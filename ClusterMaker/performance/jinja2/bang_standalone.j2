@@ -1,0 +1,156 @@
+#!/bin/sh
+#
+################################################################################
+# Name:		bang.{{ cluster_name }}.sh
+# Author:	Rodney Marable <rodney.marable@gmail.com>
+# Created On:	January 12, 2018
+# Last Changed: August 9, 2018
+# Deployed On:  {{ lookup('pipe','date \"+%B %-d, %Y\"') }}
+# Purpose:	Wrapper script for running Axb_random.py on {{ cluster_name }}
+################################################################################
+#
+# Usage: ./bang.{{ cluster_name }}.sh JOBID
+#
+# This version of bang.sh is customized for automated performance testing on
+# standalone instance {{ cluster_name }} using Axb_random.py.
+#
+# To run in standalone mode (i.e. *not* on a cluster):
+#	- Edit MATRIX_SIZES to set the sizes of the matrices to compute.
+#	- Provide JOBID as an argument using reasonable integer values.
+#	- Modify the log and data file arguments if needed.
+#
+# Examples:
+# $ ./bang.{{ cluster_name }}.sh t2.xlarge
+# $ ./bang.{{ cluster_name }}.sh rmarable_mbp_24Feb2018
+#
+# Change MATRIX_SIZES.conf to reflect the matrices to be solved.  This array is
+# also included as the 'title' field in the make_plots scripts.
+#
+# You have lots of freedom here but make sure to keep MATRIX_SIZES consistent
+# when running against multiple compute entities and note any other relevant
+# data like instance type, network configuration, EBS volume size/type, etc.
+# that might affect the test results.  Be mindful of local disk space and
+# cost constraints when working with very large matrices.
+
+source ./MATRIX_SIZES.conf
+
+# Set the CLUSTER_NAME.
+
+CLUSTER_NAME="{{ cluster_name }}"
+
+# Parse JOBID from the command line.
+
+JOBID=$1
+if [[ -z $JOBID ]]
+then
+	echo ""
+	echo "Usage: bang.sh [ JOBID ]"
+	echo "Please use reasonable integer values for \$JOBID on standalone instances!"
+	echo ""
+	exit 1
+fi
+
+# Set the compression_type.
+# Supported options are pigz and gzip.
+# Default to gzip if pigz isn't found.
+
+if test -e /usr/bin/pigz || test -e /usr/local/bin/pigz
+then
+        COMPRESSION_TYPE=pigz
+else
+        COMPRESSION_TYPE=gzip
+fi
+
+# Modify the log and data file arguments.
+# These settings should *NEVER* be changed because:
+#
+# [a] Enabling CONSOLE_DUMP doubles the amount of time required to complete
+# the test.  This feature is only useful for debugging and should not be
+# normally be turned on.
+#
+# [b] CREATE_CSV controls the dumping of matrix solution computation and file
+# compression data to a CSV file.  Disabling this feature is only useful for
+# debugging and defeats the entire purpose of running performance tests.
+
+# [c] Disabling CREATE_LOGS permits computation of much bigger matrices at the
+# cost of reducing I/O activity.  Since this script is intended to be a generic
+# apples-to-apples comparison of instances or HPC clusters, the operator should
+# never disable this feature.
+#
+# Please consult the README for additional guidance.
+
+CONSOLE_DUMP=no
+CREATE_CSV=yes
+CREATE_LOGS=yes
+
+# Replace periods with dashes in CLUSTER_NAME to prevent issues with the
+# downstream data parsers.
+
+CLUSTER_NAME=`echo $CLUSTER_NAME | tr '.' '-'`
+
+# Set paths for the log, CSV, and job summary data files.
+# Create the directories if they are missing.
+
+LOG_DIR="./logs"
+RAW_CSV_DIR="./csv"
+RAW_SUMMARY_DIR="./csv/summary_raw"
+for dir in $LOG_DIR $RAW_CSV_DIR $RAW_SUMMARY_DIR
+do
+	if [ ! -d $dir ]
+	then
+		mkdir -p $dir
+	fi
+done
+
+# Create the CSV file header.
+
+echo "execute_node,cluster_jobid,matrix_size,time_elapsed_sec,cluster_name" > $RAW_SUMMARY_DIR/summary.$CLUSTER_NAME.$JOBID.csv
+
+# Invoke Axb_random.py with the arguments provided to bang.sh.
+# Compress the log files using compress_logfiles.py.
+
+{% if base_os == 'centos7' %}
+PYTHON3=python3.6
+{% else %}
+PYTHON3=python3
+{% endif %}
+
+echo ""
+for N in $MATRIX_SIZES
+do
+	if [[ -z $CLUSTER_NAME ]]
+	then
+		$PYTHON3 Axb_random.py --jobid $JOBID --matrix-size $N --console-dump $CONSOLE_DUMP --create-csv $CREATE_CSV --create-logs $CREATE_LOGS
+	else
+		$PYTHON3 Axb_random.py --jobid $JOBID --matrix-size $N --console-dump $CONSOLE_DUMP --create-csv $CREATE_CSV --create-logs $CREATE_LOGS --note "$CLUSTER_NAME"
+	fi
+	$PYTHON3 compress_logfiles.py --jobid $JOBID --matrix-size $N --compression_type $COMPRESSION_TYPE
+	echo ""
+	if [ -f $JOBID.csv ]
+	then
+		paste -d, $JOBID.csv $JOBID.time.csv > $JOBID.csv.scratch
+		rm $JOBID.csv $JOBID.time.csv
+		cat $JOBID.csv.scratch >> $RAW_SUMMARY_DIR/summary.$CLUSTER_NAME.$JOBID.csv
+		echo "+ Printing CSV data file to stdout:"
+		cat $JOBID.csv.scratch
+		echo "--------------------------------------------------------------------------------------"
+		echo ""
+		mv $JOBID.csv.scratch $RAW_CSV_DIR/$JOBID.$CLUSTER_NAME.$N.csv
+	fi
+done
+
+# Generate the summary CSV files.
+
+sh csv_summary_time_measurement.sh $CLUSTER_NAME $JOBID
+
+echo "====================================================================================="
+echo "  Please run this script to create summary CSV files for $CLUSTER_NAME:"
+echo "====================================================================================="
+echo ""
+echo "       ===>  ./combine_csv_summary_files_for_plotting.sh"
+echo ""
+
+# Cleanup and exit.
+
+echo "********************************************************************************"
+exit 0

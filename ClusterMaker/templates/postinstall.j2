@@ -1,0 +1,348 @@
+################################################################################
+# Name:		postinstall.{{ cluster_name }}.sh
+# Author:	Rodney Marable <rodney.marable@gmail.com>
+# Created On:	April 20, 2019
+# Last Changed:	April 27, 2019
+# Deployed On:	{{ lookup('pipe','date \"+%B %-d, %Y\"') }}
+# Purpose:	Perform postinstall tasks on cluster {{ cluster_name }}
+################################################################################
+#
+#!/bin/bash
+#
+# Source the local profile and ParallelCluster environment configuration to
+# ensure PATH works as expected.
+
+source /etc/profile
+source /etc/parallelcluster/cfnconfig
+
+# Set values for some important variables. 
+
+CLUSTER_SERIAL_NUMBER_FILE=./active_clusters/{{ cluster_name }}.serial
+EC2_HOME={{ ec2_user_home }}
+SRC={{ ec2_user_src }}
+
+# Configure a local_scratch directory and set the sticky bit if instance
+# store volumes are not being used: https://en.wikipedia.org/wiki/Sticky_bit
+
+if [ ! -d /scratch ]
+then
+	sudo mkdir -p /local_scratch
+	sudo chmod 1777 /local_scratch
+	ln -s /local_scratch /scratch
+else
+	ln -s /scratch /local_scratch
+fi
+
+# Configure Spack.
+# https://spack.io/
+
+SPACK_USER={{ spack_user }}
+SPACK_GROUP={{ spack_group }}
+SPACK_DIR={{ spack_root }}
+if [ ! -d $SPACK_DIR ]
+then
+	sudo mkdir -p $SPACK_DIR
+fi
+sudo chown -R {{ ec2_user }}:{{ ec2_user }} $SPACK_DIR
+sudo chmod -R 755 $SPACK_DIR
+
+{% if base_os != 'ubuntu1604' %}
+# Update the instance and install some critical packages via yum.
+
+sudo yum -y update
+sudo yum -y --enablerepo=extras install epel-release
+sudo yum install -y gcc git lua lua-devel lua-filesystem nfs-utils parallel pigz  rpm-build tcl tcsh zsh
+{% if ec2_user == 'centos' %}
+sudo yum install -y lua-posix lua-devel tcllib
+{% endif %}
+{% else %}
+# Install some critical packages via apt-get.
+
+sudo apt-get -y update
+sudo apt-get -y gcc lua5.2 lua5.2-dev lua-filesystem nfs-common parallel pigz tcl tcsh zsh lua-posix tcllib binutils
+{% endif %}
+
+# Create a local source directory for the {{ ec2_user }} user account.
+
+if [ ! -d $SRC ]
+then
+	sudo mkdir -p $SRC
+	sudo chown -R {{ ec2_user }}:{{ ec2_user }} $SRC
+	sudo chmod -R 755 $SRC
+fi
+{% if enable_efs == 'true' %}
+
+# Configure EFS.
+# Todo - add support for handling multiple EFS file systems.
+
+# Create the EFS mount point.
+
+sudo mkdir -p {{ efs_root }}
+sudo chown root:root {{ efs_root }}
+sudo chmod 755 {{ efs_root }}
+
+{% if ec2_user == 'ec2-user' %}
+# Install amazon-efs-utils via yum on Amazon Linux.
+
+sudo yum install -y amazon-efs-utils
+{% else %}
+# Clone the amazon-efs-utils Git repository.
+
+efs_utils_install_dir=/tmp/{{ cluster_name }}/efs_utils_install_dir
+mkdir -p $efs_utils_install_dir
+pushd $efs_utils_install_dir
+git clone https://github.com/aws/efs-utils
+cd efs-utils
+
+{% if ec2_user == 'ubuntu' %}
+# Build the amazon-efs-utils Debian package for Ubuntu.
+
+./build-deb.sh
+sudo apt-get -y install ./build/amazon-efs-utils*deb
+{% elif ec2_user == 'centos' %}
+# Build the amazon-efs-utils RPM for CentOS.
+
+sudo make rpm
+sudo yum -y install ./build/amazon-efs-utils*rpm
+{% else %}
+# Don't do anything for unsupported operating systems.
+
+{% endif %}
+{% endif %}
+
+# Persistently mount the EFS file system using the EFS helper application.
+
+{% if efs_encryption == 'true' %}
+{% if ec2_user == 'ubuntu' %}
+sudo apt-get install -y stunnel4
+{% endif %}
+{% if ec2_user == 'centos' %}
+sudo yum install -y stunnel
+{% endif %}
+sudo cat << EOF >> /etc/fstab
+{{ efs_pcluster_mount_point.stdout }} {{ efs_root }} efs tls,_netdev 0 0
+EOF
+
+sudo mount -t efs -o tls {{ efs_pcluster_mount_point.stdout }} {{ efs_root }}
+{% else %}
+sudo cat << EOF >> /etc/fstab
+{{ efs_pcluster_mount_point.stdout }} {{ efs_root }} efs defaults,_netdev 0 0
+EOF
+
+sudo mount -t efs {{ efs_pcluster_mount_point.stdout }} {{ efs_root }}
+{% endif %}
+{% endif %}
+{% if enable_external_nfs == 'true' %}
+
+# Persistently mount NFS file systems from {{ external_nfs_server }}.
+# Currently supported subdirs are performance, pkg, nfs_scratch.
+
+external_nfs_server={{ external_nfs_server }}
+for dir {{ external_nfs_server_root }}/performance {{ external_nfs_server_root }}/pkg {{ external_nfs_server_root }}/nfs_scratch
+do
+	sudo mkdir -p $dir
+	sudo chown root:root $dir
+	sudo chmod -R 755 $dir
+	sudo echo "${external_nfs_server}:$dir $dir nfs defaults 0 0" >> /etc/fstab
+	sudo mount $dir
+done
+{% endif %}
+{% if enable_fsx == 'true' %}
+{% if base_os == 'ubuntu1604' %}
+#
+# FSxL on Ubuntu is not supported by ParallelClusterMaker because the client
+# installation process requires rebooting the instance, which breaks the
+# ParallelCluster installation process:
+#
+# https://docs.aws.amazon.com/fsx/latest/LustreGuide/install-lustre-client.html
+#
+# This may be addressed in a future release.
+{% else %}
+#
+# FSxL (FSx for Lustre) configuration
+#
+# Rodney Marable <rodney.marable@gmail.com> submitted a feature request for
+# native FSx_Lustre Ansible support.  Find more information about this here:
+# https://github.com/ansible/ansible/issues/50840
+#
+# Create a temp directory for the Lustre DNS name object.
+
+if [ ! -d {{ fsx_temp_dir }} ]
+then
+	mkdir {{ fsx_temp_dir }}
+	sudo chown -R {{ ec2_user }}:{{ ec2_user }} {{ fsx_temp_dir }}
+fi
+
+# Create the Lustre mount point.
+
+sudo mkdir -p {{ fsx_root }}
+sudo chown root:root {{ fsx_root }}
+sudo chmod -R 755 {{ fsx_root }}
+
+# Parse the DNS name of the Lustre file system from S3.
+# Persistently mount the Lustre file system on all cluster instances.
+
+aws --region {{ region }} s3 cp {{ s3_object_path }}/{{ fsx_dns_name_object }} {{ fsx_temp_dir }}/{{ fsx_dns_name_file }}
+
+fsx_dns_name=`cat {{ fsx_temp_dir }}/{{ fsx_dns_name_file }}`
+
+sudo echo "${fsx_dns_name}@tcp:/fsx {{ fsx_root }} lustre defaults,_netdev 0 0" >> /etc/fstab
+sudo mount -t lustre ${fsx_dns_name}@tcp:/fsx {{ fsx_root }}
+{% endif %}
+{% endif %}
+
+# Create the Spack software package directory on the master instance.
+# Spack package installation location is controlled by the selected shared
+# storage option.  Only one package location per cluster is supported.
+# Precedence: FSX > EFS > external NFS > EBS
+
+if [ ${cfn_node_type} == "MasterServer" ]
+then
+	if [ ! -d {{ pkg_dir }} ]
+	then
+		sudo mkdir -p {{ pkg_dir }}
+		sudo chown -R {{ ec2_user }}:{{ ec2_user }} {{ pkg_dir }}
+		sudo chmod -R 755 {{ pkg_dir }}
+	fi
+fi
+
+# Install luarocks to support Lmod.
+
+{% if base_os == 'alinux' %}
+cd $SRC
+wget https://luarocks.org/releases/luarocks-2.4.4.tar.gz
+tar xvzf luarocks-2.4.4.tar.gz
+cd luarocks-2.4.4
+./configure
+sudo make bootstrap
+sudo env "PATH=/usr/local/bin:$PATH" /usr/local/bin/luarocks install luaposix
+sudo env "PATH=/usr/local/bin:$PATH" /usr/local/bin/luarocks install luafilesystem
+sudo env "PATH=/usr/local/bin:$PATH" /usr/local/bin/luarocks install lua-term
+{% else %}
+sudo yum install -y luarocks
+sudo luarocks install luaposix
+sudo luarocks install luafilesystem
+sudo luarocks install lua-term
+{% endif %}
+
+# Install and configure Lmod.
+
+cd $SRC
+git clone https://github.com/TACC/Lmod
+cd Lmod
+export PATH=/usr/local/bin:$PATH
+{% if base_os == 'alinux' %}
+export LUAROCKS_PREFIX=/usr/local
+{% else %}
+export LUAROCKS_PREFIX=/usr
+{% endif %}
+export LUA_CPATH="$LUAROCKS_PREFIX/lib/lua/5.1/?.so;;"
+export LUA_PATH="$LUAROCKS_PREFIX/share/lua/5.1/?.lua;$LUAROCKS_PREFIX/share/lua/5.1/?/init.lua;;"
+./configure --prefix=/usr/local --with-module-root-path={{ pkg_dir }}/modulefiles --with-spiderCacheDir={{ pkg_dir }}/ModuleData/cachedir --with-updateSystemFn={{ pkg_dir }}/ModuleData/system.txt
+sudo -E make install
+ln -s /usr/local/lmod/lmod/libexec/lmod /usr/local/bin/lmod
+
+# Copy the Lmod user login environment environment scripts to /etc/profile.d.
+# Add $SPACK_DIR/bin to $PATH, set $SPACK_ROOT, and enable Spack shell support.
+
+sudo cp /usr/local/lmod/lmod/init/sh /etc/profile.d/lmod.sh
+cat << EOF >> /etc/profile.d/lmod_spack.sh
+#!/bin/sh
+
+export PATH=$PATH:{{ spack_root }}/bin
+export SPACK_ROOT={{ spack_root }}
+source {{ spack_root }}/share/spack/setup-env.sh
+EOF
+
+sudo cp /usr/local/lmod/lmod/init/csh /etc/profile.d/lmod.csh
+cat << EOF >> /etc/profile.d/lmod_spack.csh
+#!/bin/csh
+
+setenv PATH "$PATH:{{ spack_root }}/bin"
+setenv SPACK_ROOT "{{ spack_root }}"
+source {{ spack_root }}/share/spack/setup-env.csh
+EOF
+
+# Install Spack on the cluster master instance.
+# Push an alert via SNS when new instances are spawned.
+# Other custom role-specific tasks should be added here.
+
+source /etc/parallelcluster/cfnconfig 
+
+case ${cfn_node_type} in
+MasterServer)
+	echo "Bootstrapping Spack..."
+	cd {{ pkg_dir }}
+	git clone https://github.com/spack/spack.git
+	chown -R {{ ec2_user }}:{{ ec2_user }} {{ pkg_dir }}
+	echo "Sending an instance deployment notification via SNS..."
+	sns_message="A new master instance has been created for {{ cluster_name }} on `date '+%Y-%m-%d @ %H:%M:%S'`."
+	sns_subject="[pcluster {{ cluster_name }}] New Master Instance Alert"
+	aws --region {{ region }} sns publish --topic-arn arn:aws:sns:{{ region }}:{{ aws_account_id }}:sns_alerts_{{ cluster_name }} --message $sns_subject --subject $sns_subject
+	# Customize the pcluster stack master instance here.
+	{% if scheduler == 'sge' %}
+	# Todo - enable SGE accounting:
+	# https://github.com/awslabs/cfncluster-cookbook/issues/15
+	sudo env "SGE_ROOT=/opt/sge SGE_SINGLE_LINE=1" /opt/sge/bin/lx-amd64/qconf -am {{ ec2_user }}
+	SGE_ROOT=/opt/sge SGE_SINGLE_LINE=1 /opt/sge/bin/lx-amd64/qconf -sconf > /tmp/_global.{{ cluster_name }}
+	sed -i "s/reporting=false/reporting=true/g" /tmp/_global.{{ cluster_name }}
+	sed -i "s/joblog=false/joblog=true/g" /tmp/_global.{{ cluster_name }}
+	SGE_ROOT=/opt/sge /opt/sge/bin/lx-amd64/qconf -Mconf /tmp/_global.{{ cluster_name }}
+	{% endif %}
+	;;
+ComputeFleet)
+	echo "Sending an instance deployment notification via SNS..."
+	sns_message="A new compute instance has been spawned for {{ cluster_name }} on `date '+%Y-%m-%d @ %H:%M:%S'`."
+	sns_subject="[pcluster {{ cluster_name }}] New Compute Instance Alert"
+	aws --region {{ region }} sns publish --topic-arn arn:aws:sns:{{ region }}:{{ aws_account_id }}:sns_alerts_{{ cluster_name }} --message $sns_subject --subject $sns_subject
+	echo "Ready to finish joining the cluster!"
+	# Customize the pcluster stack compute instances here.
+	;;
+esac
+
+# Parse the InstanceId and RootDiskId from EC2 instance metadata.
+# Tag the EBS root volume associated with this instance.
+# Note: the default ParallelCluster IAM rule does not permit EC2CreateTags,
+# EC2DescribeTags, or EC2DeleteTags, so be sure to comment this stanza out
+# if you are using the base CloudFormation template.
+#
+# Rodney Marable <rodney.marable@gmail.com> submitted a pull request to enable
+# this feature: https://github.com/aws/aws-parallelcluster/pull/864
+#
+#AWS_INSTANCE_ID=$(ec2-metadata -i | awk '{print $2}')
+#ROOT_DISK_ID=$(aws --region {{ region }} ec2 describe-volumes --filter "Name=attachment.instance-id,Values=$AWS_INSTANCE_ID" --query "Volumes[].VolumeId" --out text)
+#aws --region {{ region }} ec2 create-tags --resources ${ROOT_DISK_ID} --tags Key=ClusterID,Value={{ cluster_name }} Key=ClusterSerialNumber,Value={{ cluster_serial_number }} Key=ClusterStackType,Value=pcluster Key=MountedBy,Value=${AWS_INSTANCE_ID}
+
+# Create some local aliases for HPC operator convenience.
+# Prevent multiple line copies from proliferating in HPC operator dotfiles.
+
+BASHRC={{ ec2_user_home }}/.bashrc
+LINE_EBS="alias ebsdir='cd {{ ebs_performance_dir }}'" 
+grep -qF -- "$LINE_EBS" "$BASHRC" || echo "$LINE_EBS" >> "$BASHRC"
+{% if enable_efs == 'true' %}
+for LINE_EFS in "alias pdir='cd {{ efs_hpc_performance_dir }}'" "alias efspkgdir='cd {{ efs_pkg_dir }}'"
+do
+	grep -qF -- "$LINE_EFS" "$BASHRC" || echo "$LINE_EFS" >> "$BASHRC"
+done
+{% endif %}
+{% if enable_fsx == 'true' %}
+for LINE_FSX in "alias pdir='cd {{ fsx_hpc_performance_dir }}'" "alias fsxpkgdir='cd {{ fsx_pkg_dir }}'"
+do
+	grep -qF -- "$LINE_FSX" "$BASHRC" || echo "$LINE_FSX" >> "$BASHRC"
+done
+{% endif %}
+{% if enable_external_nfs == 'true' %}
+for LINE_EXTERNAL_NFS in "alias pdir='cd {{ external_nfs_hpc_performance_dir }}'" "alias nfspkgdir='cd {{ external_nfs_pkg_dir }}'"
+do
+	grep -qF -- "$LINE_EXTERNAL_NFS" "$BASHRC" || echo "$LINE_EXTERNAL_NFS" >> "$BASHRC"
+done
+{% endif %}
+
+# Cleanup and exit.
+
+cd $SRC
+for dir in Lmod luarocks-*
+do
+	rm -rf $dir
+done
+exit 0

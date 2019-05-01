@@ -1,0 +1,23 @@
+################################################################################
+# Name:		create_ec2_keypair.{{ instance_name }}.sh
+# Author:	Rodney Marable <rodney.marable@gmail.com>
+# Created On:	April 20, 2019
+# Last Changed: April 26, 2019
+# Deployed On:  {{ lookup('pipe','date \"+%B %-d, %Y\"') }}
+# Purpose:	Build a new EC2 key pair and upload to AWS
+################################################################################
+#
+#!/bin/sh
+
+if [ -f {{ ssh_keypair_file }} ]
+then
+	aws --region {{ region }} ec2 delete-key-pair --key-name {{ ec2_keypair }}
+	chmod 0600 {{ ssh_keypair_file }}
+	rm {{ ssh_keypair_file }}
+fi
+echo ""
+echo "Building a new EC2 keypair..."
+echo ""
+aws --region {{ region }} ec2 create-key-pair --key-name {{ ec2_keypair }} --query 'KeyMaterial' --output text > {{ ssh_keypair_file }}
+chmod 0400 {{ ssh_keypair_file }}
+exit 0

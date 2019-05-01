@@ -1,0 +1,98 @@
+###############################################################################
+# Name:		kill_pcluster_jumphost.{{ instance_name }}.sh
+# Author:	Rodney Marable <rodney.marable@gmail.com>
+# Created On:	April 20, 2019
+# Last Changed:	April 27, 2019
+# Deployed On:	{{ lookup('pipe','date \"+%B %-d, %Y\"') }}
+# Purpose:	Destroy pcluster-jumphost {{ instance_name }}
+###############################################################################
+
+#!/bin/sh
+
+# Set the path to the source tree.
+
+SRC_TREE_DIR="`git rev-parse --show-toplevel`/JumphostMaker"
+
+# Set some critical paths and variables.
+
+INSTANCE_NAME={{ instance_name }}
+INSTANCE_DATA_DIR={{ instance_data_dir }}
+EC2_KEYPAIR={{ ec2_keypair }}
+SSH_KEYPAIR_FILE={{ ssh_keypair_file }}
+SNS_TOPIC_ARN="{{ sns_arn }}"
+
+# Pause for 5 seconds before deleting anything.
+
+echo ""
+echo "pcluster-jumphost \"{{ instance_name }}\" has been slated for termination."
+echo ""
+echo "################################################################################"
+echo "################  Please type CTRL-C within 5 seconds to abort  ################"
+echo "################################################################################"
+sleep 5
+echo ""
+echo "Destroying instance: {{ instance_name }}"
+echo ""
+
+# Destroy the pcluster-jumphost created by Terraform.
+
+cd $INSTANCE_DATA_DIR
+terraform destroy -auto-approve -target=aws_instance.${INSTANCE_NAME}
+cd $SRC_TREE_DIR
+
+# Delete the ec2_keypair and PEM files associated with this instance family.
+
+aws ec2 delete-key-pair --key-name $EC2_KEYPAIR
+echo "Deleted EC2 keypair: $EC2_KEYPAIR"
+for file in $INSTANCE_DATA_DIR/$SSH_KEYPAIR_FILE $SRC_TREE_DIR/$SSH_KEYPAIR_FILE
+do
+	if [ -f $file ]
+	then
+		rm $file
+		echo "Deleted SSH keypair file: $file"
+	fi
+done
+
+{% if remove_pcluster_jumphost_data_dir %}
+# Delete the instance data directory.
+
+if [ -d $INSTANCE_DATA_DIR ]
+then
+	rm -rf $INSTANCE_DATA_DIR
+	echo "Deleted directory: $INSTANCE_DATA_DIR"
+fi
+{% endif %}
+
+# Delete the SNS topic.
+
+aws sns delete-topic --topic-arn $SNS_TOPIC_ARN
+echo "Deleted SNS topic: $SNS_TOPIC_ARN"
+
+# Delete the IAM instance profile and role.
+
+aws iam delete-role-policy --role-name {{ iam_instance_role }} --policy-name {{ iam_instance_policy }}
+aws iam remove-role-from-instance-profile --instance-profile-name {{ iam_instance_profile }} --role-name {{ iam_instance_role }}
+aws iam delete-instance-profile --instance-profile-name {{ iam_instance_profile }}
+aws iam delete-role --role-name {{ iam_instance_role }}
+echo "Deleted IAM EC2 instance profile: {{ iam_instance_profile }}"
+echo "Deleted IAM role: {{ iam_instance_role }}"
+
+# Remove config files and directories associated with {{ instance_name }}.
+
+for file in {{ vars_file_path }} {{ instance_serial_number_file }}
+do
+	rm $file
+	echo "Deleted file: $file"
+done
+unlink kill-pcluster-{{ instance_name }}.sh
+
+# Cleanup and exit.
+
+echo ""
+echo "#########################################################################"
+echo "Finished deleting EC2 jumphost: {{ instance_name }}"
+echo "#########################################################################"
+echo ""
+echo "Exiting..."
+echo ""
+exit 0

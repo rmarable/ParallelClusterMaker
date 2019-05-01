@@ -1,0 +1,64 @@
+#!/bin/bash
+#
+################################################################################
+# Name:		build_pcluster_jumphost.{{ instance_name }}.sh
+# Author:	Rodney Marable <rodney.marable@gmail.com>
+# Created On:	April 18, 2019
+# Last Changed:	April 29, 2019
+# Deployed On:	{{ lookup('pipe','date \"+%B %-d, %Y\"') }}
+# Purpose:	Perform some additional post-istallation configuration steps
+#		on pcluster-jumphost {{ instance_name }}
+################################################################################
+
+source /etc/profile
+
+# Set values for some critical variables. 
+
+EC2_HOME={{ ec2_user_home }}
+EC2_USER={{ ec2_user }}
+SRC={{ ec2_user_src }}
+
+# Set the default region for AWS CLI.
+
+aws configure set default.region {{ region }}
+
+# Create a local source directory for the $EC2_USER user account.
+
+if [ ! -d $SRC ]
+then
+	sudo mkdir -p $SRC
+	sudo chown -R $EC2_USER:$EC2_USER $SRC
+	sudo chmod -R 755 $SRC
+fi
+
+# Update the instance via yum and install some critical packages.
+
+sudo yum -y update
+sudo yum install -y autoconf autotools automake docker gcc git jq libtool python3 python3-devel python3-pip 
+
+# Install the Serverless Toolkit using the guidelines provided here:
+# https://serverless.com/framework/docs/providers/aws/guide/installation/
+
+curl -o- https://raw.githubusercontent.com/creationix/nvm/v0.32.0/install.sh | bash
+export NVM_DIR="{{ ec2_user_home }}/.nvm"
+[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
+nvm install 10.15.3
+npm install -g serverless
+
+# Upgrade pip3.
+
+sudo pip3 install --upgrade pip
+sudo ln -s /usr/local/bin/pip3 /usr/bin/pip3
+
+# Clone the source code for ParallelClusterMaker and install some critical
+# Python libraries.
+
+sudo pip3 install boto
+cd $SRC
+git clone https://github.com/rmarable/ParallelClusterMaker.git
+cd $SRC/ParallelClusterMaker/ClusterMaker
+sudo pip3 install -r requirements.ParallelClusterMaker.txt
+
+# Cleanup and exit.
+
+exit 0

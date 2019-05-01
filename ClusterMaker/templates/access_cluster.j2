@@ -1,0 +1,35 @@
+{% if base_os == 'centos7' %}
+#!/usr/bin/env python3.6
+{% else %}
+#!/usr/bin/env python3
+{% endif %}
+#
+################################################################################
+# Name:         access_cluster.{{ cluster_name }}.py
+# Author:       Rodney Marable <rodney.marable@gmail.com>
+# Created On:   April 20, 2019
+# Last Changed: April 29, 2019
+# Deployed On:  {{ lookup('pipe','date \"+%B %-d, %Y\"') }}
+# Purpose:	Quick mechanism for SSH-ing into pcluster head nodes
+# Usage:	$ ./access_cluster.py --help
+################################################################################
+
+# Load some required Python libraries.
+
+import os
+import subprocess
+
+# Set some important variables.
+
+cluster_name = '{{ cluster_name }}'
+prod_level = '{{ prod_level }}'
+
+# Get the public IP address of the master instance.
+# If found, make an SSH connection to the master instance.
+
+cmd_string = 'pcluster status --region {{ region }} {{ cluster_name }} | grep MasterPublicIP | awk \'{print $2}\''
+
+with open(os.devnull, 'w') as devnull:
+    master_public_ip = subprocess.getoutput(cmd_string)
+    ssh_command = 'ssh -i {{ ssh_keypair }} -l {{ ec2_user }} ' + master_public_ip
+    subprocess.run(ssh_command, shell=True)

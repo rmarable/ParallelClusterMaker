@@ -1,0 +1,28 @@
+################################################################################
+# Name:		delete_fsx_fs.{{ cluster_name }}.sh
+# Author:	Rodney Marable <rodney.marable@gmail.com>
+# Created On:	April 20, 2019
+# Last Changed:	April 28, 2019
+# Deployed On:  {{ lookup('pipe','date \"+%B %-d, %Y\"') }}
+# Purpose:	Delete the FSx_Lustre file system for {{ cluster_name }}
+################################################################################
+#
+#!/bin/sh
+
+# Delete the FSx file system.
+
+aws fsx delete-file-system --file-system-id $1
+
+# Wait for the FSx file system completely disappear before proceeding.
+
+until [[ `aws fsx describe-file-systems --file-system-id $1 | grep Lifecycle | awk '{print $2}' | tr -d '[:punct:]'` == "" ]]
+do
+	sleep 15
+done
+
+# Delete the FSx temp directory if it still exists.
+
+if [ -d {{ fsx_temp_dir }} ]
+then
+	rm -rf {{ fsx_temp_dir }}
+fi

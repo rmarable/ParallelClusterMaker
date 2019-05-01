@@ -1,0 +1,65 @@
+################################################################################
+# Name:         kill-pcluster-{{ cluster_name }}.py
+# Author:       Rodney Marable <rodney.marable@gmail.com>
+# Created On:   June 28, 2018
+# Last Changed: August 20, 2018
+# Deployed On:  {{ lookup('pipe','date \"+%B %-d, %Y\"') }}
+# Purpose:      Lambda function handler for self-terminating pcluster stacks
+################################################################################
+
+def kill_pcluster(event, context):
+
+# Load some required Python libraries.
+    
+    import boto3
+    import sys
+    import time
+
+# Define some critical variables.
+
+    cluster_name = '{{ cluster_name }}'
+    cluster_owner = '{{ cluster_owner }}'
+    cluster_stack_name = 'pcluster-{{ cluster_name }}'
+    s3_bucketname = '{{ s3_bucketname }}'
+
+# Delete s3_bucketname along with all of the objects it contained.
+
+    s3 = boto3.resource('s3')
+    s3_objects_to_delete = s3.meta.client.list_objects(Bucket="{{ s3_bucketname }}")
+    s3_keys_to_delete = {'Objects' : []}
+    s3_keys_to_delete['Objects'] = [{'Key' : k} for k in [obj['Key'] for obj in s3_objects_to_delete.get('Contents', [])]]
+    s3.meta.client.delete_objects(Bucket="{{ s3_bucketname }}", Delete=s3_keys_to_delete)    
+    bucket_to_delete = s3.Bucket('{{ s3_bucketname }}')
+    p = bucket_to_delete.delete()
+
+# Delete the pcluster stack.
+
+    cfn_client = boto3.client('cloudformation')
+    q = cfn_client.delete_stack(StackName='pcluster-{{ cluster_name }}')
+
+# Send a termination alert to cluster_owner_email via SNS.
+
+    sns = boto3.resource('sns')
+    topic = sns.Topic('arn:aws:sns:{{ region }}:{{ aws_account_id }}:sns_alerts_{{ cluster_name }}')
+    r = topic.publish(
+        Message='CfnCluster stack {{ cluster_name }} was terminated by Lambda on ' + str(time.strftime('%c')),
+        Subject='CfnCluster stack {{ cluster_name }} Termination Alert',
+        MessageStructure='string',
+        MessageAttributes={
+            'string': {
+                'DataType': 'string',
+                'StringValue': 'string',
+                'BinaryValue': b'bytes'
+            }
+        }
+    )
+
+# Delete the SNS topic associated with this pcluster stack.
+
+    sns_client = boto3.client('sns')
+    s = sns_client.delete_topic(TopicArn='arn:aws:sns:{{ region }}:{{ aws_account_id }}:sns_alerts_{{ cluster_name }}')
+
+# Return the results.
+
+    return p, q, r, s
+

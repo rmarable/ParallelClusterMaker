@@ -1,0 +1,104 @@
+################################################################################
+# Name:		preinstall.{{ cluster_name }}.sh
+# Author:	Rodney Marable <rodney.marable@gmail.com>
+# Created On:	April 20, 2019
+# Last Changed:	April 30, 2019
+# Deployed On:	{{ lookup('pipe','date \"+%B %-d, %Y\"') }}
+# Purpose:	Perform preinstall tasks on cluster {{ cluster_name }}
+################################################################################
+#
+#!/bin/bash
+
+{% if base_os == "centos6" %}
+# Enable centos6 to properly support expanding root partitions.
+
+sudo yum update -y
+sudo yum install -y epel-release
+sudo yum install -y cloud-init dracut-modules-growroot
+sudo rpm -qa kernel | sed 's/^kernel-//'  | xargs -I {} dracut -f /boot/initramfs-{}.img {}
+{% endif %}
+{% if base_os == 'centos6' or base_os == 'alinux' %}
+
+# Install support for Python-3.6.
+
+sudo yum -y install python36
+sudo pip-3.6 install ansible boto3 matplotlib numpy pandas requests seaborn scipy tailhead
+sudo pip-3.6 install --upgrade pip
+{% endif %}
+{% if base_os == 'centos7' %}
+# Enable centos7 to properly support Python-3.6.
+
+sudo yum update -y
+sudo yum remove -y python36
+sudo yum install -y https://centos7.iuscommunity.org/ius-release.rpm
+sudo yum install -y python36u python36u-pip python36u-devel python36u-libs
+sudo yum swap -y python2-s3transfer python-s3transfer
+sudo pip3.6 install ansible boto3 matplotlib numpy pandas requests seaborn scipy tailhead
+sudo pip3.6 install --upgrade pip
+{% endif %}
+
+{% if base_os == 'ubuntu1604' %}
+# Enable Ubuntu 16.04 to properly support Python-3.6.
+
+ubuntu_install_dir=/tmp/{{ cluster_name }}/ubuntu1604
+mkdir -p $ubuntu_install_dir
+sudo add-apt-repository -y ppa:jonathonf/python-3.6
+sudo apt-get -y update
+sudo DEBIAN_FRONTEND=noninteractive apt-get -y dist-upgrade
+sudo apt-get -y install python3.6 python3.6-dev python3.6-venv python3.6-distutils unzip
+pushd $ubuntu_install_dir
+wget https://bootstrap.pypa.io/get-pip.py
+sudo python3.6 get-pip.py
+popd
+sudo ln -s /usr/bin/python3.6 /usr/local/bin/python3
+sudo pip install ansible boto3 matplotlib numpy pandas requests seaborn scipy tailhead
+sudo pip install --upgrade cryptography
+rm -rf $ubuntu_install_dir
+{% endif %}
+
+# Upgrade AWS CLI to ensure the bug reported by rodney.marable@gmail.com won't 
+# impact the operator's ability to deploy AWS FSxL file systems:
+# https://docs.aws.amazon.com/cli/latest/userguide/install-bundle.html
+
+awscli_upgrade_dir=/tmp/{{ cluster_name }}/awscli_upgrade
+mkdir -p $awscli_upgrade_dir
+curl https://s3.amazonaws.com/aws-cli/awscli-bundle.zip -o ${awscli_upgrade_dir}/awscli-bundle.zip
+pushd $awscli_upgrade_dir
+unzip awscli-bundle.zip
+sudo ./awscli-bundle/install -i /usr/local/aws -b /usr/local/bin/aws
+popd
+rm -rf ${awscli_upgrade_dir}
+
+{% if hyperthreading == 'false' and base_os == 'alinux' %}
+cat << 'EOF' >> /etc/rc.local
+
+# Disable Intel Hyperthreading on Amazon Linux:
+# http://tiny.amazon.com/1avqrokh6/awsamazblogdisa
+
+for cpunum in $(cat /sys/devices/system/cpu/cpu*/topology/thread_siblings_list | cut -s -d, -f2- | tr ',' '\n' | sort -un)
+do
+	sudo echo 0 > /sys/devices/system/cpu/cpu$cpunum/online
+done
+EOF
+{% endif %}
+{% if enable_fsx == 'true' %}
+{% if ec2_user == 'ec2-user' or ec2_user == 'centos' %}
+
+# Install the Lustre client on all cluster instances.
+
+fsx_client_install_dir=/tmp/{{ cluster_name }}/fsxl
+mkdir -p $fsx_client_install_dir
+pushd $fsx_client_install_dir
+sudo rpm -ivh https://downloads.whamcloud.com/public/lustre/lustre-2.10.5/el7.5.1804/client/RPMS/x86_64/kmod-lustre-client-2.10.5-1.el7.x86_64.rpm --nodeps
+sudo rpm -ivh https://downloads.whamcloud.com/public/lustre/lustre-2.10.5/el7.5.1804/client/RPMS/x86_64/lustre-client-2.10.5-1.el7.x86_64.rpm --nodeps
+{% else %}
+
+# FSxL on Ubuntu is not supported by ParallelClusterMaker because the client
+# installation process requires rebooting the instance, which breaks the
+# ParallelCluster installation process:
+#
+# https://docs.aws.amazon.com/fsx/latest/LustreGuide/install-lustre-client.html
+#
+# This may be addressed in a future release.
+{% endif %}
+{% endif %}

@@ -1,0 +1,61 @@
+{% if base_os == 'centos7' %}
+#!/usr/bin/env python3.6
+{% else %}
+#!/usr/bin/env python3
+{% endif %}
+#
+################################################################################
+# Name:         generate_cron_lifetime_string.{{ cluster_name }}.py
+# Author:       Rodney Marable <rodney.marable@gmail.com>
+# Created On:   April 20, 2019
+# Last Changed: April 23, 2019
+# Deployed On:  {{ lookup('pipe','date \"+%B %-d, %Y\"') }}
+# Purpose:      Schedule execution of the Lambda cluster termination function
+################################################################################
+
+# Load the required Python libraries.
+
+import argparse
+import arrow
+import time
+from datetime import datetime as DateTime
+from datetime import timedelta as TimeDelta
+
+# Parse cluster_lifetime from the command line.
+
+parser = argparse.ArgumentParser(description='Schedule execution of the Lambda cluster termination function')
+
+parser.add_argument('--cluster_lifetime', help='automatically terminate the cluster after this time period has elapsed in days:hours:minutes format (default = 30:0:0, i.e. one month)', required=True)
+parser.add_argument('--cluster_serial_number_file', help='set the path to a serial number file that is unique to this cluster sttack', required=True)
+
+args = parser.parse_args()
+cluster_lifetime = args.cluster_lifetime
+cluster_serial_number_file = '../../.' + args.cluster_serial_number_file
+
+# Calculate how long this cluster should live after adding shift_buffer in
+# minutes to account for the time required to deploy the Lambda function.
+# Convert the results to UTC for consistency.
+
+shift_buffer = 5
+
+cluster_start_time = arrow.utcnow().shift(minutes=+int(shift_buffer)).format('YYYY-MM-DD HH:mm:ss')
+
+cluster_lifetime_days, cluster_lifetime_hours, cluster_lifetime_minutes = cluster_lifetime.split(':')
+
+cluster_end_time = arrow.utcnow().shift(days=+(int(cluster_lifetime_days)), hours=+(int(cluster_lifetime_hours)), minutes=+(int(cluster_lifetime_minutes) + int(shift_buffer))).format('YYYY-MM-DD HH:mm:ss')
+
+cluster_end_time_date, cluster_end_time_timestamp = str(cluster_end_time).split(' ')
+
+cluster_end_time_year, cluster_end_time_month, cluster_end_time_day = str(cluster_end_time_date).split('-')
+
+cluster_end_time_hours, cluster_end_time_minutes, cluster_end_time_seconds = str(cluster_end_time_timestamp).split(':'[:2])
+
+cron_lifetime_string = 'cron(' + cluster_end_time_minutes + ' ' + cluster_end_time_hours + ' ' + cluster_end_time_day + ' ' + cluster_end_time_month + ' ? ' + cluster_end_time_year + ')'
+
+print(cron_lifetime_string)
+
+# Append the cluster stack lifecycle datestamps to cluster_serial_number file.
+
+print('cluster_start_time (UTC): ' + str(cluster_start_time), file=open(cluster_serial_number_file, "a"))
+
+print('cluster_end_time (UTC): ' + str(cluster_end_time), file=open(cluster_serial_number_file, "a"))

@@ -1,0 +1,183 @@
+################################################################################
+# Name:         serverless.yml
+# Author:       Rodney Marable <rodney.marable@gmail.com>
+# Created On:   June 28, 2018
+# Last Changed: August 20, 2018
+# Deployed On:  {{ lookup('pipe','date \"+%B %-d, %Y\"') }}
+# Purpose:      Serverless config to support self-terminating pcluster stacks
+################################################################################
+
+service: kill-pcluster-{{ cluster_name }}
+
+provider:
+  name: aws
+  runtime: python3.6
+  memorySize: 128
+  timeout: 30
+  region: {{ region }}
+  stage: {{ prod_level }}
+  tags:
+    ClusterID: {{ cluster_name }}
+    ClusterStackType: serverless
+    ClusterSerialNumber: {{ cluster_serial_number }}
+    ClusterOwner: {{ cluster_owner }}
+    ClusterOwnerEmail: {{ cluster_owner_email }}
+    ClusterOwnerGroup: {{ cluster_owner_group }}
+    ClusterOwnerDepartment: {{ cluster_owner_department }}
+    ProdLevel: {{ prod_level }}
+    DEPLOYMENT_DATE: {{ DEPLOYMENT_DATE }}
+
+functions:
+  kill_pcluster:
+    handler: handler.kill_pcluster
+    role: KillCfnClusterCustomLambdaRole{{ serial_datestamp }}
+    events:
+      - schedule:
+          rate: {{ cron_lifetime_string }}
+          enabled: true
+
+resources:
+  Resources:
+    KillCfnClusterCustomLambdaRole{{ serial_datestamp }}:
+      Type: AWS::IAM::Role
+      Properties:
+        Path: /
+        RoleName: KillCfnClusterCustomLambdaRole{{ serial_datestamp }}
+        AssumeRolePolicyDocument:
+          Version:  '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Principal:
+                Service:
+                  - lambda.amazonaws.com
+              Action: sts:AssumeRole
+        Policies:
+          - PolicyName: KillCfnClusterCustomLambdaPolicy{{ serial_datestamp }}
+            PolicyDocument:
+              Version:  '2012-10-17'
+              Statement:
+                - Effect: Allow
+                  Action:
+                    - logs:CreateLogGroup
+                    - logs:CreateLogStream
+                    - logs:PutLogEvents
+                  Resource:
+                    - 'Fn::Join':
+                      - ""
+                      - - "arn:aws:logs:*:*:*"
+                - Effect: Allow
+                  Action:
+                    - s3:ListBucket
+                    - s3:DeleteBucket
+                  Resource:
+                    Fn::Join:
+                      - ""
+                      - - "arn:aws:s3:::"
+                        - "Ref" : "ServerlessDeploymentBucket"
+                - Effect: Allow
+                  Action:
+                    - s3:GetObject
+                    - s3:PutObject
+                    - s3:DeleteObject
+                  Resource:
+                    Fn::Join:
+                      - ""
+                      - - "arn:aws:s3:::"
+                        - "Ref" : "ServerlessDeploymentBucket"
+                - Effect: Allow
+                  Action:
+                    - s3:ListBucket
+                    - s3:DeleteBucket
+                  Resource:
+                    Fn::Join:
+                      - ""
+                      - - "arn:aws:s3:::{{ s3_bucketname }}"
+                - Effect: Allow
+                  Action:
+                    - s3:GetObject
+                    - s3:PutObject
+                    - s3:DeleteObject
+                  Resource:
+                    Fn::Join:
+                      - ""
+                      - - "arn:aws:s3:::{{ s3_bucketname }}/*"
+                - Effect: Allow
+                  Action:
+                    - cloudformation:DescribeStacks
+                    - cloudformation:DeleteStack
+                  Resource:
+                    Fn::Join:
+                      - ""
+                      - - "arn:aws:cloudformation:{{ region }}:{{ aws_account_id }}:stack/pcluster-{{ cluster_name }}/*"
+                - Effect: Allow
+                  Action:
+                    - autoscaling:DeleteAutoScalingGroup
+                    - autoscaling:DeleteLaunchConfiguration
+                    - autoscaling:DeletePolicy
+                    - autoscaling:DescribeAutoScalingInstances
+                    - autoscaling:DescribeAutoScalingGroups
+                    - autoscaling:DescribeLaunchConfigurations
+                    - autoscaling:DescribeScalingActivities
+                    - autoscaling:UpdateAutoScalingGroup
+                    - autoscaling:TerminateInstanceInAutoScalingGroup
+                    - cloudformation:DeleteStack
+                    - cloudformation:DescribeStackEvent
+                    - cloudformation:DescribeStackResource
+                    - cloudformation:DescribeStackResources
+                    - cloudformation:DescribeStacks
+                    - cloudformation:ListStacks
+                    - cloudwatch:DeleteAlarms
+                    - dynamodb:DeleteItem
+                    - dynamodb:DeleteTable
+                    - dynamodb:DescribeTable
+                    - ec2:DeleteNetworkInterface
+                    - ec2:DeletePlacementGroup
+                    - ec2:DeleteSecurityGroup
+                    - ec2:DeleteVolume
+                    - ec2:DescribeAddresses
+                    - ec2:DescribeAvailabilityZone
+                    - ec2:DescribeImages
+                    - ec2:DescribeInstanceAttribute
+                    - ec2:DescribeInstances
+                    - ec2:DescribeInstanceStatus
+                    - ec2:DescribeKeyPairs
+                    - ec2:DescribeNetworkInterfaces
+                    - ec2:DescribePlacementGroups
+                    - ec2:DescribeSecurityGroups
+                    - ec2:DescribeSnapshots
+                    - ec2:DescribeSubnets
+                    - ec2:DescribeVolumes
+                    - ec2:DescribeVpcAttribute
+                    - ec2:DescribeVpcs
+                    - ec2:DisassociateAddress
+                    - ec2:ReleaseAddress
+                    - ec2:RevokeSecurityGroupIngress
+                    - ec2:TerminateInstances
+                    - iam:DeleteRolePolicy
+                    - iam:RemoveRoleFromInstanceProfile
+                    - sns:CreateTopic
+                    - sns:DeleteTopic
+                    - sns:GetTopicAttributes
+                    - sns:Publish
+                    - sqs:DeleteMessage
+                    - sqs:DeleteQueue
+                    - sqs:GetQueueAttributes
+                    - sqs:SetQueueAttributes
+                  Resource:
+                    Fn::Join:
+                      - ""
+                      - - "*"
+                - Effect: Allow
+                  Action:
+                    - iam:DeleteRole
+                  Resource:
+                    Fn::Join:
+                      - ""
+                      - - "arn:aws:iam::{{ aws_account_id }}:role/*"
+                - Effect: Allow
+                  Action:
+                    - iam:DeleteInstanceProfile
+                  Resource:
+                    Fn::Join:
+                      - ""
+                      - - "arn:aws:iam::{{ aws_account_id }}:instance-profile/*"

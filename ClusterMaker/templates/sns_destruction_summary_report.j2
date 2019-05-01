@@ -1,0 +1,8 @@
+================================================================================
+               Destruction Summary Report for {{cluster_name }}
+================================================================================
+
+Initiated destruction of {{ cluster_name }} on {{ start_delete_timer.stdout }}
+Completed destruction of {{ cluster_name }} on {{ stop_delete_timer.stdout }}
+
+Destroyed by kill-pcluster.py on {{ lookup('pipe','date \"+%B %-d, %Y\"') }}

@@ -1,0 +1,55 @@
+#!/bin/bash
+#
+################################################################################
+# Name:         access_cluster.{{ cluster_name }}.sh
+# Author:       Rodney Marable <rodney.marable@gmail.com>
+# Created On:   May 29, 2018
+# Last Changed: August 9, 2018
+# Deployed On:	{{ lookup('pipe','date \"+%B %-d, %Y\"') }}
+# Purpose:	Quick mechanism for SSH-ing into pcluster head nodes
+################################################################################
+
+# Set values for some critical variables.
+
+CLUSTER_NAME="{{ cluster_name }}"
+EC2_USER="{{ ec2_user }}"
+CLUSTER_VARS_FILE=./vars_files/$CLUSTER_NAME.yml
+EC2_KEYPAIR=./$CLUSTER_NAME.pem
+
+# Abort if the configuration template or EC2 key pair are missing.
+
+for file in $CLUSTER_VARS_FILE $EC2_KEYPAIR 
+do
+	if [ ! -f $file ]
+	then
+	        echo "*** Error ***"
+		echo "Missing: $file"
+		echo "Aborting..."
+		exit 1
+	else
+		:
+	fi
+done
+
+# Get the public_ip address of the EC2 instance of interest.
+
+MASTER_PUBLIC_IP=`pcluster --region {{ region }} status $CLUSTER_NAME | grep MasterPublicIP | awk '{print $2}'`
+if [ -z $MASTER_PUBLIC_IP ]
+then
+        echo "** Error ***"
+	echo "$CLUSTER_NAME doesn't seem to have a working master instance!"
+	echo "Aborting..."
+	exit 1
+fi
+
+# Make an SSH connection using the cluster stack's PEM key.
+
+echo "Connecting to the head node of $CLUSTER_NAME over ssh..."
+echo ""
+ssh -i $EC2_KEYPAIR $EC2_USER@$MASTER_PUBLIC_IP
+
+# Cleanup and exit.
+
+echo "To reconnect:"
+echo "	===>	./access_cluster.sh $CLUSTER_NAME"
+exit 0

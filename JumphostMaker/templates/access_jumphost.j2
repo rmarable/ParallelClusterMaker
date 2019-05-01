@@ -1,0 +1,109 @@
+################################################################################
+# Name:		access_jumphost.{{ instance_name }}.sh
+# Author:       Rodney Marable <rodney.marable@gmail.com>
+# Created On:   April 20, 2019
+# Last Changed: April 29, 2019
+# Deployed On:	{{ lookup('pipe','date \"+%B %-d, %Y\"') }}
+# Purpose:	Provide a quick mechanism for SSH-ing into pcluster-jumphosts
+################################################################################
+
+#!/bin/bash
+
+# Set values for some critical variables.
+
+EC2_USER={{ ec2_user }}
+REGION={{ region }}
+SRC_TREE_DIR="`git rev-parse --show-toplevel`/JumphostMaker"
+
+# Set values for some critical file and directory paths.
+
+IPLIST=/tmp/_IPLIST.`date +%s`
+INSTANCE_DATA_DIR={{ instance_data_dir }}
+EC2_KEYPAIR_FILE=$INSTANCE_DATA_DIR/{{ ssh_keypair_file }}
+INSTANCE_SERIAL_FILE=$SRC_TREE_DIR/active_pcluster_jumphosts/{{ instance_name }}.serial
+INSTANCE_VARS_FILE=$SRC_TREE_DIR/vars_files/{{ instance_name }}.yml
+
+# Perform error checking on the presence of the pcluster-jumphost EC2 key pair,
+# vars_file, and serial file.
+
+for file in $EC2_KEYPAIR_FILE $INSTANCE_SERIAL_FILE $INSTANCE_VARS_FILE
+do
+	if [ ! -f $file ]
+	then
+		echo "*** Error ***"
+		echo "Missing: $file"
+		echo "Aborting..."
+		exit 1
+	else
+		:
+	fi
+done
+
+# Get the public IP address and hostnam for this pcluster-jumphost.
+
+cd $INSTANCE_DATA_DIR
+INSTANCE_PUBLIC_IP=()
+INSTANCE_EC2_NAMES=()
+terraform output | grep "_ip_address" | awk '{$1=""; $2=""; print $0}' | tr -d ',' | sed -e "s/^. //g" > $IPLIST.addrs
+terraform output | grep "_name_index" | awk '{$1=""; $2=""; print $0}' | tr -d ',' | sed -e "s/^. //g" > $IPLIST.names
+IPLIST_COLS=`cat $IPLIST.addrs | awk '{print NF; exit}'`
+paste $IPLIST.addrs $IPLIST.names > $IPLIST.combined
+
+# Make an SSH connection to the instance of interest using the PEM file that
+# was originally created with the EC2 key pair.
+# If the pcluster-jumphost has multiple members, create a menu for the user to
+# pick a specific individual target instance.
+
+if [[ $IPLIST_COLS -eq 0 ]]
+then
+	echo "*** Error ***"
+	echo "EC2 pcluster-jumphost \"{{ instance_name }}\" doesn't seem to have any members!"
+	echo "Aborting..."
+	exit 1
+elif [[ $IPLIST_COLS -eq 1 ]]
+then
+	echo ""
+	echo "Connecting to `cat $IPLIST.combined | awk '{printf("%s (%s)", $1, $2)}'`..."
+	ssh -i $EC2_KEYPAIR_FILE -l $EC2_USER `cat $IPLIST.addrs`
+else
+	echo ""
+	echo "Multiple members of pcluster-jumphost \"{{ instance_name }}\" were found:"
+	for ip in `cat $IPLIST.addrs | awk '{print $0}'`
+	do
+		INSTANCE_PUBLIC_IP+=(${ip})
+	done
+	for names in `cat $IPLIST.names`
+	do
+		INSTANCE_EC2_NAMES+=(${names})
+	done
+	counter=0
+	while [[ $counter -lt $IPLIST_COLS ]]
+	do
+		echo "  [$((counter+1))]  -  ${INSTANCE_PUBLIC_IP[$counter]} (${INSTANCE_EC2_NAMES[$counter]})"
+		counter=$((counter+1))
+	done
+	read -p "Select a target instance to access via SSH: " selection
+	selection=$((selection-1))
+	echo ""
+	echo "Connecting to ${INSTANCE_PUBLIC_IP[$selection]} (${INSTANCE_EC2_NAMES[$selection]})..."
+	ssh -i $EC2_KEYPAIR_FILE $EC2_USER@${INSTANCE_PUBLIC_IP[$selection]}
+fi
+
+# Cleanup and exit.
+
+echo "-------------------------------------------------------------------------------------"
+echo "Reconnect to {{ instance_name }} by running one of the following:"
+echo ""
+echo "$ ./access_jumphost.py -N {{ instance_name }}"
+echo ""
+echo "or:"
+echo ""
+echo "$ ssh -i $EC2_KEYPAIR_FILE $EC2_USER@$TargetIp"
+for file in $IPLIST.* $IPLIST_COLS
+do
+	if [ -f $file ]
+	then
+		rm $file
+	fi
+done
+exit 0

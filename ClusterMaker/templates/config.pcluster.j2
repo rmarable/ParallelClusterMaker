@@ -1,0 +1,93 @@
+################################################################################
+# Name:		config.{{ cluster_name }}
+# Author:	Rodney Marable <rodney.marable@gmail.com>
+# Created On:	April 20, 2019
+# Last Changed: April 23, 2019
+# Deployed On:	{{ lookup('pipe','date \"+%B %-d, %Y\"') }}
+# Purpose:	ParallelCluster configuration for {{ cluster_name }}
+################################################################################
+
+[global]
+cluster_template = {{ cluster_name }}
+sanity_check = true
+update_check = true
+
+[aws]
+aws_region_name = {{ region }}
+
+[vpc {{ vpc_name }}]
+vpc_id = {{ vpc_id }}
+master_subnet_id = {{ subnet_id }}
+
+[cluster {{ cluster_name }}]
+base_os = {{ base_os }}
+cluster_type = {{ cluster_type }}
+scheduler = {{ scheduler }}
+{% if cluster_type == 'spot' %}
+{% if scheduler == 'awsbatch' %}
+spot_bid_percentage = {{ spot_bid_percentage }}
+{% else %}
+spot_price = {{ spot_price }}
+{% endif %}
+{% endif %}
+scaling_settings = {{ scaling_settings }}
+ebs_settings = {{ ebs_settings }}
+key_name = {{ ec2_keypair }}
+{% if enable_ganglia == 'true' %}
+extra_json = { "cluster" : { "ganglia_enabled" : "yes" } }
+{% endif %}
+vpc_settings = {{ vpc_name }}
+master_instance_type = {{ master_instance_type }}
+master_root_volume_size = {{ master_root_volume_size }}
+{% if scheduler == 'awsbatch' %}
+compute_instance_type = optimal
+compute_root_volume_size = {{ compute_root_volume_size }}
+min_vcpus = {{ min_vcpus }}
+max_vcpus = {{ max_vcpus }}
+desired_vcpus = {{ desired_vcpus }}
+{% else %}
+compute_instance_type = {{ compute_instance_type }}
+compute_root_volume_size = {{ compute_root_volume_size }}
+maintain_initial_size = {{ maintain_initial_size | bool | lower }}
+initial_queue_size = {{ initial_queue_size }}
+max_queue_size = {{ max_queue_size }}
+{% endif %}
+{% if custom_ami != 'NONE' %}
+custom_ami = {{ custom_ami }}
+{% endif %}
+{% if placement_group != 'NONE' %}
+placement_group = {{ placement_group }}
+{% if master_instance_type == compute_instance_type or placement_group != 'DYNAMIC' %}
+placement = cluster
+{% else %}
+placement = compute
+{% endif %}
+{% endif %}
+s3_read_write_resource = {{ s3_read_write_resource }}/*
+pre_install = https://s3.amazonaws.com/{{ s3_bucketname }}/{{ s3_script_path }}/{{ preinstall_s3_dest }}
+post_install = https://s3.amazonaws.com/{{ s3_bucketname }}/{{ s3_script_path }}/{{ postinstall_s3_dest }}
+tags = {"ClusterID" : "{{ cluster_name }}", "ClusterStackType" : "ParallelCluster", "ClusterOSType" : "{{ base_os }}", "ClusterScheduler" : "{{ scheduler }}", "ClusterSerialNumber" : "{{ cluster_serial_number }}", "ClusterOwner" : "{{ cluster_owner }}", "ClusterOwnerEmail" : "{{ cluster_owner_email }}", "ClusterOwnerDepartment" : "{{ cluster_owner_department }}", "ProdLevel" : "{{ prod_level }}", "DEPLOYMENT_DATE" : "{{ DEPLOYMENT_DATE }}"}
+
+[scaling {{ scaling_settings }}]
+scaledown_idletime = {{ scaledown_idletime }}
+
+[ebs {{ ebs_settings }}]
+encrypted = {{ ebs_encryption | bool | lower }}
+encrypted_ephemeral = {{ ebs_encryption | bool | lower }}
+shared_dir = {{ ebs_shared_dir }}
+volume_size = {{ ebs_shared_volume_size }}
+volume_type = {{ ebs_shared_volume_type }}
+
+{% if enable_efs == 'true' %}
+# Todo - investigate using ParallelCluster's native EFS support.
+# Since all EFS configuration is performed through the postinstall script, 
+# leave this stanza intact as it will never actually be used.
+# efs_throughput_node should also remain disabled per the documentation.
+
+[efs {{ efs_settings }}]
+shared_dir = efs
+encrypted = {{ efs_encryption | bool | lower }}
+performance_mode = generalPurpose
+#throughput_mode = provisioned
+#provisioned_throughput = 1024
+{% endif %}

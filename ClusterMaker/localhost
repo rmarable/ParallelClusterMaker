@@ -1,0 +1,10 @@
+################################################################################
+# Name:		localhost
+# Author:	Rodney Marable <rodney.marable@gmail.com>
+# Created On:	April 16, 2019
+# Last Changed:	April 16, 2019
+# Purpose:	localhost configuration file for Ansible
+################################################################################
+
+[local]
+localhost

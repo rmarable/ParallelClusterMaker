@@ -1,0 +1,27 @@
+================================================================================
+               Build Summary Report for {{cluster_name }}
+================================================================================
+
+Master instance type = {{ master_instance_type }}
+Compute instance type = {{ compute_instance_type }}
+Deployment AZ = {{ az }}
+
+Launched cluster environment on {{ start_overall_timer.stdout }}
+Initiated cluster build on {{ start_stack_creation_timer.stdout }}
+Completed cluster build on {{ stop_stack_creation_timer.stdout }}
+Finished cluster environment on {{ stop_overall_timer.stdout }}
+
+{{ cluster_name }} will self-terminate on {{ cluster_end_time.stdout }}
+
+Choose an option to access the master instance of {{ cluster_name }}:
+
+(1) ParallelClusterMaker access script:
+    ./access_cluster.py -N {{ cluster_name }}
+
+(2) Native ParallelCluster ssh alias:
+    pcluster ssh {{ cluster_name }} -i {{ ssh_keypair }}
+
+(3) Vanilla ssh using the cluster's private key:
+    ssh -i {{ ssh_keypair }} {{ ec2_user }}@{{ MasterPublicIP.stdout }} 
+
+

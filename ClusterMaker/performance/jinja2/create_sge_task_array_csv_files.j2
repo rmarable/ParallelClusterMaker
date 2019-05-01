@@ -1,0 +1,141 @@
+#!/bin/bash
+#
+################################################################################
+# Name:		create_sge_task_array_csv_files.sh
+# Author:	Rodney Marable <rodney.marable@gmail.com>
+# Created On:	February 16, 2018
+# Last Changed:	August 9, 2018
+# Deployed On:	{{ lookup('pipe','date \"+%B %-d, %Y\"') }}
+# Purpose:	Generate CSV data files from SGE task array data for any
+#		arbitrary JOB_NAME submitted to a Grid Engine scheduler
+################################################################################
+
+# Define a function to sum parsed performance data associated with a task
+# array job.
+
+sum_csv_data()
+{
+	cat $SCRATCH_FILE | grep "^$1" | awk '{sum +=$2} END {print sum}'
+}
+
+# Define functions to generate "first" and "last" date stamps from task array
+# jobs suitable for inclusion in CSV data files.
+
+csv_first_datestamp()
+{
+	date --date="`cat $SCRATCH_FILE | grep "^$1" | sort | head -1  | awk '{printf"%s %s %s %s", $3, $4, $5, $6}'`" +%Y-%m-%d-%H:%M:%S
+}
+csv_last_datestamp()
+{
+	date --date="`cat $SCRATCH_FILE | grep "^$1" | sort | tail -1  | awk '{printf"%s %s %s %s", $3, $4, $5, $6}'`" +%Y-%m-%d-%H:%M:%S
+}
+
+# Define functions to generate "first" and "last" date stamps from task array
+# jobs that can be used for shell math operations.
+
+shellmath_first_datestamp()
+{
+	date --date="`cat $SCRATCH_FILE | grep "^$1" | sort | head -1  | awk '{printf"%s %s %s %s", $3, $4, $5, $6}'`"
+}
+shellmath_last_datestamp()
+{
+	date --date="`cat $SCRATCH_FILE | grep "^$1" | sort | tail -1  | awk '{printf"%s %s %s %s", $3, $4, $5, $6}'`"
+}
+
+# Set the cluster_name, cluster_serial_number, and JOB_NAME.
+# JOB_NAME can be adjusted to match any arbitrary cluster job (or read from user
+# input by adding an appropriate 'read' command).
+
+CLUSTER_NAME={{ cluster_name }}
+CLUSTER_SERIAL_NUMBER={{ cluster_serial_number }}
+JOB_NAME=job_Axb_random
+
+# Test for the existence of any Grid Engine output files produced by previously
+# executed jobs on ths cluster.
+
+if [[ `(ls $JOB_NAME.o* 2>/dev/null) | wc -l` -eq 0 ]]
+then
+	echo ""
+	echo "No output files for cluster_job $JOB_NAME were located."
+	echo "Please provide a valid JOB_NAME or resubmit to the cluster."
+	echo "Aborting..."
+	echo ""
+	exit 1
+fi
+
+# Create a TIMESTAMP and define some critical paths.
+
+TIMESTAMP=`TZ=":US/Eastern" date +%d-%b-%Y-%H:%M:%S`
+SCRATCH_FILE=/tmp/SCRATCH_FILE.$TIMESTAMP.data
+SGE_JOB_DATA_DIR=`pwd`/sge_job_data
+SGE_MASTER_JOB_DATA_FILE="$CLUSTER_NAME.$JOB_NAME.$TIMESTAMP.csv"
+if [ ! -d $SGE_JOB_DATA_DIR ]
+then
+	mkdir -p $SGE_JOB_DATA_DIR
+fi
+
+# Generate a list of cluster jobs to process from existing SGE output files.
+# Compute resource consumption by each job and save the results to a CSV file.
+
+echo "================================================================================"
+for cluster_job_ID in `ls $JOB_NAME.o* | awk -F. '{print $2}' | uniq | tr -d 'o'`
+do
+	echo "Creating $SGE_JOB_DATA_FILE..."
+	SGE_JOB_DATA_FILE="$CLUSTER_NAME.$JOB_NAME.$cluster_job_ID.csv"
+	qacct -j $cluster_job_ID > $SCRATCH_FILE
+	task_array_size=`cat $SCRATCH_FILE | grep taskid | wc -l`
+	job_qsub_time=$(csv_first_datestamp qsub_time)
+	first_job_start_time=$(csv_first_datestamp start_time)
+	last_job_start_time=$(csv_last_datestamp start_time)
+	last_job_end_time=$(csv_last_datestamp end_time)
+	job_qsub_time_shellmath=$(shellmath_first_datestamp qsub_time)
+	first_job_start_time_shellmath=$(shellmath_first_datestamp start_time)
+	last_job_start_time_shellmath=$(shellmath_last_datestamp start_time)
+	last_job_end_time_shellmath=$(shellmath_last_datestamp end_time)
+        sge_queue_time=$(( $(date -d "$first_job_start_time_shellmath" "+%s") - $(date -d "$job_qsub_time_shellmath" "+%s") ))
+        sge_run_time=$(( $(date -d "$last_job_end_time_shellmath" "+%s") - $(date -d "$first_job_start_time_shellmath" "+%s") ))
+        sge_total_time=`expr "$sge_queue_time" + "$sge_run_time"`
+	wallclock_time=$(sum_csv_data ru_wallclock)
+	user_time=$(sum_csv_data ru_utime)
+	system_time=$(sum_csv_data ru_stime)
+	cpu_time=$(sum_csv_data cpu)
+	memory=$(sum_csv_data mem)
+	io_time=$(sum_csv_data io)
+	io_wait_time=$(sum_csv_data iow)
+	echo "$CLUSTER_SERIAL_NUMBER,$CLUSTER_NAME,$cluster_job_ID,$task_array_size,$sge_queue_time,$sge_run_time,$sge_total_time,$wallclock_time,$user_time,$system_time,$cpu_time,$memory,$io_time,$io_wait_time" >> $SGE_JOB_DATA_DIR/$SGE_JOB_DATA_FILE
+	rm $JOB_NAME.o${cluster_job_ID}.* $SCRATCH_FILE
+	echo "Saving  ===>  $SGE_JOB_DATA_DIR/$SGE_JOB_DATA_FILE"
+	echo "================================================================================"
+done
+
+# Combine the data from each task into a single summary CSV file.
+
+echo "Combining all data files into a single summary CSV file..."
+for csvfile in `ls $SGE_JOB_DATA_DIR/$CLUSTER_NAME.$JOB_NAME*.csv`
+do
+	tail -1 $csvfile >>  $SGE_JOB_DATA_DIR/$SGE_MASTER_JOB_DATA_FILE
+	rm $csvfile
+done
+if [[ `head -1 $SGE_JOB_DATA_DIR/$SGE_MASTER_JOB_DATA_FILE` == "cluster_serial_number,cluster_name,cluster_job_ID,task_array_size,sge_queue_time,sge_run_time,sge_total_time,wallclock_time,user_time,system_time,cpu_time,memory,io_time,io_wait_time" ]]
+then
+	:
+else
+	echo "cluster_serial_number,cluster_name,cluster_job_ID,task_array_size,sge_queue_time,sge_run_time,sge_total_time,wallclock_time,user_time,system_time,cpu_time,memory,io_time,io_wait_time" > $SGE_JOB_DATA_DIR/$SGE_MASTER_JOB_DATA_FILE.header
+fi
+
+# Sort the CSV data file by cluster_job_ID and task_array_size.
+# Print a summary to the console.
+
+cat $SGE_JOB_DATA_DIR/$SGE_MASTER_JOB_DATA_FILE | sort -k2,2n -k 3,3n -t, >> $SGE_JOB_DATA_DIR/$SGE_MASTER_JOB_DATA_FILE.header
+mv $SGE_JOB_DATA_DIR/$SGE_MASTER_JOB_DATA_FILE.header $SGE_JOB_DATA_DIR/$SGE_MASTER_JOB_DATA_FILE
+echo "Saved  ===>  $SGE_JOB_DATA_DIR/$SGE_MASTER_JOB_DATA_FILE"
+echo "================================================================================"
+echo "================================================================================"
+echo ""
+echo "To save and view the plots locally, please run this command:"
+echo ""
+echo "   ===>   python3 make_sge_cluster_plots.py"
+echo ""
+echo "Exiting..."
+echo ""
+exit 0

@@ -1,0 +1,56 @@
+################################################################################
+# Name:         provider_aws.{{ instance_name }}.tf
+# Author:       Rodney Marable <rodney.marable@gmail.com>
+# Created On:   April 13, 2018
+# Last Changed: April 16, 2019
+# Purpose:      Designate AWS regions for use in Terraform templates
+# Reference:	https://www.terraform.io/docs/configuration/providers.html
+# Notes:	Do NOT delete as all Terraform scripts depend on this file!
+# 		Feel free to edit region aliases to reflect your enviroment.
+################################################################################
+
+provider "aws" {
+  region  = "us-east-1"
+}
+
+{% if turbot_account == 'disabled' %}
+provider "aws" {
+  alias   = "nova_vpc"
+  region  = "us-east-1"
+}
+
+provider "aws" {
+  alias   = "ohio_vpc"
+  region  = "us-east-2"
+}
+
+provider "aws" {
+  alias   = "nocal_vpc"
+  region  = "us-west-1"
+}
+
+provider "aws" {
+  alias   = "oregon_vpc"
+  region  = "us-west-2"
+}
+
+provider "aws" {
+  alias   = "eire_vpc"
+  region  = "eu-west-1"
+}
+
+provider "aws" {
+  alias   = "frankfurt_vpc"
+  region  = "eu-central-1"
+}
+
+provider "aws" {
+  alias   = "sydney_vpc"
+  region  = "ap-southeast-2"
+}
+{% else %}
+provider "aws" {
+  alias   = "{{ turbot_account }}usea1"
+  region  = "us-east-1"
+}
+{% endif %}
