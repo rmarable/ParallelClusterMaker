@@ -1,6 +1,14 @@
-# INSTALL.md
+################################################################################
+# Name:         INSTALL.md
+# Author:       Rodney Marable <rodney.marable@gmail.com>
+# Created On:   April 20, 2019
+# Last Changed: April 24, 2019
+# Purpose:      Installation guidance for ParallelClusterMaker
+################################################################################
 
-## Introduction
+################
+# Introduction #
+################
 
 ParallelClusterMaker simplifies the automation of creating, deleting, and
 administering AWS ParallelCluster stacks.
@@ -18,7 +26,9 @@ unforeseen problems with your local environment.
 In theory, this toolkit can also be used on Windows machines, but this method
 has not been tested and will **not** be supported.
 
-## Using a Dedicated EC2 Jumphost
+##################################
+# Using a Dedicated EC2 Jumphost #
+##################################
 
 The recommended way to leverage this code is to create a dedicated jumphost
 to launch ParallelCluster stacks.
@@ -63,7 +73,9 @@ $ cd ParallelClusterMaker/ClusterMaker
 * You are now ready to build ParallelCluster stacks.  Please consult README.md
 for more detailed information on leveraging the scripts in this toolkit.
 
-## Building an Installation Environment on OSX
+###############################################
+# Building an Installation Environment on OSX #
+###############################################
 
 Please be forewarned that this method is **not** recommended, requires more
 work, and may seriously damage your local OSX environment.
@@ -159,14 +171,18 @@ for eu-west-1, and so forth.
 * You are now ready to build ParallelCluster stacks.  Please consult README.md
 for more detailed information on leveraging the scripts in this toolkit.
 
-## About make-pcluster.py
+############################
+# About make-pcluster.py #
+############################
 
 To view all available options for make-pcluster.py:
 
 $ cd ParallelClusterMaker/ClusterMaker
 $ ./make-pcluster.py --help
 
-## Example ParallelCluster Stack Build
+#######################################
+# Example ParallelCluster Stack Build #
+#######################################
 
 * This example builds a small Grid Engine cluster running Amazon Linux 2 using
 c5.xlarge instances running Amazon Linux 2.  This command can be run from a
@@ -200,7 +216,9 @@ $ deactivate
 Please consult the README.md file for additional information on how to use the
 make-pcluster.py script and its companion tools.
 
-## Reporting Bugs
+##################
+# Reporting Bugs #
+##################
 
 Any bugs, issues, or otherwise unexpected behavior should be reported to
 Rodney Marable <rodney.marable@gmail.com> using the normal Github channels.  

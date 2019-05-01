@@ -1,10 +1,4 @@
-################################################################################
-# Name:		README.FIRST.md
-# Author:	Rodney Marable <rodney.marable@gmail.com>
-# Created On:	August 2, 2018
-# Last Changed:	April 29, 2019
-# Purpose:	Quick summary of documentation for Rmarable_InstanceMaker
-################################################################################
+# README.FIRST.md
 
 * README.ParallelClusterMaker_Performance
 

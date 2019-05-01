@@ -1,6 +1,14 @@
-# README.Axb_random.py.md
+################################################################################
+# Name:		README.Axb_random.py.md
+# Author:	Rodney Marable <rodney.marable@gmail.com>
+# Created On:	January 13, 2018
+# Last Changed:	April 28, 2019
+# Purpose:	General information on Axb_random.py
+################################################################################
 
-## Background
+##############
+# Background #
+##############
 
 Axb_random.py is a Python3 tool that was created to evaluate the performance
 of HPC clusters and EC2 instances using a common framework.  It can be used 
@@ -37,7 +45,9 @@ being easier to use, the summary CSV data it produces can be visualized by
 using "create_plots-Axb_random.py." Please see below for some guidance on
 how to use this tool in conjunction with bang.sh testing.
 
-## Requirements and Prerequisites
+##################################
+# Requirements and Prerequisites #
+##################################
 
 Axb_random.py requires python-3.6 or greater along with the numpy and scipy
 libraries to function properly.
@@ -58,7 +68,9 @@ $ brew doctor
 $ brew install ansible git packer parallel python3 terraform
 $ pip3 install matplotlib numpy pandas requests seaborn scipy tailhead
 
-## Usage Guidelines
+####################
+# Usage Guidelines #
+####################
 
 Please run Axb_random.py with the -h flag to see all available options:
 
@@ -113,7 +125,9 @@ larger matrices. Also, please be mindful of the amount of time and the costs
 that are associated with running larger tests; building a 4,000-core cluster
 stack is probably overkill when seeking to obtain useful performance data.
 
-## Effects of Invoking Axb_random.py with Different Options
+############################################################
+# Effects of Invoking Axb_random.py with Different Options #
+############################################################
 
 There can be significant differences in elapsed time when the HPC operator
 invokes the console-dump and/or create-logs options, especially with larger
@@ -128,7 +142,7 @@ For rough comparative purposes, the following results were generated using a
 2017 Apple Macbook Pro with a 2.5 GHz Intel Core i7 CPU, 16 GB of physical
 memory, and a 500GB flash drive running OSX 10.12.6 (Sierra):
 
-###console-dump=yes, create-log=yes, create-csv=yes
+# console-dump=yes, create-log=yes, create-csv=yes
 $ ./Axb_random.py --jobid=foo --matrix-size=N -D yes -C yes -L yes
 	N=  512		t =    1.7142 seconds
 	N= 1024		t =    9.1533 seconds
@@ -136,7 +150,7 @@ $ ./Axb_random.py --jobid=foo --matrix-size=N -D yes -C yes -L yes
 	N= 4096		t =  408.8307 seconds
 	N= 8192		t = 2595.5627 seconds
 
-###console-dump=yes, create-log=no, create-csv=yes
+# console-dump=yes, create-log=no, create-csv=yes
 $ ./Axb_random.py --jobid=foo --matrix-size=N -D yes -C yes -L no
 	N=  512		t =    0.9918 seconds
 	N= 1024		t =    4.8456 seconds
@@ -144,7 +158,7 @@ $ ./Axb_random.py --jobid=foo --matrix-size=N -D yes -C yes -L no
 	N= 4096		t =  208.8762 seconds
 	N= 8192		t = 1330.3521 seconds
 
-###console-dump=no, create-log=yes, create-csv=yes
+# console-dump=no, create-log=yes, create-csv=yes
 $ ./Axb_random.py --jobid=foo --matrix-size=N -D no -C yes -L yes
 	N=  512		t =    0.8234 seconds		log_size =   2 MB
 	N= 1024		t =    4.1622 seconds		log_size =   8 MB
@@ -152,7 +166,7 @@ $ ./Axb_random.py --jobid=foo --matrix-size=N -D no -C yes -L yes
 	N= 4096		t =  186.7692 seconds		log_size = 132 MB
 	N= 8192		t = 1229.3696 seconds		log_size = 526 MB
 
-###console-dump=no, create-log=no, create-csv=yes
+# console-dump=no, create-log=no, create-csv=yes
 $ ./Axb_random.py --jobid=foo --matrix-size=N -D no -C yes -L no
 	N=  512		t =  0.1665 seconds
 	N= 1024		t =  0.1761 seconds

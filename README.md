@@ -1,14 +1,15 @@
 # ParallelClusterMaker - HPC Cloud Automation
 
+*Note: Text versions of the documentation can be found in the ParallelClusterMaker/docs folder.*
+
 ## Disclaimer
 
-**This software is neither endorsed nor supported by Amazon Web Services!** 
+**This software is neither endorsed by nor supported by Amazon Web Services!** 
 
-You **cannot** get support by opening a support case or engaging AWS engineers
-in the public forums.
+You **cannot** open AWS support support cases or engage AWS engineers in the Amazon public forums.
 
 If you choose to use this software in production, please be forewarned that
-bugs may still be present which will cause unexpected (and undocumented)
+bugs may still be present which may cause unexpected (and undocumented)
 behavior.  In other words: **use at your own risk!**
 
 Please report any bugs, issues, or otherwise unexpected behavior to Rodney
