@@ -334,7 +334,7 @@ $ cd ParallelClusterMaker/JumphostMaker
 $ ./kill-pcluster-jumphost.$INSTANCE_NAME.sh
 
 ##################
-# Serial Nunbers #
+# Serial Numbers #
 ##################
 
 ParallelClusterMaker generates unique "serial numbers" for every EC2 jumphost
