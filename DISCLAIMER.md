@@ -2,7 +2,7 @@
 
 ## Disclaimer
 
-**This software is neither endorsed by nor supported by Amazon Web Services.**
+**This Open Source software is neither endorsed by nor supported by Amazon Web Services.**
 
 If you choose to use this Open Source software in production environments,
 please be forewarned that bugs may still be present, unexpected behavior

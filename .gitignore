@@ -9,6 +9,7 @@
 *.pyo
 *.retry
 .serverless
+.swp
 TODO
 __pycache__/
 active_clusters/

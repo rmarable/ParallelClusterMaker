@@ -2,8 +2,8 @@
 
 ## Introduction
 
-ParallelClusterMaker simplifies the automation of creating, deleting, and
-administering AWS ParallelCluster stacks.
+ParallelClusterMaker is Open Source software that simplifies the automation
+of creating, deleting, and administering AWS ParallelCluster stacks.
 
 The recommended way to use ParallelClusterMaker is to stand up a dedicated
 jumphost using the code in ParallelClusterMaker/JumphostMaker, and from this

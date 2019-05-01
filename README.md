@@ -4,30 +4,38 @@
 
 ## Disclaimer
 
-**This software is neither endorsed by nor supported by Amazon Web Services!** 
+**This Open Source software is neither endorsed by nor supported by Amazon Web Services!** 
 
-You **cannot** open AWS support support cases or engage AWS engineers in the Amazon public forums.
+You **cannot** open AWS support support cases or engage AWS engineers in the Amazon public forums for assistance with this Open Source software.
 
-If you choose to use this software in production, please be forewarned that
-bugs may still be present which may cause unexpected (and undocumented)
-behavior.  In other words: **use at your own risk!**
+If you choose to use this Open Source software in production, please be forewarned that bugs may still be present which may cause unexpected (and undocumented)
+behavior.
+
+In other words: **use this Open Source software at your own risk!**
 
 Please report any bugs, issues, or otherwise unexpected behavior to Rodney
 Marable (rodney.marable@gmail.com) through the normal Github channels.
 
-## ParallelClusterMaker Features
+## About ParallelClusterMaker
 
-ParallelClusterMaker is a command line wrapper toolkit that makes it easier
-to automate the creation and destruction of AWS ParallelCluster stacks.
+ParallelClusterMaker is an Open Source command line wrapper toolkit that makes it easier to automate the creation and destruction of AWS ParallelCluster stacks. It is designed to enable  scientists and engineers to leverage HPC in the cloud without requiring deep infrastructure knowledge.
+
+You can find more information about AWS ParallelCluster by visiting:
+
+https://github.com/aws/aws-parallelcluster
 
 The parent directory ParallelClusterMaker contains two subdirectories:
 
 * **JumphostMaker** creates a dedicated free tier EC2 instance that can be
 used to administer AWS ParallelCluster stacks.
 
-* **ClusterMaker** builds and destroys AWS ParallelCluster stacks.  While it
-can be run locally via OSX (and, in theory, Windows), the recommended practice
-is to use JumphostMaker to first stand up a jumphost for controlling stacks.
+* **ClusterMaker** builds and destroys AWS ParallelCluster stacks.
+
+ClusterMaker can be run locally via OSX (and, in theory, Windows), but the
+recommended practice is to use JumphostMaker to first stand up a jumphost that
+can then be used to administer ParallelCluster stacks.
+
+## ParallelClusterMaker Features
 
 ParallelClusterMaker supports the following features through the command line:
 
