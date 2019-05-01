@@ -1,10 +1,10 @@
-## Name:		README.md
-## Author:	Rodney Marable <rodney.marable@gmail.com>
-## Created On:	April 20, 2019
-## Last Changed:	April 30, 2019
-## Purpose:	Documentation for using the ParallelClusterMaker toolkit	
+### Name:		README.md
+### Author:	Rodney Marable <rodney.marable@gmail.com>
+### Created On:	April 20, 2019
+### Last Changed:	April 30, 2019
+### Purpose:	Documentation for using the ParallelClusterMaker toolkit	
 
-## Disclaimer
+### Disclaimer
 
 **This software is neither endorsed nor supported by Amazon Web Services.**
 
