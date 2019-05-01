@@ -436,7 +436,7 @@ of the Lustre client process necessitates a reboot of all cluster instances,
 which in turn breaks the ParallelCluster Cloudformation template deployment.
 This may be revisited in a future release but for now, there are numerous 
 checks in place to prevent the operator from setting "--enable_fsx=true" 
-when "base_os=ubuntu1604".
+when "--base_os=ubuntu1604".
 
 #######################
 # External NFS Access #
