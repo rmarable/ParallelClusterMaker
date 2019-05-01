@@ -1,4 +1,4 @@
-# ParallelClusterMaker - Next Generation HPC Cloud Automation Tool
+# ParallelClusterMaker - HPC Cloud Automation
 
 ## Disclaimer
 
