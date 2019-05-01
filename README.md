@@ -1,4 +1,4 @@
-# ParallelClusterMaker - Command line wrapper for automating HPC in the cloud
+# ParallelClusterMaker - Next Generation HPC Cloud Automation Tool
 
 ## Disclaimer
 
