@@ -482,24 +482,24 @@ $ ./make-cluster.py -A eu-west-1b -E rodney.marable@gmail.com -O rmarable -N luk
 ParallelClusterMaker currently supports the following "departments" by using
 the `--cluster_owner_department` switch:
 
-research (default)
-hpc
-analytics
-compchem
-compbio
-datasci
-design
-clinical
-commercial
-development
-finance
-infrastructure
-manufacturing
-operations
-proteomics
-qa
-robotics
-scicomp
+* research (default)
+* hpc
+* analytics
+* compchem
+* compbio
+* datasci
+* design
+* clinical
+* commercial
+* development
+* finance
+* infrastructure
+* manufacturing
+* operations
+* proteomics
+* qa
+* robotics
+* scicomp
 
 ## Intel HyperThreading
 
