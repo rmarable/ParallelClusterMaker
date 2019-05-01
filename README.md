@@ -2,11 +2,13 @@
 
 ## Disclaimer
 
-**This software is neither endorsed nor supported by Amazon Web Services.**
+**This software is neither endorsed nor supported by Amazon Web Services!** 
+You cannot get support by opening a ticket or engaging AWS engineers in the
+public forums.
 
 If you choose to use this software in production, please be forewarned that
 bugs may still be present and unexpected (and undocumented) behavior may
-be observed.  Use at your own risk! 
+be observed.  Very bad things may happen.  Use at your own risk! 
 
 Please report any bugs, issues, or otherwise unexpected behavior to Rodney
 Marable (rodney.marable@gmail.com) through the normal Github channels.
