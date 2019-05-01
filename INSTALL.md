@@ -177,10 +177,10 @@ $ npm install -g serverless
 * In the AWS Management Console, apply a formal name to the VPC(s) within any
 region you wish to deploy cluster stacks by navigating to:
 
-Console / VPC / Your VPCs / Edit the Name field as desired
-
-For example, use "nova" for us-east-1, "cleveland" for us-east-2, "dublin"
-for eu-west-1, and so forth.
+```
+Console / VPC / Your VPCs
+```
+Edit the Name field as desired.  For example, use "nova" for us-east-1, "cleveland" for us-east-2, "dublin" for eu-west-1, and so forth.
 
 * You are now ready to build ParallelCluster stacks.  Please consult README.md
 for more detailed information on leveraging the scripts in this toolkit.
