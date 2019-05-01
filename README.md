@@ -1,3 +1,6 @@
+## ParallelClusterMaker - Command line wrapper toolkit to enable automation of
+ParallelCluster stacks
+
 ### Disclaimer
 
 **This software is neither endorsed nor supported by Amazon Web Services.**
@@ -7,7 +10,7 @@ bugs may still be present and unexpected (and undocumented) behavior may
 be observed.  Use at your own risk! 
 
 Please report any bugs, issues, or otherwise unexpected behavior to Rodney
-Marable <rodney.marable@gmail.com> through the normal Github channels.
+Marable (rodney.marable@gmail.com) through the normal Github channels.
 
 ### ParallelClusterMaker Features
 
