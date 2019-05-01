@@ -3,12 +3,12 @@
 ## Disclaimer
 
 **This software is neither endorsed nor supported by Amazon Web Services!** 
-You cannot get support by opening a ticket or engaging AWS engineers in the
-public forums.
+You **cannot** get support by opening a support case, engaging AWS engineers in the public forums,
+or 
 
 If you choose to use this software in production, please be forewarned that
 bugs may still be present and unexpected (and undocumented) behavior may
-be observed.  Very bad things may happen.  Use at your own risk! 
+be observed.  Use at your own risk! 
 
 Please report any bugs, issues, or otherwise unexpected behavior to Rodney
 Marable (rodney.marable@gmail.com) through the normal Github channels.
@@ -200,7 +200,7 @@ $ ./access_cluster.py -N rmarable-test01
 Connecting to the head node of rmarable-test01 over ssh...
 Last login: Sat Jul 21 23:13:35 2018 from 64.192.133.129
 
-# Using the HPC Performance Toolkit
+## Using the HPC Performance Toolkit
 
 ParallelClusterMaker provides an optional suite of performance tests that 
 are included with new ParallelCluster stacks when the appropriate option
@@ -218,7 +218,7 @@ Example usage:
 $ cd src/ParallelClusterMaker/ClusterMaker/performance/rmarable-test01
 $ qsub qsub-hashtest.10.sh
 
-# Ganglia #
+## Ganglia #
 
 ParallelCluster uses Ganglia for monitoring cluster stacks.  You can find more
 information about thsi software by visiting: http://ganglia.sourceforge.net/
@@ -229,7 +229,7 @@ so please consider this carefully if your clusters are operating in an
 environment where security is a priority.  A future release will provide more
 flexibility for controlling http access.
 
-# How to Manage EC2 Key Pairs for Cluster Stacks
+## How to Manage EC2 Key Pairs for Cluster Stacks
 
 ParallelCluster creates a unique EC2 key pair for each cluster stack and EC2
 jumphost, storing the respective resulting PEM files in cluster_data_dir and
@@ -243,7 +243,7 @@ secure fashion.
 The kill_cluster and kill_pcluster_jumphost scripts will delete the respective
 EC2 key pairs as part of the cluster or jumphost destruction process.
 
-# Deleting a pcluster Stack or EC2 Jumphost
+## Deleting a pcluster Stack or EC2 Jumphost
 
 There are three ways to delete a cluster stack:
 
@@ -294,7 +294,7 @@ associated with the EC2 instance living in ParallelClusterMaker/Jumphost.
 $ cd ParallelClusterMaker/JumphostMaker
 $ ./kill-pcluster-jumphost.$INSTANCE_NAME.sh
 
-# Serial Nunbers #
+## Serial Nunbers #
 
 ParallelClusterMaker generates unique "serial numbers" for every EC2 jumphost
 and ParallelCluster stack that are used for resource tagging and to associate
@@ -307,7 +307,7 @@ instance ParallelClusterMaker stack is deleted.  This makes it easier for
 devops engineers to manage multiple HPC users in a single AWS account and
 to run detailed usage reports for individual cluster stacks.
 
-# SNS 
+## SNS 
 
 A notification will be sent to the cluster_owner when a stack construction
 event has concluded via SNS.  If this is the first new stack you have created,
@@ -317,7 +317,7 @@ track major cluster events after it is emailed to cluster_owner_email.
 The SNS topic associated with the jumphost or cluster stack will be deleted
 by the kill-cluster or kill-pcluster-jumphost scripts.
 
-# Local Scratch Space
+## Local Scratch Space
 
 By default, all instances will have a /local_scratch directory that allows
 the operator to leverage the local EBS volume as ephemeral scratch space.
@@ -334,7 +334,7 @@ This may be addressed in a future release.  If greater performance from the
 shared storage is required, the operator is encouraged to use EFS max_io or
 FSxL instead.
 
-# EFS
+## EFS
 
 EFS can be used as a shared storage option for ParallelCluster by setting
 "--enable_efs=true."  Creating a new EFS file system and mount target will
@@ -360,7 +360,7 @@ $6,200/month.  For that reason, efs_throughput_mode has been completely
 disabled to prevent unexpected and unpleasant surprises with the AWS bill.
 This will be re-enabled as a future update.
 
-# FSx for Lustre (FSxL)
+## FSx for Lustre (FSxL)
 
 FSx for Lustre (FSxL) can be leveraged for scratch space on a ParallelCluster
 stack by setting "--enable_fsx=true" and waiting an additional 5-7 minutes to
@@ -389,7 +389,7 @@ This may be revisited in a future release but for now, there are numerous
 checks in place to prevent the operator from setting "--enable_fsx=true" 
 when "base_os=ubuntu1604".
 
-# External NFS Access
+## External NFS Access
 
 Support for external NFS access is configured in the "create_pcluster.yml"
 and "delete_pcluster.yml" playbooks.
@@ -444,7 +444,7 @@ cluster monitoring:
 
 $ ./make-cluster.py -A eu-west-1b -E rodney.marable@gmail.com -O rmarable -N lukecage --base_os=alinux2 --enable_ganglia=true --master_instance_type=m5.2xlarge --compute_instance_type=r5.12xlarge --enable_fsx=true --fsx_size=32768 --enable_efs=true --prod_level=prod --max_queue_size=64
 
-# Customizing Departments
+## Customizing Departments
 
 ParallelClusterMaker currently supports the following "departments" by using
 the "--cluster_owner_department" switch:
@@ -468,7 +468,7 @@ qa
 robotics
 scicomp
 
-# Intel HyperThreading
+## Intel HyperThreading
 
 Seeting "--hyperthreading=false" will disable Intel HyperThreading on Amazon
 Linux following the guidance provided in this AWS blog posting:
@@ -479,7 +479,7 @@ http://tiny.amazon.com/1avqrokh6/awsamazblogdisa
 
 This feature will be extended to these operating systems in a future release.
 
-# Custom AMIs
+## Custom AMIs
 
 ParallelClusterMaker supports custom AMIs through the "-custom_ami" switch,
 provided the base_os is supported by ParallelCluster (currently CentOS 6/7,
@@ -499,7 +499,7 @@ $ ./make-cluster.py -N starscream -O rmarable -E rodney.marable@gmail.com -A us-
 
 Error checking is performed to ensure that the custom AMI exists.
 
-# EC2 Placement Groups
+## EC2 Placement Groups
 
 EC2 placement groups can be enabled by setting "--placement_group=DYNAMIC".
 ParallelCluster provides a mechanism for using an already-existing placement
@@ -515,7 +515,7 @@ http://docs.aws.amazon.com/AWSEC2/latest/UserGuide/placement-groups.html
 
 Per the AWS public documentation, please use this option with caution.
 
-# HPC Software and Application Support
+## HPC Software and Application Support
 
 ParallelClusterMaker automatically provides support for Spack, a package
 manager that makes it easier to build and maintain multiple versions and
