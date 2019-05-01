@@ -542,7 +542,7 @@ This feature will be extended to these operating systems in a future release.
 # Custom AMIs #
 ###############
 
-ParallelClusterMaker supports custom AMIs through the "-custom_ami" switch,
+ParallelClusterMaker supports custom AMIs through the "--custom_ami" switch,
 provided the base_os is supported by ParallelCluster (currently CentOS 6/7,
 Amazon Linux, and Ubuntu 16.04 LTS).  The base_os of the custom_ami must
 also be supplied or the script will assume you are using Amazon Linux.

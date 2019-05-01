@@ -40,7 +40,7 @@ can then be used to administer ParallelCluster stacks.
 ParallelClusterMaker supports the following features through the command line:
 
 * User-configurable time-based cron-style cluster life cycle management i.e.
-clusters will self-terminate when `--cluster_lifetime' has been exceeded.
+clusters will self-terminate when `--cluster_lifetime` has been exceeded.
 The default is 30 days.
 
 * Command line designation of dev, test, stage, and prod operating levels.
@@ -218,7 +218,7 @@ Last login: Sat Jul 21 23:13:35 2018 from 64.192.133.129
 
 ParallelClusterMaker provides an optional suite of performance tests that 
 are included with new ParallelCluster stacks when the appropriate option
-(`--enable_hpc_performance_tests=true') is invoked at installation.  These
+(`--enable_hpc_performance_tests=true`) is invoked at installation.  These
 scripts live in ~/src/ParallelClusterMaker/ClusterMaker/performance.
 
 Extensive documentation for these tests are included in the "performance"
@@ -239,7 +239,7 @@ $ qsub qsub-hashtest.10.sh
 ParallelCluster uses Ganglia for monitoring cluster stacks.  You can find more
 information about thsi software by visiting: http://ganglia.sourceforge.net/
 
-Setting `--enable_ganglia=true' will install and enable Ganglia on the master
+Setting `--enable_ganglia=true` will install and enable Ganglia on the master
 instance.  This option currently permits traffic to port 80 from the Internet,
 so please consider this carefully if your clusters are operating in an
 environment where security is a priority.  A future release will provide more
@@ -287,7 +287,7 @@ the cluster, etc.
 
 3. **Wait for cluster_lifetime to take over**: Just hang out and wait.  All
 ParallelCluster stacks are built with a default 30-day lifetime but this can
-be changed by invoking `--cluster_lifetime=x:y:z' where x = days, y = hours,
+be changed by invoking `--cluster_lifetime=x:y:z` where x = days, y = hours,
 and z = minutes to dictate exactly how long this stack should live.  In the
 example below, rmarable-test01 will self-terminate in 12 hours without any
 additional user (or DevOps) intervention:
@@ -303,7 +303,7 @@ environment.
 
 By default, any EFS or FSxL file systems associated with this cluster will
 also be terminated along with the cluster stack.  For FXSxL, this behavior
-can be overridden for FSxL by setting `delete_fsx=true' in the
+can be overridden for FSxL by setting `delete_fsx=true` in the
 delete_cluster.yml Ansible playbook.
 
 To delete a pcluster jumphost, simply run the kill-pcluster-jumphost script
@@ -357,13 +357,13 @@ FSxL instead.
 ## EFS
 
 EFS can be used as a shared storage option for ParallelCluster by setting
-`--enable_efs=true.'  Creating a new EFS file system and mount target will
+`--enable_efs=true.`  Creating a new EFS file system and mount target will
 add an extra 5-7 minutes to the overall cluster stack creation process.
 
 /efs will be created and mounted by all instances in the new cluster stack.
 
 This toolkit will build only one EFS file system which will be deleted along 
-along with the cluster stack.  To override this behavior, set `--delete_efs'
+along with the cluster stack.  To override this behavior, set `--delete_efs`
 to `false` when invoking kill_cluster.py.  Support for multiple EFS file
 systems may be added in a future release.
 
@@ -376,14 +376,14 @@ Support for encryption and selecting between max_io and general_purpose modes ca
 enabled by setting the appropriate command line switches to `true`.
 
 As of 4/20/2019, provisioning a 1024 MiB/sec file system costs approximately
-$6,200/month.  For that reason, efs_throughput_mode has been completely
+$6,200/month.  For that reason, `efs_throughput_mode` has been completely
 disabled to prevent unexpected and unpleasant surprises with the AWS bill.
 This will be re-enabled as a future update.
 
 ## FSx for Lustre (FSxL)
 
 FSx for Lustre (FSxL) can be leveraged for scratch space on a ParallelCluster
-stack by setting `--enable_fsx=true' and waiting an additional 5-7 minutes to
+stack by setting `--enable_fsx=true` and waiting an additional 5-7 minutes to
 create the Lustre file system, mount point, and security group.
 
 All cluster instances will mount the FSxL file system at /fsx.  The current
@@ -391,7 +391,7 @@ implementation only supports "ephemeral" scratch, that is, S3 hydration and
 export is not supported.  This may change in a future release.
 
 The **minimum** permitted file system size is 3600 GB (or 3.6 TB).  This is
-the current default.  Larger file systems can be built by setting `--fsx_size'
+the current default.  Larger file systems can be built by setting `--fsx_size`
 to the desired value.
 
 Please be advised that ParallelClusterMaker currently supports only one FSxL
@@ -399,15 +399,15 @@ mount per cluster and will only create FSxL mount targets in the cluster's
 selected Availability Zone.  This may be changed in a future release.
 
 By default, all FSxL file systems will be deleted along with the cluster
-stack.  To override this behavior, change `--delete_fsx' to `false` when
+stack.  To override this behavior, change `--delete_fsx` to `false` when
 invoking the kill_cluster.py script.
 
 ParallelClusterMaker does **not** support FSxL on Ubuntu because installation
 of the Lustre client process necessitates a reboot of all cluster instances,
 which in turn breaks the ParallelCluster Cloudformation template deployment.
 This may be revisited in a future release but for now, there are numerous 
-checks in place to prevent the operator from setting `--enable_fsx=true' 
-when `base_os=ubuntu1604'.
+checks in place to prevent the operator from setting `--enable_fsx=true` 
+when `base_os=ubuntu1604`.
 
 ## External NFS Access
 
@@ -417,7 +417,7 @@ and "delete_pcluster.yml" playbooks.
 This example mounts an external file system called "storage.domain.com" onto
 a ParallelClusterMaker-spawned stack:
 
-`--enable_external_nfs=true' and `--external_nfs_server=storage.domain.com'
+`--enable_external_nfs=true` and `--external_nfs_server=storage.domain.com`
 
 Please do **NOT** enable this feature without having a working external NFS
 file system prepared to serve mount requests to this domain name!
@@ -479,7 +479,7 @@ $ ./make-cluster.py -A eu-west-1b -E rodney.marable@gmail.com -O rmarable -N luk
 ## Customizing Departments
 
 ParallelClusterMaker currently supports the following "departments" by using
-the "--cluster_owner_department" switch:
+the `--cluster_owner_department` switch:
 
 research (default)
 hpc
@@ -502,7 +502,7 @@ scicomp
 
 ## Intel HyperThreading
 
-Seeting "--hyperthreading=false" will disable Intel HyperThreading on Amazon
+Seeting `--hyperthreading=false` will disable Intel HyperThreading on Amazon
 Linux following the guidance provided in this AWS blog posting:
 
 http://tiny.amazon.com/1avqrokh6/awsamazblogdisa
@@ -513,7 +513,7 @@ This feature will be extended to these operating systems in a future release.
 
 ## Custom AMIs
 
-ParallelClusterMaker supports custom AMIs through the "-custom_ami" switch,
+ParallelClusterMaker supports custom AMIs through the `--custom_ami` switch,
 provided the base_os is supported by ParallelCluster (currently CentOS 6/7,
 Amazon Linux, and Ubuntu 16.04 LTS).  The base_os of the custom_ami must
 also be supplied or the script will assume you are using Amazon Linux.
@@ -535,7 +535,7 @@ Error checking is performed to ensure that the custom AMI exists.
 
 ## EC2 Placement Groups
 
-EC2 placement groups can be enabled by setting "--placement_group=DYNAMIC".
+EC2 placement groups can be enabled by setting `--placement_group=DYNAMIC`.
 ParallelCluster provides a mechanism for using an already-existing placement
 group, but this feature is not currently supported by ParallelClusterMaker.
 
