@@ -6,9 +6,7 @@
 # Purpose:	Documentation for using the ParallelClusterMaker toolkit	
 ################################################################################
 
-##############
-# Disclaimer #
-##############
+# Disclaimer
 
 **This software is neither endorsed nor supported by Amazon Web Services.**
 
@@ -19,9 +17,7 @@ be observed.  Use at your own risk!
 Please report any bugs, issues, or otherwise unexpected behavior to Rodney
 Marable <rodney.marable@gmail.com> through the normal Github channels.
 
-#################################
-# ParallelClusterMaker Features #
-#################################
+# ParallelClusterMaker Features
 
 ParallelClusterMaker is a command line wrapper toolkit that makes it easier
 to automate the creation and destruction of AWS ParallelCluster stacks.
