@@ -11,7 +11,7 @@ You **cannot** open AWS support support cases or engage AWS engineers in the Ama
 If you choose to use this Open Source software in production, please be forewarned that bugs may still be present which may cause unexpected (and undocumented)
 behavior.
 
-In other words: **use this Open Source software at your own risk!**
+_In other words: **use this Open Source software at your own risk!**_
 
 Please report any bugs, issues, or otherwise unexpected behavior to Rodney
 Marable (rodney.marable@gmail.com) through the normal Github channels.
