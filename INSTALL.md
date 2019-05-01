@@ -241,5 +241,5 @@ make-pcluster.py script and its companion tools.
 ## Reporting Bugs
 
 Any bugs, issues, or otherwise unexpected behavior should be reported to
-Rodney Marable <rodney.marable@gmail.com> using the normal Github channels.  
+Rodney Marable (rodney.marable@gmail.com) using the normal Github channels.  
 Pull requests for additional functionality are always welcome.

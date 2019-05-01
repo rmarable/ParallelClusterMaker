@@ -20,4 +20,4 @@ Please be advised that you will **NOT** be able to open cases with AWS Support o
 ```
 
 Please report any bugs, issues, or otherwise unexpected behavior to Rodney
-Marable <rodney.marable@gmail.com> through the normal Github channels.
+Marable (rodney.marable@gmail.com) through the normal Github channels.
