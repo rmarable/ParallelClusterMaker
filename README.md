@@ -9,7 +9,7 @@ in the public forums.
 
 If you choose to use this software in production, please be forewarned that
 bugs may still be present which will cause unexpected (and undocumented)
-behavior.  Use at your own risk! 
+behavior.  In other words: **use at your own risk!**
 
 Please report any bugs, issues, or otherwise unexpected behavior to Rodney
 Marable (rodney.marable@gmail.com) through the normal Github channels.
@@ -295,7 +295,7 @@ associated with the EC2 instance living in ParallelClusterMaker/Jumphost.
 $ cd ParallelClusterMaker/JumphostMaker
 $ ./kill-pcluster-jumphost.$INSTANCE_NAME.sh
 
-## Serial Nunbers #
+## Serial Nunbers
 
 ParallelClusterMaker generates unique "serial numbers" for every EC2 jumphost
 and ParallelCluster stack that are used for resource tagging and to associate
