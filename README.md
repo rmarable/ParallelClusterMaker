@@ -1,5 +1,4 @@
-## ParallelClusterMaker - Command line wrapper toolkit to enable automation of
-ParallelCluster stacks
+# ParallelClusterMaker - Command line wrapper for automating ParallelCluster stacks
 
 ### Disclaimer
 
