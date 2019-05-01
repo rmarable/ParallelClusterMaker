@@ -467,7 +467,8 @@ scratch and an EFS file system for shared storage, Amazon Linux 2 as the base
 operating system, Grid Engine as the scheduler, system, and Ganglia for
 cluster monitoring:
 
-			        #WARNING 
+#
+			        WARNING 
 
 	    DO **NOT** INVOKE THIS COMMAND TO BUILD THIS CLUSTER
 	    UNLESS YOU ARE PREPARED FOR THE BILL THAT WILL ENSUE!
