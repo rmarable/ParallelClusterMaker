@@ -63,6 +63,7 @@ sudo pip3 install -r requirements.ParallelClusterMaker.txt
 # Install a default ParallelCluster configuration file so the pcluster commands
 # will work as expected out of the box.
 
+mkdir -p $EC2_HOME/.parallelcluster
 cat << EOF > $EC2_HOME/.parallelcluster/config
 [aws]
 aws_region_name = {{ region }}
@@ -87,7 +88,7 @@ EOF
 # Install an alias for cd-ing into the ParallelClusterMaker/ClusterMaker source
 # code directory for user convenience.
 
-echo "alias src='cd ~/src/ParallelClusterMaker/ClusterMaker'" >> $EC2_USER/.bash_profile
+echo "alias src='cd ~/src/ParallelClusterMaker/ClusterMaker'" >> $EC2_USER/.bashrc
 
 # Cleanup and exit.
 
