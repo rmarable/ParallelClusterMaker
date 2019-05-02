@@ -55,7 +55,8 @@ sudo ln -s /usr/local/bin/pip3 /usr/bin/pip3
 
 sudo pip3 install boto
 cd $SRC
-git clone https://github.com/rmarable/ParallelClusterMaker.git
+#git clone https://github.com/rmarable/ParallelClusterMaker.git
+git clone https://rmarable:d2b1ff01e15795f030bc95d374184f3e0e90b702@github.com/rmarable/ParallelClusterMaker.git
 cd $SRC/ParallelClusterMaker/ClusterMaker
 sudo pip3 install -r requirements.ParallelClusterMaker.txt
 
@@ -72,7 +73,7 @@ vpc_settings = public
 
 [vpc public]
 vpc_id = {{ vpc_id }}
-master_subnet_id = {{ subnet }}
+master_subnet_id = {{ subnet_id }}
 
 [global]
 cluster_template = default
