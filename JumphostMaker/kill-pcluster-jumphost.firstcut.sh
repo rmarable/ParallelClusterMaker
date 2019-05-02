@@ -1,1 +1,0 @@
-/Users/rmarable/src/public/ParallelClusterMaker/JumphostMaker/pcluster_jumphost_data/firstcut/kill_pcluster_jumphost.firstcut.sh

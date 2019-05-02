@@ -2,7 +2,7 @@
 # Name:		kill_pcluster_jumphost.{{ instance_name }}.sh
 # Author:	Rodney Marable <rodney.marable@gmail.com>
 # Created On:	April 20, 2019
-# Last Changed:	April 27, 2019
+# Last Changed:	May 1, 2019
 # Deployed On:	{{ lookup('pipe','date \"+%B %-d, %Y\"') }}
 # Purpose:	Destroy pcluster-jumphost {{ instance_name }}
 ###############################################################################
@@ -84,7 +84,7 @@ do
 	rm $file
 	echo "Deleted file: $file"
 done
-unlink kill-pcluster-{{ instance_name }}.sh
+unlink kill-pcluster-jumphost.{{ instance_name }}.sh
 
 # Cleanup and exit.
 
