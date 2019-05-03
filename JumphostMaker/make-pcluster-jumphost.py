@@ -4,7 +4,7 @@
 # Name:         make-pcluster-jumphost.py
 # Author:       Rodney Marable <rodney.marable@gmail.com>
 # Created On:   April 18, 2019
-# Last Changed: May 2, 2019
+# Last Changed: May 3, 2019
 # Purpose:      Create an EC2 jumphost to run the ParallelClusterMaker toolkit
 ################################################################################
 
@@ -52,7 +52,7 @@ parser.add_argument('--instance_owner_department', choices=['analytics', 'clinic
 parser.add_argument('--security_group', '-S', help='primary security group for the EC2 pcluster-jumphost (default = pcluster_jumphost)', required=False, default='pcluster_jumphost')
 parser.add_argument('--turbot_account', '-T', help='Turbot account ID (default = abd).  Set to "disabled" in non-Turbot environments.', required=False, default='disabled')
 parser.add_argument('--ansible_verbosity', '-V', help='Set the Ansible verbosity level (default = none)', required=False, default='')
-parser.add_argument('--debug_mode', '-D', help='Enable debug mode (default = false)', required=False, default='false')
+parser.add_argument('--debug_mode', '-D', choices=['true', 'false'], help='Enable debug mode (default = false)', required=False, default='false')
 
 # Create variables from optional instance_parameters provided via command line.
 
@@ -137,7 +137,7 @@ if os.path.isfile(vars_file_path):
     print('Aborting...')
     sys.exit(1)
 else:
-    if debug_mode == 'True':
+    if debug_mode == 'true':
         print_TextHeader(instance_name, 'Validating', 80)
     else:
         print('')

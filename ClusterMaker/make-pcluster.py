@@ -4,7 +4,7 @@
 # Name:		make-pcluster.py
 # Author:	Rodney Marable <rodney.marable@gmail.com>
 # Created On:	April 20, 2019
-# Last Changed:	April 29, 2019
+# Last Changed:	May 3, 2019
 # Purpose:	Python3 wrapper for customizing ParallelCluster stacks
 ################################################################################
 
@@ -60,37 +60,38 @@ parser.add_argument('--compute_root_volume_size', help='compute EBS root volume 
 parser.add_argument('--cluster_type', choices=['ondemand', 'spot'], help='build the cluster with ondemand or spot instances (default = spot)', required=False, default='spot')
 parser.add_argument('--placement_group', choices=['NONE', 'DYNAMIC'], help='create a dynamic placement group for this cluster, use with caution (default=NONE)', required=False, default='NONE')
 parser.add_argument('--ebs_shared_dir', help='shared EBS file system path (default = /shared)', required=False, default='/shared')
-parser.add_argument('--ebs_encryption', choices=['True', 'true', 'False', 'false'], help='enable EBS encryption (default = false)', required=False, default='false')
+parser.add_argument('--ebs_encryption', choices=['true', 'false'], help='enable EBS encryption (default = false)', required=False, default='false')
 parser.add_argument('--ebs_shared_volume_type', choices=['gp2', 'io1', 'st1'], help='EBS volume type (default = gp2)', required=False, default='gp2')
 parser.add_argument('--ebs_shared_volume_size', help='EBS shared volume size in GB (default = 250)', required=False, default=250)
-parser.add_argument('--hyperthreading', choices=['True', 'true', 'False', 'false'], help='enable Intel Hyperthreading (default = true)', required=False, default='true')
+parser.add_argument('--hyperthreading', choices=['true', 'false'], help='enable Intel Hyperthreading (default = true)', required=False, default='true')
 parser.add_argument('--scheduler', choices=['sge', 'torque', 'slurm', 'awsbatch'], help='cluster scheduler (default = sge)', required=False, default='sge')
-parser.add_argument('--enable_sge_pe', choices=['True', 'true', 'False', 'false'], help='enable Grid Engine parallel environments (default = true)', required=False, default='true')
+parser.add_argument('--enable_sge_pe', choices=['true', 'false'], help='enable Grid Engine parallel environments (default = true)', required=False, default='true')
 parser.add_argument('--sge_pe_type', choices=['make', 'mpi', 'smp'], help='select a Grid Engine parallel environment type (default = smp)', required=False, default='smp')
 parser.add_argument('--initial_queue_size', help='initial number of compute nodes to deploy (default = 2)', required=False, default=2)
 parser.add_argument('--max_queue_size', help='maximum number of compute nodes to deploy (default = 10)', required=False, default=10)
 parser.add_argument('--maintain_initial_size', help='keep initial_queue_size instances always running (default = false)', required=False, default='false')
-parser.add_argument('--scaledown_idletime', choices=['True', 'true', 'False', 'false'], help='amount of time in minutes without a job after which the compute node will terminate (default = 5)', required=False, default=5)
+parser.add_argument('--scaledown_idletime', choices=['true', 'false'], help='amount of time in minutes without a job after which the compute node will terminate (default = 5)', required=False, default=5)
 # Todo - explicitly require these parameters when scheduler = awsbatch
 parser.add_argument('--min_vcpus', help='minimum number of vcpus to maintain when using Batch (default = 0)', required=False, default=0)
 parser.add_argument('--desired_vcpus', help='initial number of vcpus to deploy when using Batch (default = 4)', required=False, default=4)
 parser.add_argument('--max_vcpus', help='maximum number of allowed vcpus when using Batch (default = 20)', required=False, default=20)
-parser.add_argument('--enable_external_nfs', choices=['True', 'true', 'False', 'false'], help='enable support for external NFS file system mounts (default = false)', required=False, default='false')
+parser.add_argument('--enable_external_nfs', choices=['true', 'false'], help='enable support for external NFS file system mounts (default = false)', required=False, default='false')
 # Todo - make this argument dependent on --enable_external_nfs=true
 parser.add_argument('--external_nfs_server', help='set the hostname of the external NFS file system (default = NULL)', required=False, default='')
 parser.add_argument('--enable_efs', help='enable support for Elastic File System (EFS) (default = false)', required=False, default='false')
-parser.add_argument('--efs_encryption', choices=['True', 'true', 'False', 'false'], help='enable EFS encryption in transit (default = false)', required=False, default='false')
+parser.add_argument('--efs_encryption', choices=['true', 'false'], help='enable EFS encryption in transit (default = false)', required=False, default='false')
 parser.add_argument('--efs_performance_mode', choices=['make', 'mpi', 'smp'], help='select the EFS performance mode (default = general_purpose)', required=False, default='general_purpose')
-parser.add_argument('--enable_fsx', choices=['True', 'true', 'False', 'false'], help='enable Amazon FSxL for Lustre (default = false)', required=False, default='false')
+parser.add_argument('--enable_fsx', choices=['true', 'false'], help='enable Amazon FSxL for Lustre (default = false)', required=False, default='false')
 parser.add_argument('--fsx_size', help='size of the Lustre file system in GB (default = 3600)', required=False, default=3600)
 parser.add_argument('--cluster_owner_department', choices=['analytics', 'clinical', 'cloudteam', 'commercial', 'compbio', 'compchem', 'datasci', 'design', 'development', 'finance', 'hpc', 'imaging', 'infrastructure', 'manufacturing', 'medical', 'modeling', 'operations', 'proteomics', 'robotics', 'qa', 'research', 'scicomp', 'security', 'validated'], help='department of the cluster_owner (default = hpc)', required=False, default='hpc')
-parser.add_argument('--enable_hpc_performance_tests', choices=['True', 'true', 'False', 'false'], help='enable the HPC performance tests Axb_random, hashtest, and hashtest_fibonacci under the ec2_user account on the master instance (default = true)', required=False, default='false')
-parser.add_argument('--enable_ganglia', choices=['True', 'true', 'False', 'false'], help='enable Ganglia on the master instance', required=False, default='false')
+parser.add_argument('--enable_hpc_performance_tests', choices=['true', 'false'], help='enable the HPC performance tests Axb_random, hashtest, and hashtest_fibonacci under the ec2_user account on the master instance (default = true)', required=False, default='false')
+parser.add_argument('--enable_ganglia', choices=['true', 'false'], help='enable Ganglia on the master instance', required=False, default='false')
 parser.add_argument('--qsub_custom_start_number', help='starting number of custom performance cluster jobs to submit (default = 10)', required=False, default=10)
 parser.add_argument('--qsub_custom_step_size', help='step size of the custom performance qsub scripts (default = 10)', required=False, default=10)
 parser.add_argument('--qsub_custom_total_tests', help='number of performance tests to run (default = 10)', required=False, default=10)
 parser.add_argument('--turbot_account', '-T', help='Turbot account ID (default = abd).  Set to "disabled" in non-Turbot environments.', required=False, default='disabled')
 parser.add_argument('--ansible_verbosity', '-V', help='Set the Ansible verbosity level (default = none)', required=False, default='')
+parser.add_argument('--debug_mode', '-D', choices=['true', 'false'], help='Enable debug mode (default = false)', required=False, default='false')
 
 # NOTE - deploying compute instances into private subnets is not currently
 # supported so for now, "--use_private_subnet" and "--compute_cidr_subnet"
@@ -104,50 +105,51 @@ parser.add_argument('--ansible_verbosity', '-V', help='Set the Ansible verbosity
 cluster_build_command = " ".join(sys.argv)
 
 args = parser.parse_args()
+ansible_verbosity = args.ansible_verbosity
+az = args.az
+base_os = args.base_os
+cluster_lifetime = args.cluster_lifetime
 cluster_name = args.cluster_name
 cluster_owner = args.cluster_owner
+cluster_owner_department = args.cluster_owner_department
 cluster_owner_email = args.cluster_owner_email
-az = args.az
-region = az[:-1]
-cluster_lifetime = args.cluster_lifetime
-prod_level = args.prod_level
-base_os = args.base_os
-custom_ami = args.custom_ami
-master_instance_type = args.master_instance_type
-master_root_volume_size = args.master_root_volume_size
+cluster_type = args.cluster_type
 compute_instance_type = args.compute_instance_type
 compute_root_volume_size = args.compute_root_volume_size
-cluster_type = args.cluster_type
-placement_group = args.placement_group
+custom_ami = args.custom_ami
+desired_vcpus = args.desired_vcpus
+debug_mode = args.debug_mode
+ebs_encryption = args.ebs_encryption
 ebs_shared_dir = args.ebs_shared_dir
 ebs_shared_volume_size = args.ebs_shared_volume_size
 ebs_shared_volume_type = args.ebs_shared_volume_type
-ebs_encryption = args.ebs_encryption
-hyperthreading = args.hyperthreading
-scheduler = args.scheduler
-enable_sge_pe = args.enable_sge_pe
-sge_pe_type = args.sge_pe_type
-initial_queue_size = args.initial_queue_size
-max_queue_size = args.max_queue_size
-maintain_initial_size = args.maintain_initial_size
-min_vcpus = args.min_vcpus
-desired_vcpus = args.desired_vcpus
-max_vcpus = args.max_vcpus
-scaledown_idletime = args.scaledown_idletime
-enable_external_nfs = args.enable_external_nfs
-external_nfs_server = args.external_nfs_server
-enable_efs = args.enable_efs
 efs_encryption = args.efs_encryption
 efs_performance_mode = args.efs_performance_mode
+enable_efs = args.enable_efs
+enable_external_nfs = args.enable_external_nfs
 enable_fsx = args.enable_fsx
+enable_ganglia = args.enable_ganglia
+enable_hpc_performance_tests = args.enable_hpc_performance_tests
+enable_sge_pe = args.enable_sge_pe
+external_nfs_server = args.external_nfs_server
 fsx_size = args.fsx_size
-cluster_owner_department = args.cluster_owner_department
+hyperthreading = args.hyperthreading
+initial_queue_size = args.initial_queue_size
+maintain_initial_size = args.maintain_initial_size
+master_instance_type = args.master_instance_type
+master_root_volume_size = args.master_root_volume_size
+max_queue_size = args.max_queue_size
+max_vcpus = args.max_vcpus
+min_vcpus = args.min_vcpus
+placement_group = args.placement_group
+prod_level = args.prod_level
+region = az[:-1]
+scaledown_idletime = args.scaledown_idletime
+scheduler = args.scheduler
+sge_pe_type = args.sge_pe_type
 qsub_custom_start_number = args.qsub_custom_start_number
 qsub_custom_step_size = args.qsub_custom_step_size
 qsub_custom_total_tests = args.qsub_custom_total_tests
-enable_hpc_performance_tests = args.enable_hpc_performance_tests
-enable_ganglia = args.enable_ganglia
-ansible_verbosity = args.ansible_verbosity
 turbot_account = args.turbot_account
 
 # NOTE: Deploying compute instances into private subnets is not currently
@@ -160,13 +162,13 @@ turbot_account = args.turbot_account
 # Define a dictionary of cluster_parameters that require decimal values.
 
 decimal_vals_required = {
-    'master_root_volume_size': master_root_volume_size,
     'compute_root_volume_size': compute_root_volume_size,
+    'desired_vcpus': desired_vcpus,
     'ebs_shared_volume_size': ebs_shared_volume_size,
     'fsx_size': fsx_size,
+    'master_root_volume_size': master_root_volume_size,
     'max_queue_size': max_queue_size,
     'min_vcpus': min_vcpus,
-    'desired_vcpus': desired_vcpus,
     'max_vcpus': max_vcpus,
     'qsub_custom_start_number': qsub_custom_start_number,
     'qsub_custom_step_size': qsub_custom_step_size,
@@ -191,7 +193,12 @@ except OSError as e:
 
 # Print a header for cluster variable validation.
 
-print_TextHeader(cluster_owner + '-' + cluster_name, 'Validating', 80)
+if debug_mode == 'true':
+    print_TextHeader(cluster_owner + '-' + cluster_name, 'Validating', 80)
+    print('')
+    print('Performing parameter validation...')
+    print('')
+p_val('vars_file_path', debug_mode)
 
 # Perform error checking on the selected AWS Region and Availability Zone. 
 # Abort if a non-existent Region or Availability Zone was chosen.
@@ -204,8 +211,8 @@ except (ValueError):
 except (botocore.exceptions.EndpointConnectionError):
     illegal_az_msg(az)
 else:
-    p_val('region')
-    p_val('az')
+    p_val('region', debug_mode)
+    p_val('az', debug_mode)
 
 # Check for the presence of an existing cluster with the same name.
 # If an existing cluster is found, abort to prevent the potential creation
@@ -245,7 +252,7 @@ if os.path.isfile(vars_file_path):
     print('Aborting...')
     sys.exit(1)
 else:
-    p_val('vars_file_path')
+    p_val('vars_file_path', debug_mode)
 
 # Set some critical environment variables to support Turbot.
 # https://turbot.com/about/
@@ -262,7 +269,7 @@ if turbot_account != 'disabled':
 
 for key in decimal_vals_required:
     if is_number(decimal_vals_required[key]):
-        p_val(key)
+        p_val(key, debug_mode)
     else:
         print('')
         print('*** ERROR ****')
@@ -321,7 +328,7 @@ if custom_ami != 'NONE':
         print('Aborting...')
         sys.exit(1)
     else:
-        p_val('custom_ami')
+        p_val('custom_ami', debug_mode)
 
 # Todo - if enable_external_nfs=true, check to ensure external_nfs_server
 # actually exists through a ping test or running showmount/rpcinfo to verify
@@ -370,28 +377,28 @@ if not os.path.isfile(cluster_serial_number):
     print('%s.%s' % (cluster_name, serial_datestamp), file=open(cluster_serial_number_file, 'w'))
     print(' '.join(sys.argv), file=open(cluster_serial_number_file, 'a'))
 
-p_val('cluster_serial_number')
-p_val('cluster_serial_number_file')
+p_val('cluster_serial_number', debug_mode)
+p_val('cluster_serial_number_file', debug_mode)
 
 # Perform error checking on master_instance_type and compute_instance_type
 # to ensure supported EC2 instance types were selected.
 
 if master_instance_type not in ec2_instances_full_list:
     p_fail(master_instance_type, 'master_instance_type', ec2_instances_cloudhpc)
-p_val('master_instance_type')
+p_val('master_instance_type', debug_mode)
 
 if compute_instance_type not in ec2_instances_full_list:
     p_fail(compute_instance_type, 'compute_instance_type', ec2_instances_full_list)
-p_val('compute_instance_type')
+p_val('compute_instance_type', debug_mode)
 
 # Validate parameters that have already passed the argparse checks.
 
-p_val('cluster_owner_department')
-p_val('ebs_shared_volume_type')
-p_val('efs_performance_mode')
-p_val('prod_level')
-p_val('scheduler')
-p_val('sge_pe_type')
+p_val('cluster_owner_department', debug_mode)
+p_val('ebs_shared_volume_type', debug_mode)
+p_val('efs_performance_mode', debug_mode)
+p_val('prod_level', debug_mode)
+p_val('scheduler', debug_mode)
+p_val('sge_pe_type', debug_mode)
 
 # Perform error checking against the auto-generated name for s3_bucketname.
 # If the bucket doesn't exist, create it during the cfncluster stack build.
@@ -400,7 +407,7 @@ s3_bucketname = 'parallelclustermaker-' + cluster_name + '-' + serial_datestamp
 
 s3 = boto3.resource('s3')
 if s3.Bucket(s3_bucketname) not in s3.buckets.all():
-    p_val('s3_bucketname')
+    p_val('s3_bucketname', debug_mode)
 else:
     print('')
     print('*** ERROR***')
@@ -412,7 +419,7 @@ else:
 # Perform a minimal check to ensure ebs_shared_dir looks like a valid path.
 
 if ebs_shared_dir.startswith('/'):
-    p_val('ebs_shared_dir')
+    p_val('ebs_shared_dir', debug_mode)
 else:
     print('ebs_shared_dir = ' + ebs_shared_dir)
     print('')
@@ -426,7 +433,7 @@ else:
 # email address.
 
 if validate_email(cluster_owner_email):
-    p_val('cluster_owner_email')
+    p_val('cluster_owner_email', debug_mode)
 else:
     print('')
     print('cluster_owner_email = ' + cluster_owner_email)
@@ -445,12 +452,12 @@ subnet_information = ec2client.describe_subnets(
 vpc_information = ec2client.describe_vpcs()
 
 subnet_id = subnet_information['Subnets'][0]['SubnetId']
-p_val('subnet_id')
+p_val('subnet_id', debug_mode)
 for vpc in vpc_information["Vpcs"]:
     vpc_id = vpc["VpcId"]
-    p_val('vpc_id')
+    p_val('vpc_id', debug_mode)
     vpc_name = vpc_information['Vpcs'][0]['Tags'][0]['Value']
-    p_val('vpc_name')
+    p_val('vpc_name', debug_mode)
 
 # Parse the AWS Account ID.
 
@@ -469,14 +476,14 @@ elif base_os == 'ubuntu1404' or base_os == 'ubuntu1604':
 else:
     p_fail(base_os, 'base_os', base_os_allowed)
 ec2_user_home = '/home/' + ec2_user
-p_val('base_os')
+p_val('base_os', debug_mode)
 
 # Validate cluster_type.  Abort if an unsupported option is chosen.
 # Compute EC2 spot prices from: https://aws.amazon.com/ec2/spot/pricing/
 # Add 33% to raw_spot_price to protect against marketplace fluctuations.
 
 if cluster_type == 'ondemand':
-    p_val('cluster_type')
+    p_val('cluster_type', debug_mode)
     print('	Selected On-Demand instances')
     print('	*Hint* ==> using spot instances can lead to *BIG* cost savings!!!')
     print('')
@@ -485,9 +492,9 @@ elif cluster_type == 'spot':
     prices=ec2client.describe_spot_price_history(InstanceTypes=[compute_instance_type],MaxResults=1,ProductDescriptions=['Linux/UNIX (Amazon VPC)'],AvailabilityZone=az)
     raw_spot_price = float(prices['SpotPriceHistory'][0]['SpotPrice'])
     spot_price = round(raw_spot_price + ((1 / 3) * raw_spot_price), 8)
-    p_val('cluster_type')
+    p_val('cluster_type', debug_mode)
     print('Selected spot instances')
-    p_val(' spot_price')
+    p_val(' spot_price', debug_mode)
 else:
     p_fail(cluster_type, 'cluster_type', cluster_type_allowed)
 

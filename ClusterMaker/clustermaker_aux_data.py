@@ -42,8 +42,11 @@ def is_number(s):
 # Function: p_val()
 # Purpose: Print a successful cluster_parameter validation message to stdout
 
-def p_val(p):
-    print(p + " successfully validated")
+def p_val(p, debug_mode):
+    if debug_mode == 'True' or debug_mode == 'true':
+        print(p + " successfully validated")
+    else:
+        pass
 
 # Function: p_fail()
 # Purpose: Print a failed cluster_parameter validation message to stdout
@@ -51,13 +54,16 @@ def p_val(p):
 def p_fail(p, q, r):
     import sys
     import textwrap
-    print('')
+    print("")
     print("*** Error ***")
-    print('"' + p + '"' + ' is not a valid option for ' + q + '.')
-    print("Supported values:")
-    r = '\t'.join(r)
-    print('\n'.join(textwrap.wrap(r, 78)))
-    print('')
+    if r == 'missing_element':
+        print('"' + p + '"' + ' seems to be missing as a valid ' + q + '.')
+    else:
+        print('"' + p + '"' + ' is not a valid option for ' + q + '.')
+        print("Supported values:")
+        r = '\t'.join(r)
+        print('\n'.join(textwrap.wrap(r, 78)))
+    print("")
     print("Aborting...")
     sys.exit(1)
 
