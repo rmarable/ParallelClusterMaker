@@ -48,7 +48,7 @@ parser.add_argument('--instance_owner_email', '-E', help='email address of the p
 # Configure arguments for the optional parameters.
 # Set reasonable defaults for anything that is not explicitly defined.
 
-parser.add_argument('--instance_owner_department', choices=['hpc', 'compchem', 'compbio', 'scicomp', 'cloudteam', 'datasci', 'infrastructure', 'operations', 'design', 'robotics', 'proteomics', 'development', 'qa', 'research', 'commercial', 'manufacturing', 'clinical', 'finance'], help='department of the pcluster-jumphost owner (default = research)', required=False, default='research')
+parser.add_argument('--instance_owner_department', choices=['analytics', 'clinical', 'cloudteam', 'commercial', 'compbio', 'compchem', 'datasci', 'design', 'development', 'finance', 'hpc', 'imaging', 'infrastructure', 'manufacturing', 'medical', 'modeling', 'operations', 'proteomics', 'robotics', 'qa', 'research', 'scicomp', 'security', 'validated'], help='department of the instance_owner (default = hpc)', required=False, default='hpc')
 parser.add_argument('--security_group', '-S', help='primary security group for the EC2 pcluster-jumphost (default = pcluster_jumphost)', required=False, default='pcluster_jumphost')
 parser.add_argument('--turbot_account', '-T', help='Turbot account ID (default = abd).  Set to "disabled" in non-Turbot environments.', required=False, default='disabled')
 parser.add_argument('--ansible_verbosity', '-V', help='Set the Ansible verbosity level (default = none)', required=False, default='')
