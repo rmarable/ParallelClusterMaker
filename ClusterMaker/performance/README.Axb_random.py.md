@@ -46,22 +46,27 @@ PNG plot generation requires tailhead, matplotlib, and pandas.
 
 To install the Linux system packages:
 
+```
 $ sudo yum install -y python36
 $ sudo pip-3.6 install numpy scipy matplotlib installpandas tailhead
 $ which python3
 /usr/bin/python3
-
+```
+ 
 OS X users are strongly advised to use Homebrew to deploy the required tools:
 
+```
 $ /usr/bin/ruby -e "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/master/install)"
 $ brew doctor
 $ brew install ansible git packer parallel python3 terraform
 $ pip3 install matplotlib numpy pandas requests seaborn scipy tailhead
+```
 
 ## Usage Guidelines
 
 Please run Axb_random.py with the -h flag to see all available options:
 
+```
 $ ./Axb_random.py -h
 usage: Axb_random.py [-h] --jobid JOBID --matrix-size MATRIX_SIZE
                      [--console-dump CONSOLE_DUMP] [--create-csv CREATE_CSV]
@@ -86,10 +91,13 @@ optional arguments:
   --note NOTE, -N NOTE  short description of the test to be included as a
                         field in the CSV data file - do **not** use commas with
                         this option
+```
 
 An example CSV file output looks like this:
 
+```
 ip-172-31-91-135,2,11000,299.8823,ebs_m5large,995209173,379691268,229.5013
+```
 
 The suggested methods of running this suite on a cluster are documented in
 qsub-Axb_random.sh, a submission script provided for the user's convenience.
@@ -101,7 +109,8 @@ isn't any point to running the test if no useful data is being generated.
 **Mixed Workloads.** To evaluate "mixed" workloads that are probably a better
 simulation of a typical workload on a shared HPC cluster, use bang.sh with
 a good mix of varying MATRIX_SIZE values, following the guidelines outlined
-in qsub-Axb_random.sh.
+in qsub-Axb_random.sh.  Random MATRIX_SIZE values could also be used to 
+simulate a heterogeneous HPC load.
 
 Overall, bang.sh is far better suited for handling multiple interations and
 generating data to be analyzed with customers.  It also aggregates all CSV
@@ -129,36 +138,44 @@ For rough comparative purposes, the following results were generated using a
 memory, and a 500GB flash drive running OSX 10.12.6 (Sierra):
 
 ###console-dump=yes, create-log=yes, create-csv=yes
+```
 $ ./Axb_random.py --jobid=foo --matrix-size=N -D yes -C yes -L yes
 	N=  512		t =    1.7142 seconds
 	N= 1024		t =    9.1533 seconds
 	N= 2048		t =   59.9226 seconds
 	N= 4096		t =  408.8307 seconds
 	N= 8192		t = 2595.5627 seconds
+```
 
 ###console-dump=yes, create-log=no, create-csv=yes
+```
 $ ./Axb_random.py --jobid=foo --matrix-size=N -D yes -C yes -L no
 	N=  512		t =    0.9918 seconds
 	N= 1024		t =    4.8456 seconds
 	N= 2048		t =   30.3101 seconds
 	N= 4096		t =  208.8762 seconds
 	N= 8192		t = 1330.3521 seconds
+```
 
 ###console-dump=no, create-log=yes, create-csv=yes
+```
 $ ./Axb_random.py --jobid=foo --matrix-size=N -D no -C yes -L yes
 	N=  512		t =    0.8234 seconds		log_size =   2 MB
 	N= 1024		t =    4.1622 seconds		log_size =   8 MB
 	N= 2048		t =   25.9101 seconds		log_size =  33 MB
 	N= 4096		t =  186.7692 seconds		log_size = 132 MB
 	N= 8192		t = 1229.3696 seconds		log_size = 526 MB
+```
 
 ###console-dump=no, create-log=no, create-csv=yes
+```
 $ ./Axb_random.py --jobid=foo --matrix-size=N -D no -C yes -L no
 	N=  512		t =  0.1665 seconds
 	N= 1024		t =  0.1761 seconds
 	N= 2048		t =  0.5791 seconds
 	N= 4096		t =  2.1579 seconds
 	N= 8192		t = 10.7420 seconds
+```
 
 Some general recommendations to get the most out from this testing suite:
 
@@ -182,7 +199,9 @@ be mindful of this when generating log files.
 
 Example:
 
+```
 $ ./Axb_random.py --jobid=BigMatrix --matrix-size=42420 --console-dump=no --create-csv=yes --create-logs=no --note "Massive matrix testing"
+```
 
 * Using smaller matrices (N < 2000) on an HPC cluster is a good test of the
 scheduler's ability to spool small jobs. These smaller N values can also be

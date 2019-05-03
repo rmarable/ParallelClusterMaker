@@ -40,9 +40,11 @@ update.
 The cluster performance tests measure the amount of time that a given task
 array executing an array of MATRIX_SIZES takes to fully complete.
 
-Start_Time = the date/time that the first job began running
+```
+Start_Time  = the date/time that the first job began running
 Finish_Time = the date/time that the last job completed
-Queue_Time = the amount of time that the job spent waiting to execute
+Queue_Time  = the amount of time that the job spent waiting to execute
+```
 
 The cluster job scheduler captures the same data as the standalone test
 (item (a) + (b) + (c) as outlined above), along with the time required to
@@ -70,16 +72,20 @@ using instances with less than 8GB of memory.
 
 Examples:
 
+```
 MATRIX_SIZES = "500 1000 2500 5000 7500 10000"
 MATRIX_SIZES = "512 1024 2048 4096 8192"
+```
 
 * Using much smaller matrices to test how schedulers and master nodes of 
 different instance types perform when required to spool many small jobs.
 
 Examples:
 
+```
 MATRIX_SIZES = "100 250 500 750 1000 1250 1500 1750 2000 2250 2500"
 MATRIX_SIZES = "32 64 128 256 384 512 640 768 896 1024"
+```
 
 * If you are willing to wait and are willing to pay the cost, using larger
 larger matrices on bigger instances is a good way to differentiate between the
@@ -87,8 +93,10 @@ suitability of compute platforms for jobs that will run for a long time.
 
 Examples (only use on matrices with more than 16GB of memory):
 
+```
 MATRIX_SIZES = "1000 2500 5000 7500 10000 12500 15000 17500 20000"
 MATRIX_SIZES = "1000 5000 10000 15000 20000 25000 30000"
+```
 
 * Disabling the LOG_FILE feature removes memory limitations imposed by the 
 need to dump the log file to disk and compress it.  This permits solving of
@@ -97,7 +105,9 @@ present in the instance.
 
 The current default uses:
 
+```
 MATRIX_SIZES = "500 1000 1500 2000 2500 3000 3500 4000 4500 5000"
+```
 
 This test takes about 7 minutes to complete on a single m5.2xlarge instance
 and generates approximately 280MB of log files.

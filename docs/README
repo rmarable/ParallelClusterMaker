@@ -2,7 +2,7 @@
 # Name:		README
 # Author:	Rodney Marable <rodney.marable@gmail.com>
 # Created On:	April 20, 2019
-# Last Changed:	May 1, 2019
+# Last Changed:	May 2, 2019
 # Purpose:	General documentation for the ParallelClusterMaker toolkit	
 ################################################################################
 
@@ -112,6 +112,10 @@ recorded.
 
 * Inclusion of the Spack package manager (https://spack.readthedocs.io) for
 lmod-style Linux software module support.
+
+* Inclusion of a standard submission script for Grid Engine clusters that can
+be customized for your specific use case.  Support for other schedulers will
+be added in future releases.
 
 ##########################################################
 # Installation of ParallelClusterMaker for the Impatient #
@@ -327,11 +331,11 @@ also be terminated along with the cluster stack.  For FXSxL, this behavior
 can be overridden for FSxL by setting "delete_fsx" to "true" in the
 delete_cluster.yml Ansible playbook.
 
-To delete a pcluster jumphost, simply run the kill-pcluster-jumphost script
-associated with the EC2 instance living in ParallelClusterMaker/Jumphost.
-
-$ cd ParallelClusterMaker/JumphostMaker
-$ ./kill-pcluster-jumphost.$INSTANCE_NAME.sh
+After the ParallelCluster stack has been deleted, the pcluster jumphost can
+also be deleted by running the `kill-pcluster-jumphost.$INSTANCE_NAME.sh`
+script found in your local ParallelClusterMaker/Jumphost directory, i.e. the
+directory on your working computer from which the jumphost was originally
+spawned.
 
 ##################
 # Serial Numbers #
@@ -602,6 +606,27 @@ More information about Lmod can be found by exploring these links:
 * https://github.com/TACC/Lmod
 * https://sea.ucar.edu/sites/default/files/talk.pdf
 * https://www.tacc.utexas.edu/research-development/tacc-projects/lmod
+
+###################################
+# Standard Job Submission Scripts #
+###################################
+
+ParallelClusterMaker includes a standard submission script for Grid Engine
+clusters in the ec2-user's home directory on the master instance that can
+be easily customized for many other use cases includuing serial, MPI, and
+task array jobs.
+
+To submit jobs from EFS, FSxL, or external NFS file systems, simply copy
+qsub_default_submission_script.sh to the desired submission location and
+edit as needed:
+
+$ mkdir -p /fsx/scratch/scicomp/my_projects
+$ vi /home/ec2-user/qsub_default_submission_script.sh
+$ cp /home/ec2-user/qsub_default_submission_script.sh /fsx/scratch/scicomp/my_projects
+$ qsub qsub_default_submission_script.sh
+
+Subsequent releases will provide standard submission scripts for the other
+schedulers supported by AWS ParallelCluster.
 
 ##############
 # .gitignore #

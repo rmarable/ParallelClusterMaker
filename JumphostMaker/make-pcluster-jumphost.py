@@ -321,10 +321,13 @@ except ClientError as e:
         with open(iam_json_policy_src, 'r') as ec2_instance_role_src:
             filedata = ec2_instance_role_src.read()
             ec2_instance_role_src.close()
-        filedata_region = filedata.replace('<REGION>', region)
-        filedata_region_aws_account_id = filedata_region.replace('<AWS ACCOUNT ID>', aws_account_id)
+        #filedata_region = filedata.replace('<REGION>', region)
+        #filedata_region_aws_account_id = filedata_region.replace('<AWS ACCOUNT ID>', aws_account_id)
+        #filedata_aws_account_id = filedata.replace('<AWS ACCOUNT ID>', aws_account_id)
         with open(iam_json_policy_template, 'w') as ec2_instance_role_dest:
-            ec2_instance_role_dest.write(filedata_region_aws_account_id)
+            #ec2_instance_role_dest.write(filedata_region_aws_account_id)
+            #ec2_instance_role_dest.write(filedata_aws_account_id)
+            ec2_instance_role_dest.write(filedata)
             ec2_instance_role_dest.close()
         pcluster_jumphost_ec2_instance_role = iam.create_role(
             RoleName=iam_instance_role,

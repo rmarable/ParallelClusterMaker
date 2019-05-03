@@ -2,7 +2,7 @@
 # Name:		create_pcluster.yml
 # Author:	Rodney Marable <rodney.marable@gmail.com>
 # Created On:	April 20, 2019
-# Last Changed:	April 29, 2019
+# Last Changed:	May 2, 2019
 # Purpose:	Ansible playbook to create new ParallelCluster stacks
 ################################################################################
 
@@ -313,7 +313,7 @@
       when: enable_hpc_performance_tests
 
     - name: Copy the Axb_random matrix test configuration file to stage_dir
-      command: cp {{ performance_rootdir }}/MATRIX_SIZES.conf.PROD {{ stage_dir }}/MATRIX_SIZES.conf
+      command: cp {{ performance_rootdir }}/MATRIX_SIZES.conf {{ stage_dir }}/MATRIX_SIZES.conf
       when: enable_hpc_performance_tests
 
     - name: Copy the performance shell and Python scripts to stage_dir
@@ -330,11 +330,11 @@
         - rebuild_sge_csv.sh
       when: enable_hpc_performance_tests
 
-    - name: Copy the ParallelClusterMaker toolkit documentation to stage_dir
+    - name: Copy the ParallelClusterMaker performance toolkit documentation to stage_dir
       command: cp {{ item }} {{ stage_dir }}
       with_fileglob:
         - "{{ performance_rootdir }}/README*.*"
-        - "{{ local_workingdir }}/README*.*"
+      when: enable_hpc_performance_tests
 
     - name: Start the stack creation timer
       command: date +%Y-%m-%d\ \@\ %H:%M:%S
@@ -446,6 +446,10 @@
     - name: Transfer the local staging directory to the master instance
       command: scp -i {{ ssh_keypair }} -r {{ stage_dir }} {{ ec2_user }}@{{ MasterPublicIP.stdout }}:{{ stage_dir }}
 
+    - name: Transfer the standard qsub submission script to the master instance
+      command: scp -i {{ ssh_keypair }}i {{ local_workingdir }}/qsub_default_submission_script.sh {{ ec2_user }}@{{ MasterPublicIP.stdout }}:/home/{{ ec2_user }}
+      when: not enable_hpc_performance_tests
+
     - name: Move the performance source tree to its final destination directory on the master instance
       command: ssh -i {{ ssh_keypair }} {{ ec2_user }}@{{ MasterPublicIP.stdout }} mv {{ stage_dir }}/* {{ Axb_random_dest }}
       when: enable_hpc_performance_tests
@@ -456,7 +460,6 @@
         - bang
         - combine_csv_summary_files_for_plotting
         - combine_sge_data_files_for_plotting
-        - copy_stack_to_efs
         - create_sge_task_array_csv_files
         - perf-qsub
         - perf-stest

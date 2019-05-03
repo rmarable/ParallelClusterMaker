@@ -4,7 +4,7 @@
 # Name:		qsub-hashtest.JOBCOUNT.{{ cluster_name }}.sh
 # Author:	Rodney Marable <rodney.marable@gmail.com>
 # Created On:	May 4, 2018
-# Last Changed:	August 9, 2018
+# Last Changed:	May 2, 2019
 # Deployed On:	{{ lookup('pipe','date \"+%B %-d, %Y\"') }}
 # Purpose:	Custom qsub submission script for hashtest.py
 ################################################################################
@@ -12,8 +12,8 @@
 # Set the name of the cluster job.
 #$ -N job_hashtest
 
-# Set the maximum execution time to 8 hours.
-#$ -l h_rt=08:00:00
+# Set the maximum execution time to 2 hours.
+#$ -l h_rt=02:00:00
 
 # Write job standard output and error to the current directory (default).
 #$ -cwd
@@ -21,8 +21,8 @@
 # Merge standard error and output into a single file (default).
 #$ -j yes
 
-# Submit as an array job N times. Be mindful of the type of test you have
-# defined below on a public cluster so as not to waste resources.
+# Submit as an array job N times. Be mindful of the type of test defined below
+# to avoid wasting time and money.
 #$ -t 1-JOBCOUNT
 
 # Select a Grid Engine parallel environment and request slots for each job
@@ -64,11 +64,16 @@ PYTHON3=/bin/python3.6
 PYTHON3=python3
 {% endif %}
 
-# Compute the hashes.
+# Compute the hashes against varying input sizes.
+# Large COUNT values will take longer and have more of an effect on total test
+# time than SIZE values:
+# 	- 1000 x 1 Mbyte takes about 1 minute.
+# 	- 2000 x 64 Kbytes takes about 2 minutes.
+# 	- 3000 x 32 bytes takes about 10 minutes.
 
-for COUNT in 1000 2000 3000 4000 5000
+for COUNT in 100 500 1000 2000
 do
-	for SIZE in 32 64 128 256 512 1024 2048 4096 8192 16384 32768 65536 131072 262144 524288 1048576
+	for SIZE in 4096 16384 65536 262144 524288
 	do
 		echo "Making $COUNT hashes with input_size = $SIZE bytes @ `date`"
 		$PYTHON3 hashtest.py -c $COUNT -S $SIZE -O $JOB_NAME.${JOB_ID}.task${SGE_TASK_ID}.${SIZE}bytes.log -C pigz

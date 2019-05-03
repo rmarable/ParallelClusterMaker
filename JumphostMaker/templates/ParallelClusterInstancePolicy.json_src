@@ -102,7 +102,7 @@
                 "dynamodb:DeleteTable"
             ],
             "Effect": "Allow",
-            "Resource": "arn:aws:dynamodb:<REGION>:<AWS ACCOUNT ID>:table/parallelcluster-*"
+            "Resource": "*"
         },
         {
             "Sid": "SQS",
@@ -125,7 +125,7 @@
                 "sqs:GetQueueUrl"
             ],
             "Effect": "Allow",
-            "Resource": "arn:aws:sqs:<REGION>:<AWS ACCOUNT ID>:parallelcluster-*"
+            "Resource": "*"
         },
         {
             "Sid": "SNS",
@@ -156,7 +156,7 @@
                 "cloudformation:UpdateStack"
             ],
             "Effect": "Allow",
-            "Resource": "arn:aws:cloudformation:<REGION>:<AWS ACCOUNT ID>:stack/parallelcluster-*"
+            "Resource": "*"
         },
         {
             "Sid": "S3ResourcesBucket",
@@ -165,7 +165,7 @@
             "Resource": [
                 "arn:aws:s3:::parallelcluster-*",
                 "arn:aws:s3:::parallelclustermaker-*",
-                "arn:aws:s3:::<REGION>-aws-parallelcluster-*"
+                "arn:aws:s3:::*-aws-parallelcluster-*"
             ]
         },
         {
@@ -189,19 +189,19 @@
                 "lambda:RemovePermission"
             ],
             "Effect": "Allow",
-            "Resource": "arn:aws:lambda:<REGION>:<AWS ACCOUNT ID>:function:parallelcluster-*"
+            "Resource": "*"
         },
         {
             "Sid": "Logs",
             "Effect": "Allow",
             "Action": ["logs:*"],
-            "Resource": "arn:aws:logs:<REGION>:<AWS ACCOUNT ID>:*"
+            "Resource": "*"
         },
         {
             "Sid": "CodeBuild",
             "Effect": "Allow",
             "Action": ["codebuild:*"],
-            "Resource": "arn:aws:codebuild:<REGION>:<AWS ACCOUNT ID>:project/parallelcluster-*"
+            "Resource": "*"
         },
         {
             "Sid": "ECR",
@@ -231,7 +231,7 @@
                 "iam:SimulatePrincipalPolicy"
             ],
             "Effect": "Allow",
-            "Resource": "arn:aws:iam::<AWS ACCOUNT ID>:role/parallelcluster-*"
+            "Resource": "*"
         },
         {
             "Sid": "IAMInstanceProfile",
@@ -242,7 +242,7 @@
                 "iam:PassRole"
             ],
             "Effect": "Allow",
-            "Resource": "arn:aws:iam::<AWS ACCOUNT ID>:instance-profile/*"
+            "Resource": "*"
         },
         {
             "Sid": "IAMRolePolicy",

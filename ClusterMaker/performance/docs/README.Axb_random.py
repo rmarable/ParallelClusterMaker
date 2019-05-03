@@ -2,7 +2,7 @@
 # Name:		README.Axb_random.py.md
 # Author:	Rodney Marable <rodney.marable@gmail.com>
 # Created On:	January 13, 2018
-# Last Changed:	April 28, 2019
+# Last Changed:	May 2, 2019
 # Purpose:	General information on Axb_random.py
 ################################################################################
 
@@ -113,7 +113,8 @@ isn't any point to running the test if no useful data is being generated.
 **Mixed Workloads.** To evaluate "mixed" workloads that are probably a better
 simulation of a typical workload on a shared HPC cluster, use bang.sh with
 a good mix of varying MATRIX_SIZE values, following the guidelines outlined
-in qsub-Axb_random.sh.
+in qsub-Axb_random.sh.  Random MATRIX_SIZE values could also be used to
+simulate a heterogeneous HPC load.
 
 Overall, bang.sh is far better suited for handling multiple interations and
 generating data to be analyzed with customers.  It also aggregates all CSV

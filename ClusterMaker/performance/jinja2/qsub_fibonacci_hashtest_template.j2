@@ -4,7 +4,7 @@
 # Name:		qsub-fibonacci_hashtest.JOBCOUNT.{{ cluster_name }}.sh
 # Author:	Rodney Marable <rodney.marable@gmail.com>
 # Created On:	May 4, 2018
-# Last Changed:	August 10, 2018
+# Last Changed:	May 2, 2019
 # Deployed On:	{{ lookup('pipe','date \"+%B %-d, %Y\"') }}
 # Purpose:	Custom qsub submission script for fibonacci_hashtest.py
 ################################################################################
@@ -76,7 +76,7 @@ then
 	for INDEX in 1000 2500 5000 7500 10000
 	do
 		echo "Making $INDEX Fibonacci hashes @ `date`"
-		$PYTHON3 fibonacci_hashtest.py --enable-index -I $INDEX -O $JOB_NAME.${JOB_ID}.task${SGE_TASK_ID}.index.log -C pigz
+		$PYTHON3 fibonacci_hashtest.py --enable_index -I $INDEX -O $JOB_NAME.${JOB_ID}.task${SGE_TASK_ID}.index.log -C pigz
 		echo "Finished making $INDEX hashes @ `date`"
        	 echo ""
 	done
@@ -87,7 +87,7 @@ then
 	for DIGITS in 1000 2000 3000 4000 5000
 	do
 		echo "Hashing Fibonacci values up to $DIGITS digits long @ `date`"
-		$PYTHON3 fibonacci_hashtest.py --enable-digits -D $INDEX -o $JOB_NAME.${JOB_ID}.task${SGE_TASK_ID}.digits.log -C pigz
+		$PYTHON3 fibonacci_hashtest.py --enable_digits -D $INDEX -o $JOB_NAME.${JOB_ID}.task${SGE_TASK_ID}.digits.log -C pigz
 		echo "Finished hashing up to $DIGITS digits long @ `date`"
        	 echo ""
 	done
