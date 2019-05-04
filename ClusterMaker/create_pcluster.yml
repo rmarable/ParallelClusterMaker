@@ -2,7 +2,7 @@
 # Name:		create_pcluster.yml
 # Author:	Rodney Marable <rodney.marable@gmail.com>
 # Created On:	April 20, 2019
-# Last Changed:	May 2, 2019
+# Last Changed:	May 3, 2019
 # Purpose:	Ansible playbook to create new ParallelCluster stacks
 ################################################################################
 
@@ -343,13 +343,20 @@
     - debug:
         msg:
           - ""
-          - "Launching cluster {{ cluster_name }} on {{ start_stack_creation_timer.stdout }} in {{ region }}"
+          - "=================================================================="
+          - "                   Cluster Launch Summary Report"
+          - "=================================================================="
+          - ""
+          - "Cluster StackName: {{ cluster_name }}"
+          - "Launch Timestamp:  {{ start_stack_creation_timer.stdout }}"
+          - "Availabilty Zone:  {{ az }}"
+          - "Scheduler:         {{ scheduler }}" 
           - ""
           - "This process will take about 30 minutes to complete."
           - ""
-          - "Paste this command into another terminal to monitor in real-time:"
+          - "Run this command to monitor the stack progress in real time:"
           - ""
-          - "   pcluster status --region {{ region }} {{ cluster_name }}   "
+          - "pcluster status --region {{ region }} {{ cluster_name }}"
           - ""
 
     - name: Launch the new ParallelCluster stack
@@ -593,6 +600,7 @@
           - "    ssh -i {{ ssh_keypair }} {{ ec2_user }}@{{ MasterPublicIP.stdout }}   "
           - ""
           - "To destroy this cluster, run the following command::"
+          - ""
           - "$ ./kill-pcluster.py -N {{ cluster_birth_name }} -O {{ cluster_owner }} -A {{ az }}"
           - ""
 

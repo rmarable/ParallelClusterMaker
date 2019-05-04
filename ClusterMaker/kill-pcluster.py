@@ -4,7 +4,7 @@
 # Name:		kill-pcluster.py
 # Author:	Rodney Marable <rodney.marable@gmail.com>
 # Created On:   April 20, 2019
-# Last Changed: April 29, 2019
+# Last Changed: May 3, 2019
 # Purpose:	Python3 wrapper for deleting custom pcluster stacks
 # Note:         centos7 users may need to change the shebang to "python36"
 ################################################################################
@@ -50,6 +50,7 @@ parser.add_argument('--cluster_owner', '-O', help='username of the cluster owner
 parser.add_argument('--delete_efs', '-E', choices=['True', 'true', 'False', 'false'], help='Delete the EFS file system associated with this cluster (default = true)', required=False, default='true')
 parser.add_argument('--delete_fsx', '-F', choices=['True', 'true', 'False', 'false'], help='Delete the Lustre file system associated with this cluster (default = true)', required=False, default='true')
 parser.add_argument('--delete_s3_bucketname', '-S', choices=['True', 'true', 'False', 'false'], help='Delete the S3 bucket associated with this cluster (default = true)', required=False, default='true')
+parser.add_argument('--debug_mode', '-D', choices=['true', 'false'], help='Enable debug mode (default = false)', required=False, default='false')
 
 # Set cluster_parameters to the values provided via command line.
 
@@ -61,10 +62,12 @@ region = az[:-1]
 delete_efs = args.delete_efs
 delete_fsx = args.delete_fsx
 delete_s3_bucketname = args.delete_s3_bucketname
+debug_mode = args.debug_mode
 
 # Print a header for cluster variable validation.
 
-print_TextHeader(cluster_owner + '-' + cluster_name, 'Validating', 80)
+if debug_mode == 'true':
+    print_TextHeader(cluster_owner + '-' + cluster_name, 'Validating', 80)
 
 # Perform error checking on the selected AWS Region and Availability Zone.
 # Abort if a non-existent Availability Zone was chosen.
@@ -85,8 +88,8 @@ except (botocore.exceptions.EndpointConnectionError):
     print('Aborting...')
     sys.exit(1)
 else:
-    p_val('region')
-    p_val('az')
+    p_val('region', debug_mode)
+    p_val('az', debug_mode)
 
 # Preserve the "birth name" of the cluster to maintain compatibility with the
 # command line options provided by make-cluster.py ('-N' and '-O').
@@ -118,7 +121,7 @@ cluster_serial_number_file = SERIAL_DIR + '/' + cluster_name + '.serial'
 vars_file_path = VARS_FILE_DIR + '/' + cluster_name + '.yml'
 
 if os.path.isfile(cluster_serial_number_file):
-    p_val('cluster_serial_number_file')
+    p_val('cluster_serial_number_file', debug_mode)
 else:
     print('')
     print('*** ERROR ***')
@@ -127,7 +130,7 @@ else:
     sys.exit(1)
 
 if os.path.isfile(vars_file_path):
-    p_val('vars_file_path')
+    p_val('vars_file_path', debug_mode)
 else:
     print('')
     print('*** ERROR ***')

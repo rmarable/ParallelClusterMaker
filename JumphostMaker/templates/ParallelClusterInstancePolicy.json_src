@@ -224,11 +224,11 @@
         {
             "Sid": "IAMRole",
             "Action": [
-                "iam:PassRole",
                 "iam:CreateRole",
                 "iam:DeleteRole",
                 "iam:GetRole",
-                "iam:SimulatePrincipalPolicy"
+                "iam:PassRole",
+                "iam:ListGroups"
             ],
             "Effect": "Allow",
             "Resource": "*"
@@ -252,7 +252,9 @@
                 "iam:PutRolePolicy",
                 "iam:AttachRolePolicy",
                 "iam:DeleteRolePolicy",
-                "iam:DetatchRolePolicy"
+                "iam:DetatchRolePolicy",
+                "iam:ListRolePolicies",
+                "iam:SimulatePrincipalPolicy"
             ],
             "Effect": "Allow",
             "Resource": "*"
