@@ -110,7 +110,7 @@ with open(os.devnull, 'w') as devnull:
         print('Continuing with stack artifact destruction...')
         print('')
     else:
-        p_val(cluster_name)
+        p_val(cluster_name, debug_mode)
 
 # Define vars_file and cluster_serial_number_file.
 # Abort if either of these files are missing.
