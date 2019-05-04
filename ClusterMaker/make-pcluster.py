@@ -4,7 +4,7 @@
 # Name:		make-pcluster.py
 # Author:	Rodney Marable <rodney.marable@gmail.com>
 # Created On:	April 20, 2019
-# Last Changed:	May 3, 2019
+# Last Changed:	May 4, 2019
 # Purpose:	Python3 wrapper for customizing ParallelCluster stacks
 ################################################################################
 
@@ -64,7 +64,7 @@ parser.add_argument('--ebs_encryption', choices=['true', 'false'], help='enable 
 parser.add_argument('--ebs_shared_volume_type', choices=['gp2', 'io1', 'st1'], help='EBS volume type (default = gp2)', required=False, default='gp2')
 parser.add_argument('--ebs_shared_volume_size', help='EBS shared volume size in GB (default = 250)', required=False, default=250)
 parser.add_argument('--hyperthreading', choices=['true', 'false'], help='enable Intel Hyperthreading (default = true)', required=False, default='true')
-parser.add_argument('--scheduler', choices=['sge', 'torque', 'slurm', 'awsbatch'], help='cluster scheduler (default = sge)', required=False, default='sge')
+parser.add_argument('--scheduler', '-S', choices=['sge', 'torque', 'slurm', 'awsbatch'], help='cluster scheduler (default = sge)', required=False, default='sge')
 parser.add_argument('--enable_sge_pe', choices=['true', 'false'], help='enable Grid Engine parallel environments (default = true)', required=False, default='true')
 parser.add_argument('--sge_pe_type', choices=['make', 'mpi', 'smp'], help='select a Grid Engine parallel environment type (default = smp)', required=False, default='smp')
 parser.add_argument('--initial_queue_size', help='initial number of compute nodes to deploy (default = 2)', required=False, default=2)
@@ -83,7 +83,7 @@ parser.add_argument('--efs_encryption', choices=['true', 'false'], help='enable 
 parser.add_argument('--efs_performance_mode', choices=['make', 'mpi', 'smp'], help='select the EFS performance mode (default = general_purpose)', required=False, default='general_purpose')
 parser.add_argument('--enable_fsx', choices=['true', 'false'], help='enable Amazon FSxL for Lustre (default = false)', required=False, default='false')
 parser.add_argument('--fsx_size', help='size of the Lustre file system in GB (default = 3600)', required=False, default=3600)
-parser.add_argument('--cluster_owner_department', choices=['analytics', 'clinical', 'cloudteam', 'commercial', 'compbio', 'compchem', 'datasci', 'design', 'development', 'finance', 'hpc', 'imaging', 'infrastructure', 'manufacturing', 'medical', 'modeling', 'operations', 'proteomics', 'robotics', 'qa', 'research', 'scicomp'], help='department of the cluster_owner (default = hpc)', required=False, default='hpc')
+parser.add_argument('--cluster_owner_department', choices=['analytics', 'clinical', 'commercial', 'compbio', 'compchem', 'datasci', 'design', 'development', 'hpc', 'imaging', 'manufacturing', 'medical', 'modeling', 'operations', 'proteomics', 'robotics', 'qa', 'research', 'scicomp'], help='department of the cluster_owner (default = hpc)', required=False, default='hpc')
 parser.add_argument('--enable_hpc_performance_tests', choices=['true', 'false'], help='enable the HPC performance tests Axb_random, hashtest, and hashtest_fibonacci under the ec2_user account on the master instance (default = true)', required=False, default='false')
 parser.add_argument('--enable_ganglia', choices=['true', 'false'], help='enable Ganglia on the master instance', required=False, default='false')
 parser.add_argument('--qsub_custom_start_number', help='starting number of custom performance cluster jobs to submit (default = 10)', required=False, default=10)
@@ -127,12 +127,12 @@ efs_encryption = args.efs_encryption
 efs_performance_mode = args.efs_performance_mode
 enable_efs = args.enable_efs
 enable_external_nfs = args.enable_external_nfs
+external_nfs_server = args.external_nfs_server
 enable_fsx = args.enable_fsx
+fsx_size = args.fsx_size
 enable_ganglia = args.enable_ganglia
 enable_hpc_performance_tests = args.enable_hpc_performance_tests
 enable_sge_pe = args.enable_sge_pe
-external_nfs_server = args.external_nfs_server
-fsx_size = args.fsx_size
 hyperthreading = args.hyperthreading
 initial_queue_size = args.initial_queue_size
 maintain_initial_size = args.maintain_initial_size
@@ -234,7 +234,8 @@ with open(os.devnull, 'w') as devnull:
         print('Aborting...')
         sys.exit(1)
     else:
-        print('cluster_name successfully validated')
+        if debug_mode == 'true':
+            print('cluster_name successfully validated')
 
 # Check for the presence of an existing vars_file for this cluster.
 # If an existing vars_file is found, abort to prevent the potential creation
@@ -262,6 +263,8 @@ if turbot_account != 'disabled':
     os.environ['AWS_PROFILE'] = turbot_profile
     os.environ['AWS_DEFAULT_REGION'] = region
     boto3.setup_default_session(profile_name=turbot_profile)
+    p_val('turbot_account', debug_mode)
+    p_val('turbot_profile', debug_mode)
 
 # Perform error checking on the decimal_vals_required dictionary to ensure its
 # key values are decimals.  This is also critical for ensuring that all 
@@ -282,19 +285,29 @@ for key in decimal_vals_required:
 # Perform error checking to ensure external NFS support has been properly
 # enabled.
 
-if enable_external_nfs == 'true' and external_nfs_server == '':
+if (enable_external_nfs == 'true') and (external_nfs_server == ''):
     print('')
-    print('*** ERROR ****')
-    print('enable_external_nfs requires a non-empty value for external_nfs_server!')
-    print('Please validate this NFS server before continuing.')
+    print('*** ERROR ***')
+    print('Missing: valid setting for "--external_nfs_server"')
     print('Aborting...')
     sys.exit(1)
+else:
+    p_val('enable_external_nfs', debug_mode)
+    p_val('external_nfs_server', debug_mode)
 
 # Set external_nfs_server to a dummy value if external NFS support has not
 # been enabled.
 
 if enable_external_nfs == 'false':
     external_nfs_server = 'FEATURE_DISABLED'
+
+# Provide validation for EBS, EFS (performance mode), and FSxL (size).
+
+p_val('ebs_shared_volume_type', debug_mode)
+if enable_efs == 'true':
+    p_val('efs_performance_mode', debug_mode)
+if enable_fsx == 'true':
+    p_val('fsx_size', debug_mode)
 
 # FSxL on Ubuntu is not supported by ParallelClusterMaker because the client
 # installation process requires rebooting the instance, which breaks the
@@ -306,7 +319,7 @@ if enable_external_nfs == 'false':
 # continue.  The operator is responisble for ensuring the correct kernel
 # drivers and Lustre client are built into the AMI.
 
-if enable_fsx == 'true' and base_os == 'ubuntu1604' and custom_ami == 'NONE':
+if (enable_fsx == 'true') and (base_os == 'ubuntu1604') and (custom_ami == 'NONE'):
     print('')
     print('*** ERROR ****')
     print('FSxL on Ubuntu is not currently supported by ParallelClusterMaker.')
@@ -377,6 +390,8 @@ if not os.path.isfile(cluster_serial_number):
     print('%s.%s' % (cluster_name, serial_datestamp), file=open(cluster_serial_number_file, 'w'))
     print(' '.join(sys.argv), file=open(cluster_serial_number_file, 'a'))
 
+p_val('prod_level', debug_mode)
+p_val('cluster_owner_department', debug_mode)
 p_val('cluster_serial_number', debug_mode)
 p_val('cluster_serial_number_file', debug_mode)
 
@@ -386,19 +401,18 @@ p_val('cluster_serial_number_file', debug_mode)
 if master_instance_type not in ec2_instances_full_list:
     p_fail(master_instance_type, 'master_instance_type', ec2_instances_cloudhpc)
 p_val('master_instance_type', debug_mode)
+p_val('master_root_volume_size', debug_mode)
 
 if compute_instance_type not in ec2_instances_full_list:
     p_fail(compute_instance_type, 'compute_instance_type', ec2_instances_full_list)
 p_val('compute_instance_type', debug_mode)
+p_val('compute_root_volume_size', debug_mode)
 
-# Validate parameters that have already passed the argparse checks.
+# Validate the scheduler and all other associated parameters.
 
-p_val('cluster_owner_department', debug_mode)
-p_val('ebs_shared_volume_type', debug_mode)
-p_val('efs_performance_mode', debug_mode)
-p_val('prod_level', debug_mode)
 p_val('scheduler', debug_mode)
-p_val('sge_pe_type', debug_mode)
+if scheduler == 'sge':
+    p_val('sge_pe_type', debug_mode)
 
 # Perform error checking against the auto-generated name for s3_bucketname.
 # If the bucket doesn't exist, create it during the cfncluster stack build.
@@ -568,49 +582,50 @@ cluster_parameters = {
 
 # Print the current values of all validated cluster_parameters to the console.
 
-print_TextHeader(cluster_name, 'Setting', 80)
-print('cluster_name = ' + cluster_name)
-if cluster_lifetime:
-    print('cluster_lifetime (days:hours:minutes) = ' + str(cluster_lifetime))
-print('cluster_serial_number = ' + cluster_serial_number)
-print('cluster_type = ' + cluster_type)
-if cluster_type == 'spot':
-    print('spot_price = $' + str(spot_price) + ' per hour')
-if placement_group != 'NONE':
-    print('placement_group = ' + placement_group)
-print('prod_level = ' + prod_level)
-print('base_os = ' + base_os)
-if custom_ami != 'NONE':
-    print('custom_ami = ' + custom_ami)
-print('master_instance_type = ' + master_instance_type)
-print('master_root_volume_size = ' + str(master_root_volume_size) + ' GB')
-print('compute_root_volume_size = ' + str(compute_root_volume_size) + ' GB')
-print('ebs_shared_dir = ' + ebs_shared_dir)
-print('ebs_shared_volume_size = ' + str(ebs_shared_volume_size) + ' GB')
-print('ebs_shared_volume_type = ' + str(ebs_shared_volume_type))
-print('ebs_encryption = ' + str(ebs_encryption))
-print('s3_bucketname = s3://' + s3_bucketname)
-print('hyperthreading = ' + hyperthreading)
-print('initial_queue_size = ' + str(initial_queue_size))
-print('max_queue_size = ' + str(max_queue_size))
-print('scaledown_idletime = ' + str(scaledown_idletime))
-print('scheduler = ' + scheduler)
-if scheduler == 'sge':
-    print('enable_sge_pe = ' + enable_sge_pe)
-    print('sge_pe_type = ' + sge_pe_type)
-    print('qsub_custom_start_number = ' + str(qsub_custom_start_number))
-    print('qsub_custom_step_size = ' + str(qsub_custom_step_size))
-    print('qsub_custom_total_tests = ' + str(qsub_custom_total_tests))
-if scheduler == 'batch':
-    print('min_vcpus = ' + min_vcpus)
-    print('desired_vcpus = ' + desired_vcpus)
-    print('max_vcpus = ' + max_vcpus)
-print('aws_account_id = ' + aws_account_id)
-print('region = ' + region)
-print('vpc_id = ' + vpc_id)
-print('vpc_name = ' + vpc_name)
-print('subnet_id = ' + subnet_id)
-
+if debug_mode == 'true':
+    print_TextHeader(cluster_name, 'Setting', 80)
+    print('cluster_name = ' + cluster_name)
+    if cluster_lifetime:
+        print('cluster_lifetime (days:hours:minutes) = ' + str(cluster_lifetime))
+    print('cluster_serial_number = ' + cluster_serial_number)
+    print('cluster_type = ' + cluster_type)
+    if cluster_type == 'spot':
+        print('spot_price = $' + str(spot_price) + ' per hour')
+    if placement_group != 'NONE':
+        print('placement_group = ' + placement_group)
+    print('prod_level = ' + prod_level)
+    print('base_os = ' + base_os)
+    if custom_ami != 'NONE':
+        print('custom_ami = ' + custom_ami)
+    print('master_instance_type = ' + master_instance_type)
+    print('master_root_volume_size = ' + str(master_root_volume_size) + ' GB')
+    print('compute_root_volume_size = ' + str(compute_root_volume_size) + ' GB')
+    print('ebs_shared_dir = ' + ebs_shared_dir)
+    print('ebs_shared_volume_size = ' + str(ebs_shared_volume_size) + ' GB')
+    print('ebs_shared_volume_type = ' + str(ebs_shared_volume_type))
+    print('ebs_encryption = ' + str(ebs_encryption))
+    print('s3_bucketname = s3://' + s3_bucketname)
+    print('hyperthreading = ' + hyperthreading)
+    print('initial_queue_size = ' + str(initial_queue_size))
+    print('max_queue_size = ' + str(max_queue_size))
+    print('scaledown_idletime = ' + str(scaledown_idletime))
+    print('scheduler = ' + scheduler)
+    if scheduler == 'sge':
+        print('enable_sge_pe = ' + enable_sge_pe)
+        print('sge_pe_type = ' + sge_pe_type)
+        print('qsub_custom_start_number = ' + str(qsub_custom_start_number))
+        print('qsub_custom_step_size = ' + str(qsub_custom_step_size))
+        print('qsub_custom_total_tests = ' + str(qsub_custom_total_tests))
+    if scheduler == 'batch':
+        print('min_vcpus = ' + min_vcpus)
+        print('desired_vcpus = ' + desired_vcpus)
+        print('max_vcpus = ' + max_vcpus)
+    print('aws_account_id = ' + aws_account_id)
+    print('region = ' + region)
+    print('vpc_id = ' + vpc_id)
+    print('vpc_name = ' + vpc_name)
+    print('subnet_id = ' + subnet_id)
+#
 # NOTE - deploying compute instances into private subnets is not currently
 # supported so for now, "--use_private_subnet" and "--compute_cidr_subnet"
 # should remain commented out.
@@ -620,26 +635,26 @@ print('subnet_id = ' + subnet_id)
 #if use_private_subnet:
 #    print('use_private_subnet = " + use_private_subnet)
 #    print('compute_cidr_subnet = " + compute_cidr_subnet)
-
-print('ec2_user = ' + ec2_user)
-print('ec2_user_home = ' + ec2_user_home)
-if enable_external_nfs == 'true':
-    print('enable_external_nfs = ' + enable_external_nfs)
-    print('external_nfs_server = ' + external_nfs_server)
-if enable_efs == 'true':
-    print('enable_efs = ' + enable_efs)
-    print('efs_encryption = ' + efs_encryption)
-    print('efs_performance_mode = ' + efs_performance_mode)
-if enable_fsx == 'true':
-    print('enable_fsx = ' + enable_fsx)
-    print('fsx_size = ' + str(fsx_size) + ' GB')
-print('cluster_owner = ' + cluster_owner)
-print('cluster_owner_email = ' + cluster_owner_email)
-print('cluster_owner_department = ' + cluster_owner_department)
-if enable_hpc_performance_tests:
-    print('enable_hpc_performance_tests = ' + enable_hpc_performance_tests)
-if enable_ganglia:
-    print('enable_ganglia = ' + enable_ganglia)
+#
+    print('ec2_user = ' + ec2_user)
+    print('ec2_user_home = ' + ec2_user_home)
+    if enable_external_nfs == 'true':
+        print('enable_external_nfs = ' + enable_external_nfs)
+        print('external_nfs_server = ' + external_nfs_server)
+    if enable_efs == 'true':
+        print('enable_efs = ' + enable_efs)
+        print('efs_encryption = ' + efs_encryption)
+        print('efs_performance_mode = ' + efs_performance_mode)
+    if enable_fsx == 'true':
+        print('enable_fsx = ' + enable_fsx)
+        print('fsx_size = ' + str(fsx_size) + ' GB')
+    print('cluster_owner = ' + cluster_owner)
+    print('cluster_owner_email = ' + cluster_owner_email)
+    print('cluster_owner_department = ' + cluster_owner_department)
+    if enable_hpc_performance_tests:
+        print('enable_hpc_performance_tests = ' + enable_hpc_performance_tests)
+    if enable_ganglia:
+        print('enable_ganglia = ' + enable_ganglia)
 
 # Generate the vars_file for this cluster.
 

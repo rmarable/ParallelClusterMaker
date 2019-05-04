@@ -350,7 +350,7 @@ except ClientError as e:
             )
         print('Added: ' + iam_instance_role + ' to ' + iam_instance_profile)
 
-if debug_mode == 'True':
+if debug_mode == 'true':
     p_val('iam_instance_role', debug_mode)
     p_val('iam_instance_profile', debug_mode)
 
@@ -394,7 +394,7 @@ instance_parameters = {
 # Print the current values of all defined instance_parameters to the console
 # when debug_mode is enabled.
 
-if debug_mode == 'True':
+if debug_mode == 'true':
     print_TextHeader(instance_name, 'Printing', 80)
     print('aws_account_id = ' + aws_account_id)
     if turbot_account != 'disabled':

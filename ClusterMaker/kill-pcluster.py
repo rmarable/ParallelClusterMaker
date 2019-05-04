@@ -4,7 +4,7 @@
 # Name:		kill-pcluster.py
 # Author:	Rodney Marable <rodney.marable@gmail.com>
 # Created On:   April 20, 2019
-# Last Changed: May 3, 2019
+# Last Changed: May 4, 2019
 # Purpose:	Python3 wrapper for deleting custom pcluster stacks
 # Note:         centos7 users may need to change the shebang to "python36"
 ################################################################################
@@ -108,7 +108,6 @@ with open(os.devnull, 'w') as devnull:
         print('*** WARNING ***')
         print('Cluster stack "' + cluster_name + '" was not found in ' + region + '!')
         print('Continuing with stack artifact destruction...')
-        print('')
     else:
         p_val(cluster_name, debug_mode)
 
