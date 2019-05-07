@@ -1,0 +1,113 @@
+#!/bin/bash
+#
+################################################################################
+# Name:         sbatch-fibonacci_hashtest.JOBCOUNT.{{ cluster_name }}.sh
+# Author:       Rodney Marable <rodney.marable@gmail.com>
+# Created On:   May 8, 2019
+# Last Changed: May 8, 2019
+# Deployed On:  {{ lookup('pipe','date \"+%B %-d, %Y\"') }}
+# Purpose:      Custom sbatch submission script for bang.sh and fibonacci_hashtest.py
+################################################################################
+
+# Set the name of the cluster job.
+#SBATCH --job-name=slurm_fibonacci_hashtest
+
+# Set the maximum execution time to 8 hours.
+# Format: D-HH:MM
+#SBATCH --time=08:00
+
+# Write job standard output to this file.
+# Uncomment the second option to include the jobID.
+# Uncomment the third option to include the jobID and taskID (default).
+# To write stdout and stderr to the same file, leave the next stanza alone.
+##SBATCH --output slurm_fibonacci_hashtest.out
+##SBATCH --output slurm_fibonacci_hashtest.job%j.out
+#SBATCH --output slurm_fibonacci_hashtest.job%j.task%t.out
+
+# Write job standard error to this file.
+# Uncomment the second option to include the jobID.
+# Uncomment the third option to include the jobID and taskID.
+# To write stdout and stderr to the same file, leave this stanza ALONE.
+##SBATCH --error slurm_fibonacci_hashtest.err
+##SBATCH --error slurm_fibonacci_hashtest.job%j.err
+#SBATCH --error slurm_fibonacci_hashtest.job%j.task%t.err
+
+# Select the number of compute cores.
+# Todo - test this!
+{% if hyperthreading %}# Hyperthreading is enabled.
+{% if compute_instance_type.split('.')[-1] == "large" %}--ntasks=2
+{% elif compute_instance_type.split('.')[-1] == "xlarge" %}--ntasks=4
+{% elif compute_instance_type.split('.')[-1] == "2xlarge" %}--ntasks=8
+{% elif compute_instance_type.split('.')[-1] == "4xlarge" %}--ntasks=16
+{% elif compute_instance_type.split('.')[-1] == "9xlarge" %}--ntasks=36
+{% elif compute_instance_type.split('.')[-1] == "12xlarge" %}--ntasks=48
+{% elif compute_instance_type.split('.')[-1] == "18xlarge" %}--ntasks=72
+{% elif compute_instance_type.split('.')[-1] == "24xlarge" %}--ntasks=96
+{% else %}#--ntasks=4
+{% endif %}
+{% else %}# Hyperthreading is disabled.
+{% if compute_instance_type.split('.')[-1] == "large" %}--ntasks=1
+{% elif compute_instance_type.split('.')[-1] == "xlarge" %}--ntasks=2
+{% elif compute_instance_type.split('.')[-1] == "2xlarge" %}--ntasks=4
+{% elif compute_instance_type.split('.')[-1] == "4xlarge" %}--ntasks=8
+{% elif compute_instance_type.split('.')[-1] == "9xlarge" %}--ntasks=18
+{% elif compute_instance_type.split('.')[-1] == "12xlarge" %}--ntasks=24
+{% elif compute_instance_type.split('.')[-1] == "18xlarge" %}--ntasks=36
+{% elif compute_instance_type.split('.')[-1] == "24xlarge" %}--ntasks=48
+{% else %}#--ntasks=2
+{% endif %}
+{% endif %}
+
+# Reserve 1 CPU per task.
+#SBATCH --cpus-per-task=1
+
+# Ensure that all cores are on the same machine.
+##SBATCH -N 1                
+
+# Reserve 250MB per core.
+##SBATCH --mem-per-cpu=250mb
+
+##########################################################################
+##########################################################################
+###                      Start the script here                         ###
+##########################################################################
+##########################################################################
+
+# Set PYTHON3 to the proper binary.
+{% if base_os == 'centos7' %}
+PYTHON3=/bin/python3.6
+{% else %}
+PYTHON3=python3
+{% endif %}
+
+# Set the test_mode.  You can use both at the same time.
+
+ENABLE_INDEX=TRUE
+ENABLE_DIGITS=TRUE
+
+# Compute Fibonacci hashes.
+
+if [[ $ENABLE_INDEX == "TRUE" ]]
+then
+	for INDEX in 1000 2500 5000 7500 10000
+	do
+		echo "Making $INDEX Fibonacci hashes @ `date`"
+		$PYTHON3 fibonacci_hashtest.py --enable_index -I $INDEX -O $JOB_NAME.${JOB_ID}.task${SGE_TASK_ID}.index.log -C pigz
+		echo "Finished making $INDEX hashes @ `date`"
+       	 echo ""
+	done
+fi
+
+if [[ $ENABLE_DIGITS == "TRUE" ]]
+then
+	for DIGITS in 1000 2000 3000 4000 5000
+	do
+		echo "Hashing Fibonacci values up to $DIGITS digits long @ `date`"
+		$PYTHON3 fibonacci_hashtest.py --enable_digits -D $INDEX -o $JOB_NAME.${JOB_ID}.task${SGE_TASK_ID}.digits.log -C pigz
+		echo "Finished hashing up to $DIGITS digits long @ `date`"
+       	 echo ""
+	done
+fi
+
+# Exit successfully.
+exit 0

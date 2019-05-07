@@ -1,8 +1,5 @@
 #!/usr/bin/env python3
 #
-# NOTE - centos7 users may need to modify the shebang above to "python36"
-# Todo - explore a template for this
-#
 ################################################################################
 # Name:         access_cluster.py
 # Author:       Rodney Marable <rodney.marable@gmail.com>

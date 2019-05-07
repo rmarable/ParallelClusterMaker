@@ -166,6 +166,12 @@ damage your local OSX environment.
 
 * Configure the AWS CLI.
 
+* Ensure that the IAM account or role you are using to build ParallelCluster
+stacks has permission to run the required API calls by either assigning admin
+rights or creating a custom role using this template as a source:
+
+```ParallelClusterMaker/JumphostMaker/templates/ParallelClusterInstancePolicy.json_src```
+
 * Install and activate a virtual Python environment using virtualenv or pyenv.
 
 * Install all required Python libraries into the virtual environment using

@@ -1,0 +1,79 @@
+#!/bin/bash
+#
+################################################################################
+# Name:         sbatch-Axb_random.JOBCOUNT.{{ cluster_name }}.sh
+# Author:       Rodney Marable <rodney.marable@gmail.com>
+# Created On:   May 3, 2019
+# Last Changed: May 3, 2019
+# Deployed On:  {{ lookup('pipe','date \"+%B %-d, %Y\"') }}
+# Purpose:      Custom sbatch submission script for bang.sh and Axb_random.py
+################################################################################
+
+# Set the name of the cluster job.
+#SBATCH --job-name=slurm_Axb_random
+
+# Set the maximum execution time to 8 hours.
+# Format: D-HH:MM
+#SBATCH --time=08:00
+
+# Write job standard output to this file.
+# Uncomment the second option to include the jobID.
+# Uncomment the third option to include the jobID and taskID (default).
+# To write stdout and stderr to the same file, leave the next stanza alone.
+##SBATCH --output slurm_Axb_random.out
+##SBATCH --output slurm_Axb_random.job%j.out
+#SBATCH --output slurm_Axb_random.job%j.task%t.out
+
+# Write job standard error to this file.
+# Uncomment the second option to include the jobID.
+# Uncomment the third option to include the jobID and taskID.
+# To write stdout and stderr to the same file, leave this stanza ALONE.
+##SBATCH --error slurm_Axb_random.err
+##SBATCH --error slurm_Axb_random.job%j.err
+#SBATCH --error slurm_Axb_random.job%j.task%t.err
+
+# Select the number of compute cores.
+# Todo - test this!
+{% if hyperthreading %}# Hyperthreading is enabled.
+{% if compute_instance_type.split('.')[-1] == "large" %}--ntasks=2
+{% elif compute_instance_type.split('.')[-1] == "xlarge" %}--ntasks=4
+{% elif compute_instance_type.split('.')[-1] == "2xlarge" %}--ntasks=8
+{% elif compute_instance_type.split('.')[-1] == "4xlarge" %}--ntasks=16
+{% elif compute_instance_type.split('.')[-1] == "9xlarge" %}--ntasks=36
+{% elif compute_instance_type.split('.')[-1] == "12xlarge" %}--ntasks=48
+{% elif compute_instance_type.split('.')[-1] == "18xlarge" %}--ntasks=72
+{% elif compute_instance_type.split('.')[-1] == "24xlarge" %}--ntasks=96
+{% else %}#--ntasks=4
+{% endif %}
+{% else %}# Hyperthreading is disabled.
+{% if compute_instance_type.split('.')[-1] == "large" %}--ntasks=1
+{% elif compute_instance_type.split('.')[-1] == "xlarge" %}--ntasks=2
+{% elif compute_instance_type.split('.')[-1] == "2xlarge" %}--ntasks=4
+{% elif compute_instance_type.split('.')[-1] == "4xlarge" %}--ntasks=8
+{% elif compute_instance_type.split('.')[-1] == "9xlarge" %}--ntasks=18
+{% elif compute_instance_type.split('.')[-1] == "12xlarge" %}--ntasks=24
+{% elif compute_instance_type.split('.')[-1] == "18xlarge" %}--ntasks=36
+{% elif compute_instance_type.split('.')[-1] == "24xlarge" %}--ntasks=48
+{% else %}#--ntasks=2
+{% endif %}
+{% endif %}
+
+# Reserve 1 CPU per task.
+#SBATCH --cpus-per-task=1
+
+# Ensure that all cores are on the same machine.
+##SBATCH -N 1                
+
+# Reserve 250MB per core.
+##SBATCH --mem-per-cpu=250mb
+
+##########################################################################
+##########################################################################
+###                      Start the script here                         ###
+##########################################################################
+##########################################################################
+
+sh bang.sh $JOB_NAME.$JOB_ID.$SGE_TASK_ID
+
+# Exit successfully.
+exit 0

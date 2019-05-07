@@ -4,9 +4,8 @@
 # Name:		kill-pcluster.py
 # Author:	Rodney Marable <rodney.marable@gmail.com>
 # Created On:   April 20, 2019
-# Last Changed: May 4, 2019
+# Last Changed: May 8, 2019
 # Purpose:	Python3 wrapper for deleting custom pcluster stacks
-# Note:         centos7 users may need to change the shebang to "python36"
 ################################################################################
 
 # Load some required Python libraries.
@@ -141,10 +140,15 @@ else:
 # Strip any trailing newlines that would otherwise break destory_cmd_string.
 
 cluster_serial_number = open(cluster_serial_number_file).readline().rstrip("\n")
-        
+
+# Parse the Python3 interpreter path to ensure ParallelCluster stacks can be
+# created from either OSX or an EC2 jumphost.
+
+python3_path = subprocess.run(['which','python3'], stdout=subprocess.PIPE).stdout.decode('utf8')
+
 # Delete the cluster stack.
 
-destroy_cmd_string = 'ansible-playbook --extra-vars ' + '"' + 'cluster_name=' + cluster_name + ' cluster_birth_name=' + cluster_birth_name + ' cluster_serial_number=' + cluster_serial_number + ' delete_s3_bucketname=' + delete_s3_bucketname + ' delete_efs=' + delete_efs + ' delete_fsx=' + delete_fsx + ' ansible_python_interpreter=/usr/bin/python3' + '"' + ' delete_pcluster.yml ' + ansible_verbosity
+destroy_cmd_string = 'ansible-playbook --extra-vars ' + '"' + 'cluster_name=' + cluster_name + ' cluster_birth_name=' + cluster_birth_name + ' cluster_serial_number=' + cluster_serial_number + ' delete_s3_bucketname=' + delete_s3_bucketname + ' delete_efs=' + delete_efs + ' delete_fsx=' + delete_fsx + ' ansible_python_interpreter="' + python3_path + '"' + ' delete_pcluster.yml ' + ansible_verbosity
 
 print('')
 print('Ready to execute:')

@@ -2,7 +2,7 @@
 # Name:		README
 # Author:	Rodney Marable <rodney.marable@gmail.com>
 # Created On:	April 20, 2019
-# Last Changed:	May 2, 2019
+# Last Changed:	May 8, 2019
 # Purpose:	General documentation for the ParallelClusterMaker toolkit	
 ################################################################################
 
@@ -184,6 +184,12 @@ damage your local OSX environment.
    * serverless
 
 * Configure the AWS CLI.
+
+* Ensure that the IAM account or role you are using to build ParallelCluster
+stacks has permission to run the required API calls by either assigning admin
+rights or creating a custom role using this template as a source:
+
+ParallelClusterMaker/JumphostMaker/templates/ParallelClusterInstancePolicy.json_src
 
 * Install and activate a virtual Python environment using virtualenv or pyenv.
 

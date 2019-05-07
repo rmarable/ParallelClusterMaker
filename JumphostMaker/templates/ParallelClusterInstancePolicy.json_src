@@ -260,6 +260,15 @@
             "Resource": "*"
         },
         {
+            "Sid": "BatchECS",
+            "Action": [
+                "ecs:ListContainerInstances",
+                "ecs:DescribeContainerInstances"
+            ],
+            "Effect": "Allow",
+            "Resource": "*"
+        },
+        {
             "Sid": "EFS",
             "Action": [
                 "efs:CreateFileSystem",

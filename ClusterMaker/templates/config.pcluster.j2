@@ -40,8 +40,7 @@ vpc_settings = {{ vpc_name }}
 master_instance_type = {{ master_instance_type }}
 master_root_volume_size = {{ master_root_volume_size }}
 {% if scheduler == 'awsbatch' %}
-compute_instance_type = optimal
-compute_root_volume_size = {{ compute_root_volume_size }}
+compute_instance_type = {{ compute_instance_type }}
 min_vcpus = {{ min_vcpus }}
 max_vcpus = {{ max_vcpus }}
 desired_vcpus = {{ desired_vcpus }}

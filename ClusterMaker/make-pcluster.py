@@ -26,6 +26,7 @@ from validate_email import validate_email
 # Import the list of supported EC2 instances and some external functions.
 # Source: clustermaker_aux_data.py
 
+from clustermaker_aux_data import default_instance_types
 from clustermaker_aux_data import ec2_instances_full_list
 from clustermaker_aux_data import illegal_az_msg
 from clustermaker_aux_data import is_number
@@ -71,12 +72,10 @@ parser.add_argument('--initial_queue_size', help='initial number of compute node
 parser.add_argument('--max_queue_size', help='maximum number of compute nodes to deploy (default = 10)', required=False, default=10)
 parser.add_argument('--maintain_initial_size', help='keep initial_queue_size instances always running (default = false)', required=False, default='false')
 parser.add_argument('--scaledown_idletime', choices=['true', 'false'], help='amount of time in minutes without a job after which the compute node will terminate (default = 5)', required=False, default=5)
-# Todo - explicitly require these parameters when scheduler = awsbatch
 parser.add_argument('--min_vcpus', help='minimum number of vcpus to maintain when using Batch (default = 0)', required=False, default=0)
 parser.add_argument('--desired_vcpus', help='initial number of vcpus to deploy when using Batch (default = 4)', required=False, default=4)
 parser.add_argument('--max_vcpus', help='maximum number of allowed vcpus when using Batch (default = 20)', required=False, default=20)
 parser.add_argument('--enable_external_nfs', choices=['true', 'false'], help='enable support for external NFS file system mounts (default = false)', required=False, default='false')
-# Todo - make this argument dependent on --enable_external_nfs=true
 parser.add_argument('--external_nfs_server', help='set the hostname of the external NFS file system (default = NULL)', required=False, default='')
 parser.add_argument('--enable_efs', help='enable support for Elastic File System (EFS) (default = false)', required=False, default='false')
 parser.add_argument('--efs_encryption', choices=['true', 'false'], help='enable EFS encryption in transit (default = false)', required=False, default='false')
@@ -100,9 +99,11 @@ parser.add_argument('--debug_mode', '-D', choices=['true', 'false'], help='Enabl
 #parser.add_argument('--use_private_subnet', help='deploy the compute nodes into a nonroutable private network - NOT FULLY TESTED (default = false)', required=False, default='false')
 #parser.add_argument('--compute_cidr_subnet', help='designate a separate CIDR subnet for compute instances - NOT FULLY TESTED (default = false)', required=False, default='false')
 
-# Set cluster_parameters to the values provided via command line.
+# Parse the command used to create this cluster stack.
 
 cluster_build_command = " ".join(sys.argv)
+
+# Set cluster_parameters to the values provided via command line.
 
 args = parser.parse_args()
 ansible_verbosity = args.ansible_verbosity
@@ -158,6 +159,18 @@ turbot_account = args.turbot_account
 #
 #use_private_subnet = args.use_private_subnet
 #compute_cidr_subnet = args.compute_cidr_subnet
+
+# Set master_instance_type and compute_instance_type to the default values if
+# no specific instance_type was provided.  Change these values by editing the
+# default_instance_types dictionary defined in clustermaker_aux_data.
+
+if scheduler != 'awsbatch':
+    if master_instance_type == 'default':
+        master_instance_type = default_master_instance_type
+    if compute_instance_type == 'default':
+        compute_instance_type =  default_compute_instance_type
+else:
+    compute_instance_type = 'optimal'
 
 # Define a dictionary of cluster_parameters that require decimal values.
 
@@ -507,6 +520,7 @@ elif cluster_type == 'spot':
     raw_spot_price = float(prices['SpotPriceHistory'][0]['SpotPrice'])
     spot_price = round(raw_spot_price + ((1 / 3) * raw_spot_price), 8)
     p_val('cluster_type', debug_mode)
+    print('')
     print('Selected spot instances')
     p_val(' spot_price', debug_mode)
 else:
@@ -1076,13 +1090,18 @@ print('Ready to execute:')
 print('$ ' + cluster_build_command)
 print('')
 
+# Parse the Python3 interpreter path to ensure ParallelCluster stacks can be
+# created from either OSX or an EC2 jumphost.
+
+python3_path = subprocess.run(['which','python3'], stdout=subprocess.PIPE).stdout.decode('utf8')
+
 # Generate the build command string.  For conciseness, don't include the
 # external NFS server if that functionality was not enabled by the operator.
 
 if enable_external_nfs == 'false':
-    build_cmd_string = 'ansible-playbook --extra-vars ' + '"' + 'cluster_name=' + cluster_name + ' cluster_birth_name=' + cluster_birth_name + ' cluster_serial_number=' + cluster_serial_number + ' enable_hpc_performance_tests=' + enable_hpc_performance_tests + ' enable_efs=' + enable_efs + ' enable_external_nfs=false' + ' enable_fsx=' + enable_fsx + ' ansible_python_interpreter=/usr/bin/python3' + '"' + ' create_pcluster.yml ' + ansible_verbosity
+    build_cmd_string = 'ansible-playbook --extra-vars ' + '"' + 'cluster_name=' + cluster_name + ' cluster_birth_name=' + cluster_birth_name + ' cluster_serial_number=' + cluster_serial_number + ' enable_hpc_performance_tests=' + enable_hpc_performance_tests + ' enable_efs=' + enable_efs + ' enable_external_nfs=false' + ' enable_fsx=' + enable_fsx + ' ansible_python_interpreter="' + python3_path + '"' + ' create_pcluster.yml ' + ansible_verbosity
 else:
-    build_cmd_string = 'ansible-playbook --extra-vars ' + '"' + 'cluster_name=' + cluster_name + ' cluster_birth_name=' + cluster_birth_name + ' cluster_serial_number=' + cluster_serial_number + ' enable_hpc_performance_tests=' + enable_hpc_performance_tests + ' enable_efs=' + enable_efs + ' enable_external_nfs=true' + ' external_nfs_server=' + external_nfs_server + ' enable_fsx=' + enable_fsx + ' ansible_python_interpreter=/usr/bin/python3' + '"' + ' create_pcluster.yml ' + ansible_verbosity
+    build_cmd_string = 'ansible-playbook --extra-vars ' + '"' + 'cluster_name=' + cluster_name + ' cluster_birth_name=' + cluster_birth_name + ' cluster_serial_number=' + cluster_serial_number + ' enable_hpc_performance_tests=' + enable_hpc_performance_tests + ' enable_efs=' + enable_efs + ' enable_external_nfs=true' + ' external_nfs_server=' + external_nfs_server + ' enable_fsx=' + enable_fsx + ' ansible_python_interpreter="' + python3_path + '"' + ' create_pcluster.yml ' + ansible_verbosity
 
 print('Preparing to build cluster "' + cluster_name + '" using this command:')
 print('$ ' + build_cmd_string)

@@ -2,7 +2,7 @@
 # Name:		clustermaker_aux_data.py
 # Author:	Rodney Marable <rodney.marable@gmail.com>
 # Created On:	April 20, 2019
-# Last Changed:	April 30, 2019
+# Last Changed:	May 7, 2019
 # Purpose:	External data structures and functions for ParallelClusterMaker
 ################################################################################
 
@@ -99,6 +99,13 @@ def print_TextHeader(p, action, line_length):
 ############################
 # EC2 instance definitions #
 ############################
+
+# Define a dictionary of default values for the master and compute instances.
+
+default_instance_types = {
+    'default_master_instance_type': 'c5.xlarge',
+    'default_compute_instance_type': 'c5.xlarge'
+}
 
 # General Purpose
 
