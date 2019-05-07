@@ -1099,9 +1099,9 @@ python3_path = subprocess.run(['which','python3'], stdout=subprocess.PIPE).stdou
 # external NFS server if that functionality was not enabled by the operator.
 
 if enable_external_nfs == 'false':
-    build_cmd_string = 'ansible-playbook --extra-vars ' + '"' + 'cluster_name=' + cluster_name + ' cluster_birth_name=' + cluster_birth_name + ' cluster_serial_number=' + cluster_serial_number + ' enable_hpc_performance_tests=' + enable_hpc_performance_tests + ' enable_efs=' + enable_efs + ' enable_external_nfs=false' + ' enable_fsx=' + enable_fsx + ' ansible_python_interpreter="' + python3_path + '"' + ' create_pcluster.yml ' + ansible_verbosity
+    build_cmd_string = 'ansible-playbook --extra-vars ' + '"' + 'cluster_name=' + cluster_name + ' cluster_birth_name=' + cluster_birth_name + ' cluster_serial_number=' + cluster_serial_number + ' enable_hpc_performance_tests=' + enable_hpc_performance_tests + ' enable_efs=' + enable_efs + ' enable_external_nfs=false' + ' enable_fsx=' + enable_fsx + ' ansible_python_interpreter=' + python3_path + '"' + ' create_pcluster.yml ' + ansible_verbosity
 else:
-    build_cmd_string = 'ansible-playbook --extra-vars ' + '"' + 'cluster_name=' + cluster_name + ' cluster_birth_name=' + cluster_birth_name + ' cluster_serial_number=' + cluster_serial_number + ' enable_hpc_performance_tests=' + enable_hpc_performance_tests + ' enable_efs=' + enable_efs + ' enable_external_nfs=true' + ' external_nfs_server=' + external_nfs_server + ' enable_fsx=' + enable_fsx + ' ansible_python_interpreter="' + python3_path + '"' + ' create_pcluster.yml ' + ansible_verbosity
+    build_cmd_string = 'ansible-playbook --extra-vars ' + '"' + 'cluster_name=' + cluster_name + ' cluster_birth_name=' + cluster_birth_name + ' cluster_serial_number=' + cluster_serial_number + ' enable_hpc_performance_tests=' + enable_hpc_performance_tests + ' enable_efs=' + enable_efs + ' enable_external_nfs=true' + ' external_nfs_server=' + external_nfs_server + ' enable_fsx=' + enable_fsx + ' ansible_python_interpreter=' + python3_path + '"' + ' create_pcluster.yml ' + ansible_verbosity
 
 print('Preparing to build cluster "' + cluster_name + '" using this command:')
 print('$ ' + build_cmd_string)
