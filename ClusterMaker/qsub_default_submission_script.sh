@@ -4,12 +4,12 @@
 # Name:		qsub_default_submission_script.sh
 # Author:	Rodney Marable <rodney.marable@gmail.com>
 # Created On:	May 2, 2019
-# Last Changed:	May 2, 2019
+# Last Changed:	May 8, 2019
 # Purpose:	Default qsub submission script for Grid Engine-style clusters
 ################################################################################
 
 # Set the name of the cluster job.
-#$ -N my_cluster_job
+#$ -N my_gridengine_job
 
 # Set the shell (default = bash) to use when running the job,
 #$ -S /bin/bash
@@ -41,7 +41,7 @@
 ##$ -e my_cluster_job.stderr
 
 # Send an email when the job is submitted (b), completed (e), suspended (s), or
-# aborted (a) to  the listed address (uncomment to enable).
+# aborted (a) to the listed address (uncomment to enable).
 ##$ -m be
 ##$ -M your_email_address@yourdomain.com
 
