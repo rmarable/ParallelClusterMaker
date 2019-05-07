@@ -1093,7 +1093,7 @@ print('')
 # Parse the Python3 interpreter path to ensure ParallelCluster stacks can be
 # created from either OSX or an EC2 jumphost.
 
-python3_path = subprocess.run(['which','python3'], stdout=subprocess.PIPE).stdout.decode('utf8')
+python3_path = subprocess.run(['which','python3'], stdout=subprocess.PIPE).stdout.decode('utf8').rstrip()
 
 # Generate the build command string.  For conciseness, don't include the
 # external NFS server if that functionality was not enabled by the operator.
