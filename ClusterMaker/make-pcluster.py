@@ -85,9 +85,9 @@ parser.add_argument('--fsx_size', help='size of the Lustre file system in GB (de
 parser.add_argument('--cluster_owner_department', choices=['analytics', 'clinical', 'commercial', 'compbio', 'compchem', 'datasci', 'design', 'development', 'hpc', 'imaging', 'manufacturing', 'medical', 'modeling', 'operations', 'proteomics', 'robotics', 'qa', 'research', 'scicomp'], help='department of the cluster_owner (default = hpc)', required=False, default='hpc')
 parser.add_argument('--enable_hpc_performance_tests', choices=['true', 'false'], help='enable the HPC performance tests Axb_random, hashtest, and hashtest_fibonacci under the ec2_user account on the master instance (default = true)', required=False, default='false')
 parser.add_argument('--enable_ganglia', choices=['true', 'false'], help='enable Ganglia on the master instance', required=False, default='false')
-parser.add_argument('--qsub_custom_start_number', help='starting number of custom performance cluster jobs to submit (default = 10)', required=False, default=10)
-parser.add_argument('--qsub_custom_step_size', help='step size of the custom performance qsub scripts (default = 10)', required=False, default=10)
-parser.add_argument('--qsub_custom_total_tests', help='number of performance tests to run (default = 10)', required=False, default=10)
+parser.add_argument('--perftest_custom_start_number', help='starting number of custom performance cluster jobs to submit (default = 10)', required=False, default=10)
+parser.add_argument('--perftest_custom_step_size', help='step size of the custom performance qsub scripts (default = 10)', required=False, default=10)
+parser.add_argument('--perftest_custom_total_tests', help='number of performance tests to run (default = 10)', required=False, default=10)
 parser.add_argument('--turbot_account', '-T', help='Turbot account ID (default = abd).  Set to "disabled" in non-Turbot environments.', required=False, default='disabled')
 parser.add_argument('--ansible_verbosity', '-V', help='Set the Ansible verbosity level (default = none)', required=False, default='')
 parser.add_argument('--debug_mode', '-D', choices=['true', 'false'], help='Enable debug mode (default = false)', required=False, default='false')
@@ -148,9 +148,9 @@ region = az[:-1]
 scaledown_idletime = args.scaledown_idletime
 scheduler = args.scheduler
 sge_pe_type = args.sge_pe_type
-qsub_custom_start_number = args.qsub_custom_start_number
-qsub_custom_step_size = args.qsub_custom_step_size
-qsub_custom_total_tests = args.qsub_custom_total_tests
+perftest_custom_start_number = args.perftest_custom_start_number
+perftest_custom_step_size = args.perftest_custom_step_size
+perftest_custom_total_tests = args.perftest_custom_total_tests
 turbot_account = args.turbot_account
 
 # NOTE: Deploying compute instances into private subnets is not currently
@@ -183,9 +183,9 @@ decimal_vals_required = {
     'max_queue_size': max_queue_size,
     'min_vcpus': min_vcpus,
     'max_vcpus': max_vcpus,
-    'qsub_custom_start_number': qsub_custom_start_number,
-    'qsub_custom_step_size': qsub_custom_step_size,
-    'qsub_custom_total_tests': qsub_custom_total_tests,
+    'perftest_custom_start_number': perftest_custom_start_number,
+    'perftest_custom_step_size': perftest_custom_step_size,
+    'perftest_custom_total_tests': perftest_custom_total_tests,
     'scaledown_idletime': scaledown_idletime
 }
 
@@ -587,9 +587,9 @@ cluster_parameters = {
     'cluster_owner': cluster_owner,
     'cluster_owner_email': cluster_owner_email,
     'cluster_owner_department': cluster_owner_department,
-    'qsub_custom_start_number': qsub_custom_start_number,
-    'qsub_custom_step_size': qsub_custom_step_size,
-    'qsub_custom_total_tests': qsub_custom_total_tests,
+    'perftest_custom_start_number': perftest_custom_start_number,
+    'perftest_custom_step_size': perftest_custom_step_size,
+    'perftest_custom_total_tests': perftest_custom_total_tests,
     'enable_hpc_performance_tests': enable_hpc_performance_tests,
     'enable_ganglia': enable_ganglia
 }
@@ -627,9 +627,6 @@ if debug_mode == 'true':
     if scheduler == 'sge':
         print('enable_sge_pe = ' + enable_sge_pe)
         print('sge_pe_type = ' + sge_pe_type)
-        print('qsub_custom_start_number = ' + str(qsub_custom_start_number))
-        print('qsub_custom_step_size = ' + str(qsub_custom_step_size))
-        print('qsub_custom_total_tests = ' + str(qsub_custom_total_tests))
     if scheduler == 'batch':
         print('min_vcpus = ' + min_vcpus)
         print('desired_vcpus = ' + desired_vcpus)
@@ -667,6 +664,9 @@ if debug_mode == 'true':
     print('cluster_owner_department = ' + cluster_owner_department)
     if enable_hpc_performance_tests:
         print('enable_hpc_performance_tests = ' + enable_hpc_performance_tests)
+        print('perftest_custom_start_number = ' + str(perftest_custom_start_number))
+        print('perftest_custom_step_size = ' + str(perftest_custom_step_size))
+        print('perftest_custom_total_tests = ' + str(perftest_custom_total_tests))
     if enable_ganglia:
         print('enable_ganglia = ' + enable_ganglia)
 
@@ -868,9 +868,9 @@ Axb_random_dest: "{{{{ ec2_user_home }}}}/performance/{{{{ cluster_owner }}}}/{{
 
 # HPC qsub custom performance submission script templates
 
-qsub_custom_start_number: {qsub_custom_start_number}
-qsub_custom_step_size: {qsub_custom_step_size}
-qsub_custom_total_tests: {qsub_custom_total_tests}
+perftest_custom_start_number: {perftest_custom_start_number}
+perftest_custom_step_size: {perftest_custom_step_size}
+perftest_custom_total_tests: {perftest_custom_total_tests}
 
 # Ganglia
 

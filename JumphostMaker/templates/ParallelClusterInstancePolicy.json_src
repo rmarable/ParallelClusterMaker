@@ -302,9 +302,22 @@
             "Resource": "*"
         },
         {
-            "Sid": "SSMDescribe",
+            "Sid": "AllowAccessToSSM",
             "Action": [
-                "ssm:GetParametersByPath"
+                "ssm:DescribeAssociation",
+                "ssm:ListAssociations",
+                "ssm:GetDocument",
+                "ssm:ListInstanceAssociations",
+                "ssm:UpdateAssociationStatus",
+                "ssm:UpdateInstanceInformation",
+                "ec2messages:AcknowledgeMessage",
+                "ec2messages:DeleteMessage",
+                "ec2messages:FailMessage",
+                "ec2messages:GetEndpoint",
+                "ec2messages:GetMessages",
+                "ec2messages:SendReply",
+                "ds:CreateComputer",
+                "ds:DescribeDirectories"
             ],
             "Effect": "Allow",
             "Resource": "*"

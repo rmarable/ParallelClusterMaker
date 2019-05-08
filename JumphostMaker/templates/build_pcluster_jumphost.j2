@@ -4,7 +4,7 @@
 # Name:		build_pcluster_jumphost.{{ instance_name }}.sh
 # Author:	Rodney Marable <rodney.marable@gmail.com>
 # Created On:	April 18, 2019
-# Last Changed:	May 1, 2019
+# Last Changed:	May 8, 2019
 # Deployed On:	{{ lookup('pipe','date \"+%B %-d, %Y\"') }}
 # Purpose:	Perform some additional post-istallation configuration steps
 #		on pcluster-jumphost {{ instance_name }}
@@ -90,6 +90,15 @@ EOF
 
 echo "
 alias src='cd ~/src/ParallelClusterMaker/ClusterMaker'" >> $EC2_HOME/.bashrc
+
+# Add a 50-second keep-alive interval so that SSH doesn't logout automatically
+# and adversely affect ParallelClusterMaker activity.
+
+echo "
+# Add a 50-second keep-alive interval so that SSH doesn't logout automatically
+# and adversely affect ParallelClusterMaker activity.
+ServerAliveInterval 50" >> $EC2_HOME/.ssh/config
+chmod 0600 $EC2_HOME/.ssh/config
 
 # Cleanup and exit.
 

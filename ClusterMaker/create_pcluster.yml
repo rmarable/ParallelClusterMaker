@@ -2,7 +2,7 @@
 # Name:		create_pcluster.yml
 # Author:	Rodney Marable <rodney.marable@gmail.com>
 # Created On:	April 20, 2019
-# Last Changed:	May 3, 2019
+# Last Changed:	May 8, 2019
 # Purpose:	Ansible playbook to create new ParallelCluster stacks
 ################################################################################
 
@@ -283,22 +283,27 @@
         - combine_sge_data_files_for_plotting
         - create_sge_task_array_csv_files
         - perf-qsub
+        - perf-sbatch
         - perf-stest
       when: enable_hpc_performance_tests
 
-    - name: Generate custom performance test qsub scripts
-      shell: sh {{ performance_rootdir }}/generate_qsub_custom_templates.sh {{ qsub_custom_start_number }} {{ qsub_custom_step_size }} {{ qsub_custom_total_tests }}
+    - name: Generate custom performance test qsub and sbatch scripts
+      shell: sh {{ performance_rootdir }}/{{ item }}.sh {{ perftest_custom_start_number }} {{ perftest_custom_step_size }} {{ perftest_custom_total_tests }}
       args:
         chdir: "{{ performance_rootdir }}"
+      with_items:
+        -  generate_qsub_custom_templates
+        -  generate_sbatch_custom_templates
       when: enable_hpc_performance_tests
 
-    - name: Template the custom performance test qsub scripts to stage_dir
+    - name: Template the custom performance test qsub and sbatch scripts to stage_dir
       template:
         src: "{{ item }}"
         dest: "{{ stage_dir }}/{{ item | basename | regex_replace('.j2','') }}.{{ cluster_name }}.sh"
         mode: 0755
       with_fileglob:
         - "{{ performance_template_dir }}/qsub-*.j2"
+        - "{{ performance_template_dir }}/sbatch-*.j2"
       when: enable_hpc_performance_tests
 
     - name: Template the custom performance Python scripts to stage_dir
@@ -457,6 +462,9 @@
       command: scp -i {{ ssh_keypair }}i {{ local_workingdir }}/qsub_default_submission_script.sh {{ ec2_user }}@{{ MasterPublicIP.stdout }}:/home/{{ ec2_user }}
       when: not enable_hpc_performance_tests
 
+    - name: Transfer the standard sbatch submission script to the master instance
+      command: scp -i {{ ssh_keypair }}i {{ local_workingdir }}/sbatch_default_submission_script.sh {{ ec2_user }}@{{ MasterPublicIP.stdout }}:/home/{{ ec2_user }}
+      when: not enable_hpc_performance_tests
     - name: Move the performance source tree to its final destination directory on the master instance
       command: ssh -i {{ ssh_keypair }} {{ ec2_user }}@{{ MasterPublicIP.stdout }} mv {{ stage_dir }}/* {{ Axb_random_dest }}
       when: enable_hpc_performance_tests
@@ -469,6 +477,7 @@
         - combine_sge_data_files_for_plotting
         - create_sge_task_array_csv_files
         - perf-qsub
+        - perf-sbatch
         - perf-stest
       ignore_errors: true
       when: enable_hpc_performance_tests
@@ -544,10 +553,11 @@
         - "{{ fsx_temp_dir }}"
       when: enable_fsx
 
-    - name: Remove all custom qsub performance templates from the src tree
+    - name: Remove all custom qsub and sbatch performance templates from the src tree
       file: path="{{ item }}" state=absent
       with_fileglob:
         - "{{ performance_template_dir }}/qsub-*.j2"
+        - "{{ performance_template_dir }}/sbatch-*.j2"
       when: enable_hpc_performance_tests
 
     - name: Stop the overall stack timer

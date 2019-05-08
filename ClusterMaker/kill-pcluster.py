@@ -46,9 +46,10 @@ parser.add_argument('--cluster_owner', '-O', help='username of the cluster owner
 # Configure arguments for the optional variables.
 # By default, delete any storage associated with the cluster.
 
-parser.add_argument('--delete_efs', '-E', choices=['True', 'true', 'False', 'false'], help='Delete the EFS file system associated with this cluster (default = true)', required=False, default='true')
-parser.add_argument('--delete_fsx', '-F', choices=['True', 'true', 'False', 'false'], help='Delete the Lustre file system associated with this cluster (default = true)', required=False, default='true')
-parser.add_argument('--delete_s3_bucketname', '-S', choices=['True', 'true', 'False', 'false'], help='Delete the S3 bucket associated with this cluster (default = true)', required=False, default='true')
+parser.add_argument('--delete_efs', choices=['True', 'true', 'False', 'false'], help='Delete the EFS file system associated with this cluster (default = true)', required=False, default='true')
+parser.add_argument('--delete_fsx', choices=['True', 'true', 'False', 'false'], help='Delete the Lustre file system associated with this cluster (default = true)', required=False, default='true')
+parser.add_argument('--delete_s3_bucketname', choices=['True', 'true', 'False', 'false'], help='Delete the S3 bucket associated with this cluster (default = true)', required=False, default='true')
+parser.add_argument('--cluster_owner_email', '-E', help='email address of the cluster owner (default = UNDEFINED)', required=False, default='UNDEFINED')
 parser.add_argument('--debug_mode', '-D', choices=['true', 'false'], help='Enable debug mode (default = false)', required=False, default='false')
 
 # Set cluster_parameters to the values provided via command line.
@@ -61,6 +62,7 @@ region = az[:-1]
 delete_efs = args.delete_efs
 delete_fsx = args.delete_fsx
 delete_s3_bucketname = args.delete_s3_bucketname
+cluster_owner_email = args.cluster_owner_email
 debug_mode = args.debug_mode
 
 # Print a header for cluster variable validation.
@@ -180,6 +182,10 @@ with contextlib.suppress(FileNotFoundError):
         print('To rebuild the cluster:')
         print('$ ' + cli_input.readlines()[-1])
         print(''.center(line_length, '='))
+
+# Messaging to cluster_owner_email announcing the destruction of cluster_name
+# is currently handled by delete_pcluster.yml but this may be revisited in a
+# future release.
 
 # Cleanup and exit.
 

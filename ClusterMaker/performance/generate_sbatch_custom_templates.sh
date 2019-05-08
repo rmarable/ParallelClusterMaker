@@ -1,9 +1,9 @@
 ################################################################################
-# Name:		generate_custom_qsub_templates.sh
+# Name:		generate_custom_sbatch_templates.sh
 # Author:	Rodney Marable <rodney.marable@gmail.com>
-# Created On:	April 21, 2018
+# Created On:	May 8, 2019
 # Last Changed:	May 8, 2019
-# Purpose:	Generate custom qsub job array submission scripts
+# Purpose:	Generate custom sbatch job array submission scripts
 ################################################################################
 #
 #!/bin/bash
@@ -31,21 +31,21 @@ then
 	TOTAL_TESTS=10
 fi
 
-# Generate the custom qsub scripts.
+# Generate the custom sbatch scripts.
 
-for QSUB_TEMPLATE_INPUT in Axb_random hashtest fibonacci_hashtest
+for SBATCH_TEMPLATE_INPUT in Axb_random hashtest fibonacci_hashtest
 do
 	FINAL=$(( $TOTAL_TESTS * $STEP_SIZE ))
 	JOBCOUNT=$STARTING_TEST_NUMBER
 	while [ $JOBCOUNT -le $FINAL ]
 	do
-		QSUB_TEMPLATE_OUTPUT="qsub-${QSUB_TEMPLATE_INPUT}.$JOBCOUNT.j2"
-		if [ ! -f $PERFORMANCE_TEMPLATE_DIR/$QSUB_TEMPLATE_OUTPUT ]
+		SBATCH_TEMPLATE_OUTPUT="sbatch-${SBATCH_TEMPLATE_INPUT}.$JOBCOUNT.j2"
+		if [ ! -f $PERFORMANCE_TEMPLATE_DIR/$SBATCH_TEMPLATE_OUTPUT ]
 		then
-			cat $PERFORMANCE_TEMPLATE_DIR/qsub_${QSUB_TEMPLATE_INPUT}_template.j2 | sed -e "s/JOBCOUNT/$JOBCOUNT/g" > $PERFORMANCE_TEMPLATE_DIR/$QSUB_TEMPLATE_OUTPUT
-			echo "Generating $QSUB_TEMPLATE_OUTPUT..."
+			cat $PERFORMANCE_TEMPLATE_DIR/sbatch_${SBATCH_TEMPLATE_INPUT}_template.j2 | sed -e "s/JOBCOUNT/$JOBCOUNT/g" > $PERFORMANCE_TEMPLATE_DIR/$SBATCH_TEMPLATE_OUTPUT
+			echo "Generating $SBATCH_TEMPLATE_OUTPUT..."
 		else
-			echo "Found an existing $QSUB_TEMPLATE_OUTPUT..."
+			echo "Found an existing $SBATCH_TEMPLATE_OUTPUT..."
 		fi
 		JOBCOUNT=$(( $JOBCOUNT + $STEP_SIZE ))
 	done
@@ -53,6 +53,6 @@ done
 
 # Cleanup and exit.
 
-echo "Finished generating the custom qsub performance scripts!"
+echo "Finished generating the custom sbatch performance scripts!"
 echo "Exiting..."
 exit 0
