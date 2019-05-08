@@ -2,7 +2,7 @@
 # Name:		config.{{ cluster_name }}
 # Author:	Rodney Marable <rodney.marable@gmail.com>
 # Created On:	April 20, 2019
-# Last Changed: April 23, 2019
+# Last Changed: May 9, 2019
 # Deployed On:	{{ lookup('pipe','date \"+%B %-d, %Y\"') }}
 # Purpose:	ParallelCluster configuration for {{ cluster_name }}
 ################################################################################
@@ -18,6 +18,11 @@ aws_region_name = {{ region }}
 [vpc {{ vpc_name }}]
 vpc_id = {{ vpc_id }}
 master_subnet_id = {{ subnet_id }}
+{% if use_private_compute_subnet == 'true' %}
+compute_subnet_id = {{ private_compute_subnet_id }}
+{% else %}
+compute_subnet_id = {{ subnet_id }}
+{% endif %}
 
 [cluster {{ cluster_name }}]
 base_os = {{ base_os }}
@@ -78,15 +83,16 @@ volume_size = {{ ebs_shared_volume_size }}
 volume_type = {{ ebs_shared_volume_type }}
 
 {% if enable_efs == 'true' %}
-# Todo - investigate using ParallelCluster's native EFS support.
 # Since all EFS configuration is performed through the postinstall script, 
-# leave this stanza intact as it will never actually be used.
-# efs_throughput_node should also remain disabled per the documentation.
+# leaving this stanza intact is fine as it will never actually be used.
+# Native ParallelCluster support for EFS may be enabled in a future release.
 
 [efs {{ efs_settings }}]
 shared_dir = efs
 encrypted = {{ efs_encryption | bool | lower }}
 performance_mode = generalPurpose
+# efs_throughput_node is disabled per the documentation but may be supported
+# in a future release.
 #throughput_mode = provisioned
 #provisioned_throughput = 1024
 {% endif %}

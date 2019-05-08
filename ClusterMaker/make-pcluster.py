@@ -4,7 +4,7 @@
 # Name:		make-pcluster.py
 # Author:	Rodney Marable <rodney.marable@gmail.com>
 # Created On:	April 20, 2019
-# Last Changed:	May 4, 2019
+# Last Changed:	May 9, 2019
 # Purpose:	Python3 wrapper for customizing ParallelCluster stacks
 ################################################################################
 
@@ -92,12 +92,16 @@ parser.add_argument('--turbot_account', '-T', help='Turbot account ID (default =
 parser.add_argument('--ansible_verbosity', '-V', help='Set the Ansible verbosity level (default = none)', required=False, default='')
 parser.add_argument('--debug_mode', '-D', choices=['true', 'false'], help='Enable debug mode (default = false)', required=False, default='false')
 
-# NOTE - deploying compute instances into private subnets is not currently
-# supported so for now, "--use_private_subnet" and "--compute_cidr_subnet"
-# should remain commented out.
+# Ddeploying compute instances into private subnets is not (yet) supported.
+# Set --use_private_compute_subnet" and "--private_compute_cidr_subnet" to
+# "false" and explicitly disable these parser options.
 #
-#parser.add_argument('--use_private_subnet', help='deploy the compute nodes into a nonroutable private network - NOT FULLY TESTED (default = false)', required=False, default='false')
-#parser.add_argument('--compute_cidr_subnet', help='designate a separate CIDR subnet for compute instances - NOT FULLY TESTED (default = false)', required=False, default='false')
+#parser.add_argument('--use_private_compute_subnet', help='deploy the compute nodes into a nonroutable private network - NOT TESTED (default = false)', required=False, default='false')
+#parser.add_argument('--private_compute_cidr_subnet', help='designate a separate CIDR subnet for compute instances - NOT TESTED (default = false)', required=False, default='false')
+
+use_private_compute_subnet = 'false'
+private_compute_cidr_subnet = 'false'
+private_compute_subnet_id = 'false'
 
 # Parse the command used to create this cluster stack.
 
@@ -584,6 +588,9 @@ cluster_parameters = {
     'vpc_id': vpc_id,
     'vpc_name': vpc_name,
     'subnet_id': subnet_id,
+    'use_private_compute_subnet': use_private_compute_subnet,
+    'private_compute_cidr_subnet': private_compute_cidr_subnet,
+    'private_compute_subnet_id': private_compute_subnet_id,
     'cluster_owner': cluster_owner,
     'cluster_owner_email': cluster_owner_email,
     'cluster_owner_department': cluster_owner_department,
@@ -636,17 +643,10 @@ if debug_mode == 'true':
     print('vpc_id = ' + vpc_id)
     print('vpc_name = ' + vpc_name)
     print('subnet_id = ' + subnet_id)
-#
-# NOTE - deploying compute instances into private subnets is not currently
-# supported so for now, "--use_private_subnet" and "--compute_cidr_subnet"
-# should remain commented out.
-#
-# Todo - enable support for private networks.
-#
-#if use_private_subnet:
-#    print('use_private_subnet = " + use_private_subnet)
-#    print('compute_cidr_subnet = " + compute_cidr_subnet)
-#
+    if use_private_compute_subnet == 'true':
+        print('use_private_compute_subnet = ' + use_private_compute_subnet)
+        print('private_compute_cidr_subnet = ' + private_compute_cidr_subnet)
+        print('private_compute_subnet_id = ' + private_compute_subnet_id)
     print('ec2_user = ' + ec2_user)
     print('ec2_user_home = ' + ec2_user_home)
     if enable_external_nfs == 'true':
@@ -703,14 +703,20 @@ compute_instance_type: {compute_instance_type}
 compute_root_volume_size: {compute_root_volume_size}
 hyperthreading: {hyperthreading}
 
-# AWS networking and EC2 instances
+# AWS networking parameters
 
 aws_account_id: {aws_account_id}
 region: {region}
 az: {az}
-subnet_id: {subnet_id}
 vpc_id: {vpc_id}
 vpc_name: {vpc_name}
+subnet_id: {subnet_id}
+use_private_compute_subnet: {use_private_compute_subnet}
+private_compute_cidr_subnet: {private_compute_cidr_subnet}
+private_compute_subnet_id: {private_compute_subnet_id}
+
+# EC2 instance parameters
+
 ec2_keypair: "{{{{ cluster_name }}}}"
 ec2_user: {ec2_user}
 ec2_user_home: {ec2_user_home}
@@ -718,22 +724,6 @@ ec2_user_src: "{{{{ ec2_user_home }}}}/src"
 '''
 
 vars_file_part_2 = '''\
-
-###############################################################################
-# NOTE - deploying compute instances into private subnets is not currently
-# supported so for now, "--use_private_subnet" and "--compute_cidr_subnet"
-# should remain commented out.
-#
-# Do *NOT* enable these features in PROD environments!
-#
-#if use_private_subnet == "true":
-#    print('')
-#    print('use_private_subnet = " + use_private_subnet)
-#    print('compute_vpc_id = " + compute_vpc_id)
-#    print('compute_vpc_name = ' + compute_vpc_name)
-#    print('compute_vpc_subnet = " + compute_vpc_subnet)
-#    print('compute_cidr_subnet = " + compute_cidr_subnet)
-###############################################################################
 
 # Critical directory paths
 
@@ -838,9 +828,12 @@ s3_cluster_data_dir: "cluster_data/{{{{ prod_level }}}}"
 s3_url: https://s3.amazonaws.com/{{{{ s3_bucketname }}}}/cluster_scripts/{{{{ prod_level }}}}
 s3_read_write_resource: arn:aws:s3:::{{{{ s3_bucketname }}}}
 
+# *********************************** WARNING **********************************
+#                Custom Chef recipes are currently unsupported!
+#            Do *NOT* enable these parameters in PROD environments!
+# ******************************************************************************
+#
 # Custom Chef recipe configuration
-# *** WARNING ***
-# This feature is not fully tested.  Do *NOT* enable in PROD environments!
 #
 #custom_cookbook_src: "{{{{ cluster_name }}}}-custom-pcluster-cookbook.tgz"
 #custom_cookbook_s3_dest: "{{{{ custom_cookbook_src }}}}"
@@ -863,16 +856,13 @@ postinstall_s3_dest: "{{{{ cluster_name }}}}-postinstall.sh"
 # HPC performance test configuration
 
 enable_hpc_performance_tests: {enable_hpc_performance_tests}
-Axb_random_src: "{{{{ performance_rootdir }}}}"
-Axb_random_dest: "{{{{ ec2_user_home }}}}/performance/{{{{ cluster_owner }}}}/{{{{ cluster_name }}}}"
-
-# HPC qsub custom performance submission script templates
-
 perftest_custom_start_number: {perftest_custom_start_number}
 perftest_custom_step_size: {perftest_custom_step_size}
 perftest_custom_total_tests: {perftest_custom_total_tests}
+Axb_random_src: "{{{{ performance_rootdir }}}}"
+Axb_random_dest: "{{{{ ec2_user_home }}}}/performance/{{{{ cluster_owner }}}}/{{{{ cluster_name }}}}"
 
-# Ganglia
+# Ganglia support
 
 enable_ganglia: {enable_ganglia}
 '''
@@ -892,11 +882,9 @@ ebs_shared_volume_type: {ebs_shared_volume_type}
 ebs_performance_dir: "{{{{ ebs_root }}}}/performance/{{{{ cluster_owner }}}}/{{{{ cluster_name }}}}"
 
 # Supported shared storage options:
-#   "enable_efs=true" ==> Elastic File System a.k.a. EFS
-#   "enable_external_nfs=true"  ==> External NFS support: direct mounting of 
-# onprem NFS or other alternative cloud storage solutions like EMC Cloudpools,
-# Qumulo File System, NetApp Cloud Volumes, WekaIO, etc.
-#   "enable_fsx=true" ==> FSxL for Lustre
+#   "enable_efs" ==> Elastic File System a.k.a. EFS
+#   "enable_external_nfs  ==> External NFS support: onprem NFS
+#   "enable_fsx ==> FSx for Lustre
 
 enable_efs: {enable_efs}
 enable_external_nfs: {enable_external_nfs}
@@ -934,7 +922,7 @@ external_nfs_hpc_performance_dir: "{{{{ external_nfs_performance }}}}/{{{{ clust
 
 vars_file_fsx = '''\
 
-# FSxL definitions
+# FSx for Lustre (FSxL) definitions
 
 fsx_size: {fsx_size}
 fsx_root: /fsx
