@@ -60,10 +60,26 @@
           ClusterOwner: "{{ cluster_owner }}"
           ClusterOwnerEmail: "{{ cluster_owner_email }}"
           ClusterOwnerDepartment: "{{ cluster_owner_department }}"
-          ProjectID: "{{ project_id }}"
           ProdLevel: "{{ prod_level }}"
           DEPLOYMENT_DATE: "{{ DEPLOYMENT_DATE }}"
 
+    - name: Append the ProjectID tag to s3_bucketname if it is defined
+      s3_bucket:
+        name: "{{ s3_bucketname }}"
+        tags:
+          ClusterID: "{{ cluster_name }}"
+          ClusterStackType: ParallelCluster
+          ClusterOSType: "{{ base_os }}"
+          ClusterScheduler: "{{ scheduler }}"
+          ClusterSerialNumber: "{{ cluster_serial_number }}"
+          ClusterOwner: "{{ cluster_owner }}"
+          ClusterOwnerEmail: "{{ cluster_owner_email }}"
+          ClusterOwnerDepartment: "{{ cluster_owner_department }}"
+          ProjectID: "{{ project_id }}"
+          ProdLevel: "{{ prod_level }}"
+          DEPLOYMENT_DATE: "{{ DEPLOYMENT_DATE }}"
+        when: 'UNDEFINED' not in project_id
+          
     - block:
       - name: Start a timer to record how long it takes to complete all EFS activities for this cluster
         command: date +%Y-%m-%d\ \@\ %H:%M:%S
@@ -105,6 +121,15 @@
           targets:
             - subnet_id: "{{ subnet_id }}"
               security_groups: [ "{{ efs_sg.group_id }}" ]
+      - name: Append the ProjectID tag if it is defined
+        efs:
+          name: efs_pcluster_{{ cluster_name }}
+          state: present
+          tags:
+            ProjectID: "{{ project_id }}"
+          when: 'UNDEFINED' not in project_id
+      - name: Get facts about the newly created EFS file system
+        efs_facts:
       - name: Get facts about the newly created EFS file system
         efs_facts:
           tags:

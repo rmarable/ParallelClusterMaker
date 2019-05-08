@@ -2,7 +2,7 @@
 # Name:		create_fsx_fs.{{ cluster_name }}.sh
 # Author:	Rodney Marable <rodney.marable@gmail.com>
 # Created On:	April 20, 2019
-# Last Changed:	April 28, 2019
+# Last Changed:	May 9, 2019
 # Deployed On:  {{ lookup('pipe','date \"+%B %-d, %Y\"') }}
 # Purpose:	Create an FSx_Lustre file system for {{ cluster_name }}
 ################################################################################
@@ -19,7 +19,7 @@ fsx_fsid=$(aws --region {{ region }} fsx describe-file-systems | jq '.FileSystem
 
 if [[ -z $fsx_fsid ]]
 then
-	fsx_fsid=`aws --region {{ region }} fsx create-file-system --file-system-type LUSTRE --storage-capacity {{ fsx_size }} --subnet-ids {{ subnet_id }} --tags Key=ClusterID,Value={{ cluster_name }} Key=ClusterSerialNumber,Value={{ cluster_serial_number }} Key=ClusterOwner,Value={{ cluster_owner }} Key=ClusterOwnerEmail,Value={{ cluster_owner_email }} Key=ClusterOwnerDepartment,Value={{ cluster_owner_department }} Key=ProjectID,Value={{ project_id }} Key=ProdLevel,Value={{ prod_level }} Key=DEPLOYMENT_DATE,Value=\"{{ DEPLOYMENT_DATE }}\" | grep FileSystemId | awk '{print $2}' | tr -d \" | tr -d ,`
+	fsx_fsid=`aws --region {{ region }} fsx create-file-system --file-system-type LUSTRE --storage-capacity {{ fsx_size }} --subnet-ids {{ subnet_id }} --tags Key=ClusterID,Value={{ cluster_name }} Key=ClusterSerialNumber,Value={{ cluster_serial_number }} Key=ClusterOwner,Value={{ cluster_owner }} Key=ClusterOwnerEmail,Value={{ cluster_owner_email }} Key=ClusterOwnerDepartment,Value={{ cluster_owner_department }}{% if 'UNDEFINED' not in project_id %} Key=ProjectID,Value={{ project_id }}{% endif %} Key=ProdLevel,Value={{ prod_level }} Key=DEPLOYMENT_DATE,Value=\"{{ DEPLOYMENT_DATE }}\" | grep FileSystemId | awk '{print $2}' | tr -d \" | tr -d ,`
 	until [[ `aws --region {{ region }} fsx describe-file-systems --file-system-id ${fsx_fsid} | grep Lifecycle | awk '{print $2}' | tr -d '[:punct:]'` == "AVAILABLE" ]]
 	do
 		echo "Still waiting @ `date`..."
