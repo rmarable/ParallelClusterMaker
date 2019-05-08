@@ -82,7 +82,7 @@ parser.add_argument('--efs_encryption', choices=['true', 'false'], help='enable 
 parser.add_argument('--efs_performance_mode', choices=['make', 'mpi', 'smp'], help='select the EFS performance mode (default = general_purpose)', required=False, default='general_purpose')
 parser.add_argument('--enable_fsx', choices=['true', 'false'], help='enable Amazon FSxL for Lustre (default = false)', required=False, default='false')
 parser.add_argument('--fsx_size', help='size of the Lustre file system in GB (default = 3600)', required=False, default=3600)
-parser.add_argument('--project_id', help='project name or ID number (default = UNDEFINED)', required=false, default='UNDEFINED')
+parser.add_argument('--project_id', help='project name or ID number (default = UNDEFINED)', required=False, default='UNDEFINED')
 parser.add_argument('--cluster_owner_department', choices=['analytics', 'clinical', 'commercial', 'compbio', 'compchem', 'datasci', 'design', 'development', 'hpc', 'imaging', 'manufacturing', 'medical', 'modeling', 'operations', 'proteomics', 'robotics', 'qa', 'research', 'scicomp'], help='department of the cluster_owner (default = hpc)', required=False, default='hpc')
 parser.add_argument('--enable_hpc_performance_tests', choices=['true', 'false'], help='enable the HPC performance tests Axb_random, hashtest, and hashtest_fibonacci under the ec2_user account on the master instance (default = true)', required=False, default='false')
 parser.add_argument('--enable_ganglia', choices=['true', 'false'], help='enable Ganglia on the master instance', required=False, default='false')
