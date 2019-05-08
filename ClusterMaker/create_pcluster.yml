@@ -2,7 +2,7 @@
 # Name:		create_pcluster.yml
 # Author:	Rodney Marable <rodney.marable@gmail.com>
 # Created On:	April 20, 2019
-# Last Changed:	May 8, 2019
+# Last Changed:	May 9, 2019
 # Purpose:	Ansible playbook to create new ParallelCluster stacks
 ################################################################################
 
@@ -51,7 +51,6 @@
     - name: Create s3_bucketname to support this cluster
       s3_bucket:
         name: "{{ s3_bucketname }}"
-        #name: "parallelcluster-{{ region }}-{{ cluster_name }}-{{ serial_datestamp }}"
         tags:
           ClusterID: "{{ cluster_name }}"
           ClusterStackType: ParallelCluster
@@ -61,6 +60,7 @@
           ClusterOwner: "{{ cluster_owner }}"
           ClusterOwnerEmail: "{{ cluster_owner_email }}"
           ClusterOwnerDepartment: "{{ cluster_owner_department }}"
+          ProjectID: "{{ project_id }}"
           ProdLevel: "{{ prod_level }}"
           DEPLOYMENT_DATE: "{{ DEPLOYMENT_DATE }}"
 
@@ -98,6 +98,7 @@
             ClusterOwnerEmail: "{{ cluster_owner_email }}"
             ClusterOwnerDepartment: "{{ cluster_owner_department }}"
             Encryption: "{{ efs_encryption }}"
+            ProjectID: "{{ project_id }}"
             ProdLevel: "{{ prod_level }}"
             DEPLOYMENT_DATE: "{{ DEPLOYMENT_DATE }}"
             status: active

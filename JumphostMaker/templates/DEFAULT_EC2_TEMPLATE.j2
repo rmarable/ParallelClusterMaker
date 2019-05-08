@@ -2,7 +2,7 @@
 # Name:		{{ instance_name }}.tf
 # Author:	Rodney Marable <rodney.marable@gmail.com>
 # Created On:	April 16, 2019
-# Last Changed:	April 20, 2019
+# Last Changed:	May 9, 2019
 # Deployed On:	{{ lookup('pipe','date \"+%B %-d, %Y\"') }}
 # Purpose:	Terraform template for {{ instance_name }}
 ################################################################################
@@ -29,6 +29,9 @@ resource "aws_instance"  "{{ instance_name }}" {
     InstanceOwner           = "{{ instance_owner }}"
     InstanceOwnerEmail      = "{{ instance_owner_email }}"
     InstanceOwnerDepartment = "{{ instance_owner_department }}"
+{% if 'UNDEFINED' not in project_id %}
+    ProjectID               = "{{ project_id }}"
+{% endif %}
     DEPLOYMENT_DATE         = "{{ DEPLOYMENT_DATE }}"
   }
   volume_tags {

@@ -82,6 +82,7 @@ parser.add_argument('--efs_encryption', choices=['true', 'false'], help='enable 
 parser.add_argument('--efs_performance_mode', choices=['make', 'mpi', 'smp'], help='select the EFS performance mode (default = general_purpose)', required=False, default='general_purpose')
 parser.add_argument('--enable_fsx', choices=['true', 'false'], help='enable Amazon FSxL for Lustre (default = false)', required=False, default='false')
 parser.add_argument('--fsx_size', help='size of the Lustre file system in GB (default = 3600)', required=False, default=3600)
+parser.add_argument('--project_id', help='project name or ID number (default = UNDEFINED)', required=false, default='UNDEFINED')
 parser.add_argument('--cluster_owner_department', choices=['analytics', 'clinical', 'commercial', 'compbio', 'compchem', 'datasci', 'design', 'development', 'hpc', 'imaging', 'manufacturing', 'medical', 'modeling', 'operations', 'proteomics', 'robotics', 'qa', 'research', 'scicomp'], help='department of the cluster_owner (default = hpc)', required=False, default='hpc')
 parser.add_argument('--enable_hpc_performance_tests', choices=['true', 'false'], help='enable the HPC performance tests Axb_random, hashtest, and hashtest_fibonacci under the ec2_user account on the master instance (default = true)', required=False, default='false')
 parser.add_argument('--enable_ganglia', choices=['true', 'false'], help='enable Ganglia on the master instance', required=False, default='false')
@@ -148,6 +149,7 @@ max_vcpus = args.max_vcpus
 min_vcpus = args.min_vcpus
 placement_group = args.placement_group
 prod_level = args.prod_level
+project_id = args.project_id
 region = az[:-1]
 scaledown_idletime = args.scaledown_idletime
 scheduler = args.scheduler
@@ -412,6 +414,11 @@ p_val('cluster_owner_department', debug_mode)
 p_val('cluster_serial_number', debug_mode)
 p_val('cluster_serial_number_file', debug_mode)
 
+# Validate the project_id if it was provided.
+
+if project_id != 'UNDEFINED':
+    p_val('project_id', debug_mode)
+
 # Perform error checking on master_instance_type and compute_instance_type
 # to ensure supported EC2 instance types were selected.
 
@@ -594,6 +601,7 @@ cluster_parameters = {
     'cluster_owner': cluster_owner,
     'cluster_owner_email': cluster_owner_email,
     'cluster_owner_department': cluster_owner_department,
+    'project_id': project_id,
     'perftest_custom_start_number': perftest_custom_start_number,
     'perftest_custom_step_size': perftest_custom_step_size,
     'perftest_custom_total_tests': perftest_custom_total_tests,
@@ -662,6 +670,8 @@ if debug_mode == 'true':
     print('cluster_owner = ' + cluster_owner)
     print('cluster_owner_email = ' + cluster_owner_email)
     print('cluster_owner_department = ' + cluster_owner_department)
+    if project_id != 'UNDEFINED':
+        print('project_id = ' + project_id)
     if enable_hpc_performance_tests:
         print('enable_hpc_performance_tests = ' + enable_hpc_performance_tests)
         print('perftest_custom_start_number = ' + str(perftest_custom_start_number))
@@ -688,6 +698,7 @@ vars_file_part_1 = '''\
 cluster_owner: {cluster_owner}
 cluster_owner_department: {cluster_owner_department}
 cluster_owner_email: {cluster_owner_email}
+project_id: {project_id}
 prod_level: {prod_level}
 serial_datestamp: {serial_datestamp}
 cluster_serial_number_file: {cluster_serial_number_file}

@@ -49,6 +49,7 @@ parser.add_argument('--instance_owner_email', '-E', help='email address of the p
 # Set reasonable defaults for anything that is not explicitly defined.
 
 parser.add_argument('--instance_owner_department', choices=['analytics', 'clinical', 'cloudteam', 'commercial', 'compbio', 'compchem', 'datasci', 'design', 'development', 'finance', 'hpc', 'imaging', 'infrastructure', 'manufacturing', 'medical', 'modeling', 'operations', 'proteomics', 'robotics', 'qa', 'research', 'scicomp', 'security', 'validated'], help='department of the instance_owner (default = hpc)', required=False, default='hpc')
+parser.add_argument('--project_id', help='project name or ID number (default = UNDEFINED)', required=false, default='UNDEFINED')
 parser.add_argument('--security_group', '-S', help='primary security group for the EC2 pcluster-jumphost (default = pcluster_jumphost)', required=False, default='pcluster_jumphost')
 parser.add_argument('--turbot_account', '-T', help='Turbot account ID (default = abd).  Set to "disabled" in non-Turbot environments.', required=False, default='disabled')
 parser.add_argument('--ansible_verbosity', '-V', help='Set the Ansible verbosity level (default = none)', required=False, default='')
@@ -64,6 +65,7 @@ instance_name = args.instance_name
 instance_owner = args.instance_owner
 instance_owner_email = args.instance_owner_email
 instance_owner_department = args.instance_owner_department
+project_id = args.project_id
 region = az[:-1]
 security_group = args.security_group
 turbot_account = args.turbot_account
@@ -377,6 +379,7 @@ instance_parameters = {
     'instance_root_volume_size': instance_root_volume_size,
     'instance_serial_number': instance_serial_number,
     'instance_serial_number_file': instance_serial_number_file,
+    'project_id': project_id,
     'region': region,
     'security_group': security_group,
     'vpc_security_group_ids': vpc_security_group_ids,
@@ -411,6 +414,8 @@ if debug_mode == 'true':
     print('instance_owner = ' + instance_owner)
     print('instance_owner_email = ' + instance_owner_email)
     print('instance_owner_department = ' + instance_owner_department)
+    if project_id != 'UNDEFINED':
+        print('project_id = ' + project_id)
     print('instance_root_volume_size = ' + str(instance_root_volume_size) + ' GB')
     print('region = ' + region)
     print('az = ' + az)
@@ -476,6 +481,7 @@ ec2_user_src: "{{{{ ec2_user_home }}}}/src"
 instance_owner: {instance_owner}
 instance_owner_email: {instance_owner_email}
 instance_owner_department: {instance_owner_department}
+project_id: {project_id}
 instance_serial_number: {instance_serial_number}
 instance_serial_number_file: {instance_serial_number_file}
 DEPLOYMENT_DATE: {DEPLOYMENT_DATE}
