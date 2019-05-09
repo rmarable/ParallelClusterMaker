@@ -24,15 +24,15 @@ from botocore.exceptions import ClientError
 from nested_lookup import nested_lookup
 
 # Import some external lists and functions.
-# Source: jumphost_aux_data.py
+# Source: jumphostmaker_aux_data.py
 
-from jumphost_aux_data import add_security_group_rule
-from jumphost_aux_data import get_ami_info
-from jumphost_aux_data import illegal_az_msg
-from jumphost_aux_data import p_val
-from jumphost_aux_data import p_fail
-from jumphost_aux_data import print_AbortHeader
-from jumphost_aux_data import print_TextHeader
+from jumphostmaker_aux_data import add_security_group_rule
+from jumphostmaker_aux_data import get_ami_info
+from jumphostmaker_aux_data import illegal_az_msg
+from jumphostmaker_aux_data import p_val
+from jumphostmaker_aux_data import p_fail
+from jumphostmaker_aux_data import ctrlC_Abort
+from jumphostmaker_aux_data import print_TextHeader
 
 # Parse input from the command line.
 
@@ -532,6 +532,11 @@ print(vars_file_main_part.format(**instance_parameters), file = open(vars_file_p
 print('Saved ' + instance_name + ' build template: ' + vars_file_path)
 print('')
 
+# Increase Ansible verbosity when debug_mode is enabled.
+
+if debug_mode == 'true':
+    ansible_verbosity = '-vvv'
+
 # Generate the EC2 instance and security group templates using Ansible.
 # Abort if CTRL-C is typed within 5 seconds.
 
@@ -546,7 +551,7 @@ subprocess.run(cmd_string, shell=True)
 # Create the new EC2 pcluster jumphost and security group with Terraform.
 # Abort if CTRL-C is typed within 5 seconds.
 
-print_AbortHeader(5, 80)
+ctrlC_Abort(5, 80, vars_file_path, instance_serial_number_file)
 print('Invoking Terraform to build ' + instance_name + '...')
 
 subprocess.run('terraform init -input=false', shell=True, cwd=instance_data_dir)

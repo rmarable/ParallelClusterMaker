@@ -1,8 +1,8 @@
 ################################################################################
-# Name:		jumphost_aux_data.py
+# Name:		jumphostmaker_aux_data.py
 # Author:	Rodney Marable <rodney.marable@gmail.com>
 # Created On:	April 16, 2019
-# Last Changed:	April 16, 2019
+# Last Changed:	May 9, 2019
 # Purpose:	Data structures and functions for make-pcluster-jumphost.py
 ################################################################################
 
@@ -119,7 +119,7 @@ def p_val(p, debug_mode):
 def p_fail(p, q, r):
     import sys
     import textwrap
-    print("")
+    print('')
     print("*** Error ***")
     if r == 'missing_element':
         print('"' + p + '"' + ' seems to be missing as a valid ' + q + '.')
@@ -128,7 +128,7 @@ def p_fail(p, q, r):
         print("Supported values:")
         r = '\t'.join(r)
         print('\n'.join(textwrap.wrap(r, 78)))
-    print("")
+    print('')
     print("Aborting...")
     sys.exit(1)
 
@@ -137,25 +137,36 @@ def p_fail(p, q, r):
 # of instance_parameters.
 
 def print_TextHeader(p, action, line_length):
-    print("")
+    print('')
     print(''.center(line_length, '-'))
     T2C = action + ' parameter values for ' + p
     print(T2C.center(line_length))
     print(''.center(line_length, '-'))
 
-# Function: print_AbortHeader()
-# Purpose: print a header inviting the user to abort a proposed script action
+# Function: ctrlC_Abort()
+# Purpose: Print an abort header, capture CTRL-C when pressed, and remove any
+# orphaned state and config files created by the jumphost creation script.
 
-def print_AbortHeader(sleep_time, line_length):
+def ctrlC_Abort(sleep_time, line_length, vars_file_path, instance_serial_number_file):
+    import os
     import sys
     import time
-    print("")
+    print('')
     print(''.center(line_length, '#'))
-    print('  Please type CTRL-C within 5 seconds to abort  '.center(line_length, '#'))
+    print('    Please type CTRL-C within 5 seconds to abort    '.center(line_length, '#'))
     print(''.center(line_length, '#'))
-    print("")
+    print('')
     try:
         time.sleep(sleep_time)
     except KeyboardInterrupt:
-        print(" Aborting...")
+        if (vars_file_path == 1) and (cluster_serial_number_file == 1):
+            pass
+        else:
+            os.remove(instance_serial_number_file)
+            os.remove(vars_file_path)
+            print('')
+            print('Removed: ' + instance_serial_number_file)
+            print('Removed: ' + vars_file_path)
+            print('')
+        print('Aborting...')
         sys.exit(1)

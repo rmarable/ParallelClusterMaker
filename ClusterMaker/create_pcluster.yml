@@ -62,6 +62,7 @@
           ClusterOwnerDepartment: "{{ cluster_owner_department }}"
           ProdLevel: "{{ prod_level }}"
           DEPLOYMENT_DATE: "{{ DEPLOYMENT_DATE }}"
+      when: '"UNDEFINED" in project_id'
 
     - name: Append the ProjectID tag to s3_bucketname if it is defined
       s3_bucket:
@@ -78,7 +79,7 @@
           ProjectID: "{{ project_id }}"
           ProdLevel: "{{ prod_level }}"
           DEPLOYMENT_DATE: "{{ DEPLOYMENT_DATE }}"
-        when: 'UNDEFINED' not in project_id
+      when: '"UNDEFINED" not in project_id'
           
     - block:
       - name: Start a timer to record how long it takes to complete all EFS activities for this cluster
@@ -127,7 +128,7 @@
           state: present
           tags:
             ProjectID: "{{ project_id }}"
-          when: 'UNDEFINED' not in project_id
+          when: '"UNDEFINED" not in project_id'
       - name: Get facts about the newly created EFS file system
         efs_facts:
       - name: Get facts about the newly created EFS file system

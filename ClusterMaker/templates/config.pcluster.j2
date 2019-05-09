@@ -70,7 +70,7 @@ placement = compute
 s3_read_write_resource = {{ s3_read_write_resource }}/*
 pre_install = https://s3.amazonaws.com/{{ s3_bucketname }}/{{ s3_script_path }}/{{ preinstall_s3_dest }}
 post_install = https://s3.amazonaws.com/{{ s3_bucketname }}/{{ s3_script_path }}/{{ postinstall_s3_dest }}
-tags = {"ClusterID" : "{{ cluster_name }}", "ClusterStackType" : "ParallelCluster", "ClusterOSType" : "{{ base_os }}", "ClusterScheduler" : "{{ scheduler }}", "ClusterSerialNumber" : "{{ cluster_serial_number }}", "ClusterOwner" : "{{ cluster_owner }}", "ClusterOwnerEmail" : "{{ cluster_owner_email }}", "ClusterOwnerDepartment" : "{{ cluster_owner_department }}",{% if 'UNDEFINED' not in project_id %} ProjectID" : "{{ project_id }}",{% endif } "ProdLevel" : "{{ prod_level }}", "DEPLOYMENT_DATE" : "{{ DEPLOYMENT_DATE }}"}
+tags = {"ClusterID" : "{{ cluster_name }}", "ClusterStackType" : "ParallelCluster", "ClusterOSType" : "{{ base_os }}", "ClusterScheduler" : "{{ scheduler }}", "ClusterSerialNumber" : "{{ cluster_serial_number }}", "ClusterOwner" : "{{ cluster_owner }}", "ClusterOwnerEmail" : "{{ cluster_owner_email }}", "ClusterOwnerDepartment" : "{{ cluster_owner_department }}",{% if 'UNDEFINED' not in project_id %} "ProjectID" : "{{ project_id }}",{% endif %} "ProdLevel" : "{{ prod_level }}", "DEPLOYMENT_DATE" : "{{ DEPLOYMENT_DATE }}"}
 
 [scaling {{ scaling_settings }}]
 scaledown_idletime = {{ scaledown_idletime }}

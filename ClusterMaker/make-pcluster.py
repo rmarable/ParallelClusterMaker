@@ -24,17 +24,17 @@ from requests.exceptions import ConnectionError
 from validate_email import validate_email
 
 # Import the list of supported EC2 instances and some external functions.
-# Source: clustermaker_aux_data.py
+# Source: parallelparallelclustermaker_aux_data.py
 
-from clustermaker_aux_data import default_instance_types
-from clustermaker_aux_data import ec2_instances_full_list
-from clustermaker_aux_data import illegal_az_msg
-from clustermaker_aux_data import is_number
-from clustermaker_aux_data import p_val
-from clustermaker_aux_data import p_fail
-from clustermaker_aux_data import print_AbortHeader
-from clustermaker_aux_data import print_TextHeader
-from clustermaker_aux_data import S3Prefix
+from parallelclustermaker_aux_data import default_instance_types
+from parallelclustermaker_aux_data import ec2_instances_full_list
+from parallelclustermaker_aux_data import illegal_az_msg
+from parallelclustermaker_aux_data import is_number
+from parallelclustermaker_aux_data import p_val
+from parallelclustermaker_aux_data import p_fail
+from parallelclustermaker_aux_data import ctrlC_Abort
+from parallelclustermaker_aux_data import print_TextHeader
+from parallelclustermaker_aux_data import S3Prefix
 
 # Parse input from the command line.
 
@@ -168,7 +168,7 @@ turbot_account = args.turbot_account
 
 # Set master_instance_type and compute_instance_type to the default values if
 # no specific instance_type was provided.  Change these values by editing the
-# default_instance_types dictionary defined in clustermaker_aux_data.
+# default_instance_types dictionary defined in parallelclustermaker_aux_data.
 
 if scheduler != 'awsbatch':
     if master_instance_type == 'default':
@@ -527,9 +527,13 @@ if cluster_type == 'ondemand':
     print('')
     spot_price = 'undefined'
 elif cluster_type == 'spot':
-    prices=ec2client.describe_spot_price_history(InstanceTypes=[compute_instance_type],MaxResults=1,ProductDescriptions=['Linux/UNIX (Amazon VPC)'],AvailabilityZone=az)
-    raw_spot_price = float(prices['SpotPriceHistory'][0]['SpotPrice'])
-    spot_price = round(raw_spot_price + ((1 / 3) * raw_spot_price), 8)
+    if compute_instance_type != 'optimal':
+        prices=ec2client.describe_spot_price_history(InstanceTypes=[compute_instance_type],MaxResults=1,ProductDescriptions=['Linux/UNIX (Amazon VPC)'],AvailabilityZone=az)
+        raw_spot_price = float(prices['SpotPriceHistory'][0]['SpotPrice'])
+        spot_price = round(raw_spot_price + ((1 / 3) * raw_spot_price), 8)
+    else:
+        raw_spot_price = 'UNDEFINED'
+        spot_price = 'UNDEFINED'
     p_val('cluster_type', debug_mode)
     print('')
     print('Selected spot instances')
@@ -1078,8 +1082,25 @@ vars_file_grand_final = vars_file_shared_storage
 
 print(vars_file_grand_final.format(**cluster_parameters), file = open(vars_file_path, 'w'))
 
-# Create the new cluster stack using the create_pcluster Ansible playbook.
-# Abort if CTRL-C is typed within 5 seconds.
+# Parse the Python3 interpreter path to ensure ParallelCluster stacks can be
+# created from either OSX or an EC2 jumphost.
+
+python3_path = subprocess.run(['which','python3'], stdout=subprocess.PIPE).stdout.decode('utf8').rstrip()
+
+# Increase Ansible verbosity when debug_mode is enabled.
+
+if debug_mode == 'true':
+    ansible_verbosity = '-vvv'
+
+# Generate the cluster build command string.  Don't include the external NFS
+# server if that functionality is not explicitly enabled by the operator.
+
+if enable_external_nfs == 'false':
+    build_cmd_string = 'ansible-playbook --extra-vars ' + '"' + 'cluster_name=' + cluster_name + ' cluster_birth_name=' + cluster_birth_name + ' cluster_serial_number=' + cluster_serial_number + ' enable_hpc_performance_tests=' + enable_hpc_performance_tests + ' enable_efs=' + enable_efs + ' enable_external_nfs=false' + ' enable_fsx=' + enable_fsx + ' ansible_python_interpreter=' + python3_path + '"' + ' create_pcluster.yml ' + ansible_verbosity
+else:
+    build_cmd_string = 'ansible-playbook --extra-vars ' + '"' + 'cluster_name=' + cluster_name + ' cluster_birth_name=' + cluster_birth_name + ' cluster_serial_number=' + cluster_serial_number + ' enable_hpc_performance_tests=' + enable_hpc_performance_tests + ' enable_efs=' + enable_efs + ' enable_external_nfs=true' + ' external_nfs_server=' + external_nfs_server + ' enable_fsx=' + enable_fsx + ' ansible_python_interpreter=' + python3_path + '"' + ' create_pcluster.yml ' + ansible_verbosity
+
+# Print the config file location and cluster build commands to the console.
 
 print('')
 print('View the configuration file for cluster ' + cluster_name + ':')
@@ -1088,30 +1109,20 @@ print('')
 print('Ready to execute:')
 print('$ ' + cluster_build_command)
 print('')
-
-# Parse the Python3 interpreter path to ensure ParallelCluster stacks can be
-# created from either OSX or an EC2 jumphost.
-
-python3_path = subprocess.run(['which','python3'], stdout=subprocess.PIPE).stdout.decode('utf8').rstrip()
-
-# Generate the build command string.  For conciseness, don't include the
-# external NFS server if that functionality was not enabled by the operator.
-
-if enable_external_nfs == 'false':
-    build_cmd_string = 'ansible-playbook --extra-vars ' + '"' + 'cluster_name=' + cluster_name + ' cluster_birth_name=' + cluster_birth_name + ' cluster_serial_number=' + cluster_serial_number + ' enable_hpc_performance_tests=' + enable_hpc_performance_tests + ' enable_efs=' + enable_efs + ' enable_external_nfs=false' + ' enable_fsx=' + enable_fsx + ' ansible_python_interpreter=' + python3_path + '"' + ' create_pcluster.yml ' + ansible_verbosity
-else:
-    build_cmd_string = 'ansible-playbook --extra-vars ' + '"' + 'cluster_name=' + cluster_name + ' cluster_birth_name=' + cluster_birth_name + ' cluster_serial_number=' + cluster_serial_number + ' enable_hpc_performance_tests=' + enable_hpc_performance_tests + ' enable_efs=' + enable_efs + ' enable_external_nfs=true' + ' external_nfs_server=' + external_nfs_server + ' enable_fsx=' + enable_fsx + ' ansible_python_interpreter=' + python3_path + '"' + ' create_pcluster.yml ' + ansible_verbosity
-
 print('Preparing to build cluster "' + cluster_name + '" using this command:')
 print('$ ' + build_cmd_string)
-print_AbortHeader(5, 80)
+
+# Exit the script and cleanup any orphaned state files if the operator types
+# 'CTRL-C' within 5 seconds after the abort header is displayed.
+
+ctrlC_Abort(5, 80, vars_file_path, cluster_sserial_number_file)
+
+# Create the new cluster stack using the create_pcluster Ansible playbook.
 
 subprocess.run(build_cmd_string, shell=True)
 
 # Append make-pcluster.py command line and the Ansible playbook command used
 # to build the stack to the cluster_serial_number file.
-# NOTE - the create_pcluster playbook handles appending cluster_start_time
-# and cluster_end_time to cluster_serial_file.
 
 print(build_cmd_string, file=open(cluster_serial_number_file, 'a'))
 print(cluster_build_command, file=open(cluster_serial_number_file, 'a'))

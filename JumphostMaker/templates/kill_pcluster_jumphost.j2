@@ -2,7 +2,7 @@
 # Name:		kill_pcluster_jumphost.{{ instance_name }}.sh
 # Author:	Rodney Marable <rodney.marable@gmail.com>
 # Created On:	April 20, 2019
-# Last Changed:	May 1, 2019
+# Last Changed:	May 9, 2019
 # Deployed On:	{{ lookup('pipe','date \"+%B %-d, %Y\"') }}
 # Purpose:	Destroy pcluster-jumphost {{ instance_name }}
 ###############################################################################
@@ -81,17 +81,20 @@ echo "Deleted IAM role: {{ iam_instance_role }}"
 
 for file in {{ vars_file_path }} {{ instance_serial_number_file }}
 do
-	rm $file
-	echo "Deleted file: $file"
+	if [ -f $file ]
+	then
+		rm $file
+		echo "Deleted file: $file"
+	fi
 done
 unlink kill-pcluster-jumphost.{{ instance_name }}.sh
 
 # Cleanup and exit.
 
 echo ""
-echo "#########################################################################"
+echo "###############################################################################"
 echo "Finished deleting EC2 jumphost: {{ instance_name }}"
-echo "#########################################################################"
+echo "###############################################################################"
 echo ""
 echo "Exiting..."
 echo ""

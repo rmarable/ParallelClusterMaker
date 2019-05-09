@@ -4,7 +4,7 @@
 # Name:		kill-pcluster.py
 # Author:	Rodney Marable <rodney.marable@gmail.com>
 # Created On:   April 20, 2019
-# Last Changed: May 8, 2019
+# Last Changed: May 9, 2019
 # Purpose:	Python3 wrapper for deleting custom pcluster stacks
 ################################################################################
 
@@ -23,9 +23,9 @@ from nested_lookup import nested_lookup
 # Import some external lists and functions.
 # Source: clustermaker_aux_data.py
 
-from clustermaker_aux_data import p_val
-from clustermaker_aux_data import print_AbortHeader
-from clustermaker_aux_data import print_TextHeader
+from parallelclustermaker_aux_data import p_val
+from parallelclustermaker_aux_data import ctrlC_Abort
+from parallelclustermaker_aux_data import print_TextHeader
 
 # Set the Ansible verbosity.
 # Todo - consider making this a command line switch.
@@ -148,9 +148,16 @@ cluster_serial_number = open(cluster_serial_number_file).readline().rstrip("\n")
 
 python3_path = subprocess.run(['which','python3'], stdout=subprocess.PIPE).stdout.decode('utf8').rstrip()
 
-# Delete the cluster stack.
+# Increase Ansible verbosity when debug_mode is enabled.
+
+if debug_mode == 'true':
+    ansible_verbosity = '-vvv'
+
+# Generate the command string that will delete the cluster stack.
 
 destroy_cmd_string = 'ansible-playbook --extra-vars ' + '"' + 'cluster_name=' + cluster_name + ' cluster_birth_name=' + cluster_birth_name + ' cluster_serial_number=' + cluster_serial_number + ' delete_s3_bucketname=' + delete_s3_bucketname + ' delete_efs=' + delete_efs + ' delete_fsx=' + delete_fsx + ' ansible_python_interpreter=' + python3_path + '"' + ' delete_pcluster.yml ' + ansible_verbosity
+
+# Print the cluster destroy commands to the console.
 
 print('')
 print('Ready to execute:')
@@ -159,7 +166,13 @@ print('')
 print('Preparing to delete cluster "' + cluster_name + '" using this command:')
 print('$ ' + destroy_cmd_string)
 
-print_AbortHeader(5, 80)
+# Exit the script if the operator types 'CTRL-C' within 5 seconds after the
+# abort header is displayed.
+
+ctrlC_Abort(5, 80, 1, 1)
+
+# Delete the cluster stack using the delete_pcluster Ansible playbook.
+
 subprocess.run(destroy_cmd_string, shell=True)
 
 # Delete cluster_serial_number_file and vars_file_path.
