@@ -2,7 +2,7 @@
 # Name:		create_pcluster.yml
 # Author:	Rodney Marable <rodney.marable@gmail.com>
 # Created On:	April 20, 2019
-# Last Changed:	May 9, 2019
+# Last Changed:	May 10, 2019
 # Purpose:	Ansible playbook to create new ParallelCluster stacks
 ################################################################################
 
@@ -17,6 +17,7 @@
   vars:
     - local_homedir: "{{ lookup('env','HOME') }}"
     - local_workingdir: "{{ lookup('pipe','pwd') }}"
+    - local_os: "{{ lookup('pipe','uname') }}"
 
   tasks:
     - name: Start a timer for the cluster environment build process

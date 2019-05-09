@@ -2,15 +2,21 @@
 # Name:		config.{{ cluster_name }}
 # Author:	Rodney Marable <rodney.marable@gmail.com>
 # Created On:	April 20, 2019
-# Last Changed: May 9, 2019
+# Last Changed: May 10, 2019
 # Deployed On:	{{ lookup('pipe','date \"+%B %-d, %Y\"') }}
 # Purpose:	ParallelCluster configuration for {{ cluster_name }}
 ################################################################################
 
 [global]
 cluster_template = {{ cluster_name }}
-sanity_check = true
 update_check = true
+{% if scheduler == 'awsbatch' %}
+{% if local_os == 'Darwin' %}
+sanity_check = true
+{% else %}
+sanity_check = false
+{% endif %}
+{% endif %}
 
 [aws]
 aws_region_name = {{ region }}
