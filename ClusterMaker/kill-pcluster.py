@@ -68,7 +68,7 @@ debug_mode = args.debug_mode
 # Print a header for cluster variable validation.
 
 if debug_mode == 'true':
-    print_TextHeader(cluster_owner + '-' + cluster_name, 'Validating', 80)
+    print_TextHeader(cluster_owner + '-' + cluster_name, 'Validating cluster parameter values', 80)
 
 # Perform error checking on the selected AWS Region and Availability Zone.
 # Abort if a non-existent Availability Zone was chosen.

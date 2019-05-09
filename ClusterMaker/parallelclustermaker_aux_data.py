@@ -100,10 +100,10 @@ def ctrlC_Abort(sleep_time, line_length, vars_file_path, cluster_serial_number_f
 # Purpose: Print a centered text header to support validation and reviewing
 # of cluster_parameters.
 
-def print_TextHeader(p, action, line_length):
+def print_TextHeader(cluster_name, header, line_length):
     print('')
     print(''.center(line_length, '-'))
-    T2C = action + ' parameter values for ' + p
+    T2C = header +' for ' + cluster_name
     print(T2C.center(line_length))
     print(''.center(line_length, '-'))
 

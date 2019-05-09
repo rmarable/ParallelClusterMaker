@@ -4,7 +4,7 @@
 # Name:		make-pcluster.py
 # Author:	Rodney Marable <rodney.marable@gmail.com>
 # Created On:	April 20, 2019
-# Last Changed:	May 9, 2019
+# Last Changed:	May 10, 2019
 # Purpose:	Python3 wrapper for customizing ParallelCluster stacks
 ################################################################################
 
@@ -213,7 +213,7 @@ except OSError as e:
 # Print a header for cluster variable validation.
 
 if debug_mode == 'true':
-    print_TextHeader(cluster_owner + '-' + cluster_name, 'Validating', 80)
+    print_TextHeader(cluster_owner + '-' + cluster_name, 'Validating cluster parameters', 80)
     print('')
     print('Performing parameter validation...')
     print('')
@@ -522,11 +522,12 @@ p_val('base_os', debug_mode)
 
 if cluster_type == 'ondemand':
     p_val('cluster_type', debug_mode)
-    print('	Selected On-Demand instances')
-    print('	*Hint* ==> using spot instances can lead to *BIG* cost savings!!!')
+    print('	On-Demand instances were selected')
+    print('	*Hint* ==> spot instances are more cost-effective for HPC!!')
     print('')
     spot_price = 'undefined'
 elif cluster_type == 'spot':
+    p_val('cluster_type', debug_mode)
     if compute_instance_type != 'optimal':
         prices=ec2client.describe_spot_price_history(InstanceTypes=[compute_instance_type],MaxResults=1,ProductDescriptions=['Linux/UNIX (Amazon VPC)'],AvailabilityZone=az)
         raw_spot_price = float(prices['SpotPriceHistory'][0]['SpotPrice'])
@@ -534,10 +535,7 @@ elif cluster_type == 'spot':
     else:
         raw_spot_price = 'UNDEFINED'
         spot_price = 'UNDEFINED'
-    p_val('cluster_type', debug_mode)
-    print('')
-    print('Selected spot instances')
-    p_val(' spot_price', debug_mode)
+    p_val('spot_price', debug_mode)
 else:
     p_fail(cluster_type, 'cluster_type', cluster_type_allowed)
 
@@ -616,40 +614,23 @@ cluster_parameters = {
 # Print the current values of all validated cluster_parameters to the console.
 
 if debug_mode == 'true':
-    print_TextHeader(cluster_name, 'Setting', 80)
+    print_TextHeader(cluster_name, 'Displaying cluster parameter values', 80)
     print('cluster_name = ' + cluster_name)
     if cluster_lifetime:
         print('cluster_lifetime (days:hours:minutes) = ' + str(cluster_lifetime))
     print('cluster_serial_number = ' + cluster_serial_number)
     print('cluster_type = ' + cluster_type)
     if cluster_type == 'spot':
-        print('spot_price = $' + str(spot_price) + ' per hour')
+        if 'UNDEFINED' not in spot_price:
+            print('spot_price = $' + str(spot_price) + ' per hour')
     if placement_group != 'NONE':
         print('placement_group = ' + placement_group)
     print('prod_level = ' + prod_level)
     print('base_os = ' + base_os)
+    print('ec2_user = ' + ec2_user)
+    print('ec2_user_home = ' + ec2_user_home)
     if custom_ami != 'NONE':
         print('custom_ami = ' + custom_ami)
-    print('master_instance_type = ' + master_instance_type)
-    print('master_root_volume_size = ' + str(master_root_volume_size) + ' GB')
-    print('compute_root_volume_size = ' + str(compute_root_volume_size) + ' GB')
-    print('ebs_shared_dir = ' + ebs_shared_dir)
-    print('ebs_shared_volume_size = ' + str(ebs_shared_volume_size) + ' GB')
-    print('ebs_shared_volume_type = ' + str(ebs_shared_volume_type))
-    print('ebs_encryption = ' + str(ebs_encryption))
-    print('s3_bucketname = s3://' + s3_bucketname)
-    print('hyperthreading = ' + hyperthreading)
-    print('initial_queue_size = ' + str(initial_queue_size))
-    print('max_queue_size = ' + str(max_queue_size))
-    print('scaledown_idletime = ' + str(scaledown_idletime))
-    print('scheduler = ' + scheduler)
-    if scheduler == 'sge':
-        print('enable_sge_pe = ' + enable_sge_pe)
-        print('sge_pe_type = ' + sge_pe_type)
-    if scheduler == 'batch':
-        print('min_vcpus = ' + min_vcpus)
-        print('desired_vcpus = ' + desired_vcpus)
-        print('max_vcpus = ' + max_vcpus)
     print('aws_account_id = ' + aws_account_id)
     print('region = ' + region)
     print('vpc_id = ' + vpc_id)
@@ -659,8 +640,27 @@ if debug_mode == 'true':
         print('use_private_compute_subnet = ' + use_private_compute_subnet)
         print('private_compute_cidr_subnet = ' + private_compute_cidr_subnet)
         print('private_compute_subnet_id = ' + private_compute_subnet_id)
-    print('ec2_user = ' + ec2_user)
-    print('ec2_user_home = ' + ec2_user_home)
+    print('scheduler = ' + scheduler)
+    if scheduler == 'sge':
+        print('enable_sge_pe = ' + enable_sge_pe)
+        print('sge_pe_type = ' + sge_pe_type)
+    if scheduler == 'batch':
+        print('min_vcpus = ' + min_vcpus)
+        print('desired_vcpus = ' + desired_vcpus)
+        print('max_vcpus = ' + max_vcpus)
+    print('master_instance_type = ' + master_instance_type)
+    print('master_root_volume_size = ' + str(master_root_volume_size) + ' GB')
+    print('compute_instance_type = ' + compute_instance_type)
+    print('compute_root_volume_size = ' + str(compute_root_volume_size) + ' GB')
+    print('hyperthreading = ' + hyperthreading)
+    print('initial_queue_size = ' + str(initial_queue_size))
+    print('max_queue_size = ' + str(max_queue_size))
+    print('scaledown_idletime = ' + str(scaledown_idletime))
+    print('ebs_shared_dir = ' + ebs_shared_dir)
+    print('ebs_shared_volume_size = ' + str(ebs_shared_volume_size) + ' GB')
+    print('ebs_shared_volume_type = ' + str(ebs_shared_volume_type))
+    print('ebs_encryption = ' + str(ebs_encryption))
+    print('s3_bucketname = s3://' + s3_bucketname)
     if enable_external_nfs == 'true':
         print('enable_external_nfs = ' + enable_external_nfs)
         print('external_nfs_server = ' + external_nfs_server)
