@@ -4,6 +4,7 @@
         {
             "Sid": "EC2Describe",
             "Action": [
+                "ec2:DescribeAccountAttributes",
                 "ec2:DescribeKeyPairs",
                 "ec2:DescribeVpcs",
                 "ec2:DescribeSpotPriceHistory",
@@ -12,6 +13,7 @@
                 "ec2:DescribePlacementGroups",
                 "ec2:DescribeImages",
                 "ec2:DescribeInstances",
+                "ec2:DescribeInstanceCreditSpecifications",
                 "ec2:DescribeInstanceStatus",
                 "ec2:DescribeSnapshots",
                 "ec2:DescribeTags",
@@ -101,6 +103,8 @@
             "Action": [
                 "dynamodb:DescribeTable",
                 "dynamodb:CreateTable",
+                "dynamodb:ListTagsOfResource",
+                "dynamodb:TagResource",
                 "dynamodb:DeleteTable"
             ],
             "Effect": "Allow",
@@ -230,7 +234,8 @@
                 "iam:DeleteRole",
                 "iam:GetRole",
                 "iam:PassRole",
-                "iam:ListGroups"
+                "iam:ListGroups",
+                "iam:ListUsers"
             ],
             "Effect": "Allow",
             "Resource": "*"
