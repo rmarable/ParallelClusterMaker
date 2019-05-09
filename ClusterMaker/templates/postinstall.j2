@@ -2,7 +2,7 @@
 # Name:		postinstall.{{ cluster_name }}.sh
 # Author:	Rodney Marable <rodney.marable@gmail.com>
 # Created On:	April 20, 2019
-# Last Changed:	April 27, 2019
+# Last Changed:	May 10, 2019
 # Deployed On:	{{ lookup('pipe','date \"+%B %-d, %Y\"') }}
 # Purpose:	Perform postinstall tasks on cluster {{ cluster_name }}
 ################################################################################
@@ -302,16 +302,15 @@ esac
 
 # Parse the InstanceId and RootDiskId from EC2 instance metadata.
 # Tag the EBS root volume associated with this instance.
-# Note: the default ParallelCluster IAM rule does not permit EC2CreateTags,
-# EC2DescribeTags, or EC2DeleteTags, so be sure to comment this stanza out
-# if you are using the base CloudFormation template.
 #
-# Rodney Marable <rodney.marable@gmail.com> submitted a pull request to enable
-# this feature: https://github.com/aws/aws-parallelcluster/pull/864
-#
-#AWS_INSTANCE_ID=$(ec2-metadata -i | awk '{print $2}')
-#ROOT_DISK_ID=$(aws --region {{ region }} ec2 describe-volumes --filter "Name=attachment.instance-id,Values=$AWS_INSTANCE_ID" --query "Volumes[].VolumeId" --out text)
-#aws --region {{ region }} ec2 create-tags --resources ${ROOT_DISK_ID} --tags Key=ClusterID,Value={{ cluster_name }} Key=ClusterSerialNumber,Value={{ cluster_serial_number }} Key=ClusterStackType,Value=pcluster Key=MountedBy,Value=${AWS_INSTANCE_ID}
+# Please note that since the default ParallelCluster IAM rule does not permit
+# EC2CreateTags, EC2DescribeTags, or EC2DeleteTags, this stanza may need to be
+# commented out when building cluster stacks on OSX.  Using an EC2 jumphost to
+# build cluster stacks avoids this issue.
+
+AWS_INSTANCE_ID=$(ec2-metadata -i | awk '{print $2}')
+ROOT_DISK_ID=$(aws --region {{ region }} ec2 describe-volumes --filter "Name=attachment.instance-id,Values=$AWS_INSTANCE_ID" --query "Volumes[].VolumeId" --out text)
+aws --region {{ region }} ec2 create-tags --resources ${ROOT_DISK_ID} --tags Key=ClusterID,Value={{ cluster_name }} Key=ClusterSerialNumber,Value={{ cluster_serial_number }} Key=ClusterStackType,Value=ParallelCluster Key=MountedBy,Value=${AWS_INSTANCE_ID}{% if 'UNDEFINED' not in project_id %} Key=ProjectID,Value={{ project_id }}{% endif %}
 
 # Create some local aliases for HPC operator convenience.
 # Prevent multiple line copies from proliferating in HPC operator dotfiles.

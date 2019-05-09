@@ -160,7 +160,7 @@ def ctrlC_Abort(sleep_time, line_length, vars_file_path, instance_serial_number_
         time.sleep(sleep_time)
     except KeyboardInterrupt:
         if (vars_file_path == 1) and (cluster_serial_number_file == 1):
-            pass
+            print('')
         else:
             os.remove(instance_serial_number_file)
             os.remove(vars_file_path)

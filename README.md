@@ -616,6 +616,48 @@ by this toolkit.
 If you wish to preserve these files within your own private or internal Git
 repositories, please modify ParallelClusterMaker/.gitignore accordingly.
 
+# Tagging
+
+All resources associated with traditional schedulers are automatically tagged
+with the following keys:
+
+ClusterID
+ClusterSerialNumber
+ClusterOwner
+ClusterStackType
+ClusterOwnerEmail
+ClusterOwnerDepartment
+Encryption
+ProdLevel
+ProjectID (if defined)
+DEPLOYMENT_DATE
+
+This includes EC2 instances, EFS and FSxL file systems, Cloudformation stacks,
+EBS root volumes, SQS queues, etc.
+
+Please note that since the default ParallelCluster IAM rule does not permit
+EC2CreateTags, EC2DescribeTags, or EC2DeleteTags, EBS root volume tagging
+may fail when building cluster stacks on OSX.  Building ParallelCluster stacks
+with an EC2 jumphost will avoid this potential issue.
+
+AWS Batch does not currently support post-creation tagging of managed compute
+environments, so the default tags outlined above will not be visible with
+this scheduler.  However, it is still possible to identify Batch environments
+using the "Application" tag, which uses "parallelcluster-$CLUSTER_NAME" for
+its naming $CLUSTER_NAME parameter.
+
+```
+$ aws batch describe-compute-environments | jq '. | select(.computeEnvironment[].computeResources.tags.Application == "parallelcluster-rmarable-batch01")'
+```
+
+In terms of cost tracking, per the AWS Batch public documentation:
+
+```
+Q. What is the pricing for AWS Batch?
+There is no additional charge for AWS Batch.  You only pay for the AWS
+Resources (e.g. EC2 Instances) you create to store and run your batch jobs.
+```
+
 # Reporting Bugs
 
 Please report any bugs, issues, or otherwise unexpected behavior to Rodney

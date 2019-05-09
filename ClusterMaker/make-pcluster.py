@@ -1115,7 +1115,7 @@ print('$ ' + build_cmd_string)
 # Exit the script and cleanup any orphaned state files if the operator types
 # 'CTRL-C' within 5 seconds after the abort header is displayed.
 
-ctrlC_Abort(5, 80, vars_file_path, cluster_sserial_number_file)
+ctrlC_Abort(5, 80, vars_file_path, cluster_serial_number_file)
 
 # Create the new cluster stack using the create_pcluster Ansible playbook.
 
