@@ -247,6 +247,7 @@
                 "iam:CreateInstanceProfile",
                 "iam:DeleteInstanceProfile",
                 "iam:GetInstanceProfile",
+                "iam:ListInstanceProfiles",
                 "iam:PassRole"
             ],
             "Effect": "Allow",
