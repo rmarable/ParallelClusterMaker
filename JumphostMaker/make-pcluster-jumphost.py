@@ -4,7 +4,7 @@
 # Name:         make-pcluster-jumphost.py
 # Author:       Rodney Marable <rodney.marable@gmail.com>
 # Created On:   April 18, 2019
-# Last Changed: May 3, 2019
+# Last Changed: May 11, 2019
 # Purpose:      Create an EC2 jumphost to run the ParallelClusterMaker toolkit
 ################################################################################
 
@@ -328,7 +328,7 @@ except ClientError as e:
             ec2_instance_role_dest.close()
         pcluster_jumphost_ec2_instance_role = iam.create_role(
             RoleName=iam_instance_role,
-            AssumeRolePolicyDocument='{ "Version": "2012-10-17", "Statement": [ { "Effect": "Allow", "Principal": { "Service": "ec2.amazonaws.com" }, "Action": "sts:AssumeRole" } ] }',
+            AssumeRolePolicyDocument='{ "Version": "2012-10-17", "Statement": [ { "Effect": "Allow", "Principal": { "Service": [ "batch.amazonaws.com", "ec2.amazonaws.com", "ecs-tasks.amazonaws.com", "spotfleet.amazonaws.com" ] }, "Action": "sts:AssumeRole" } ] }',
             Description='ParallelClusterMaker EC2 instance role'
             )
         with open(iam_json_policy_template, 'r') as policy_input:
