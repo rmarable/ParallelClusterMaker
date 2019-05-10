@@ -235,6 +235,7 @@
                 "iam:GetRole",
                 "iam:PassRole",
                 "iam:ListGroups",
+                "iam:ListRoles",
                 "iam:ListUsers"
             ],
             "Effect": "Allow",
