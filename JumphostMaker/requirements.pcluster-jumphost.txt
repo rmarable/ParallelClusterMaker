@@ -20,4 +20,4 @@ python-dateutil
 PyYAML
 s3transfer
 six
-urllib3 <1.25,>=1.20; python_version >= '3.4'
+urllib3
