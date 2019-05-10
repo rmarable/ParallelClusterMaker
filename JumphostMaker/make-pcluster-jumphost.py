@@ -298,7 +298,7 @@ if not os.path.isfile(secret_key_file):
     print('Please resolve this issue and retry, perhaps deleting the original keypair by')
     print('pasting this command into the shell:')
     print('')
-    print('$ aws ec2 delete-key-pair --key-name ' + ec2_keypair)
+    print('$ aws --region ' + region + ' ec2 delete-key-pair --key-name ' + ec2_keypair)
     print('')
     print('Aborting...')
     sys.exit(1)
