@@ -247,8 +247,8 @@
                 "iam:CreateInstanceProfile",
                 "iam:DeleteInstanceProfile",
                 "iam:GetInstanceProfile",
-                "iam:ListInstanceProfiles",
-                "iam:PassRole"
+                "iam:ListInstanceProfilesForRole",
+                "iam:ListInstanceProfiles"
             ],
             "Effect": "Allow",
             "Resource": "*"
@@ -260,8 +260,8 @@
                 "iam:RemoveRoleFromInstanceProfile",
                 "iam:PutRolePolicy",
                 "iam:AttachRolePolicy",
-                "iam:DeleteRolePolicy",
                 "iam:DetatchRolePolicy",
+                "iam:DeleteRolePolicy",
                 "iam:ListRolePolicies",
                 "iam:SimulatePrincipalPolicy"
             ],
@@ -271,7 +271,20 @@
         {
             "Sid": "BatchECS",
             "Action": [
+                "ecs:ListAccountSettings",
+                "ecs:ListAttributes",
+                "ecs:ListClusters",
                 "ecs:ListContainerInstances",
+                "ecs:ListServices",
+                "ecs:ListTagsForResource",
+                "ecs:ListTaskDefinitionFamilies",
+                "ecs:ListTaskDefinitions",
+                "ecs:ListTasks",
+                "ecs:DescribeClusters",
+                "ecs:DescribeServices",
+                "ecs:DescribeTaskDefinition",
+                "ecs:DescribeTaskSets",
+                "ecs:DescribeTasks",
                 "ecs:DescribeContainerInstances"
             ],
             "Effect": "Allow",

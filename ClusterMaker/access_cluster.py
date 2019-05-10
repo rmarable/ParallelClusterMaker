@@ -4,9 +4,8 @@
 # Name:         access_cluster.py
 # Author:       Rodney Marable <rodney.marable@gmail.com>
 # Created On:   April 20, 2019
-# Last Changed: April 30, 2019
+# Last Changed: May 10, 2019
 # Purpose:	Provide a mechanism for SSH-ing into pcluster master instances
-# Usage:	$ ./access_cluster.py --help
 ################################################################################
 
 # Load some required Python libraries
@@ -15,13 +14,13 @@ import argparse
 import subprocess
 
 # Import some external lists.
-# Source: clustermaker_aux_data.py
+# Source: parallelclustermaker_aux_data.py
 
-from clustermaker_aux_data import p_fail
+from parallelclustermaker_aux_data import p_fail
 
 # Parse input from the command line.
 
-parser = argparse.ArgumentParser(description='access_cluster.py: Provide quick SSH access to CFNCluster head nodes')
+parser = argparse.ArgumentParser(description='access_cluster.py: Provide quick SSH access to ParallelCluster head nodes')
 
 # Configure arguments for the required variables.
 
