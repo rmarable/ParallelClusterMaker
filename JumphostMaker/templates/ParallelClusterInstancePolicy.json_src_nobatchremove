@@ -4,20 +4,23 @@
         {
             "Sid": "EC2Describe",
             "Action": [
-                "ec2:DescribeVolumes",
-                "ec2:DescribeInstanceAttribute",
-                "ec2:DescribeInstanceStatus",
-                "ec2:DescribeInstances",
-                "ec2:DescribeRegions",
+                "ec2:DescribeAccountAttributes",
                 "ec2:DescribeKeyPairs",
                 "ec2:DescribeVpcs",
+                "ec2:DescribeSpotPriceHistory",
                 "ec2:DescribeSubnets",
                 "ec2:DescribeSecurityGroups",
                 "ec2:DescribePlacementGroups",
                 "ec2:DescribeImages",
+                "ec2:DescribeInstances",
+                "ec2:DescribeInstanceCreditSpecifications",
+                "ec2:DescribeInstanceStatus",
                 "ec2:DescribeSnapshots",
+                "ec2:DescribeTags",
+                "ec2:DescribeVolumes",
                 "ec2:DescribeVpcAttribute",
                 "ec2:DescribeAddresses",
+                "ec2:DescribeKeyPairs",
                 "ec2:DescribeNetworkInterfaces",
                 "ec2:DescribeAvailabilityZones"
             ],
@@ -25,10 +28,8 @@
             "Resource": "*"
         },
         {
-            "Sid": "EC2Action",
+            "Sid": "EC2Modify",
             "Action": [
-                "ec2:AttachVolume",
-                "ec2:CreateTags",
                 "ec2:CreateVolume",
                 "ec2:RunInstances",
                 "ec2:AllocateAddress",
@@ -38,6 +39,11 @@
                 "ec2:AuthorizeSecurityGroupIngress",
                 "ec2:CreateNetworkInterface",
                 "ec2:CreateSecurityGroup",
+                "ec2:CreateKeyPair",
+                "ec2:DeleteKeyPair",
+                "ec2:ImportKeyPair",
+                "ec2:CreateTags",
+                "ec2:DeleteTags",
                 "ec2:ModifyVolumeAttribute",
                 "ec2:ModifyNetworkInterfaceAttribute",
                 "ec2:DeleteNetworkInterface",
@@ -54,25 +60,9 @@
             "Resource": "*"
         },
         {
-            "Sid": "EC2Extras",
-            "Action": [
-                "ec2:CreateKeyPair",
-                "ec2:DeleteKeyPair",
-                "ec2:DeleteTags",
-                "ec2:DescribeAccountAttributes",
-                "ec2:DescribeInstanceCreditSpecifications",
-                "ec2:DescribeKeyPairs",
-                "ec2:DescribeSpotPriceHistory",
-                "ec2:DescribeTags"
-            ],
-            "Effect": "Allow",
-            "Resource": "*"
-        },
-        {
             "Sid": "AutoScalingDescribe",
             "Action": [
                 "autoscaling:DescribeAutoScalingGroups",
-                "autoscaling:DescribeTags",
                 "autoscaling:DescribeLaunchConfigurations",
                 "autoscaling:DescribeAutoScalingInstances"
             ],
@@ -82,9 +72,6 @@
         {
             "Sid": "AutoScalingModify",
             "Action": [
-                "autoscaling:TerminateInstanceInAutoScalingGroup",
-                "autoscaling:SetDesiredCapacity",
-                "autoscaling:UpdateAutoScalingGroup",
                 "autoscaling:CreateAutoScalingGroup",
                 "autoscaling:CreateLaunchConfiguration",
                 "ec2:CreateLaunchTemplate",
@@ -93,6 +80,7 @@
                 "ec2:DescribeLaunchTemplates",
                 "ec2:DescribeLaunchTemplateVersions",
                 "autoscaling:PutNotificationConfiguration",
+                "autoscaling:UpdateAutoScalingGroup",
                 "autoscaling:PutScalingPolicy",
                 "autoscaling:DeleteLaunchConfiguration",
                 "autoscaling:DescribeScalingActivities",
@@ -104,30 +92,20 @@
         },
         {
             "Sid": "STS",
-            "Action": [ "sts:GetCallerIdentity" ],
+            "Action": [
+                "sts:GetCallerIdentity"
+            ],
             "Effect": "Allow",
             "Resource": "*"
         },
         {
             "Sid": "DynamoDB",
             "Action": [
-                "dynamodb:ListTables",
-                "dynamodb:PutItem",
-                "dynamodb:Query",
-                "dynamodb:GetItem",
-                "dynamodb:DeleteItem",
                 "dynamodb:DescribeTable",
                 "dynamodb:CreateTable",
-                "dynamodb:DeleteTable"
-            ],
-            "Effect": "Allow",
-            "Resource": "*"
-        },
-        {
-            "Sid": "DynamoDBExtras",
-            "Action": [
                 "dynamodb:ListTagsOfResource",
-                "dynamodb:TagResource"
+                "dynamodb:TagResource",
+                "dynamodb:DeleteTable"
             ],
             "Effect": "Allow",
             "Resource": "*"
@@ -135,11 +113,17 @@
         {
             "Sid": "SQS",
             "Action": [
-                "sqs:ListQueues",
                 "sqs:GetQueueAttributes",
                 "sqs:CreateQueue",
                 "sqs:SetQueueAttributes",
-                "sqs:DeleteQueue",
+                "sqs:DeleteQueue"
+            ],
+            "Effect": "Allow",
+            "Resource": "*"
+        },
+        {
+            "Sid": "SQSQueue",
+            "Action": [
                 "sqs:SendMessage",
                 "sqs:ReceiveMessage",
                 "sqs:ChangeMessageVisibility",
@@ -167,10 +151,10 @@
         {
             "Sid": "CloudFormation",
             "Action": [
-                "cloudformation:DescribeStacks",
                 "cloudformation:DescribeStackEvents",
                 "cloudformation:DescribeStackResource",
                 "cloudformation:DescribeStackResources",
+                "cloudformation:DescribeStacks",
                 "cloudformation:ListStacks",
                 "cloudformation:GetTemplate",
                 "cloudformation:CreateStack",
@@ -181,7 +165,7 @@
             "Resource": "*"
         },
         {
-            "Sid": "S3Resources",
+            "Sid": "S3ResourcesBucket",
             "Action": ["s3:*"],
             "Effect": "Allow",
             "Resource": [
@@ -246,10 +230,10 @@
         {
             "Sid": "IAMRole",
             "Action": [
-                "iam:PassRole",
                 "iam:CreateRole",
                 "iam:DeleteRole",
                 "iam:GetRole",
+                "iam:PassRole",
                 "iam:ListGroups",
                 "iam:ListRoles",
                 "iam:ListUsers"
@@ -276,7 +260,7 @@
                 "iam:RemoveRoleFromInstanceProfile",
                 "iam:PutRolePolicy",
                 "iam:AttachRolePolicy",
-                "iam:DetachRolePolicy",
+                "iam:DetatchRolePolicy",
                 "iam:DeleteRolePolicy",
                 "iam:ListRolePolicies",
                 "iam:SimulatePrincipalPolicy"
@@ -287,10 +271,10 @@
         {
             "Sid": "BatchECS",
             "Action": [
-                "ecs:ListContainerInstances",
                 "ecs:ListAccountSettings",
                 "ecs:ListAttributes",
                 "ecs:ListClusters",
+                "ecs:ListContainerInstances",
                 "ecs:ListServices",
                 "ecs:ListTagsForResource",
                 "ecs:ListTaskDefinitionFamilies",
@@ -309,18 +293,18 @@
         {
             "Sid": "EFS",
             "Action": [
-                "elasticfilesystem:CreateFileSystem",
-                "elasticfilesystem:CreateMountTarget",
-                "elasticfilesystem:CreateTags",
-                "elasticfilesystem:DeleteFileSystem",
-                "elasticfilesystem:DeleteMountTarget",
-                "elasticfilesystem:DeleteTags",
-                "elasticfilesystem:DescribeFileSystems",
-                "elasticfilesystem:DescribeMountTargets",
-                "elasticfilesystem:DescribeTags",
-                "elasticfilesystem:DescribeMountTargetSecurityGroups",
-                "elasticfilesystem:ModifyMountTargetSecurityGroups",
-                "elasticfilesystem:UpdateFileSystem"
+                "efs:CreateFileSystem",
+                "efs:CreateMountTarget",
+                "efs:CreateTags",
+                "efs:DeleteFileSystem",
+                "efs:DeleteMountTarget",
+                "efs:DeleteTags",
+                "efs:DescribeFileSystems",
+                "efs:DescribeMountTargets",
+                "efs:DescribeTags",
+                "efs:DescribeMountTargetSecurityGroups",
+                "efs:ModifyMountTargetSecurityGroups",
+                "efs:UpdateFileSystem"
             ],
             "Effect": "Allow",
             "Resource": "*"
