@@ -2,7 +2,7 @@
 # Name:		create_pcluster.yml
 # Author:	Rodney Marable <rodney.marable@gmail.com>
 # Created On:	April 20, 2019
-# Last Changed:	May 10, 2019
+# Last Changed:	May 11, 2019
 # Purpose:	Ansible playbook to create new ParallelCluster stacks
 ################################################################################
 
@@ -385,12 +385,34 @@
           - "Availabilty Zone:  {{ az }}"
           - "Scheduler:         {{ scheduler }}" 
           - ""
-          - "This process will take about 30 minutes to complete."
+          - "This process will take approximately 30 minutes to complete."
           - ""
           - "Run this command to monitor the stack progress in real time:"
           - ""
-          - "pcluster status --region {{ region }} {{ cluster_name }}"
+          - "pcluster status --region us-east-1 rmarable-batch01"
           - ""
+      when: '"awsbatch" not in scheduler'
+
+    - debug:
+        msg:
+          - ""
+          - "=================================================================="
+          - "                   Cluster Launch Summary Report"
+          - "=================================================================="
+          - ""
+          - "Cluster StackName: {{ cluster_name }}"
+          - "Launch Timestamp:  {{ start_stack_creation_timer.stdout }}"
+          - "Availabilty Zone:  {{ az }}"
+          - "Scheduler:         {{ scheduler }}" 
+          - ""
+          - "This process will take about 10 minutes to complete."
+          - ""
+          - ""
+          - "Run this command to monitor the stack progress in real time:"
+          - ""
+          - "pcluster status --region us-east-1 rmarable-batch01"
+          - ""            
+      when: scheduler == 'awsbatch'
 
     - name: Launch the new ParallelCluster stack
       command: pcluster create --config {{ cluster_config_template }} --region {{ region }} --norollback {{ cluster_name }}

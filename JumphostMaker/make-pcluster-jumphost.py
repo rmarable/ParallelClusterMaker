@@ -328,7 +328,6 @@ except ClientError as e:
             ec2_instance_role_dest.close()
         pcluster_jumphost_ec2_instance_role = iam.create_role(
             RoleName=iam_instance_role,
-            #AssumeRolePolicyDocument='{ "Version": "2012-10-17", "Statement": [ { "Effect": "Allow", "Principal": { "Service": [ "batch.amazonaws.com", "ec2.amazonaws.com", "ecs-tasks.amazonaws.com", "spotfleet.amazonaws.com" ] }, "Action": "sts:AssumeRole" } ] }',
             AssumeRolePolicyDocument='{ "Version": "2012-10-17", "Statement": [ { "Effect": "Allow", "Principal": { "Service": [ "ec2.amazonaws.com" ] }, "Action": "sts:AssumeRole" } ] }',
             Description='ParallelClusterMaker EC2 instance role'
             )

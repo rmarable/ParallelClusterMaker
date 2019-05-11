@@ -1103,6 +1103,9 @@ else:
 # Print the config file location and cluster build commands to the console.
 
 print('')
+if ansible_verbosity:
+    print('Setting Ansible verbosity to "' + ansible_verbosity + '"')
+    print('')
 print('View the configuration file for cluster ' + cluster_name + ':')
 print('$ cat ' + vars_file_path)
 print('')

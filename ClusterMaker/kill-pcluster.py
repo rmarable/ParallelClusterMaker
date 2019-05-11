@@ -160,6 +160,9 @@ destroy_cmd_string = 'ansible-playbook --extra-vars ' + '"' + 'cluster_name=' + 
 # Print the cluster destroy commands to the console.
 
 print('')
+if ansible_verbosity:
+    print('Setting Ansible verbosity to "' + ansible_verbosity + '"')
+    print('')
 print('Ready to execute:')
 print('$ ' + cluster_destroy_command)
 print('')
