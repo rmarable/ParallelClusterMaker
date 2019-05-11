@@ -280,7 +280,7 @@
                 "iam:RemoveRoleFromInstanceProfile",
                 "iam:PutRolePolicy",
                 "iam:AttachRolePolicy",
-                "iam:DetatchRolePolicy",
+                "iam:DetachRolePolicy",
                 "iam:DeleteRolePolicy",
                 "iam:ListRolePolicies",
                 "iam:SimulatePrincipalPolicy"
