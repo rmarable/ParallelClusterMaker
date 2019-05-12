@@ -509,11 +509,11 @@
       command: scp -i {{ ssh_keypair }} -r {{ stage_dir }} {{ ec2_user }}@{{ MasterPublicIP.stdout }}:{{ stage_dir }}
 
     - name: Transfer the standard qsub submission script to the master instance
-      command: scp -i {{ ssh_keypair }}i {{ local_workingdir }}/qsub_default_submission_script.sh {{ ec2_user }}@{{ MasterPublicIP.stdout }}:/home/{{ ec2_user }}
+      command: scp -i {{ ssh_keypair }}i {{ local_workingdir }}/qsub_default_submission_script.sh {{ ec2_user }}@{{ MasterPublicIP.stdout }}:{{ ec2_user_home }}
       when: not enable_hpc_performance_tests
 
     - name: Transfer the standard sbatch submission script to the master instance
-      command: scp -i {{ ssh_keypair }}i {{ local_workingdir }}/sbatch_default_submission_script.sh {{ ec2_user }}@{{ MasterPublicIP.stdout }}:/home/{{ ec2_user }}
+      command: scp -i {{ ssh_keypair }}i {{ local_workingdir }}/sbatch_default_submission_script.sh {{ ec2_user }}@{{ MasterPublicIP.stdout }}:{{ ec2_user_home }}
       when: not enable_hpc_performance_tests
     - name: Move the performance source tree to its final destination directory on the master instance
       command: ssh -i {{ ssh_keypair }} {{ ec2_user }}@{{ MasterPublicIP.stdout }} mv {{ stage_dir }}/* {{ Axb_random_dest }}

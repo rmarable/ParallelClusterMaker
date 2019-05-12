@@ -181,9 +181,9 @@ if not os.path.isfile(instance_serial_number):
 p_val('instance_serial_number', debug_mode)
 p_val('instance_serial_number_file', debug_mode)
 
-# Select t2.micro as the EC2 instance type.
+# Select t3.micro as the EC2 instance type.
 
-ec2_instance_type = 't2.micro'
+ec2_instance_type = 't3.micro'
 p_val('ec2_instance_type', debug_mode)
 
 # Set the EBS volume type to gp2.

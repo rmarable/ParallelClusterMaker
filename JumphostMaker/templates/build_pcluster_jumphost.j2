@@ -4,7 +4,7 @@
 # Name:		build_pcluster_jumphost.{{ instance_name }}.sh
 # Author:	Rodney Marable <rodney.marable@gmail.com>
 # Created On:	April 18, 2019
-# Last Changed:	May 10, 2019
+# Last Changed:	May 11, 2019
 # Deployed On:	{{ lookup('pipe','date \"+%B %-d, %Y\"') }}
 # Purpose:	Perform some additional post-istallation configuration steps
 #		on pcluster-jumphost {{ instance_name }}
@@ -86,8 +86,8 @@ sanity_check = true
 ssh = ssh {CFN_USER}@{MASTER_IP} {ARGS}
 EOF
 
-# Install an alias for cd-ing into the ParallelClusterMaker/ClusterMaker source
-# code directory for user convenience.
+# Install an alias for cd-ing into the ParallelClusterMaker/ClusterMaker
+# source code directory for user convenience.
 
 echo "
 alias src='cd ~/src/ParallelClusterMaker/ClusterMaker'" >> $EC2_HOME/.bashrc
