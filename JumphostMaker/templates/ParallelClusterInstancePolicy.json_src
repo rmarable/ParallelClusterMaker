@@ -178,17 +178,19 @@
                 "cloudformation:UpdateStack"
             ],
             "Effect": "Allow",
-            "Resource": "arn:aws:cloudformation:*:<AWS_ACCOUNT_ID>:stack/parallelcluster-*",
-            "Resource": "arn:aws:cloudformation:*:<AWS_ACCOUNT_ID>:stack/kill-pcluster-*-<PROD_LEVEL>/*"
+            "Resource": [
+                "arn:aws:cloudformation:*:<AWS_ACCOUNT_ID>:stack/parallelcluster-*",
+                "arn:aws:cloudformation:*:<AWS_ACCOUNT_ID>:stack/kill-pcluster-*-<PROD_LEVEL>-*"
+            ]
         },
         {
             "Sid": "CloudFormationExtras",
-            "Action": [
-                "cloudformation:ValidateTemplate"
-            ],
+            "Action": [ "cloudformation:ValidateTemplate" ],
             "Effect": "Allow",
-            "Resource": "arn:aws:cloudformation:*:<AWS_ACCOUNT_ID>:stack/parallelcluster-*/",
-            "Resource": "arn:aws:cloudformation:*:<AWS_ACCOUNT_ID>:stack/kill-pcluster-*-<PROD_LEVEL>/*"
+            "Resource": [
+                "arn:aws:cloudformation:*:<AWS_ACCOUNT_ID>:stack/parallelcluster-*",
+                "arn:aws:cloudformation:*:<AWS_ACCOUNT_ID>:stack/kill-pcluster-*-<PROD_LEVEL>-*"
+            ]
         },
         {
             "Sid": "S3Resources",
@@ -266,7 +268,12 @@
                 "iam:ListUsers"
             ],
             "Effect": "Allow",
-            "Resource": "*"
+            "Resource": [
+                "arn:aws:iam::<AWS_ACCOUNT_ID>:role/parallelcluster-*",
+                "arn:aws:iam::<AWS_ACCOUNT_ID>:role/parallelclustermaker-*",
+                "arn:aws:iam::<AWS_ACCOUNT_ID>:role/<CLUSTER_OWNER>-*",
+                "arn:aws:iam::<AWS_ACCOUNT_ID>:instance-profile/parallelclustermaker-profile-*"
+            ]
         },
         {
             "Sid": "IAMInstanceProfile",
@@ -278,7 +285,12 @@
                 "iam:ListInstanceProfiles"
             ],
             "Effect": "Allow",
-            "Resource": "*"
+            "Resource": [
+                "arn:aws:iam::<AWS_ACCOUNT_ID>:role/parallelcluster-*",
+                "arn:aws:iam::<AWS_ACCOUNT_ID>:role/parallelclustermaker-*",
+                "arn:aws:iam::<AWS_ACCOUNT_ID>:role/<CLUSTER_OWNER>-*",
+                "arn:aws:iam::<AWS_ACCOUNT_ID>:instance-profile/parallelclustermaker-profile-*"
+            ]
         },
         {
             "Sid": "IAMRolePolicy",
@@ -293,7 +305,12 @@
                 "iam:SimulatePrincipalPolicy"
             ],
             "Effect": "Allow",
-            "Resource": "*"
+            "Resource": [
+                "arn:aws:iam::<AWS_ACCOUNT_ID>:role/parallelcluster-*",
+                "arn:aws:iam::<AWS_ACCOUNT_ID>:role/parallelclustermaker-*",
+                "arn:aws:iam::<AWS_ACCOUNT_ID>:role/<CLUSTER_OWNER>-*",
+                "arn:aws:iam::<AWS_ACCOUNT_ID>:instance-profile/parallelclustermaker-profile-*"
+            ]
         },
         {
             "Sid": "ECSBatch",
