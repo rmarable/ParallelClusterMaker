@@ -2,7 +2,7 @@
 # Name:         serverless.yml
 # Author:       Rodney Marable <rodney.marable@gmail.com>
 # Created On:   August 20, 2019
-# Last Changed: May 1, 2019
+# Last Changed: May 12, 2019
 # Deployed On:  {{ lookup('pipe','date \"+%B %-d, %Y\"') }}
 # Purpose:      Serverless config to support self-terminating pcluster stacks
 ################################################################################
@@ -23,6 +23,7 @@ provider:
     ClusterOwner: {{ cluster_owner }}
     ClusterOwnerEmail: {{ cluster_owner_email }}
     ClusterOwnerDepartment: {{ cluster_owner_department }}
+{% if 'UNDEFINED' not in project_id %}    ProjectID: {{ project_id }}{% endif %}
     ProdLevel: {{ prod_level }}
     DEPLOYMENT_DATE: {{ DEPLOYMENT_DATE }}
 

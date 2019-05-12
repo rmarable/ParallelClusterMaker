@@ -4,7 +4,7 @@
 # Name:		kill-pcluster.py
 # Author:	Rodney Marable <rodney.marable@gmail.com>
 # Created On:   April 20, 2019
-# Last Changed: May 9, 2019
+# Last Changed: May 12, 2019
 # Purpose:	Python3 wrapper for deleting custom pcluster stacks
 ################################################################################
 
@@ -27,12 +27,6 @@ from parallelclustermaker_aux_data import p_val
 from parallelclustermaker_aux_data import ctrlC_Abort
 from parallelclustermaker_aux_data import print_TextHeader
 
-# Set the Ansible verbosity.
-# Todo - consider making this a command line switch.
-# Warning: anything beyond -vv will produce a LOT of output!
-
-ansible_verbosity = ''
-
 # Parse input from the command line.
 
 parser = argparse.ArgumentParser(description='kill-cluster.py: Command-line tool to destroy ParallelCluster stacks built in AWS')
@@ -50,11 +44,13 @@ parser.add_argument('--delete_efs', choices=['True', 'true', 'False', 'false'], 
 parser.add_argument('--delete_fsx', choices=['True', 'true', 'False', 'false'], help='Delete the Lustre file system associated with this cluster (default = true)', required=False, default='true')
 parser.add_argument('--delete_s3_bucketname', choices=['True', 'true', 'False', 'false'], help='Delete the S3 bucket associated with this cluster (default = true)', required=False, default='true')
 parser.add_argument('--cluster_owner_email', '-E', help='email address of the cluster owner (default = UNDEFINED)', required=False, default='UNDEFINED')
+parser.add_argument('--ansible_verbosity', '-V', help='Set the Ansible verbosity level (default = none)', required=False, default='')
 parser.add_argument('--debug_mode', '-D', choices=['true', 'false'], help='Enable debug mode (default = false)', required=False, default='false')
 
 # Set cluster_parameters to the values provided via command line.
 
 args = parser.parse_args()
+ansible_verbosity = args.ansible_verbosity
 az = args.az
 cluster_name = args.cluster_name
 cluster_owner = args.cluster_owner

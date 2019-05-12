@@ -2,7 +2,7 @@
 # Name:         kill-pcluster-{{ cluster_name }}.py
 # Author:       Rodney Marable <rodney.marable@gmail.com>
 # Created On:   June 28, 2018
-# Last Changed: August 20, 2018
+# Last Changed: May 12, 2019
 # Deployed On:  {{ lookup('pipe','date \"+%B %-d, %Y\"') }}
 # Purpose:      Lambda function handler for self-terminating pcluster stacks
 ################################################################################
@@ -19,10 +19,10 @@ def kill_pcluster(event, context):
 
     cluster_name = '{{ cluster_name }}'
     cluster_owner = '{{ cluster_owner }}'
-    cluster_stack_name = 'pcluster-{{ cluster_name }}'
+    cluster_stack_name = 'parallelcluster-{{ cluster_name }}'
     s3_bucketname = '{{ s3_bucketname }}'
 
-# Delete s3_bucketname along with all of the objects it contained.
+# Delete s3_bucketname and any objects it contained.
 
     s3 = boto3.resource('s3')
     s3_objects_to_delete = s3.meta.client.list_objects(Bucket="{{ s3_bucketname }}")
@@ -32,18 +32,31 @@ def kill_pcluster(event, context):
     bucket_to_delete = s3.Bucket('{{ s3_bucketname }}')
     p = bucket_to_delete.delete()
 
-# Delete the pcluster stack.
+# Delete the ParallelCluster stack.
 
     cfn_client = boto3.client('cloudformation')
-    q = cfn_client.delete_stack(StackName='pcluster-{{ cluster_name }}')
+    q = cfn_client.delete_stack(StackName=cluster_stack_name)
+
+# Delete the EFS file system associated with this ParallelCluster stack.
+
+    efs_client = boto3.client('efs')
+    efs_mount_target = efs_client.delete_mount_target(MountTargetId={{ efs_pcluster_mount_target_id }})
+    delete_efs_fsid = efs_client.delete_file_system(FileSystemId={{ efs_pcluster_fsid }})
+
+# Delete the FSx file system associated with this ParallelCluster stack.
+#{{ s3_object_path }}/{{ fsx_fsid_object }}
+
+    fsx_client = boto3.client('fsx')
+    fsx_fsid = s3.Object('{{ s3_bucketname }}', '{{ s3_object_path }}/{{ fsx_fsid_object }}')
+    delete_fsx_fsid = fsx_client.delete_file_system(FileSystemId=fsx_fsid)
 
 # Send a termination alert to cluster_owner_email via SNS.
 
     sns = boto3.resource('sns')
     topic = sns.Topic('arn:aws:sns:{{ region }}:{{ aws_account_id }}:sns_alerts_{{ cluster_name }}')
     r = topic.publish(
-        Message='CfnCluster stack {{ cluster_name }} was terminated by Lambda on ' + str(time.strftime('%c')),
-        Subject='CfnCluster stack {{ cluster_name }} Termination Alert',
+        Message='ParallelCluster stack {{ cluster_name }} was terminated by the kill-pcluster Lambda function on ' + str(time.strftime('%c')),
+        Subject='ParallelCluster stack {{ cluster_name }} Termination Alert',
         MessageStructure='string',
         MessageAttributes={
             'string': {
@@ -61,5 +74,5 @@ def kill_pcluster(event, context):
 
 # Return the results.
 
-    return p, q, r, s
+    return delete_efs_fsid, delete_fsx_fsid, p, q, r, s
 

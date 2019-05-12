@@ -2,7 +2,7 @@
 # Name:		create_pcluster.yml
 # Author:	Rodney Marable <rodney.marable@gmail.com>
 # Created On:	April 20, 2019
-# Last Changed:	May 11, 2019
+# Last Changed:	May 12, 2019
 # Purpose:	Ansible playbook to create new ParallelCluster stacks
 ################################################################################
 
@@ -132,8 +132,6 @@
           when: '"UNDEFINED" not in project_id'
       - name: Get facts about the newly created EFS file system
         efs_facts:
-      - name: Get facts about the newly created EFS file system
-        efs_facts:
           tags:
             ClusterSerialNumber: "{{ cluster_serial_number }}"
         register: EFS_PCLUSTER
@@ -143,9 +141,15 @@
           state: directory
       - name: Dump the EFS file system mountpoint to a temp file
         local_action: copy content={{ EFS_PCLUSTER }} dest={{ efs_temp_file }}
-      - name: Set the EFS file system mountpoint value from the temp file
+      - name: Parse the EFS file system mountpoint value from the temp file
         shell: cat {{ efs_temp_file }} | jq '.ansible_facts.efs[].filesystem_address' | tr -d \"
         register: efs_pcluster_mount_point
+      - name: Parse the EFS mount target ID from the temp file
+        shell: cat {{ efs_temp_file }} | jq '.ansible_facts.efs[].mount_targets[].mount_target_id'
+        register: efs_pcluster_mount_target_id
+      - name: Parse the EFS file system ID from the temp file
+        shell: cat {{ efs_temp_file }} | jq '.ansible_facts.efs[].filesystem_id'
+        register: efs_pcluster_fsid
       - name: Stop the EFS creation timer 
         command: date +%Y-%m-%d\ \@\ %H:%M:%S
         register: stop_efs_timer

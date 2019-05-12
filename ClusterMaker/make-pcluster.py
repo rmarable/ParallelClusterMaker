@@ -4,7 +4,7 @@
 # Name:		make-pcluster.py
 # Author:	Rodney Marable <rodney.marable@gmail.com>
 # Created On:	April 20, 2019
-# Last Changed:	May 11, 2019
+# Last Changed:	May 12, 2019
 # Purpose:	Python3 wrapper for customizing ParallelCluster stacks
 ################################################################################
 
@@ -51,7 +51,7 @@ parser.add_argument('--az', '--AvailabilityZone', '-A', help='AWS Availability Z
 # Set reasonable defaults for anything not explicitly defined.
 
 parser.add_argument('--cluster_lifetime', help='automatically terminate the cluster after this time period has elapsed in days:hours:minutes format (default = 30:0:0, i.e. one month)', required=False, default='30:0:0')
-parser.add_argument('--prod_level', choices=['dev', 'test', 'stage', 'prod'], help='operating level of the cluster (default = dev)', required=False, default='dev')
+parser.add_argument('--prod_level', choices=['dev', 'test', 'stage', 'prod'], help='operating stage of the cluster (default = dev)', required=False, default='dev')
 parser.add_argument('--base_os', choices=['alinux', 'centos6', 'centos7', 'ubuntu1604'], help='cluster operating system (default = alinux a.k.a. Amazon Linux)', required=False, default='alinux')
 parser.add_argument('--custom_ami', help='ID of a Custom AMI to use instead of default published AMIs.  A valid base_os is still required.', required=False, default='NONE')
 parser.add_argument('--master_instance_type', help='master EC2 instance type (default = c5.xlarge)', required=False, default='c5.xlarge')

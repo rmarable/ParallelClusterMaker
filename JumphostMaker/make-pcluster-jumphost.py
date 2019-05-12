@@ -4,7 +4,7 @@
 # Name:         make-pcluster-jumphost.py
 # Author:       Rodney Marable <rodney.marable@gmail.com>
 # Created On:   April 18, 2019
-# Last Changed: May 11, 2019
+# Last Changed: May 12, 2019
 # Purpose:      Create an EC2 jumphost to run the ParallelClusterMaker toolkit
 ################################################################################
 
@@ -50,6 +50,7 @@ parser.add_argument('--instance_owner_email', '-E', help='email address of the p
 
 parser.add_argument('--instance_owner_department', choices=['analytics', 'clinical', 'commercial', 'compbio', 'compchem', 'datasci', 'design', 'development', 'hpc', 'imaging', 'manufacturing', 'medical', 'modeling', 'operations', 'proteomics', 'robotics', 'qa', 'research', 'scicomp'], help='department of the instance_owner (default = hpc)', required=False, default='hpc')
 parser.add_argument('--project_id', '-P', help='project name or ID number (default = UNDEFINED)', required=False, default='UNDEFINED')
+parser.add_argument('--prod_level', choices=['dev', 'test', 'stage', 'prod'], help='operating stage of the jumphost  (default = dev)', required=False, default='dev')
 parser.add_argument('--security_group', help='primary security group for the EC2 pcluster-jumphost (default = pcluster_jumphost)', required=False, default='pcluster_jumphost')
 parser.add_argument('--turbot_account', '-T', help='Turbot account ID (default = abd).  Set to "disabled" in non-Turbot environments.', required=False, default='disabled')
 parser.add_argument('--ansible_verbosity', '-V', help='Set the Ansible verbosity level (default = none)', required=False, default='')
@@ -65,6 +66,7 @@ instance_name = args.instance_name
 instance_owner = args.instance_owner
 instance_owner_email = args.instance_owner_email
 instance_owner_department = args.instance_owner_department
+project_id = args.prod_level
 project_id = args.project_id
 region = az[:-1]
 security_group = args.security_group
@@ -321,8 +323,15 @@ try:
 except ClientError as e:
     if e.response['Error']['Code'] == 'NoSuchEntity':
         with open(iam_json_policy_src, 'r') as ec2_instance_role_src:
-            filedata = ec2_instance_role_src.read()
+            filedata_stage_0 = ec2_instance_role_src.read()
             ec2_instance_role_src.close()
+            # Customize the IAM JSON policy template from cluster_parameters
+            # provided from the CLI using this specific replacement order:
+            # aws_account_id -> cluster_name -> prod_level
+            filedata_stage_1 = filedata_stage_0.replace('<AWS_ACCOUNT_ID>', aws_account_id)
+            filedata_stage_2 = filedata_stage_1.replace('<CLUSTER_NAME>', cluster_name)
+            filedata_stage_3 = filedata_stage_2.replace('<PROD_LEVEL>', prod_level)
+            filedata = filedata_stage_3
         with open(iam_json_policy_template, 'w') as ec2_instance_role_dest:
             ec2_instance_role_dest.write(filedata)
             ec2_instance_role_dest.close()
@@ -379,6 +388,7 @@ instance_parameters = {
     'instance_root_volume_size': instance_root_volume_size,
     'instance_serial_number': instance_serial_number,
     'instance_serial_number_file': instance_serial_number_file,
+    'prod_level': prod_level,
     'project_id': project_id,
     'region': region,
     'security_group': security_group,
@@ -414,6 +424,7 @@ if debug_mode == 'true':
     print('instance_owner = ' + instance_owner)
     print('instance_owner_email = ' + instance_owner_email)
     print('instance_owner_department = ' + instance_owner_department)
+    print('prod_devel = ' + prod_level)
     if project_id != 'UNDEFINED':
         print('project_id = ' + project_id)
     print('instance_root_volume_size = ' + str(instance_root_volume_size) + ' GB')
@@ -439,12 +450,14 @@ if debug_mode == 'true':
 # Generate the vars_file for this pcluster-jumphost.
 
 vars_file_main_part = '''\
+################################################################################
 # Name:    	{instance_name}.yml
 # Author:  	Rodney Marable <rodney.marable@gmail.com>
 # Created On:   April 20, 2019
-# Last Changed: April 24, 2019
+# Last Changed: May 12, 2019
 # Deployed On:  {DEPLOYMENT_DATE}
 # Purpose: 	Build template for pcluster-jumphost
+################################################################################
 
 # Build tool information
 
@@ -481,6 +494,7 @@ ec2_user_src: "{{{{ ec2_user_home }}}}/src"
 instance_owner: {instance_owner}
 instance_owner_email: {instance_owner_email}
 instance_owner_department: {instance_owner_department}
+prod_level: {prod_level}
 project_id: {project_id}
 instance_serial_number: {instance_serial_number}
 instance_serial_number_file: {instance_serial_number_file}
