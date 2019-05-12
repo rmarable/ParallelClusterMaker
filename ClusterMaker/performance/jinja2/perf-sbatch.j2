@@ -1,26 +1,26 @@
 #!/bin/sh
 #
 ################################################################################
-# Name:		perf-qsub.{{ cluster_name }}.sh
+# Name:		perf-sbatch.sh
 # Author:	Rodney Marable <rodney.marable@gmail.com>
-# Created On:	February 14, 2018
+# Created On:	May 8, 2019
 # Last Changed:	May 11, 2019
 # Deployed On:  {{ lookup('pipe','date \"+%B %-d, %Y\"') }}
-# Purpose:	Wrapper for submitting multiple qsub-Axb_random cluster jobs
+# Purpose:      Wrapper for submitting multiple sbatch-Axb_random cluster jobs
 # Note:         This script was automatically generated from a Jinja2 template
 #               by $SRC/rmarable_hpc/pcluster/create_pcluster.yml
 ################################################################################
 
-# Submit the prebuilt qsub templates for execution on {{ cluster_name }}.
+# Submit the prebuilt sbatch templates for execution on {{ cluster_name }}.
 
-for file in `ls qsub-Axb_random.[0-9]*.{{ cluster_name }}.sh | sort -k2,2n -t.`
+for sbatchfile in `ls sbatch-Axb_random.[0-9]*.{{ cluster_name }}.sh | sort -k2,2n -t.`
 do
-	qsub $file
-	echo "Submitted $file to {{ cluster_name }} for execution..."
+        sbatch $sbatchfile
+        echo "Submitted $sbatchfile to {{ cluster_name }} for execution..."
 done
 
 # Cleanup and exit.
 
-echo "Finished."
+echo "Finished!"
 echo "Exiting..."
 exit 0
