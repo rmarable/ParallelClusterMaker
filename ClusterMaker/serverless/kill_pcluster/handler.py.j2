@@ -37,19 +37,22 @@ def kill_pcluster(event, context):
     cfn_client = boto3.client('cloudformation')
     q = cfn_client.delete_stack(StackName=cluster_stack_name)
 
+{% if enable_efs == 'true' %}
 # Delete the EFS file system associated with this ParallelCluster stack.
 
     efs_client = boto3.client('efs')
     efs_mount_target = efs_client.delete_mount_target(MountTargetId={{ efs_pcluster_mount_target_id }})
     delete_efs_fsid = efs_client.delete_file_system(FileSystemId={{ efs_pcluster_fsid }})
 
+{% endif %}
+{% if enable_fsx == 'true' %}
 # Delete the FSx file system associated with this ParallelCluster stack.
-#{{ s3_object_path }}/{{ fsx_fsid_object }}
 
     fsx_client = boto3.client('fsx')
     fsx_fsid = s3.Object('{{ s3_bucketname }}', '{{ s3_object_path }}/{{ fsx_fsid_object }}')
     delete_fsx_fsid = fsx_client.delete_file_system(FileSystemId=fsx_fsid)
 
+{% endif %}
 # Send a termination alert to cluster_owner_email via SNS.
 
     sns = boto3.resource('sns')
