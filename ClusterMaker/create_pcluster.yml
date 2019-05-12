@@ -407,7 +407,6 @@
           - ""
           - "This process will take about 10 minutes to complete."
           - ""
-          - ""
           - "Run this command to monitor the stack progress in real time:"
           - ""
           - "pcluster status --region us-east-1 rmarable-batch01"
