@@ -326,12 +326,10 @@ except ClientError as e:
             filedata_stage_0 = ec2_instance_role_src.read()
             ec2_instance_role_src.close()
             # Customize the IAM JSON policy template from cluster_parameters
-            # provided from the CLI using this specific replacement order:
-            # aws_account_id -> cluster_name -> prod_level
+            # provided from the CLI.
             filedata_stage_1 = filedata_stage_0.replace('<AWS_ACCOUNT_ID>', aws_account_id)
-            filedata_stage_2 = filedata_stage_1.replace('<CLUSTER_NAME>', cluster_name)
-            filedata_stage_3 = filedata_stage_2.replace('<PROD_LEVEL>', prod_level)
-            filedata = filedata_stage_3
+            filedata_stage_2 = filedata_stage_1.replace('<PROD_LEVEL>', prod_level)
+            filedata = filedata_stage_2
         with open(iam_json_policy_template, 'w') as ec2_instance_role_dest:
             ec2_instance_role_dest.write(filedata)
             ec2_instance_role_dest.close()

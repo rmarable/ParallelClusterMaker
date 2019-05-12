@@ -178,8 +178,8 @@
                 "cloudformation:UpdateStack"
             ],
             "Effect": "Allow",
-            "Resource": "arn:aws:cloudformation:*:<AWS_ACCOUNT_ID>:stack/parallelcluster-<CLUSTER_NAME>/*"
-            "Resource": "arn:aws:cloudformation:*:<AWS_ACCOUNT_ID>:stack/kill-pcluster-<CLUSTER_NAME>-<PROD_LEVEL>/*"
+            "Resource": "arn:aws:cloudformation:*:<AWS_ACCOUNT_ID>:stack/parallelcluster-*",
+            "Resource": "arn:aws:cloudformation:*:<AWS_ACCOUNT_ID>:stack/kill-pcluster-*-<PROD_LEVEL>/*"
         },
         {
             "Sid": "CloudFormationExtras",
@@ -187,18 +187,18 @@
                 "cloudformation:ValidateTemplate"
             ],
             "Effect": "Allow",
-            "Resource": "arn:aws:cloudformation:*:<AWS_ACCOUNT_ID>:stack/parallelcluster-<CLUSTER_NAME>/*"
-            "Resource": "arn:aws:cloudformation:*:<AWS_ACCOUNT_ID>:stack/kill-pcluster-<CLUSTER_NAME>-<PROD_LEVEL>/*"
+            "Resource": "arn:aws:cloudformation:*:<AWS_ACCOUNT_ID>:stack/parallelcluster-*/",
+            "Resource": "arn:aws:cloudformation:*:<AWS_ACCOUNT_ID>:stack/kill-pcluster-*-<PROD_LEVEL>/*"
         },
         {
             "Sid": "S3Resources",
             "Action": ["s3:*"],
             "Effect": "Allow",
             "Resource": [
-                "arn:aws:s3:::parallelcluster-<CLUSTER_NAME>-*",
-                "arn:aws:s3:::parallelclustermaker-<CLUSTER_NAME>-*",
+                "arn:aws:s3:::parallelcluster-*",
+                "arn:aws:s3:::parallelclustermaker-*",
                 "arn:aws:s3:::*-aws-parallelcluster-*",
-                "arn:aws:s3:::kill-pcluster-<CLUSTER_OWNER>-*"
+                "arn:aws:s3:::kill-pcluster-*"
             ]
         },
         {
