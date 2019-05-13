@@ -274,8 +274,7 @@
                 "arn:aws:iam::<AWS_ACCOUNT_ID>:role/parallelcluster-*",
                 "arn:aws:iam::<AWS_ACCOUNT_ID>:role/parallelclustermaker-*",
                 "arn:aws:iam::<AWS_ACCOUNT_ID>:role/<CLUSTER_OWNER>-*",
-                "arn:aws:iam::<AWS_ACCOUNT_ID>:instance-profile/parallelcluster-<CLUSTER_OWNER>-*",
-                "arn:aws:iam::<AWS_ACCOUNT_ID>:instance-profile/parallelclustermaker-profile-*"
+                "arn:aws:iam::<AWS_ACCOUNT_ID>:instance-profile/*"
             ]
         },
         {
@@ -292,8 +291,7 @@
                 "arn:aws:iam::<AWS_ACCOUNT_ID>:role/parallelcluster-*",
                 "arn:aws:iam::<AWS_ACCOUNT_ID>:role/parallelclustermaker-*",
                 "arn:aws:iam::<AWS_ACCOUNT_ID>:role/<CLUSTER_OWNER>-*",
-                "arn:aws:iam::<AWS_ACCOUNT_ID>:instance-profile/parallelcluster-<CLUSTER_OWNER>-*",
-                "arn:aws:iam::<AWS_ACCOUNT_ID>:instance-profile/parallelclustermaker-profile-*"
+                "arn:aws:iam::<AWS_ACCOUNT_ID>:instance-profile/*"
             ]
         },
         {
@@ -313,8 +311,7 @@
                 "arn:aws:iam::<AWS_ACCOUNT_ID>:role/parallelcluster-*",
                 "arn:aws:iam::<AWS_ACCOUNT_ID>:role/parallelclustermaker-*",
                 "arn:aws:iam::<AWS_ACCOUNT_ID>:role/<CLUSTER_OWNER>-*",
-                "arn:aws:iam::<AWS_ACCOUNT_ID>:instance-profile/parallelcluster-<CLUSTER_OWNER>-*",
-                "arn:aws:iam::<AWS_ACCOUNT_ID>:instance-profile/parallelclustermaker-profile-*"
+                "arn:aws:iam::<AWS_ACCOUNT_ID>:instance-profile/*"
             ]
         },
         {
