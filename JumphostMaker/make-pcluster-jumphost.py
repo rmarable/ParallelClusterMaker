@@ -329,7 +329,7 @@ except ClientError as e:
             # provided from the command line.
             filedata_stage_1 = filedata_stage_0.replace('<AWS_ACCOUNT_ID>', aws_account_id)
             filedata_stage_2 = filedata_stage_1.replace('<PROD_LEVEL>', prod_level)
-            filedata_stage_3 = filedata_stage_2.replace('<CLUSTER_OWNER>', cluster_owner)
+            filedata_stage_3 = filedata_stage_2.replace('<INSTANCE_OWNER>', instance_owner)
             filedata = filedata_stage_3
         with open(iam_json_policy_template, 'w') as ec2_instance_role_dest:
             ec2_instance_role_dest.write(filedata)

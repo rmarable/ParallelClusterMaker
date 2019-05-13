@@ -180,7 +180,7 @@
             "Effect": "Allow",
             "Resource": [
                 "arn:aws:cloudformation:*:<AWS_ACCOUNT_ID>:stack/parallelcluster-*",
-                "arn:aws:cloudformation:*:<AWS_ACCOUNT_ID>:stack/kill-pcluster-<CLUSTER_OWNER>-*"
+                "arn:aws:cloudformation:*:<AWS_ACCOUNT_ID>:stack/kill-pcluster-<INSTANCE_OWNER>-*"
             ]
         },
         {
@@ -189,7 +189,7 @@
             "Effect": "Allow",
             "Resource": [
                 "arn:aws:cloudformation:*:<AWS_ACCOUNT_ID>:stack/parallelcluster-*",
-                "arn:aws:cloudformation:*:<AWS_ACCOUNT_ID>:stack/kill-pcluster-<CLUSTER_OWNER>-*"
+                "arn:aws:cloudformation:*:<AWS_ACCOUNT_ID>:stack/kill-pcluster-<INSTANCE_OWNER>-*"
             ]
         },
         {
@@ -273,7 +273,7 @@
                 "arn:aws:iam::<AWS_ACCOUNT_ID>:user/*",
                 "arn:aws:iam::<AWS_ACCOUNT_ID>:role/parallelcluster-*",
                 "arn:aws:iam::<AWS_ACCOUNT_ID>:role/parallelclustermaker-*",
-                "arn:aws:iam::<AWS_ACCOUNT_ID>:role/<CLUSTER_OWNER>-*",
+                "arn:aws:iam::<AWS_ACCOUNT_ID>:role/<INSTANCE_OWNER>-*",
                 "arn:aws:iam::<AWS_ACCOUNT_ID>:instance-profile/*"
             ]
         },
@@ -290,7 +290,7 @@
             "Resource": [
                 "arn:aws:iam::<AWS_ACCOUNT_ID>:role/parallelcluster-*",
                 "arn:aws:iam::<AWS_ACCOUNT_ID>:role/parallelclustermaker-*",
-                "arn:aws:iam::<AWS_ACCOUNT_ID>:role/<CLUSTER_OWNER>-*",
+                "arn:aws:iam::<AWS_ACCOUNT_ID>:role/<INSTANCE_OWNER>-*",
                 "arn:aws:iam::<AWS_ACCOUNT_ID>:instance-profile/*"
             ]
         },
@@ -310,7 +310,7 @@
             "Resource": [
                 "arn:aws:iam::<AWS_ACCOUNT_ID>:role/parallelcluster-*",
                 "arn:aws:iam::<AWS_ACCOUNT_ID>:role/parallelclustermaker-*",
-                "arn:aws:iam::<AWS_ACCOUNT_ID>:role/<CLUSTER_OWNER>-*",
+                "arn:aws:iam::<AWS_ACCOUNT_ID>:role/<INSTANCE_OWNER>-*",
                 "arn:aws:iam::<AWS_ACCOUNT_ID>:instance-profile/*"
             ]
         },
