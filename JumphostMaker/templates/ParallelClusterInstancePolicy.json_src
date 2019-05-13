@@ -180,7 +180,7 @@
             "Effect": "Allow",
             "Resource": [
                 "arn:aws:cloudformation:*:<AWS_ACCOUNT_ID>:stack/parallelcluster-*",
-                "arn:aws:cloudformation:*:<AWS_ACCOUNT_ID>:stack/kill-pcluster-*-<PROD_LEVEL>-*"
+                "arn:aws:cloudformation:*:<AWS_ACCOUNT_ID>:stack/kill-pcluster-<CLUSTER_OWNER>-*"
             ]
         },
         {
@@ -189,7 +189,7 @@
             "Effect": "Allow",
             "Resource": [
                 "arn:aws:cloudformation:*:<AWS_ACCOUNT_ID>:stack/parallelcluster-*",
-                "arn:aws:cloudformation:*:<AWS_ACCOUNT_ID>:stack/kill-pcluster-*-<PROD_LEVEL>-*"
+                "arn:aws:cloudformation:*:<AWS_ACCOUNT_ID>:stack/kill-pcluster-<CLUSTER_OWNER>-*"
             ]
         },
         {
@@ -269,9 +269,11 @@
             ],
             "Effect": "Allow",
             "Resource": [
+                "arn:aws:iam::<AWS_ACCOUNT_ID>:group/*",
                 "arn:aws:iam::<AWS_ACCOUNT_ID>:role/parallelcluster-*",
                 "arn:aws:iam::<AWS_ACCOUNT_ID>:role/parallelclustermaker-*",
                 "arn:aws:iam::<AWS_ACCOUNT_ID>:role/<CLUSTER_OWNER>-*",
+                "arn:aws:iam::<AWS_ACCOUNT_ID>:instance-profile/parallelcluster-<CLUSTER_OWNER>-*",
                 "arn:aws:iam::<AWS_ACCOUNT_ID>:instance-profile/parallelclustermaker-profile-*"
             ]
         },
@@ -289,6 +291,7 @@
                 "arn:aws:iam::<AWS_ACCOUNT_ID>:role/parallelcluster-*",
                 "arn:aws:iam::<AWS_ACCOUNT_ID>:role/parallelclustermaker-*",
                 "arn:aws:iam::<AWS_ACCOUNT_ID>:role/<CLUSTER_OWNER>-*",
+                "arn:aws:iam::<AWS_ACCOUNT_ID>:instance-profile/parallelcluster-<CLUSTER_OWNER>-*",
                 "arn:aws:iam::<AWS_ACCOUNT_ID>:instance-profile/parallelclustermaker-profile-*"
             ]
         },
@@ -309,6 +312,7 @@
                 "arn:aws:iam::<AWS_ACCOUNT_ID>:role/parallelcluster-*",
                 "arn:aws:iam::<AWS_ACCOUNT_ID>:role/parallelclustermaker-*",
                 "arn:aws:iam::<AWS_ACCOUNT_ID>:role/<CLUSTER_OWNER>-*",
+                "arn:aws:iam::<AWS_ACCOUNT_ID>:instance-profile/parallelcluster-<CLUSTER_OWNER>-*",
                 "arn:aws:iam::<AWS_ACCOUNT_ID>:instance-profile/parallelclustermaker-profile-*"
             ]
         },
