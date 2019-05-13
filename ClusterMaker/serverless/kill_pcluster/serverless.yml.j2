@@ -171,6 +171,13 @@ resources:
                       - - "*"
                 - Effect: Allow
                   Action:
+                    - cloudformation:ValidateTemplate
+                  Resource:
+                    Fn::Join:
+                      - ""
+                      - - "arn:aws:sts::{{ aws_account_id }}:assumed-role/parallelclustermaker-role-*"
+                - Effect: Allow
+                  Action:
                     - iam:ListRoles
                     - iam:ListRolePolicies
                     - iam:DeleteRole
