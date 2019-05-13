@@ -150,6 +150,16 @@
             "Resource": "*"
         },
         {
+            "Sid": "SQSTags",
+            "Action": [
+                "sqs:ListQueueTags",
+                "sqs:TagQueue",
+                "sqs:UntagQueue"
+            ],
+            "Effect": "Allow",
+            "Resource": "*"
+        },
+        {
             "Sid": "SNS",
             "Action": [
                 "sns:Subscribe",
