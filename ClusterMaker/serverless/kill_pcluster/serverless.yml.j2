@@ -175,7 +175,7 @@ resources:
                   Resource:
                     Fn::Join:
                       - ""
-                      - - "arn:aws:sts::{{ aws_account_id }}:assumed-role/parallelclustermaker-role-*"
+                      - - "arn:aws:sts::{{ aws_account_id }}:assumed-role/*"
                 - Effect: Allow
                   Action:
                     - iam:ListRoles
