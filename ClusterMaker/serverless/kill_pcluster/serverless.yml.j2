@@ -108,7 +108,7 @@ resources:
                   Resource:
                     Fn::Join:
                       - ""
-                      - - "arn:aws:cloudformation:{{ region }}:{{ aws_account_id }}:stack/pcluster-{{ cluster_name }}/*"
+                      - - "arn:aws:cloudformation:{{ region }}:{{ aws_account_id }}:stack/pcluster-{{ cluster_name }}-{{ prod_level }}/*"
                 - Effect: Allow
                   Action:
                     - autoscaling:DeleteAutoScalingGroup
