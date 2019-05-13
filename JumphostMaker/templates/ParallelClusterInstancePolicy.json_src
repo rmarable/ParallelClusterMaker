@@ -198,7 +198,6 @@
             "Action": [ "cloudformation:ValidateTemplate" ],
             "Effect": "Allow",
             "Resource": [
-                "arn:aws:cloudformation:*:<AWS_ACCOUNT_ID>:stack/parallelcluster-*",
                 "arn:aws:cloudformation:*:<AWS_ACCOUNT_ID>:stack/kill-pcluster-<INSTANCE_OWNER>-*"
             ]
         },

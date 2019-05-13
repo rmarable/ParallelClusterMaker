@@ -30,7 +30,7 @@ provider:
 functions:
   kill_pcluster:
     handler: handler.kill_pcluster
-    role: KillCfnClusterCustomLambdaRole{{ serial_datestamp }}
+    role: KillParallelClusterCustomLambdaRole{{ serial_datestamp }}
     events:
       - schedule:
           rate: {{ cron_lifetime_string }}
@@ -38,21 +38,22 @@ functions:
 
 resources:
   Resources:
-    KillCfnClusterCustomLambdaRole{{ serial_datestamp }}:
+    KillParallelClusterCustomLambdaRole{{ serial_datestamp }}:
       Type: AWS::IAM::Role
       Properties:
         Path: /
-        RoleName: KillCfnClusterCustomLambdaRole{{ serial_datestamp }}
+        RoleName: KillParallelClusterCustomLambdaRole{{ serial_datestamp }}
         AssumeRolePolicyDocument:
           Version:  '2012-10-17'
           Statement:
             - Effect: Allow
               Principal:
                 Service:
+                  - ec2.amazonaws.com
                   - lambda.amazonaws.com
               Action: sts:AssumeRole
         Policies:
-          - PolicyName: KillCfnClusterCustomLambdaPolicy{{ serial_datestamp }}
+          - PolicyName: KillParallelClusterCustomLambdaPolicy{{ serial_datestamp }}
             PolicyDocument:
               Version:  '2012-10-17'
               Statement:
@@ -154,6 +155,7 @@ resources:
                     - ec2:RevokeSecurityGroupIngress
                     - ec2:TerminateInstances
                     - iam:DeleteRolePolicy
+                    - iam:ListRolePolicies
                     - iam:RemoveRoleFromInstanceProfile
                     - sns:CreateTopic
                     - sns:DeleteTopic
@@ -169,6 +171,8 @@ resources:
                       - - "*"
                 - Effect: Allow
                   Action:
+                    - iam:ListRoles
+                    - iam:ListRolePolicies
                     - iam:DeleteRole
                   Resource:
                     Fn::Join:
