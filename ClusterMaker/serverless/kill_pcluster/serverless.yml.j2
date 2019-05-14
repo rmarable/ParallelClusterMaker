@@ -2,7 +2,7 @@
 # Name:         serverless.yml
 # Author:       Rodney Marable <rodney.marable@gmail.com>
 # Created On:   August 20, 2019
-# Last Changed: May 12, 2019
+# Last Changed: May 13, 2019
 # Deployed On:  {{ lookup('pipe','date \"+%B %-d, %Y\"') }}
 # Purpose:      Serverless config to support self-terminating pcluster stacks
 ################################################################################
@@ -169,13 +169,6 @@ resources:
                     Fn::Join:
                       - ""
                       - - "*"
-                - Effect: Allow
-                  Action:
-                    - cloudformation:ValidateTemplate
-                  Resource:
-                    Fn::Join:
-                      - ""
-                      - - "arn:aws:sts::{{ aws_account_id }}:assumed-role/*"
                 - Effect: Allow
                   Action:
                     - iam:ListRoles

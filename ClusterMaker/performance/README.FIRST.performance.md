@@ -1,4 +1,4 @@
-# README.FIRST.md
+# README.performance.FIRST.md
 
 * README.ParallelClusterMaker_Performance
 

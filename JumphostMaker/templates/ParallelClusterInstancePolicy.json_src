@@ -177,11 +177,9 @@
         {
             "Sid": "CloudFormation",
             "Action": [
-                "cloudformation:DescribeStacks",
                 "cloudformation:DescribeStackEvents",
                 "cloudformation:DescribeStackResource",
                 "cloudformation:DescribeStackResources",
-                "cloudformation:ListStacks",
                 "cloudformation:GetTemplate",
                 "cloudformation:CreateStack",
                 "cloudformation:DeleteStack",
@@ -195,21 +193,23 @@
         },
         {
             "Sid": "CloudFormationExtras",
-            "Action": [ "cloudformation:ValidateTemplate" ],
+            "Action": [
+                "cloudformation:DescribeStacks",
+                "cloudformation:ListStacks",
+                "cloudformation:ValidateTemplate"
+            ],
             "Effect": "Allow",
-            "Resource": [
-                "arn:aws:cloudformation:*:<AWS_ACCOUNT_ID>:stack/kill-pcluster-<INSTANCE_OWNER>-*"
-            ]
+            "Resource": [ "*" ]
         },
         {
             "Sid": "S3Resources",
             "Action": ["s3:*"],
             "Effect": "Allow",
             "Resource": [
-                "arn:aws:s3:::parallelcluster-*",
-                "arn:aws:s3:::parallelclustermaker-*",
-                "arn:aws:s3:::*-aws-parallelcluster-*",
-                "arn:aws:s3:::kill-pcluster-*"
+                "arn:aws:s3:::parallelcluster-<INSTANCE_OWNER>-*",
+                "arn:aws:s3:::parallelclustermaker-<INSTANCE_OWNER>-*",
+                "arn:aws:s3:::*-aws-parallelcluster-<INSTANCE_OWNER>-*",
+                "arn:aws:s3:::kill-pcluster-<INSTANCE_OWNER>-*"
             ]
         },
         {

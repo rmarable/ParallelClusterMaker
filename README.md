@@ -514,6 +514,25 @@ the `--cluster_owner_department` switch:
 * robotics
 * scicomp
 
+## Customizing Projects
+
+Operators can use the "--project_id" (or "-P") command line argument to to
+tag all resources with belonging to a cluster stack or an EC2 jumphost with
+this value.  Please refer to the examples below for adding "projectMayhem"
+as a tag for which additional cost or consumption data could be generated:
+
+JumphostMaker example:
+
+```
+$ ./make-pcluster-jumphost.py -N jumphost03 -O rmarable -E rodney.marable@gmail.com -A us-west-2b --project_id=projectMayhem --cluster_owner_department=compchem --scheduler=sge --ansible_verbosity=-vv
+```
+
+ClusterMaker example:
+
+```
+$ ./make-cluster.py --cluster_name batch019 --cluster_owner rmarable --cluster_owner_email=rodney.marable@gmail.com --cluster_owner_department=compbio --az=eu-west-1a --project_id=projectMayhem --scheduler awsbatch --desired_vcpus=50
+```
+
 ## Intel HyperThreading
 
 Seeting `--hyperthreading=false` will disable Intel HyperThreading on Amazon
