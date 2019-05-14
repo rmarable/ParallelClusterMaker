@@ -2,7 +2,7 @@
 # Name:		delete_pcluster.yml
 # Author:	Rodney Marable <rodney.marable@gmail.com>
 # Created On:	February 20, 2019
-# Last Changed:	May 8, 2019
+# Last Changed:	May 13, 2019
 # Purpose:	Ansible playbook to delete ParallelCluster stacks
 ################################################################################
 
@@ -45,8 +45,8 @@
         state: absent
       ignore_errors: yes
       with_items:
-        - policy: KillCfnClusterCustomLambdaPolicy{{ serial_datestamp }}
-          role: KillCfnClusterCustomLambdaRole{{ serial_datestamp }}
+        - policy: parallelclustermaker-terminate-stack-policy-{{ cluster_serial_number }}
+          role: parallelclustermaker-terminate-stack-role-{{ cluster_serial_number }}
 
     - name: Delete the IAM role associated with the self-terminating Lambda function for this cluster
       iam:
@@ -55,8 +55,8 @@
         state: absent
       ignore_errors: yes
       with_items:
-        - policy: KillCfnClusterCustomLambdaPolicy{{ serial_datestamp }}
-          role: KillCfnClusterCustomLambdaRole{{ serial_datestamp }}
+        - policy: parallelclustermaker-terminate-stack-policy-{{ cluster_serial_number }}
+          role: parallelclustermaker-terminate-stack-role-{{ cluster_serial_number }}
 
     - name: Delete the cluster self-terminating Lambda function stage directory 
       serverless:
