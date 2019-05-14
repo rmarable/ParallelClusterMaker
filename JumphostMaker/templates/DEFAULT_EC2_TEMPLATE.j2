@@ -2,25 +2,25 @@
 # Name:		{{ instance_name }}.tf
 # Author:	Rodney Marable <rodney.marable@gmail.com>
 # Created On:	April 16, 2019
-# Last Changed:	May 9, 2019
+# Last Changed:	May 13, 2019
 # Deployed On:	{{ lookup('pipe','date \"+%B %-d, %Y\"') }}
 # Purpose:	Terraform template for {{ instance_name }}
 ################################################################################
 
 resource "aws_instance"  "{{ instance_name }}" {
-  availability_zone    = "{{ az }}"
-  ami                  = "{{ aws_ami }}"
-  ebs_optimized        = "{{ ebs_optimized }}"
-  iam_instance_profile = "{{ iam_instance_profile }}"
-  instance_type        = "{{ ec2_instance_type }}"
-  key_name             = "{{ ec2_keypair }}"
-  provider             = "{{ provider }}"
+  availability_zone         = "{{ az }}"
+  ami                       = "{{ aws_ami }}"
+  ebs_optimized             = "{{ ebs_optimized }}"
+  iam_instance_profile      = "{{ iam_instance_profile }}"
+  instance_type             = "{{ ec2_instance_type }}"
+  key_name                  = "{{ ec2_keypair }}"
+  provider                  = "{{ provider }}"
   root_block_device {
-    volume_size        = "{{ instance_root_volume_size }}"
-    volume_type        = "{{ ebs_volume_type }}"
+    volume_size             = "{{ instance_root_volume_size }}"
+    volume_type             = "{{ ebs_volume_type }}"
   }
-  vpc_security_group_ids = ["{{ vpc_security_group_ids }}"]
-  subnet_id            = "{{ subnet_id }}"
+  vpc_security_group_ids    = ["{{ vpc_security_group_ids }}"]
+  subnet_id                 = "{{ subnet_id }}"
   tags {
     Name                    = "{{ instance_name }}"
     EC2InstanceBuilder      = "Terraform"
@@ -36,9 +36,16 @@ resource "aws_instance"  "{{ instance_name }}" {
   }
   volume_tags {
     EC2InstanceBuilder      = "Terraform"
-    InstanceSerialNumber    = "{{ instance_serial_number }}"
     Purpose                 = "EBS volume for pcluster-jumphost {{ instance_name }}"
+    InstanceSerialNumber    = "{{ instance_serial_number }}"
+    InstanceOwner           = "{{ instance_owner }}"
+    InstanceOwnerEmail      = "{{ instance_owner_email }}"
+    InstanceOwnerDepartment = "{{ instance_owner_department }}"
+{% if 'UNDEFINED' not in project_id %}
+    ProjectID               = "{{ project_id }}"
+{% endif %}
     MountedBy               = "{{ instance_name }}"
+    DEPLOYMENT_DATE         = "{{ DEPLOYMENT_DATE }}"
   }
   provisioner "file" {
     source      = "{{ build_pcluster_jumphost_script }}"

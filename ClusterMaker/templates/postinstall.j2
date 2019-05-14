@@ -2,7 +2,7 @@
 # Name:		postinstall.{{ cluster_name }}.sh
 # Author:	Rodney Marable <rodney.marable@gmail.com>
 # Created On:	April 20, 2019
-# Last Changed:	May 10, 2019
+# Last Changed:	May 13, 2019
 # Deployed On:	{{ lookup('pipe','date \"+%B %-d, %Y\"') }}
 # Purpose:	Perform postinstall tasks on cluster {{ cluster_name }}
 ################################################################################
@@ -310,7 +310,7 @@ esac
 
 AWS_INSTANCE_ID=$(ec2-metadata -i | awk '{print $2}')
 ROOT_DISK_ID=$(aws --region {{ region }} ec2 describe-volumes --filter "Name=attachment.instance-id,Values=$AWS_INSTANCE_ID" --query "Volumes[].VolumeId" --out text)
-aws --region {{ region }} ec2 create-tags --resources ${ROOT_DISK_ID} --tags Key=ClusterID,Value={{ cluster_name }} Key=ClusterSerialNumber,Value={{ cluster_serial_number }} Key=ClusterStackType,Value=ParallelCluster Key=MountedBy,Value=${AWS_INSTANCE_ID}{% if 'UNDEFINED' not in project_id %} Key=ProjectID,Value={{ project_id }}{% endif %}
+aws --region {{ region }} ec2 create-tags --resources ${ROOT_DISK_ID} --tags Key=ClusterID,Value={{ cluster_name }} Key=ClusterSerialNumber,Value={{ cluster_serial_number }} Key=ClusterOwner,Value={{ cluster_owner }}, Key=ClusterOwnerEmail,Value={{ cluster_owner_email }}, Key=ClusterOwnerDepartment,Value={{ cluster_owner_department }}, Key=ClusterStackType,Value=ParallelCluster Key=DEPLOYMENT_DATE,Value={{ DEPLOYMENT_DATE }} Key=MountedBy,Value=${AWS_INSTANCE_ID}{% if 'UNDEFINED' not in project_id %} Key=ProjectID,Value={{ project_id }}{% endif %}
 
 # Create some local aliases for HPC operator convenience.
 # Prevent multiple line copies from proliferating in HPC operator dotfiles.

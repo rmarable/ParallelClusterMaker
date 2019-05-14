@@ -2,13 +2,12 @@
 # Name:         kill-pcluster-{{ cluster_name }}.py
 # Author:       Rodney Marable <rodney.marable@gmail.com>
 # Created On:   June 28, 2018
-# Last Changed: May 13, 2019
+# Last Changed: May 12, 2019
 # Deployed On:  {{ lookup('pipe','date \"+%B %-d, %Y\"') }}
-# Purpose:      Lambda function for scheduled self-termination of pcluster
-# 		stack {{ cluster_name }}
+# Purpose:      Lambda function handler for self-terminating pcluster stacks
 ################################################################################
 
-def kill_pcluster_{{ cluster_serial_number }}(event, context):
+def kill_pcluster(event, context):
 
 # Load some required Python libraries.
     

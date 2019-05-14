@@ -4,8 +4,7 @@
 # Created On:   August 20, 2019
 # Last Changed: May 13, 2019
 # Deployed On:  {{ lookup('pipe','date \"+%B %-d, %Y\"') }}
-# Purpose:      Serverless config to support automated self-termination of
-# 		pcluster stack {{ cluster_name }}
+# Purpose:      Serverless config to support self-terminating pcluster stacks
 ################################################################################
 
 service: kill-pcluster-{{ cluster_name }}
@@ -29,9 +28,9 @@ provider:
     DEPLOYMENT_DATE: {{ DEPLOYMENT_DATE }}
 
 functions:
-  kill_pcluster_{{ cluster_serial_number }}:
-    handler: handler.kill_pcluster_{{ cluster_serial_number }}
-    role: parallelclustermaker-terminate-stack-{{ cluster_serial_number }}
+  kill_pcluster:
+    handler: handler.kill_pcluster
+    role: KillParallelClusterCustomLambdaRole{{ serial_datestamp }}
     events:
       - schedule:
           rate: {{ cron_lifetime_string }}
@@ -39,11 +38,11 @@ functions:
 
 resources:
   Resources:
-    parallelclustermaker-terminate-stack-{{ cluster_serial_number }}:
+    KillParallelClusterCustomLambdaRole{{ serial_datestamp }}:
       Type: AWS::IAM::Role
       Properties:
         Path: /
-        RoleName: parallelclustermaker-terminate-stack-role-{{ cluster_serial_number }}
+        RoleName: KillParallelClusterCustomLambdaRole{{ serial_datestamp }}
         AssumeRolePolicyDocument:
           Version:  '2012-10-17'
           Statement:
@@ -54,7 +53,7 @@ resources:
                   - lambda.amazonaws.com
               Action: sts:AssumeRole
         Policies:
-          - PolicyName: parallelclustermaker-terminate-stack-policy-{{ cluster_serial_number }}
+          - PolicyName: KillParallelClusterCustomLambdaPolicy{{ serial_datestamp }}
             PolicyDocument:
               Version:  '2012-10-17'
               Statement:

@@ -90,7 +90,7 @@ parser.add_argument('--perftest_custom_start_number', help='starting number of c
 parser.add_argument('--perftest_custom_step_size', help='step size of the custom performance qsub scripts (default = 10)', required=False, default=10)
 parser.add_argument('--perftest_custom_total_tests', help='number of performance tests to run (default = 10)', required=False, default=10)
 parser.add_argument('--turbot_account', '-T', help='Turbot account ID (default = abd).  Set to "disabled" in non-Turbot environments.', required=False, default='disabled')
-parser.add_argument('--ansible_verbosity', '-V', help='Set the Ansible verbosity level (default = none)', required=False, default='')
+parser.add_argument('--ansible_verbosity', help='Set the Ansible verbosity level (default = none)', required=False, default='')
 parser.add_argument('--debug_mode', '-D', choices=['true', 'false'], help='Enable debug mode (default = false)', required=False, default='false')
 
 # Ddeploying compute instances into private subnets is not (yet) supported.

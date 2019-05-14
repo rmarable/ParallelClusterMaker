@@ -53,7 +53,7 @@ parser.add_argument('--project_id', '-P', help='project name or ID number (defau
 parser.add_argument('--prod_level', choices=['dev', 'test', 'stage', 'prod'], help='operating stage of the jumphost  (default = dev)', required=False, default='dev')
 parser.add_argument('--security_group', help='primary security group for the EC2 pcluster-jumphost (default = pcluster_jumphost)', required=False, default='pcluster_jumphost')
 parser.add_argument('--turbot_account', '-T', help='Turbot account ID (default = abd).  Set to "disabled" in non-Turbot environments.', required=False, default='disabled')
-parser.add_argument('--ansible_verbosity', '-V', help='Set the Ansible verbosity level (default = none)', required=False, default='')
+parser.add_argument('--ansible_verbosity', help='Set the Ansible verbosity level (default = none)', required=False, default='')
 parser.add_argument('--debug_mode', '-D', choices=['true', 'false'], help='Enable debug mode (default = false)', required=False, default='false')
 
 # Create variables from optional instance_parameters provided via command line.
