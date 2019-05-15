@@ -2,7 +2,7 @@
 # Name:         serverless.yml
 # Author:       Rodney Marable <rodney.marable@gmail.com>
 # Created On:   August 20, 2019
-# Last Changed: May 14, 2019
+# Last Changed: May 15, 2019
 # Deployed On:  {{ lookup('pipe','date \"+%B %-d, %Y\"') }}
 # Purpose:      Serverless config to support automated self-termination of
 # 		pcluster stack {{ cluster_name }}
@@ -21,6 +21,7 @@ provider:
     ClusterID: {{ cluster_name }}
     ClusterStackType: serverless
     ClusterSerialNumber: {{ cluster_serial_number }}
+    ClusterSerialDateStamp: {{ cluster_serial_datestamp }}
     ClusterOwner: {{ cluster_owner }}
     ClusterOwnerEmail: {{ cluster_owner_email }}
     ClusterOwnerDepartment: {{ cluster_owner_department }}
@@ -31,7 +32,8 @@ provider:
 functions:
   kill_pcluster_{{ cluster_serial_number }}:
     handler: handler.kill_pcluster_{{ cluster_serial_number }}
-    role: parallelclustermaker-terminate-stack-{{ cluster_serial_number }}
+    #role: ParallelClusterMakerTerminateStack{{ cluster_serial_datestamp }}
+    role: parallelclustermaker-terminate-stack-role-{{ cluster_serial_number }}
     events:
       - schedule:
           rate: {{ cron_lifetime_string }}
@@ -39,11 +41,12 @@ functions:
 
 resources:
   Resources:
-    parallelclustermaker-terminate-stack-{{ cluster_serial_number }}:
+    ParallelClusterMakerTerminateStack{{ cluster_serial_datestamp }}:
       Type: AWS::IAM::Role
       Properties:
         Path: /
-        RoleName: parallelclustermaker-terminate-stack-role-{{ cluster_serial_number }}
+        role: parallelclustermaker-terminate-stack-role-{{ cluster_serial_number }}
+        #RoleName: ParallelClusterMakerTerminateStackrole{{ cluster_serial_number }}
         AssumeRolePolicyDocument:
           Version:  '2012-10-17'
           Statement:
@@ -54,6 +57,7 @@ resources:
                   - lambda.amazonaws.com
               Action: sts:AssumeRole
         Policies:
+          #- PolicyName: ParallelClusterMakerTerminateStackpolicy-{{ cluster_serial_number }}
           - PolicyName: parallelclustermaker-terminate-stack-policy-{{ cluster_serial_number }}
             PolicyDocument:
               Version:  '2012-10-17'

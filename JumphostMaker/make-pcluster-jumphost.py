@@ -172,12 +172,12 @@ try:
 except OSError as e:
     if e.errno != errno.EEXIST:
         raise
-serial_datestamp = time.strftime("%S%M%H%d%m%Y")
-instance_serial_number = instance_name + '-' + serial_datestamp
+instance_serial_datestamp = time.strftime("%S%M%H%d%m%Y")
+instance_serial_number = instance_name + '-' + instance_serial_datestamp
 instance_serial_number_file = SERIAL_DIR + '/' + instance_name + '.serial'
 
 if not os.path.isfile(instance_serial_number):
-    print('%s.%s' % (instance_name, serial_datestamp), file=open(instance_serial_number_file, 'w'))
+    print('%s.%s' % (instance_name, instance_serial_datestamp), file=open(instance_serial_number_file, 'w'))
     print(' '.join(sys.argv), file=open(instance_serial_number_file, 'a'))
 
 p_val('instance_serial_number', debug_mode)
