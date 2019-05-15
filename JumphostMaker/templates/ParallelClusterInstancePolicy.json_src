@@ -280,6 +280,7 @@
             "Resource": [
                 "arn:aws:iam::<AWS_ACCOUNT_ID>:group/*",
                 "arn:aws:iam::<AWS_ACCOUNT_ID>:user/*",
+                "arn:aws:iam::<AWS_ACCOUNT_ID>:role/kill-pcluster-*",
                 "arn:aws:iam::<AWS_ACCOUNT_ID>:role/parallelcluster-*",
                 "arn:aws:iam::<AWS_ACCOUNT_ID>:role/parallelclustermaker-*",
                 "arn:aws:iam::<AWS_ACCOUNT_ID>:role/<INSTANCE_OWNER>-*",
@@ -297,6 +298,7 @@
             ],
             "Effect": "Allow",
             "Resource": [
+                "arn:aws:iam::<AWS_ACCOUNT_ID>:role/kill-pcluster-*",
                 "arn:aws:iam::<AWS_ACCOUNT_ID>:role/parallelcluster-*",
                 "arn:aws:iam::<AWS_ACCOUNT_ID>:role/parallelclustermaker-*",
                 "arn:aws:iam::<AWS_ACCOUNT_ID>:role/<INSTANCE_OWNER>-*",
@@ -317,6 +319,7 @@
             ],
             "Effect": "Allow",
             "Resource": [
+                "arn:aws:iam::<AWS_ACCOUNT_ID>:role/kill-pcluster-*",
                 "arn:aws:iam::<AWS_ACCOUNT_ID>:role/parallelcluster-*",
                 "arn:aws:iam::<AWS_ACCOUNT_ID>:role/parallelclustermaker-*",
                 "arn:aws:iam::<AWS_ACCOUNT_ID>:role/<INSTANCE_OWNER>-*",

@@ -400,8 +400,8 @@ except OSError as e:
 
 DEPLOYMENT_DATE = time.strftime("%-d.%B.%Y")
 Deployed_On = time.strftime("%B %-d, %Y")
-cluster_serial_datestamp = DateTime.utcnow().strftime('%f%S%M%H%d%m%Y')
 
+cluster_serial_datestamp = DateTime.utcnow().strftime('%S%M%H%d%m%Y')
 cluster_serial_number = cluster_name + '-' + cluster_serial_datestamp
 cluster_serial_number_file = SERIAL_DIR + '/' + cluster_name + '.serial'
 

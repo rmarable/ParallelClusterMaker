@@ -2,7 +2,7 @@
 # Name:		create_pcluster.yml
 # Author:	Rodney Marable <rodney.marable@gmail.com>
 # Created On:	April 20, 2019
-# Last Changed:	May 12, 2019
+# Last Changed:	May 15, 2019
 # Purpose:	Ansible playbook to create new ParallelCluster stacks
 ################################################################################
 
@@ -486,6 +486,17 @@
         stage: "{{ prod_level }}"
         state: present
       ignore_errors: true
+      when: debug_mode == 'false'
+
+    - name: Deploy a Lambda function to terminate the stack when cluster_lifetime has exceeded with verbose mode enabled
+      serverless:
+        service_path: "{{ serverless_stage_dir }}"
+        region: "{{ region }}"
+        stage: "{{ prod_level }}"
+        state: present
+        verbose_mode: true
+      ignore_errors: true
+      when: debug_mode == 'true'
 
     - name: Stop lambda_timer
       command: date +%Y-%m-%d\ \@\ %H:%M:%S
