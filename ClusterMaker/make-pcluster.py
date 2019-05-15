@@ -4,7 +4,7 @@
 # Name:		make-pcluster.py
 # Author:	Rodney Marable <rodney.marable@gmail.com>
 # Created On:	April 20, 2019
-# Last Changed:	May 12, 2019
+# Last Changed:	May 13, 2019
 # Purpose:	Python3 wrapper for customizing ParallelCluster stacks
 ################################################################################
 
@@ -500,6 +500,7 @@ for vpc in vpc_information["Vpcs"]:
 # Parse the AWS Account ID.
 
 stsclient = boto3.client('sts', region_name = region)
+endpoint_url = 'https://sts.' + region + '.amazonaws.com'
 aws_account_id = stsclient.get_caller_identity()["Account"]
 
 # Perform error checking on the selected operating system.

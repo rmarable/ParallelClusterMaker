@@ -2,7 +2,7 @@
 # Name:         serverless.yml
 # Author:       Rodney Marable <rodney.marable@gmail.com>
 # Created On:   August 20, 2019
-# Last Changed: May 13, 2019
+# Last Changed: May 14, 2019
 # Deployed On:  {{ lookup('pipe','date \"+%B %-d, %Y\"') }}
 # Purpose:      Serverless config to support automated self-termination of
 # 		pcluster stack {{ cluster_name }}
@@ -13,8 +13,8 @@ service: kill-pcluster-{{ cluster_name }}
 provider:
   name: aws
   runtime: python3.7
-  memorySize: 128
-  timeout: 30
+  memorySize: 256
+  timeout: 60
   region: {{ region }}
   stage: {{ prod_level }}
   tags:

@@ -4,7 +4,7 @@
 # Name:         make-pcluster-jumphost.py
 # Author:       Rodney Marable <rodney.marable@gmail.com>
 # Created On:   April 18, 2019
-# Last Changed: May 12, 2019
+# Last Changed: May 13, 2019
 # Purpose:      Create an EC2 jumphost to run the ParallelClusterMaker toolkit
 ################################################################################
 
@@ -212,6 +212,7 @@ else:
 # Parse the AWS Account ID.
 
 stsclient = boto3.client('sts', region_name = region)
+endpoint_url = 'https://sts.' + region + '.amazonaws.com'
 aws_account_id = stsclient.get_caller_identity()["Account"]
 
 # Parse the subnet_id, vpc_id, and vpc_name from the selected AWS Region and
