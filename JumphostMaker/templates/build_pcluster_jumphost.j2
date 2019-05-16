@@ -92,14 +92,14 @@ EOF
 echo "
 alias src='cd ~/src/ParallelClusterMaker/ClusterMaker'" >> $EC2_HOME/.bashrc
 
-# Add a 50-second keep-alive interval so that SSH doesn't logout automatically
+# Add a 45-second keep-alive interval so that SSH doesn't logout automatically
 # and adversely affect ParallelClusterMaker activity.
 
 echo "
 # Add a 50-second keep-alive interval so that SSH doesn't logout automatically
 # and adversely affect ParallelClusterMaker activity.
-ServerAliveInterval 50" >> $EC2_HOME/.ssh/config
-chmod 0600 $EC2_HOME/.ssh/config
+ServerAliveInterval 45" >> $EC2_HOME/.ssh/config
+chmod 0644 $EC2_HOME/.ssh/config
 
 # Cleanup and exit.
 
