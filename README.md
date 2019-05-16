@@ -422,7 +422,7 @@ This may be revisited in a future release but for now, there are numerous
 checks in place to prevent the operator from setting `--enable_fsx=true` 
 when `--base_os=ubuntu1604`.
 
-## External NFS Access
+## External NFS Servers
 
 Support for external NFS access is configured in the "create_pcluster.yml"
 and "delete_pcluster.yml" playbooks.
@@ -582,9 +582,9 @@ http://docs.aws.amazon.com/AWSEC2/latest/UserGuide/placement-groups.html
 
 Per the AWS public documentation, please use this option with caution.
 
-## HPC Software and Application Support
+## HPC Software Packages and Application Support
 
-ParallelClusterMaker automatically provides support for Spack, a package
+ParallelClusterMaker automatically includes support for Spack, a package
 manager that makes it easier to build and maintain multiple versions and
 configurations of complex HPC software.
 
@@ -656,8 +656,8 @@ EBS root volumes, SQS queues, etc.
 
 Please note that since the default ParallelCluster IAM rule does not permit
 EC2CreateTags, EC2DescribeTags, or EC2DeleteTags, EBS root volume tagging
-may fail when building cluster stacks on OSX.  Building ParallelCluster stacks
-with an EC2 jumphost will avoid this potential issue.
+may fail when building cluster stacks on OSX.  Build ParallelCluster stacks
+with an EC2 jumphost to avoid this potential issue.
 
 AWS Batch does not currently support post-creation tagging of managed compute
 environments, so the default tags outlined above will not be visible with
@@ -676,6 +676,19 @@ Q. What is the pricing for AWS Batch?
 There is no additional charge for AWS Batch.  You only pay for the AWS
 Resources (e.g. EC2 Instances) you create to store and run your batch jobs.
 ```
+
+# Shared jumphosts
+
+As of May 2019, permissions to build ParallelCluster stacks when using an EC2
+jumphost are provided through a custom IAM EC2 instance profile that restricts
+certain API calls to resources including `instance_owner` in their name.
+
+This means multiple users cannot share a jumphost to launch clusters, i.e.
+"--instance_owner" and "--cluster_owner" must match.
+
+Shared jumphosts between multiple team members will be addressed in a future
+release.  For now, operators are advised to maintain a single jumphost per
+cluster_owner.
 
 # Reporting Bugs
 

@@ -2,7 +2,7 @@
 # Name:         serverless.yml
 # Author:       Rodney Marable <rodney.marable@gmail.com>
 # Created On:   August 20, 2019
-# Last Changed: May 15, 2019
+# Last Changed: May 16, 2019
 # Deployed On:  {{ lookup('pipe','date \"+%B %-d, %Y\"') }}
 # Purpose:      Serverless config to support automated self-termination of
 # 		pcluster stack {{ cluster_name }}
@@ -40,7 +40,7 @@ functions:
 
 resources:
   Resources:
-    KillParallelClusterMakerStack{{ cluster_owner }}{{ cluster_serial_datestamp }}
+    KillParallelClusterMakerStack{{ cluster_owner }}{{ cluster_serial_datestamp }}:
       Type: AWS::IAM::Role
       Properties:
         Path: /
@@ -65,7 +65,7 @@ resources:
                     - logs:CreateLogStream
                     - logs:PutLogEvents
                   Resource:
-                    - 'Fn::Join':
+                    Fn::Join:
                       - ""
                       - - "arn:aws:logs:*:*:*"
                 - Effect: Allow

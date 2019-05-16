@@ -109,23 +109,26 @@
             "Resource": "*"
         },
         {
-            "Sid": "DynamoDB",
+            "Sid": "DynamoDBTable",
             "Action": [
+                "dynamodb:CreateTable",
+                "dynamodb:DescribeTable",
+                "dynamodb:DeleteTable",
                 "dynamodb:ListTables",
                 "dynamodb:PutItem",
                 "dynamodb:Query",
                 "dynamodb:GetItem",
-                "dynamodb:DeleteItem",
-                "dynamodb:DescribeTable",
-                "dynamodb:CreateTable",
-                "dynamodb:DeleteTable"
+                "dynamodb:DeleteItem"
             ],
             "Effect": "Allow",
-            "Resource": "*"
+            "Resource": [
+                "arn:aws:dynamodb:*:<AWS_ACCOUNT_ID>:table/parallelcluster-*"
+            ]
         },
         {
-            "Sid": "DynamoDBExtras",
+            "Sid": "DynamoDBGlobal",
             "Action": [
+                "dynamodb:ListTables",
                 "dynamodb:ListTagsOfResource",
                 "dynamodb:TagResource"
             ],
@@ -227,13 +230,17 @@
             "Action": [
                 "lambda:CreateFunction",
                 "lambda:DeleteFunction",
+                "lambda:GetFunction",
                 "lambda:GetFunctionConfiguration",
                 "lambda:InvokeFunction",
                 "lambda:AddPermission",
                 "lambda:RemovePermission"
             ],
             "Effect": "Allow",
-            "Resource": "*"
+            "Resource": [
+                "arn:aws:lambda:*:<AWS_ACCOUNT_ID>:function:parallelcluster-*",
+                "arn:aws:lambda:*:<AWS_ACCOUNT_ID>:function:kill-pcluster-<INSTANCE_OWNER>-*"
+            ]
         },
         {
             "Sid": "Logs",

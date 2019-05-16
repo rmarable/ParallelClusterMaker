@@ -4,7 +4,7 @@
 # Name:         make-pcluster-jumphost.py
 # Author:       Rodney Marable <rodney.marable@gmail.com>
 # Created On:   April 18, 2019
-# Last Changed: May 13, 2019
+# Last Changed: May 16, 2019
 # Purpose:      Create an EC2 jumphost to run the ParallelClusterMaker toolkit
 ################################################################################
 
@@ -330,6 +330,7 @@ except ClientError as e:
             # provided from the command line.
             filedata_stage_1 = filedata_stage_0.replace('<AWS_ACCOUNT_ID>', aws_account_id)
             filedata_stage_2 = filedata_stage_1.replace('<PROD_LEVEL>', prod_level)
+            # Remove <INSTANCE_OWNER> substitution if teams share jumphosts.
             filedata_stage_3 = filedata_stage_2.replace('<INSTANCE_OWNER>', instance_owner)
             filedata = filedata_stage_3
         with open(iam_json_policy_template, 'w') as ec2_instance_role_dest:
