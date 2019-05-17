@@ -4,7 +4,7 @@
 # Name:		kill-pcluster.py
 # Author:	Rodney Marable <rodney.marable@gmail.com>
 # Created On:   April 20, 2019
-# Last Changed: May 12, 2019
+# Last Changed: May 16, 2019
 # Purpose:	Python3 wrapper for deleting custom pcluster stacks
 ################################################################################
 
@@ -155,8 +155,10 @@ destroy_cmd_string = 'ansible-playbook --extra-vars ' + '"' + 'cluster_name=' + 
 
 # Print the cluster destroy commands to the console.
 
-print('')
 if ansible_verbosity:
+    if debug_mode == 'true':
+        print('debug_mode = enabled')
+        print('')
     print('Setting Ansible verbosity to "' + ansible_verbosity + '"')
     print('')
 print('Ready to execute:')
@@ -167,8 +169,12 @@ print('$ ' + destroy_cmd_string)
 
 # Exit the script if the operator types 'CTRL-C' within 5 seconds after the
 # abort header is displayed.
+# If debug_mode is enabled, set the timer to 15 seconds.
 
-ctrlC_Abort(5, 80, 1, 1)
+if debug_mode == 'true':
+    ctrlC_Abort(15, 80, 1, 1)
+else:
+    ctrlC_Abort(5, 80, 1, 1)
 
 # Delete the cluster stack using the delete_pcluster Ansible playbook.
 

@@ -39,8 +39,8 @@ can then be used to administer ParallelCluster stacks.
 
 ParallelClusterMaker supports the following features through the command line:
 
-* User-configurable time-based cron-style cluster life cycle management i.e.
-clusters will self-terminate when `--cluster_lifetime` has been exceeded.
+* User-configurable time-based cron-style cluster life cycle management that
+causes stacks to self-terminate when `--cluster_lifetime` has been exceeded.
 The default is 30 days.
 
 * Command line designation of dev, test, stage, and prod operating levels.
@@ -286,7 +286,7 @@ practice.
 2. **kill-pcluster.py**: Run the kill-pcluster.py script from your local
 environment.  This tool can also be used to clean up artifacts from previous
 builds or in situations where the the ParallelCluster stack has exceeded
-`cluster_lifetime` and self-terminates.  To delete the cluster that was created
+`cluster_lifetime` and self-terminates.  To delete the cluster that created
 in the example above:
 
 `$ ./kill-pcluster.py -N test01 -O rmarable -A us-east-1a`
@@ -306,10 +306,9 @@ additional user (or DevOps) intervention:
 $ ./make-pcluster.py -N test01 -O rmarable -E rodney.marable@gmail.com -A us-east-1a --cluster_lifetime="0:12:0"
 ```
 
-A notification will be sent to cluster_owner_email when a stack destruction
-event has occurred.  The user should then run the local kill-pcluster script
-to remove any artifacts associated with the now-dead stack from the local
-environment.
+A notification will be sent to cluster_owner_email over SNS when a cluster
+stack termination event occurrs.  The user can then run kill-pcluster.py to
+remove artifacts associated with the deleted stack from the local environment.
 
 By default, any EFS or FSxL file systems associated with this cluster will
 also be terminated along with the cluster stack.  For FXSxL, this behavior

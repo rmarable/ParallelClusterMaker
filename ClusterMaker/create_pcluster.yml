@@ -2,7 +2,7 @@
 # Name:		create_pcluster.yml
 # Author:	Rodney Marable <rodney.marable@gmail.com>
 # Created On:	April 20, 2019
-# Last Changed:	May 16, 2019
+# Last Changed:	May 17, 2019
 # Purpose:	Ansible playbook to create new ParallelCluster stacks
 ################################################################################
 
@@ -23,6 +23,9 @@
     - name: Start a timer for the cluster environment build process
       command: date +%Y-%m-%d\ \@\ %H:%M:%S
       register: start_overall_timer
+
+    - debug: 
+        msg: "Debug {{ debug_mode }}"
 
     - name: Create a local state directory for this cluster
       file:
@@ -462,7 +465,7 @@
       set_fact:
         cron_lifetime_string: "{{ cron_lifetime_string_raw.stdout }}"
 
-    - name: Template the kill_pcluster Lambda function to serverless_stage_dir
+    - name: Template the terminate_pcluster Lambda function to serverless_stage_dir
       template:
         src: "{{ serverless_template_dir }}/{{ item }}.j2"
         dest: "{{ serverless_stage_dir }}/{{ item }}"
@@ -494,7 +497,7 @@
         region: "{{ region }}"
         stage: "{{ prod_level }}"
         state: present
-        verbose_mode: true
+        verbose: true
       ignore_errors: true
       when: 'debug_mode == "false"'
 

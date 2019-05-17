@@ -455,7 +455,7 @@ vars_file_main_part = '''\
 # Name:    	{instance_name}.yml
 # Author:  	Rodney Marable <rodney.marable@gmail.com>
 # Created On:   April 20, 2019
-# Last Changed: May 12, 2019
+# Last Changed: May 16, 2019
 # Deployed On:  {DEPLOYMENT_DATE}
 # Purpose: 	Build template for pcluster-jumphost
 ################################################################################
@@ -492,6 +492,7 @@ ec2_instance_type: {ec2_instance_type}
 ec2_user: {ec2_user}
 ec2_user_home: /home/{ec2_user}
 ec2_user_src: "{{{{ ec2_user_home }}}}/src"
+instance_name: {instance_name}
 instance_owner: {instance_owner}
 instance_owner_email: {instance_owner_email}
 instance_owner_department: {instance_owner_department}

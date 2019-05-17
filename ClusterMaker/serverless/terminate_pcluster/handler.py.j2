@@ -1,5 +1,5 @@
 ################################################################################
-# Name:         kill-pcluster-{{ cluster_name }}.py
+# Name:         terminate-pcluster-{{ cluster_name }}.py
 # Author:       Rodney Marable <rodney.marable@gmail.com>
 # Created On:   June 28, 2018
 # Last Changed: May 13, 2019
@@ -8,7 +8,7 @@
 # 		stack {{ cluster_name }}
 ################################################################################
 
-def kill_pcluster_{{ cluster_serial_number }}(event, context):
+def terminate_pcluster_{{ cluster_serial_number }}(event, context):
 
 # Load some required Python libraries.
     
@@ -59,7 +59,7 @@ def kill_pcluster_{{ cluster_serial_number }}(event, context):
     sns = boto3.resource('sns')
     topic = sns.Topic('arn:aws:sns:{{ region }}:{{ aws_account_id }}:sns_alerts_{{ cluster_name }}')
     r = topic.publish(
-        Message='ParallelCluster stack {{ cluster_name }} was terminated by the kill-pcluster Lambda function on ' + str(time.strftime('%c')),
+        Message='ParallelCluster stack {{ cluster_name }} was terminated by the terminate-pcluster Lambda function on ' + str(time.strftime('%c')),
         Subject='ParallelCluster stack {{ cluster_name }} Termination Alert',
         MessageStructure='string',
         MessageAttributes={

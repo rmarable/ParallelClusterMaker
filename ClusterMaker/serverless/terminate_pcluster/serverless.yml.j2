@@ -2,13 +2,13 @@
 # Name:         serverless.yml
 # Author:       Rodney Marable <rodney.marable@gmail.com>
 # Created On:   August 20, 2019
-# Last Changed: May 16, 2019
+# Last Changed: May 17, 2019
 # Deployed On:  {{ lookup('pipe','date \"+%B %-d, %Y\"') }}
 # Purpose:      Serverless config to support automated self-termination of
 # 		pcluster stack {{ cluster_name }}
 ################################################################################
 
-service: kill-pcluster-{{ cluster_name }}
+service: auto-terminate-parallelclustermaker-stacks
 
 provider:
   name: aws
@@ -16,23 +16,25 @@ provider:
   memorySize: 256
   timeout: 60
   region: {{ region }}
+  stackName: terminate-pcluster-{{ cluster_serial_number }}
   stage: {{ prod_level }}
   tags:
     ClusterID: {{ cluster_name }}
-    ClusterStackType: serverless
-    ClusterSerialNumber: {{ cluster_serial_number }}
-    ClusterSerialDateStamp: {{ cluster_serial_datestamp }}
     ClusterOwner: {{ cluster_owner }}
     ClusterOwnerEmail: {{ cluster_owner_email }}
     ClusterOwnerDepartment: {{ cluster_owner_department }}
+    ClusterStackType: serverless
+    ClusterSerialNumber: {{ cluster_serial_number }}
 {% if 'UNDEFINED' not in project_id %}    ProjectID: {{ project_id }}{% endif %}
     ProdLevel: {{ prod_level }}
     DEPLOYMENT_DATE: {{ DEPLOYMENT_DATE }}
+    Purpose: 'Auto-terminate cluster stacks built with ParallelClusterMaker'
 
 functions:
-  kill_pcluster_{{ cluster_serial_number }}:
-    handler: handler.kill_pcluster_{{ cluster_serial_number }}
-    role: KillParallelClusterMakerStack{{ cluster_owner }}{{ cluster_serial_datestamp }}
+  terminate-parallelclustermaker-stack:
+    handler: handler.terminate__pcluster_{{ cluster_serial_number }}
+    name: terminate-{{ cluster_name }}-{{ stage }}-{{ cluster_serial_datestamp }}
+    role: TerminateParallelClusterMakerStack{{ cluster_owner }}{{ cluster_serial_datestamp }}
     events:
       - schedule:
           rate: {{ cron_lifetime_string }}
@@ -40,11 +42,11 @@ functions:
 
 resources:
   Resources:
-    KillParallelClusterMakerStack{{ cluster_owner }}{{ cluster_serial_datestamp }}:
+    TerminateParallelClusterMakerStack{{ cluster_owner }}{{ cluster_serial_datestamp }}:
       Type: AWS::IAM::Role
       Properties:
         Path: /
-        RoleName: kill-pcluster-role-{{ cluster_serial_number }}
+        RoleName: terminate-pcluster-role-{{ cluster_serial_number }}
         AssumeRolePolicyDocument:
           Version:  '2012-10-17'
           Statement:
@@ -55,7 +57,7 @@ resources:
                   - lambda.amazonaws.com
               Action: sts:AssumeRole
         Policies:
-          - PolicyName: kill-pcluster-policy-{{ cluster_serial_number }}
+          - PolicyName: Terminate-pcluster-policy-{{ cluster_serial_number }}
             PolicyDocument:
               Version:  '2012-10-17'
               Statement:
