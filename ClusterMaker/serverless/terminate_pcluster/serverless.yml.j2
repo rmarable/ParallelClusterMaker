@@ -33,7 +33,7 @@ provider:
 functions:
   terminate-parallelclustermaker-stack:
     handler: handler.terminate__pcluster_{{ cluster_serial_number }}
-    name: terminate-{{ cluster_name }}-{{ stage }}-{{ cluster_serial_datestamp }}
+    name: terminate-{{ cluster_name }}-{{ prod_level }}-{{ cluster_serial_datestamp }}
     role: TerminateParallelClusterMakerStack{{ cluster_owner }}{{ cluster_serial_datestamp }}
     events:
       - schedule:
