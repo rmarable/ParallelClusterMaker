@@ -151,7 +151,7 @@ if debug_mode == 'true':
 
 # Generate the command string that will delete the cluster stack.
 
-destroy_cmd_string = 'ansible-playbook --extra-vars ' + '"' + 'cluster_name=' + cluster_name + ' cluster_birth_name=' + cluster_birth_name + ' cluster_serial_number=' + cluster_serial_number + ' delete_s3_bucketname=' + delete_s3_bucketname + ' delete_efs=' + delete_efs + ' delete_fsx=' + delete_fsx + ' ansible_python_interpreter=' + python3_path + '"' + ' delete_pcluster.yml ' + ansible_verbosity
+destroy_cmd_string = 'ansible-playbook --extra-vars ' + '"' + 'cluster_name=' + cluster_name + ' cluster_birth_name=' + cluster_birth_name + ' cluster_serial_number=' + cluster_serial_number + ' delete_s3_bucketname=' + delete_s3_bucketname + ' delete_efs=' + delete_efs + ' delete_fsx=' + delete_fsx + ' debug_mode=' + debug_mode + ' ansible_python_interpreter=' + python3_path + '"' + ' delete_pcluster.yml ' + ansible_verbosity
 
 # Print the cluster destroy commands to the console.
 
