@@ -2,7 +2,7 @@
 # Name:		create_pcluster.yml
 # Author:	Rodney Marable <rodney.marable@gmail.com>
 # Created On:	April 20, 2019
-# Last Changed:	May 15, 2019
+# Last Changed:	May 16, 2019
 # Purpose:	Ansible playbook to create new ParallelCluster stacks
 ################################################################################
 
@@ -171,7 +171,7 @@
               - "Initiated EFS build @ {{ start_efs_timer.stdout }}"
               - "Completed EFS build @ {{ stop_efs_timer.stdout }}"
               - ""
-      when: enable_efs
+      when: 'enable_efs == "true"'
 
     - name: Create a new security group for mounting external NFS file systems
       ec2_group:
@@ -196,7 +196,7 @@
               - 4047
             cidr_ip: 172.31.0.0/16
       register: external_nfs_sg
-      when: enable_external_nfs
+      when: 'enable_external_nfs == "true"'
 
     - block:
       - name: Start a timer to record how long it takes to complete all FSxL activities for this cluster
@@ -242,7 +242,7 @@
           - {src: '{{ fsx_delete_fs_script }}', dest: '{{ s3_script_path }}/{{ fsx_delete_fs_object }}'}
       - name: Create a new Lustre file system for this cluster
         shell: sh {{ fsx_create_fs_script }}
-      when: enable_fsx
+      when: 'enable_fsx == "true"'
 
     - name: Generate a new EC2 keypair for this cluster
       ec2_key:
@@ -303,7 +303,7 @@
         src: "{{ performance_template_dir }}/bang_cluster_friendly.j2"
         dest: "{{ stage_dir }}/bang.{{ cluster_name }}.sh"
         mode: 0755
-      when: enable_hpc_performance_tests
+      when: 'enable_hpc_performance_tests == "true"'
 
     - name: Template the custom shell scripts to stage_dir
       template:
@@ -317,7 +317,7 @@
         - perf-qsub
         - perf-sbatch
         - perf-stest
-      when: enable_hpc_performance_tests
+      when: 'enable_hpc_performance_tests == "true"'
 
     - name: Generate custom performance test qsub and sbatch scripts
       shell: sh {{ performance_rootdir }}/{{ item }}.sh {{ perftest_custom_start_number }} {{ perftest_custom_step_size }} {{ perftest_custom_total_tests }}
@@ -326,7 +326,7 @@
       with_items:
         -  generate_qsub_custom_templates
         -  generate_sbatch_custom_templates
-      when: enable_hpc_performance_tests
+      when: 'enable_hpc_performance_tests == "true"'
 
     - name: Template the custom performance test qsub and sbatch scripts to stage_dir
       template:
@@ -336,7 +336,7 @@
       with_fileglob:
         - "{{ performance_template_dir }}/qsub-*.j2"
         - "{{ performance_template_dir }}/sbatch-*.j2"
-      when: enable_hpc_performance_tests
+      when: 'enable_hpc_performance_tests == "true"'
 
     - name: Template the custom performance Python scripts to stage_dir
       template:
@@ -347,11 +347,11 @@
         - hashtest
         - fibonacci_hashtest
         - print_fibonacci
-      when: enable_hpc_performance_tests
+      when: 'enable_hpc_performance_tests == "true"'
 
     - name: Copy the Axb_random matrix test configuration file to stage_dir
       command: cp {{ performance_rootdir }}/MATRIX_SIZES.conf {{ stage_dir }}/MATRIX_SIZES.conf
-      when: enable_hpc_performance_tests
+      when: 'enable_hpc_performance_tests == "true"'
 
     - name: Copy the performance shell and Python scripts to stage_dir
       command: cp {{ performance_rootdir }}/{{ item }} {{ stage_dir }}
@@ -365,13 +365,13 @@
         - csv_summary_time_measurement.sh
         - make_sge_cluster_plots.py
         - rebuild_sge_csv.sh
-      when: enable_hpc_performance_tests
+      when: 'enable_hpc_performance_tests == "true"'
 
     - name: Copy the ParallelClusterMaker performance toolkit documentation to stage_dir
       command: cp {{ item }} {{ stage_dir }}
       with_fileglob:
         - "{{ performance_rootdir }}/README*.*"
-      when: enable_hpc_performance_tests
+      when: 'enable_hpc_performance_tests == "true"'
 
     - name: Start the stack creation timer
       command: date +%Y-%m-%d\ \@\ %H:%M:%S
@@ -415,7 +415,7 @@
           - ""
           - "pcluster status --region us-east-1 rmarable-batch01"
           - ""            
-      when: scheduler == 'awsbatch'
+      when: 'scheduler == "awsbatch"'
 
     - name: Launch the new ParallelCluster stack
       command: pcluster create --config {{ cluster_config_template }} --region {{ region }} --norollback {{ cluster_name }}
@@ -438,7 +438,7 @@
                 - 80
                 - 443
               cidr_ip: 0.0.0.0/0
-      when: enable_ganglia
+      when: 'enable_ganglia == "true"'
 
     - name: Stop the stack timer
       command: date +%Y-%m-%d\ \@\ %H:%M:%S
@@ -486,7 +486,7 @@
         stage: "{{ prod_level }}"
         state: present
       ignore_errors: true
-      when: debug_mode == 'false'
+      when: 'debug_mode == "false"'
 
     - name: Deploy a Lambda function to terminate the stack when cluster_lifetime has exceeded with verbose mode enabled
       serverless:
@@ -496,7 +496,7 @@
         state: present
         verbose_mode: true
       ignore_errors: true
-      when: debug_mode == 'true'
+      when: 'debug_mode == "false"'
 
     - name: Stop lambda_timer
       command: date +%Y-%m-%d\ \@\ %H:%M:%S
@@ -531,7 +531,7 @@
       when: not enable_hpc_performance_tests
     - name: Move the performance source tree to its final destination directory on the master instance
       command: ssh -i {{ ssh_keypair }} {{ ec2_user }}@{{ MasterPublicIP.stdout }} mv {{ stage_dir }}/* {{ Axb_random_dest }}
-      when: enable_hpc_performance_tests
+      when: 'enable_hpc_performance_tests == "true"'
 
     - name: Symlink the custom shell scripts on the master instance
       command: ssh -i {{ ssh_keypair }} {{ ec2_user }}@{{ MasterPublicIP.stdout }} cd {{ Axb_random_dest }}; ln -s {{ item }}.{{ cluster_name }}.sh {{ item }}.sh
@@ -544,7 +544,7 @@
         - perf-sbatch
         - perf-stest
       ignore_errors: true
-      when: enable_hpc_performance_tests
+      when: 'enable_hpc_performance_tests == "true"'
 
     - name: Symlink the custom Python scripts on the master instance
       command: ssh -i {{ ssh_keypair }} {{ ec2_user }}@{{ MasterPublicIP.stdout }} cd {{ Axb_random_dest }}; ln -s {{ item }}.{{ cluster_name }}.py {{ item }}.py
@@ -553,7 +553,7 @@
         - hashtest
         - print_fibonacci
       ignore_errors: true
-      when: enable_hpc_performance_tests
+      when: 'enable_hpc_performance_tests == "true"'
 
     - block:
       - name: Create an EBS shared storage HPC performance test directory
@@ -562,7 +562,7 @@
         command: ssh -i {{ ssh_keypair }} {{ ec2_user }}@{{ MasterPublicIP.stdout }} sudo chown -R {{ ec2_user }}:{{ ec2_user }} {{ ebs_hpc_performance_dir }}
       - name: Copy the final performance source tree from the master instance to the EBS shared storage HPC performance test directory
         command: ssh -i {{ ssh_keypair }} {{ ec2_user }}@{{ MasterPublicIP.stdout }} cp -a {{ Axb_random_dest }}/* {{ ebs_hpc_performance_dir }}
-      when: enable_hpc_performance_tests
+      when: 'enable_hpc_performance_tests == "true"'
 
     - block:
       - name: Create an EFS shared storage HPC performance test directory
@@ -571,7 +571,7 @@
         command: ssh -i {{ ssh_keypair }} {{ ec2_user }}@{{ MasterPublicIP.stdout }} sudo chown -R {{ ec2_user }}:{{ ec2_user }} {{ efs_hpc_performance_dir }}
       - name: Copy the final performance source tree from the master instance to the EFS shared storage HPC performance test directory
         command: ssh -i {{ ssh_keypair }} {{ ec2_user }}@{{ MasterPublicIP.stdout }} cp -a {{ Axb_random_dest }}/* {{ efs_hpc_performance_dir }}
-      when: enable_hpc_performance_tests and enable_efs == 'true'
+      when: 'enable_hpc_performance_tests == "true" and enable_efs == "true"'
 
     - block:
       - name: Create an external NFS shared storage HPC performance test directory
@@ -580,7 +580,7 @@
         command: ssh -i {{ ssh_keypair }} {{ ec2_user }}@{{ MasterPublicIP.stdout }} sudo chown -R {{ ec2_user }}:{{ ec2_user }} {{ external_nfs_hpc_performance_dir }}
       - name: Copy the final performance source tree from the master instance to the external NFS shared storage HPC performance test directory
         command: ssh -i {{ ssh_keypair }} {{ ec2_user }}@{{ MasterPublicIP.stdout }} cp -a {{ Axb_random_dest }}/* {{ external_nfs_hpc_performance_dir }}
-      when: enable_hpc_performance_tests and enable_external_nfs == 'true'
+      when: 'enable_hpc_performance_tests == "true" and enable_external_nfs == "true"'
 
     - block:
       - name: Create an FSxL shared storage HPC performance test directory
@@ -589,11 +589,11 @@
         command: ssh -i {{ ssh_keypair }} {{ ec2_user }}@{{ MasterPublicIP.stdout }} sudo chown -R {{ ec2_user }}:{{ ec2_user }} {{ fsx_hpc_performance_dir }}
       - name: Copy the final performance source tree from the master instance to the external NFS shared storage HPC performance test directory
         command: ssh -i {{ ssh_keypair }} {{ ec2_user }}@{{ MasterPublicIP.stdout }} cp -a {{ Axb_random_dest }}/* {{ fsx_hpc_performance_dir }}
-      when: enable_hpc_performance_tests and enable_fsx == 'true'
+      when: 'enable_hpc_performance_tests == "true" and enable_fsx == "true"'
 
     - name: Remove the staging directory on the master instance
       command: ssh -i {{ ssh_keypair }} {{ ec2_user }}@{{ MasterPublicIP.stdout }} rm -rf {{ stage_dir_parent }}
-      when: enable_hpc_performance_tests
+      when: 'enable_hpc_performance_tests == "true"'
 
     - name: Copy the custom scripts from the local staging directory to the cluster_data directory
       shell: cp -av {{ stage_dir }}/* {{ cluster_data_dir }}
@@ -609,20 +609,20 @@
       file: path="{{ item }}" state=absent
       with_items:
         - "{{ stage_dir }}"
-      when: enable_hpc_performance_tests
+      when: 'enable_hpc_performance_tests == "true"'
 
     - name: Remove the FSxL temp directory
       file: path="{{ item }}" state=absent
       with_items:
         - "{{ fsx_temp_dir }}"
-      when: enable_fsx
+      when: 'enable_fsx == "true"'
 
     - name: Remove all custom qsub and sbatch performance templates from the src tree
       file: path="{{ item }}" state=absent
       with_fileglob:
         - "{{ performance_template_dir }}/qsub-*.j2"
         - "{{ performance_template_dir }}/sbatch-*.j2"
-      when: enable_hpc_performance_tests
+      when: 'enable_hpc_performance_tests == "true"'
 
     - name: Stop the overall stack timer
       command: date +%Y-%m-%d\ \@\ %H:%M:%S
@@ -683,4 +683,4 @@
           - "Visit this link to view cluster statistics:"
           - "    http://{{ MasterPublicIP.stdout }}/ganglia"
           - ""
-      when: enable_ganglia
+      when: 'enable_ganglia == "true"'
