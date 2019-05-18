@@ -52,9 +52,9 @@
         region: "{{ region }}"
       delegate_to: localhost
 
-    - name: Create s3_bucketname to support this cluster
+    - name: Create S3 buckets to support this cluster stack
       s3_bucket:
-        name: "{{ s3_bucketname }}"
+        name: "{{ item.bucket }}"
         tags:
           ClusterID: "{{ cluster_name }}"
           ClusterStackType: ParallelCluster
@@ -66,11 +66,14 @@
           ClusterOwnerDepartment: "{{ cluster_owner_department }}"
           ProdLevel: "{{ prod_level }}"
           DEPLOYMENT_DATE: "{{ DEPLOYMENT_DATE }}"
+      with_items:
+        - { bucket: '{{ s3_bucketname }}' }
+        - { bucket: 'serverless-pcluster-{{ cluster_serial_number }}' }
       when: '"UNDEFINED" in project_id'
 
-    - name: Append the ProjectID tag to s3_bucketname if it is defined
+    - name: Create S3 buckets to support this cluster stack and append the ProjectID tag 
       s3_bucket:
-        name: "{{ s3_bucketname }}"
+        name: "{{ item.bucket }}"
         tags:
           ClusterID: "{{ cluster_name }}"
           ClusterStackType: ParallelCluster
@@ -83,6 +86,9 @@
           ProjectID: "{{ project_id }}"
           ProdLevel: "{{ prod_level }}"
           DEPLOYMENT_DATE: "{{ DEPLOYMENT_DATE }}"
+      with_items:
+        - { bucket: '{{ s3_bucketname }}' }
+        - { bucket: 'serverless-pcluster-{{ cluster_serial_number }}' }
       when: '"UNDEFINED" not in project_id'
           
     - block:
