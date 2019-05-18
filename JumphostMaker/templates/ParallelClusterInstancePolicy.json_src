@@ -209,6 +209,7 @@
             "Action": ["s3:*"],
             "Effect": "Allow",
             "Resource": [
+                "arn:aws:s3:::serverless-pcluster-*",
                 "arn:aws:s3:::parallelcluster-<INSTANCE_OWNER>-*",
                 "arn:aws:s3:::parallelclustermaker-<INSTANCE_OWNER>-*",
                 "arn:aws:s3:::*-aws-parallelcluster-<INSTANCE_OWNER>-*",

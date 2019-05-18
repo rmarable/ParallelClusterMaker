@@ -2,9 +2,9 @@
 # Name:         terminate-pcluster-{{ cluster_name }}.py
 # Author:       Rodney Marable <rodney.marable@gmail.com>
 # Created On:   June 28, 2018
-# Last Changed: May 13, 2019
+# Last Changed: May 17, 2019
 # Deployed On:  {{ lookup('pipe','date \"+%B %-d, %Y\"') }}
-# Purpose:      Lambda function for scheduled self-termination of pcluster
+# Purpose:      Lambda function for auto-scheduled self-termination of pcluster
 # 		stack {{ cluster_name }}
 ################################################################################
 
@@ -23,21 +23,6 @@ def terminate_pcluster_{{ cluster_serial_number }}(event, context):
     cluster_stack_name = 'parallelcluster-{{ cluster_name }}'
     s3_bucketname = '{{ s3_bucketname }}'
 
-# Delete s3_bucketname and any objects it contained.
-
-    s3 = boto3.resource('s3')
-    s3_objects_to_delete = s3.meta.client.list_objects(Bucket="{{ s3_bucketname }}")
-    s3_keys_to_delete = {'Objects' : []}
-    s3_keys_to_delete['Objects'] = [{'Key' : k} for k in [obj['Key'] for obj in s3_objects_to_delete.get('Contents', [])]]
-    s3.meta.client.delete_objects(Bucket="{{ s3_bucketname }}", Delete=s3_keys_to_delete)    
-    bucket_to_delete = s3.Bucket('{{ s3_bucketname }}')
-    p = bucket_to_delete.delete()
-
-# Delete the ParallelCluster stack.
-
-    cfn_client = boto3.client('cloudformation')
-    q = cfn_client.delete_stack(StackName=cluster_stack_name)
-
 {% if enable_efs == 'true' %}
 # Delete the EFS file system associated with this ParallelCluster stack.
 
@@ -54,6 +39,21 @@ def terminate_pcluster_{{ cluster_serial_number }}(event, context):
     delete_fsx_fsid = fsx_client.delete_file_system(FileSystemId=fsx_fsid)
 
 {% endif %}
+# Delete the ParallelCluster stack.
+
+    cfn_client = boto3.client('cloudformation')
+    q = cfn_client.delete_stack(StackName=cluster_stack_name)
+
+# Delete s3_bucketname and any objects it contained.
+
+    s3 = boto3.resource('s3')
+    s3_objects_to_delete = s3.meta.client.list_objects(Bucket="{{ s3_bucketname }}")
+    s3_keys_to_delete = {'Objects' : []}
+    s3_keys_to_delete['Objects'] = [{'Key' : k} for k in [obj['Key'] for obj in s3_objects_to_delete.get('Contents', [])]]
+    s3.meta.client.delete_objects(Bucket="{{ s3_bucketname }}", Delete=s3_keys_to_delete)    
+    bucket_to_delete = s3.Bucket('{{ s3_bucketname }}')
+    p = bucket_to_delete.delete()
+
 # Send a termination alert to cluster_owner_email via SNS.
 
     sns = boto3.resource('sns')

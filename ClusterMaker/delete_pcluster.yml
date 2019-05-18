@@ -45,8 +45,8 @@
         state: absent
       ignore_errors: yes
       with_items:
-        - policy: parallelclustermaker-terminate-stack-policy-{{ cluster_serial_number }}
-          role: parallelclustermaker-terminate-stack-role-{{ cluster_serial_number }}
+        - policy: terminate-pcluster-policy-{{ cluster_serial_number }}
+        - role: terminate-pcluster-role-{{ cluster_serial_number }}
 
     - name: Delete the IAM role associated with the self-terminating Lambda function for this cluster
       iam:
@@ -55,8 +55,7 @@
         state: absent
       ignore_errors: yes
       with_items:
-        - policy: parallelclustermaker-terminate-stack-policy-{{ cluster_serial_number }}
-          role: parallelclustermaker-terminate-stack-role-{{ cluster_serial_number }}
+        - role: terminate-pcluster-role-{{ cluster_serial_number }}
 
     - name: Delete the cluster self-terminating Lambda function stage directory 
       serverless:

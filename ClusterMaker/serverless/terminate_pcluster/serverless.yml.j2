@@ -18,6 +18,7 @@ provider:
   region: {{ region }}
   stackName: terminate-pcluster-{{ cluster_serial_number }}
   stage: {{ prod_level }}
+  deploymentBucket: serverless-pcluster-{{ cluster_serial_number }}
   tags:
     ClusterID: {{ cluster_name }}
     ClusterOwner: {{ cluster_owner }}
@@ -57,7 +58,7 @@ resources:
                   - lambda.amazonaws.com
               Action: sts:AssumeRole
         Policies:
-          - PolicyName: Terminate-pcluster-policy-{{ cluster_serial_number }}
+          - PolicyName: terminate-pcluster-policy-{{ cluster_serial_number }}
             PolicyDocument:
               Version:  '2012-10-17'
               Statement:
