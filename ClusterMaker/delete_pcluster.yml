@@ -2,7 +2,7 @@
 # Name:		delete_pcluster.yml
 # Author:	Rodney Marable <rodney.marable@gmail.com>
 # Created On:	February 20, 2019
-# Last Changed:	May 17, 2019
+# Last Changed:	May 25, 2019
 # Purpose:	Ansible playbook to delete ParallelCluster stacks
 ################################################################################
 
@@ -24,7 +24,14 @@
       register: start_delete_timer
 
     - debug:
-         msg: "Destroying {{ cluster_name }} on {{ start_delete_timer.stdout }}"
+         msg:
+          - ""
+          - "================================================================="
+          - "Destroying {{ cluster_name }} on {{ start_delete_timer.stdout }}"
+          - ""
+          - "This process will take about 5 minutes to complete"
+          - "================================================================="
+          - ""
 
     - name: Delete the ParallelCluster stack
       command: pcluster delete --config {{ cluster_config_template }} --region {{ region }} {{ cluster_name }}
@@ -35,27 +42,13 @@
       register: start_delete_lambda_timer
 
     - debug:
-         msg: "Removing the terminate_pcluster Lambda function on {{ start_delete_lambda_timer.stdout }}"
-
-    - name: Delete the IAM policy associated with the self-terminating Lambda function for this cluster
-      iam_policy:
-        iam_name: "{{ item.role }}"
-        iam_type: role
-        policy_name: "{{ item.policy }}"
-        state: absent
-      ignore_errors: yes
-      with_items:
-        - policy: terminate-pcluster-policy-{{ cluster_serial_number }}
-        - role: terminate-pcluster-role-{{ cluster_serial_number }}
-
-    - name: Delete the IAM role associated with the self-terminating Lambda function for this cluster
-      iam:
-        name: "{{ item.role }}"
-        iam_type: role
-        state: absent
-      ignore_errors: yes
-      with_items:
-        - role: terminate-pcluster-role-{{ cluster_serial_number }}
+         msg:
+          - "================================================================="
+          - "Removing the terminate_pcluster Lambda function on {{ start_delete_lambda_timer.stdout }}"
+          - ""
+          - "This process will take less than 5 minutes to complete"
+          - "================================================================="
+          - ""
 
     - name: Delete the cluster self-terminating Lambda function stage directory 
       serverless:
@@ -89,73 +82,6 @@
         state: absent
       when: ec2_private_key.changed
 
-    - name: Get facts about the EFS file system associated with this cluster
-      efs_facts:
-        tags:
-          ClusterSerialNumber: "{{ cluster_serial_number }}"
-      register: EFS_PCLUSTER
-      when: delete_efs == "true" and efs_temp_dir is defined
-
-    - debug: msg="{{ EFS_PCLUSTER }}"
-
-    - name: Create efs_temp_dir
-      file:
-        path: "{{ efs_temp_dir }}"
-        state: directory
-      when: delete_efs == "true" and efs_temp_dir is defined
-
-    - name: Dump the EFS file system mountpoint to a temp file
-      local_action: copy content={{ EFS_PCLUSTER }} dest={{ efs_temp_file }}
-      when: delete_efs == "true" and efs_temp_dir is defined
-
-    - name: Set the EFS file system mountpoint value from the temp file
-      shell: >
-        cat {{ efs_temp_file }} | jq '.ansible_facts.efs[].filesystem_address' | tr -d \"
-      register: efs_pcluster_mount_point
-      when: delete_efs == "true" and efs_temp_dir is defined
-
-    - name: Delete the EFS file system associated with this cluster
-      efs:
-        state: absent
-        name: "{{ efs_fs_pcluster }}"
-      when: delete_efs == "true" and efs_temp_dir is defined
-
-    - name: Delete the EFS security group associated with this cluster
-      ec2_group:
-        name: pcluster-{{ cluster_name }}-efs
-        state: absent
-        region: "{{ region }}"
-      when: delete_efs == "true" and efs_temp_dir is defined
-
-    - name: Delete the EFS temp directory
-      file: path="{{ efs_temp_dir }}" state=absent
-      when: delete_efs == "true" and efs_temp_dir is defined
-
-    - name: Parse the FSxL file system ID
-      shell: >
-        aws --region {{ region }} fsx describe-file-systems | jq '.FileSystems[] | select( any (.Tags[]; .Key == "ClusterSerialNumber" and .Value == "{{ cluster_serial_number }}"))' | jq '.FileSystemId' | tr -d \"
-      register: fsx_fsid
-      when: 'delete_fsx == "true"'
-
-    - debug:
-        msg: "Deleting fsx_fsid = {{ fsx_fsid.stdout }}..."
-      when: 'delete_fsx == "true" and fsx_fsid.stdout != ""'
-
-    - name: Delete the FSxL file system and wait for it to completely disappear before proceeding
-      shell: sh {{ fsx_delete_fs_script }} {{ fsx_fsid.stdout }}
-      when: 'delete_fsx == "true" and fsx_fsid.stdout != ""'
-
-    - name: Delete the FSxL security group associated with this cluster
-      ec2_group:
-        name: pcluster-{{ cluster_name }}-fsx
-        state: absent
-        region: "{{ region }}"
-      when: 'delete_fsx == "true" and fsx_fsid.stdout != ""'
-
-    - name: Delete the FSxL temp directory
-      file: path="{{ fsx_temp_dir }}" state=absent
-      when: 'delete_fsx == "true" and fsx_fsid.stdout != ""'
-
     - name: Remove all custom qsub and sbatch performance templates from the src tree
       file: path="{{ item }}" state=absent
       with_fileglob:
@@ -166,8 +92,10 @@
     - name: Delete the S3 bucket associated with this cluster
       s3_bucket:
         name: "{{ s3_bucketname }}"
+        region: "{{ region }}"
         state: absent
         force: yes
+      ignore_errors: yes
       when: 'delete_s3_bucketname == "true"'
 
     - name: Stop the timer and record how long the cluster took to destroy
@@ -191,8 +119,9 @@
         subject: "Cluster Destruction Notice: {{ cluster_name }}"
         topic: sns_alerts_{{ cluster_name }}
         region: "{{ region }}"
-      when: isdir_cdd.stat.isdir is defined and isdir_cdd.stat.isdir
+      ignore_errors: yes
       delegate_to: localhost
+      when: isdir_cdd.stat.isdir is defined and isdir_cdd.stat.isdir
 
     - name: Delete the SNS topic associated with this cluster
       sns_topic:
@@ -202,7 +131,43 @@
         subscriptions:
           - endpoint: "{{ cluster_owner_email }}"
             protocol: "email"
+      ignore_errors: yes
       when: isdir_cdd.stat.isdir is defined and isdir_cdd.stat.isdir
+
+    - name: Delete the IAM policies associated with the cluster stack
+      iam_policy:
+        iam_type: role
+        iam_name: "{{ ec2_iam_role }}"
+        policy_name: "{{ item }}"
+        region: "{{ region }}"
+        state: absent
+      with_items:
+        - "{{ ec2_iam_policy }}"
+        - "{{ fsx_hydration_iam_policy }}"
+      ignore_errors: yes
+
+    - name: Delete the IAM policies associated with the kill-pcluster Lambda function
+      iam_policy:
+        iam_type: role
+        iam_name: "{{ serverless_ec2_iam_role }}"
+        policy_name: "{{ item }}"
+        region: "{{ region }}"
+        state: absent
+      with_items:
+        - "{{ serverless_ec2_iam_policy }}"
+        - "{{ fsx_hydration_iam_policy }}"
+      ignore_errors: yes
+
+    - name: Delete the IAM roles associated with the cluster stack and kill-pcluster Lambda function
+      iam:
+        name: "{{ item }}"
+        iam_type: role
+        region: "{{ region }}"
+        state: absent
+      with_items:
+        - "{{ ec2_iam_role }}"
+        - "{{ serverless_ec2_iam_role }}"
+      ignore_errors: yes
 
     - name: Delete the cluster data directory
       file:

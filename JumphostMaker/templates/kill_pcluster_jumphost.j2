@@ -70,12 +70,12 @@ echo "Deleted SNS topic: $SNS_TOPIC_ARN"
 
 # Delete the IAM instance profile and role.
 
-aws iam delete-role-policy --role-name {{ iam_instance_role }} --policy-name {{ iam_instance_policy }}
-aws iam remove-role-from-instance-profile --instance-profile-name {{ iam_instance_profile }} --role-name {{ iam_instance_role }}
-aws iam delete-instance-profile --instance-profile-name {{ iam_instance_profile }}
-aws iam delete-role --role-name {{ iam_instance_role }}
-echo "Deleted IAM EC2 instance profile: {{ iam_instance_profile }}"
-echo "Deleted IAM role: {{ iam_instance_role }}"
+aws iam delete-role-policy --role-name {{ jumphost_iam_instance_role }} --policy-name {{ jumphost_iam_instance_policy }}
+aws iam remove-role-from-instance-profile --instance-profile-name {{ jumphost_iam_instance_profile }} --role-name {{ jumphost_iam_instance_role }}
+aws iam delete-instance-profile --instance-profile-name {{ jumphost_iam_instance_profile }}
+aws iam delete-role --role-name {{ jumphost_iam_instance_role }}
+echo "Deleted IAM EC2 instance profile: {{ jumphost_iam_instance_profile }}"
+echo "Deleted IAM role: {{ jumphost_iam_instance_role }}"
 
 # Remove config files and directories associated with {{ instance_name }}.
 

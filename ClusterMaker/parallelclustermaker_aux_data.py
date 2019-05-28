@@ -2,7 +2,7 @@
 # Name:		parallelclustermaker_aux_data.py
 # Author:	Rodney Marable <rodney.marable@gmail.com>
 # Created On:	April 20, 2019
-# Last Changed:	May 11, 2019
+# Last Changed:	May 27, 2019
 # Purpose:	External data structures and functions for ParallelClusterMaker
 ################################################################################
 
@@ -25,7 +25,7 @@ def S3Prefix(size):
 def illegal_az_msg(az):
     import sys
     print('*** ERROR ***')
-    print('"' + az + '"' + ' is not a valid Availability Zone in the selected AWS Region.')
+    print('"' + az + '"' + ' is not a valid Availability Zone in the selected AWS Region!')
     print('Aborting...')
     sys.exit(1)
 
@@ -55,11 +55,11 @@ def p_fail(p, q, r):
     import sys
     import textwrap
     print('')
-    print("*** Error ***")
+    print("*** ERROR ***")
     if r == 'missing_element':
-        print('"' + p + '"' + ' seems to be missing as a valid ' + q + '.')
+        print('"' + p + '"' + ' seems to be missing as a valid ' + q + '!')
     else:
-        print('"' + p + '"' + ' is not a valid option for ' + q + '.')
+        print('"' + p + '"' + ' is not a valid option for ' + q + '!')
         print("Supported values:")
         r = '\t'.join(r)
         print('\n'.join(textwrap.wrap(r, 78)))
@@ -68,14 +68,23 @@ def p_fail(p, q, r):
     sys.exit(1)
 
 # Function: ctrlC_Abort()
-# Purpose: Print an abort header, capture CTRL-C when pressed, and remove any
-# orphaned state and configuration files created by the make-cluster.py script.
+# Purpose: Print an abort header, capture CTRL-C when pressed, remove any
+# orphaned state and configuration files, and delete any IAM roles and policies
+# created by the make-cluster.py script.
 
-def ctrlC_Abort(sleep_time, line_length, vars_file_path, cluster_serial_number_file):
+def ctrlC_Abort(sleep_time, line_length, vars_file_path, cluster_serial_number_file, cluster_serial_number, enable_fsx_hydration):
+    import boto3
     import os
     import sys
     import time
     center_string = '   Please type CTRL-C within ' + str(sleep_time) + ' seconds to abort   '
+    iam = boto3.client('iam')
+    ec2_iam_policy = 'pclustermaker-policy-' + str(cluster_serial_number)
+    ec2_iam_role = 'pclustermaker-role-' + str(cluster_serial_number)
+    serverless_ec2_iam_policy = 'kill-pclustermaker-policy-' + str(cluster_serial_number)
+    serverless_ec2_iam_role = 'kill-pclustermaker-role-' + str(cluster_serial_number)
+    if enable_fsx_hydration == 'true':
+        fsx_hydration_iam_policy = 'pclustermaker-fsx-s3-policy-' + str(cluster_serial_number)
     print('')
     print(''.center(line_length, '#'))
     print(center_string.center(line_length, '#'))
@@ -86,17 +95,38 @@ def ctrlC_Abort(sleep_time, line_length, vars_file_path, cluster_serial_number_f
     except KeyboardInterrupt:
         if (vars_file_path == 1) and (cluster_serial_number_file == 1):
             print('')
+            print('No orphaned files or directories were found.')
+            print('')
         else:
             os.remove(cluster_serial_number_file)
             os.remove(vars_file_path)
             print('')
             print('Removed: ' + cluster_serial_number_file)
             print('Removed: ' + vars_file_path)
+        if (cluster_serial_number == 1):
+            print('')
+            print('No IAM roles or policies exist for this cluster.')
+            print('')
+        else:
+            if enable_fsx_hydration == 'true':
+                iam.delete_role_policy(RoleName=ec2_iam_role, PolicyName=fsx_hydration_iam_policy)
+                iam.delete_role_policy(RoleName=serverless_ec2_iam_role, PolicyName=fsx_hydration_iam_policy)
+                print('Deleted: ' + fsx_hydration_iam_policy)
+            iam.delete_role_policy(RoleName=ec2_iam_role, PolicyName=ec2_iam_policy)
+            iam.delete_role(RoleName=ec2_iam_role)
+            iam.delete_role_policy(RoleName=serverless_ec2_iam_role, PolicyName=serverless_ec2_iam_policy)
+            iam.delete_role(RoleName=serverless_ec2_iam_role)
+            print('')
+            print('-------')
+            print('Deleted: ' + ec2_iam_policy)
+            print('Deleted: ' + ec2_iam_role)
+            print('Deleted: ' + serverless_ec2_iam_policy)
+            print('Deleted: ' + serverless_ec2_iam_role)
             print('')
         print('Aborting...')
         sys.exit(1)
 
-# Function print_TextHeader()
+# Function: print_TextHeader()
 # Purpose: Print a centered text header to support validation and reviewing
 # of cluster_parameters.
 
@@ -106,6 +136,22 @@ def print_TextHeader(cluster_name, header, line_length):
     T2C = header +' for ' + cluster_name
     print(T2C.center(line_length))
     print(''.center(line_length, '-'))
+
+# Function: refer_to_docs_and_quit()
+# Purpose: Print an error message, refer to the AWS ParallelCluster public
+# documentation, and quit with a non-successful error code.
+
+def refer_to_docs_and_quit(error_msg):
+    import sys
+    print('')
+    print('*** ERROR ***')
+    print(error_msg)
+    print('')
+    print('Please refer to the ParallelCluster documentation for more information:')
+    print('https://aws-parallelcluster.readthedocs.io/en/latest/index.html')
+    print('')
+    print('Aborting...')
+    sys.exit(1)
 
 ############################
 # EC2 instance definitions #

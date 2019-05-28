@@ -1,0 +1,83 @@
+################################################################################
+# Name:         {{ serverless_handler }}.py
+# Author:       Rodney Marable <rodney.marable@gmail.com>
+# Created On:   June 28, 2018
+# Last Changed: May 23, 2019
+# Deployed On:  {{ lookup('pipe','date \"+%B %-d, %Y\"') }}
+# Purpose:      Lambda function for auto-scheduled self-termination of pcluster
+# 		stack {{ cluster_serial_number }}
+################################################################################
+
+# Load some required Python libraries.
+
+import boto3
+import botocore
+import sys
+import time
+from botocore.exceptions import ClientError
+
+def handler(event, context):
+
+# Define some important parameters.
+
+    cluster_stack_name = 'parallelcluster-{{ cluster_name }}'
+
+# Delete the ParallelCluster stack.
+
+    cfn_client = boto3.client('cloudformation')
+    try:
+        p = cfn_client.describe_stacks(StackName=cluster_stack_name)
+    except (botocore.exceptions.ClientError):
+        raise Exception('Cluster stack ' + cluster_stack_name + ' was not found in account {{ aws_account_id }}.')
+    else:
+        q = cfn_client.delete_stack(StackName=cluster_stack_name)
+
+# Delete s3_bucketname and any objects it contained.
+
+    s3client = boto3.client('s3')
+    try:
+        r = s3client.head_bucket(Bucket='{{ s3_bucketname }}')
+    except (botocore.exceptions.ClientError):
+        raise Exception('s3://{{ s3_bucketname }} is missing.')
+    s3 = boto3.resource('s3')
+    s3_objects_to_delete = s3.meta.client.list_objects(Bucket='{{ s3_bucketname }}')
+    s3_keys_to_delete = {'Objects' : []}
+    s3_keys_to_delete['Objects'] = [{'Key' : k} for k in [obj['Key'] for obj in s3_objects_to_delete.get('Contents', [])]]
+    s3.meta.client.delete_objects(Bucket='{{ s3_bucketname }}', Delete=s3_keys_to_delete)    
+    bucket_to_delete = s3.Bucket('{{ s3_bucketname }}')
+    s = bucket_to_delete.delete()
+
+# Delete the IAM role and policy associated with the cluster.
+
+    iam_client = boto3.client('iam')
+    ec2_iam_policy = 'pclustermaker-policy-{{ cluster_serial_number }}'
+    ec2_iam_role = 'pclustermaker-role-{{ cluster_serial_number }}'
+
+    try:
+        t = iam_client.delete_role_policy(RoleName=ec2_iam_role, PolicyName=ec2_iam_policy)
+    except (iam_client.exceptions.NoSuchEntityException):
+        print('*** ERROR ***')
+        print('Unable to delete {{ ec2_iam_role }} and {{ ec2_iam_policy }}!')
+        print('Continuing with destruction of ' + cluster_stack_name + '...')
+
+# Send a termination alert to cluster_owner_email by publishing to the SNS
+# topic endpoint for this cluster stack.
+
+    termination_message='ParallelCluster stack {{ cluster_name }} was terminated by the Lambda function terminate-{{ cluster_name }}-{{ prod_level }}-{{ cluster_serial_datestamp }} on ' + str(time.strftime('%c')) + '.  This Lambda function along with its associated IAM role and policy must also be deleted to complete the removal process for cluster {{ cluster_serial_number }}.'
+    sns = boto3.resource('sns')
+    topic = sns.Topic('arn:aws:sns:{{ region }}:{{ aws_account_id }}:sns_alerts_{{ cluster_name }}')
+    u = topic.publish(
+        Message=termination_message,
+        Subject='[ParallelClusterMaker] Stack Termination Notice',
+        MessageAttributes={
+            'ParallelClusterMaker Stack Termination Notice': {
+                'DataType': 'String',
+                'StringValue': '{{ cluster_serial_number }}'
+            }
+        }
+    )
+
+# Delete the SNS topic associated with this cluster stack.
+
+    sns_client = boto3.client('sns')
+    u = sns_client.delete_topic(TopicArn='arn:aws:sns:{{ region }}:{{ aws_account_id }}:sns_alerts_{{ cluster_name }}')

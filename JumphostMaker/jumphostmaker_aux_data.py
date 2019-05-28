@@ -2,7 +2,7 @@
 # Name:		jumphostmaker_aux_data.py
 # Author:	Rodney Marable <rodney.marable@gmail.com>
 # Created On:	April 16, 2019
-# Last Changed:	May 9, 2019
+# Last Changed:	May 26, 2019
 # Purpose:	Data structures and functions for make-pcluster-jumphost.py
 ################################################################################
 
@@ -31,7 +31,7 @@ def get_ami_info(base_os, region):
         ami_information = ec2client.describe_images(
             Owners=['137112412989'], # Amazon
             Filters=[
-              {'Name': 'name', 'Values': ['amzn2-ami-hvm-2.0.20180622.1-x86_64-gp2']},
+              {'Name': 'name', 'Values': ['amzn2-ami-hvm-2.0.20190508-x86_64-gp2']},
               {'Name': 'architecture', 'Values': ['x86_64']},
               {'Name': 'root-device-type', 'Values': ['ebs']},
             ],
@@ -44,7 +44,7 @@ def get_ami_info(base_os, region):
         ami_information = ec2client.describe_images(
             Owners=['137112412989'], # Amazon
             Filters=[
-              {'Name': 'name', 'Values': ['amzn-ami-hvm-2018.03.0.20180622-x86_64-gp2']},
+              {'Name': 'name', 'Values': ['amzn-ami-hvm-2018.03.0.20190514-x86_64-gp2']},
               {'Name': 'architecture', 'Values': ['x86_64']},
               {'Name': 'root-device-type', 'Values': ['ebs']},
             ],
@@ -147,10 +147,15 @@ def print_TextHeader(p, action, line_length):
 # Purpose: Print an abort header, capture CTRL-C when pressed, and remove any
 # orphaned state and config files created by the jumphost creation script.
 
-def ctrlC_Abort(sleep_time, line_length, vars_file_path, instance_serial_number_file):
+def ctrlC_Abort(sleep_time, line_length, vars_file_path, instance_serial_number_file, instance_serial_number):
+    import boto3
     import os
     import sys
     import time
+    iam = boto3.client('iam')
+    jumphost_iam_instance_policy = 'jumphostmaker-policy-' + str(instance_serial_number)
+    jumphost_iam_instance_profile = 'jumphostmaker-profile-' + str(instance_serial_number)
+    jumphost_iam_instance_role = 'jumphostmaker-role-' + str(instance_serial_number)
     print('')
     print(''.center(line_length, '#'))
     print('    Please type CTRL-C within 5 seconds to abort    '.center(line_length, '#'))
@@ -161,12 +166,28 @@ def ctrlC_Abort(sleep_time, line_length, vars_file_path, instance_serial_number_
     except KeyboardInterrupt:
         if (vars_file_path == 1) and (cluster_serial_number_file == 1):
             print('')
+            print('No orphaned files or directories were found.')
+            print('')
         else:
             os.remove(instance_serial_number_file)
             os.remove(vars_file_path)
             print('')
             print('Removed: ' + instance_serial_number_file)
             print('Removed: ' + vars_file_path)
+            print('')
+        if (instance_serial_number == 1):
+            print('')
+            print('No IAM role or policy exists for this jumphost.')
+            print('')
+        else:
+            iam.remove_role_from_instance_profile(InstanceProfileName=jumphost_iam_instance_profile, RoleName=jumphost_iam_instance_role)
+            iam.delete_instance_profile(InstanceProfileName=jumphost_iam_instance_profile)
+            iam.delete_role_policy(RoleName=jumphost_iam_instance_role, PolicyName=jumphost_iam_instance_policy)
+            iam.delete_role(RoleName=jumphost_iam_instance_role)
+            print('')
+            print('Deleted: ' + jumphost_iam_instance_profile)
+            print('Deleted: ' + jumphost_iam_instance_policy)
+            print('Deleted: ' + jumphost_iam_instance_role)
             print('')
         print('Aborting...')
         sys.exit(1)

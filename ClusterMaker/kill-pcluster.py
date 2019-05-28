@@ -4,7 +4,7 @@
 # Name:		kill-pcluster.py
 # Author:	Rodney Marable <rodney.marable@gmail.com>
 # Created On:   April 20, 2019
-# Last Changed: May 16, 2019
+# Last Changed: May 26, 2019
 # Purpose:	Python3 wrapper for deleting custom pcluster stacks
 ################################################################################
 
@@ -40,11 +40,11 @@ parser.add_argument('--cluster_owner', '-O', help='username of the cluster owner
 # Configure arguments for the optional variables.
 # By default, delete any storage associated with the cluster.
 
+parser.add_argument('--ansible_verbosity', '-V', help='Set the Ansible verbosity level (default = none)', required=False, default='')
+parser.add_argument('--cluster_owner_email', '-E', help='email address of the cluster owner (default = UNDEFINED)', required=False, default='UNDEFINED')
 parser.add_argument('--delete_efs', choices=['True', 'true', 'False', 'false'], help='Delete the EFS file system associated with this cluster (default = true)', required=False, default='true')
 parser.add_argument('--delete_fsx', choices=['True', 'true', 'False', 'false'], help='Delete the Lustre file system associated with this cluster (default = true)', required=False, default='true')
 parser.add_argument('--delete_s3_bucketname', choices=['True', 'true', 'False', 'false'], help='Delete the S3 bucket associated with this cluster (default = true)', required=False, default='true')
-parser.add_argument('--cluster_owner_email', '-E', help='email address of the cluster owner (default = UNDEFINED)', required=False, default='UNDEFINED')
-parser.add_argument('--ansible_verbosity', '-V', help='Set the Ansible verbosity level (default = none)', required=False, default='')
 parser.add_argument('--debug_mode', '-D', choices=['true', 'false'], help='Enable debug mode (default = false)', required=False, default='false')
 
 # Set cluster_parameters to the values provided via command line.
@@ -104,6 +104,7 @@ with open(os.devnull, 'w') as devnull:
         print('')
         print('*** WARNING ***')
         print('Cluster stack "' + cluster_name + '" was not found in ' + region + '!')
+        print('')
         print('Continuing with stack artifact destruction...')
     else:
         p_val(cluster_name, debug_mode)
@@ -111,7 +112,7 @@ with open(os.devnull, 'w') as devnull:
 # Define vars_file and cluster_serial_number_file.
 # Abort if either of these files are missing.
 
-SERIAL_DIR = './active_pclusters'
+SERIAL_DIR = './active_clusters'
 VARS_FILE_DIR = './vars_files'
 cluster_serial_number_file = SERIAL_DIR + '/' + cluster_name + '.serial'
 vars_file_path = VARS_FILE_DIR + '/' + cluster_name + '.yml'
@@ -135,7 +136,8 @@ else:
     sys.exit(1)
 
 # Parse cluster_serial_number from cluser_serial_number_file.
-# Strip any trailing newlines that would otherwise break destory_cmd_string.
+# Strip any trailing newlines that would otherwise break the Ansible destroy
+# command string.
 
 cluster_serial_number = open(cluster_serial_number_file).readline().rstrip("\n")
 
@@ -151,7 +153,7 @@ if debug_mode == 'true':
 
 # Generate the command string that will delete the cluster stack.
 
-destroy_cmd_string = 'ansible-playbook --extra-vars ' + '"' + 'cluster_name=' + cluster_name + ' cluster_birth_name=' + cluster_birth_name + ' cluster_serial_number=' + cluster_serial_number + ' delete_s3_bucketname=' + delete_s3_bucketname + ' delete_efs=' + delete_efs + ' delete_fsx=' + delete_fsx + ' debug_mode=' + debug_mode + ' ansible_python_interpreter=' + python3_path + '"' + ' delete_pcluster.yml ' + ansible_verbosity
+ansible_destroy_cmd_string = 'ansible-playbook --extra-vars ' + '"' + 'cluster_name=' + cluster_name + ' cluster_birth_name=' + cluster_birth_name + ' cluster_serial_number=' + cluster_serial_number + ' delete_s3_bucketname=' + delete_s3_bucketname + ' debug_mode=' + debug_mode + ' ansible_python_interpreter=' + python3_path + '"' + ' delete_pcluster.yml ' + ansible_verbosity
 
 # Print the cluster destroy commands to the console.
 
@@ -160,35 +162,26 @@ if ansible_verbosity:
         print('debug_mode = enabled')
         print('')
     print('Setting Ansible verbosity to "' + ansible_verbosity + '"')
-    print('')
+print('')
 print('Ready to execute:')
 print('$ ' + cluster_destroy_command)
 print('')
 print('Preparing to delete cluster "' + cluster_name + '" using this command:')
-print('$ ' + destroy_cmd_string)
+print('$ ' + ansible_destroy_cmd_string)
 
 # Exit the script if the operator types 'CTRL-C' within 5 seconds after the
 # abort header is displayed.
 # If debug_mode is enabled, set the timer to 15 seconds.
 
+line_length = 80
 if debug_mode == 'true':
-    ctrlC_Abort(15, 80, 1, 1)
+    ctrlC_Abort(15, 80, 1, 1, 1, 'false')
 else:
-    ctrlC_Abort(5, 80, 1, 1)
+    ctrlC_Abort(5, 80, 1, 1, 1, 'false')
 
 # Delete the cluster stack using the delete_pcluster Ansible playbook.
 
-subprocess.run(destroy_cmd_string, shell=True)
-
-# Delete cluster_serial_number_file and vars_file_path.
-
-line_length = 80
-print(''.center(line_length, '='))
-with contextlib.suppress(FileNotFoundError):
-    os.remove(cluster_serial_number_file)
-    print('Removed  ===> ' + cluster_serial_number_file)
-    os.remove(vars_file_path)
-    print('Removed  ===> ' + vars_file_path)
+subprocess.run(ansible_destroy_cmd_string, shell=True)
 
 # Print a friendly banner to the console and include the command used to
 # spawn the cluster stack.
@@ -198,12 +191,19 @@ print(''.center(line_length, '='))
 with contextlib.suppress(FileNotFoundError):
     with open(cluster_serial_number_file, 'r') as cli_input:
         print('To rebuild the cluster:')
+        print('')
         print('$ ' + cli_input.readlines()[-1])
-        print(''.center(line_length, '='))
+        print('')
 
-# Messaging to cluster_owner_email announcing the destruction of cluster_name
-# is currently handled by delete_pcluster.yml but this may be revisited in a
-# future release.
+# Delete cluster_serial_number_file and vars_file_path.
+
+print(''.center(line_length, '='))
+print('')
+with contextlib.suppress(FileNotFoundError):
+    os.remove(cluster_serial_number_file)
+    print('Removed  ===> ' + cluster_serial_number_file)
+    os.remove(vars_file_path)
+    print('Removed  ===> ' + vars_file_path)
 
 # Cleanup and exit.
 

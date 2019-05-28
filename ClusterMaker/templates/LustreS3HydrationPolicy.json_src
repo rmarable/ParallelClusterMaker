@@ -1,0 +1,32 @@
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Sid": "S3Objects",
+            "Action": [
+                "s3:GetObject",
+                "s3:PutObject",
+                "s3:DeleteObject"
+            ],
+            "Effect": "Allow",
+            "Resource": [
+                "arn:aws:s3:::<FSX_S3_EXPORT_BUCKET>/*",
+                "arn:aws:s3:::<FSX_S3_IMPORT_BUCKET>/*"
+            ]
+        },
+        {
+            "Sid": "S3Bucket",
+            "Action": [
+                "s3:CreateBucket",
+                "s3:DeleteBucket",
+                "s3:ListBucket",
+                "s3:PutBucketTagging"
+            ],
+            "Effect": "Allow",
+            "Resource": [
+                "arn:aws:s3:::<FSX_S3_EXPORT_BUCKET>/*",
+                "arn:aws:s3:::<FSX_S3_IMPORT_BUCKET>/*"
+            ]
+        }
+    ]
+}

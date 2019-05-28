@@ -114,7 +114,6 @@
                 "dynamodb:CreateTable",
                 "dynamodb:DescribeTable",
                 "dynamodb:DeleteTable",
-                "dynamodb:ListTables",
                 "dynamodb:PutItem",
                 "dynamodb:Query",
                 "dynamodb:GetItem",
@@ -122,7 +121,7 @@
             ],
             "Effect": "Allow",
             "Resource": [
-                "arn:aws:dynamodb:*:<AWS_ACCOUNT_ID>:table/parallelcluster-*"
+                "arn:aws:dynamodb:*:<AWS_ACCOUNT_ID>:table/parallelcluster-<CLUSTER_NAME>-DynamoDBTable-*"
             ]
         },
         {
@@ -190,8 +189,9 @@
             ],
             "Effect": "Allow",
             "Resource": [
-                "arn:aws:cloudformation:*:<AWS_ACCOUNT_ID>:stack/parallelcluster-*",
-                "arn:aws:cloudformation:*:<AWS_ACCOUNT_ID>:stack/kill-pcluster-<INSTANCE_OWNER>-*"
+                "arn:aws:cloudformation:*:<AWS_ACCOUNT_ID>:stack/parallelcluster-<CLUSTER_NAME>/*",
+                "arn:aws:cloudformation:*:<AWS_ACCOUNT_ID>:stack/parallelcluster-<CLUSTER_SERIAL_NUMBER>-*",
+                "arn:aws:cloudformation:*:<AWS_ACCOUNT_ID>:stack/kill-pcluster-<CLUSTER_SERIAL_NUMBER>-*"
             ]
         },
         {
@@ -202,29 +202,47 @@
                 "cloudformation:ValidateTemplate"
             ],
             "Effect": "Allow",
-            "Resource": [ "*" ]
+            "Resource": "*"
         },
         {
-            "Sid": "S3Resources",
-            "Action": ["s3:*"],
+            "Sid": "S3Objects",
+            "Action": [
+                "s3:GetObject",
+                "s3:PutObject",
+                "s3:DeleteObject"
+            ],
             "Effect": "Allow",
             "Resource": [
-                "arn:aws:s3:::serverless-pcluster-*",
-                "arn:aws:s3:::parallelcluster-<INSTANCE_OWNER>-*",
-                "arn:aws:s3:::parallelclustermaker-<INSTANCE_OWNER>-*",
-                "arn:aws:s3:::*-aws-parallelcluster-<INSTANCE_OWNER>-*",
-                "arn:aws:s3:::kill-pcluster-<INSTANCE_OWNER>-*"
+                "arn:aws:s3:::parallelcluster-<CLUSTER_NAME>-*/*",
+                "arn:aws:s3:::parallelclustermaker-<CLUSTER_SERIAL_NUMBER>/*",
+                "arn:aws:s3:::serverless-pcluster-<CLUSTER_SERIAL_NUMBER>/*",
+                "arn:aws:s3:::terminate-pcluster-*/*"
             ]
         },
         {
-            "Sid": "S3BucketInventory",
+            "Sid": "S3Bucket",
             "Action": [
-                "s3:HeadBucket",
-                "s3:ListAllMyBuckets",
-                "s3:ListBucket"
+                "s3:CreateBucket",
+                "s3:DeleteBucket",
+                "s3:ListBucket",
+                "s3:PutBucketTagging"
             ],
             "Effect": "Allow",
-            "Resource": ["*"]
+            "Resource": [
+                "arn:aws:s3:::parallelcluster-<CLUSTER_NAME>-*",
+                "arn:aws:s3:::parallelclustermaker-<CLUSTER_SERIAL_NUMBER>",
+                "arn:aws:s3:::serverless-pcluster-<CLUSTER_SERIAL_NUMBER>",
+                "arn:aws:s3:::terminate-pcluster-*"
+            ]
+        },
+        {
+            "Sid": "S3Inventory",
+            "Action": [
+                "s3:HeadBucket",
+                "s3:ListAllMyBuckets"
+            ],
+            "Effect": "Allow",
+            "Resource": "*"
         },
         {
             "Sid": "Lambda",
@@ -240,7 +258,7 @@
             "Effect": "Allow",
             "Resource": [
                 "arn:aws:lambda:*:<AWS_ACCOUNT_ID>:function:parallelcluster-*",
-                "arn:aws:lambda:*:<AWS_ACCOUNT_ID>:function:kill-pcluster-<INSTANCE_OWNER>-*"
+                "arn:aws:lambda:*:<AWS_ACCOUNT_ID>:function:kill-<CLUSTER_NAME>-<PROD_LEVEL>-<CLUSTER_SERIAL_DATESTAMP>"
             ]
         },
         {
@@ -288,29 +306,10 @@
             "Resource": [
                 "arn:aws:iam::<AWS_ACCOUNT_ID>:group/*",
                 "arn:aws:iam::<AWS_ACCOUNT_ID>:user/*",
-                "arn:aws:iam::<AWS_ACCOUNT_ID>:role/kill-pcluster-*",
-                "arn:aws:iam::<AWS_ACCOUNT_ID>:role/parallelcluster-*",
-                "arn:aws:iam::<AWS_ACCOUNT_ID>:role/parallelclustermaker-*",
-                "arn:aws:iam::<AWS_ACCOUNT_ID>:role/<INSTANCE_OWNER>-*",
-                "arn:aws:iam::<AWS_ACCOUNT_ID>:instance-profile/*"
-            ]
-        },
-        {
-            "Sid": "IAMInstanceProfile",
-            "Action": [
-                "iam:CreateInstanceProfile",
-                "iam:DeleteInstanceProfile",
-                "iam:GetInstanceProfile",
-                "iam:ListInstanceProfilesForRole",
-                "iam:ListInstanceProfiles"
-            ],
-            "Effect": "Allow",
-            "Resource": [
-                "arn:aws:iam::<AWS_ACCOUNT_ID>:role/kill-pcluster-*",
-                "arn:aws:iam::<AWS_ACCOUNT_ID>:role/parallelcluster-*",
-                "arn:aws:iam::<AWS_ACCOUNT_ID>:role/parallelclustermaker-*",
-                "arn:aws:iam::<AWS_ACCOUNT_ID>:role/<INSTANCE_OWNER>-*",
-                "arn:aws:iam::<AWS_ACCOUNT_ID>:instance-profile/*"
+                "arn:aws:iam::<AWS_ACCOUNT_ID>:role/parallelcluster-<CLUSTER_NAME>-*",
+                "arn:aws:iam::<AWS_ACCOUNT_ID>:role/parallelcluster-<CLUSTER_OWNER>-*",
+                "arn:aws:iam::<AWS_ACCOUNT_ID>:role/pclustermaker-role-<CLUSTER_SERIAL_NUMBER>",
+                "arn:aws:iam::<AWS_ACCOUNT_ID>:role/kill-pcluster-role-<CLUSTER_SERIAL_NUMBER>"
             ]
         },
         {
@@ -327,12 +326,24 @@
             ],
             "Effect": "Allow",
             "Resource": [
-                "arn:aws:iam::<AWS_ACCOUNT_ID>:role/kill-pcluster-*",
-                "arn:aws:iam::<AWS_ACCOUNT_ID>:role/parallelcluster-*",
-                "arn:aws:iam::<AWS_ACCOUNT_ID>:role/parallelclustermaker-*",
-                "arn:aws:iam::<AWS_ACCOUNT_ID>:role/<INSTANCE_OWNER>-*",
-                "arn:aws:iam::<AWS_ACCOUNT_ID>:instance-profile/*"
+                "arn:aws:iam::<AWS_ACCOUNT_ID>:role/parallelcluster-<CLUSTER_NAME>-*",
+                "arn:aws:iam::<AWS_ACCOUNT_ID>:role/parallelcluster-<CLUSTER_OWNER>-*",
+                "arn:aws:iam::<AWS_ACCOUNT_ID>:role/pclustermaker-role-<CLUSTER_SERIAL_NUMBER>",
+                "arn:aws:iam::<AWS_ACCOUNT_ID>:role/kill-pcluster-role-<CLUSTER_SERIAL_NUMBER>"
             ]
+        },
+        {
+            "Sid": "IAMInstanceProfile",
+            "Action": [
+                "iam:CreateInstanceProfile",
+                "iam:DeleteInstanceProfile",
+                "iam:GetInstanceProfile",
+                "iam:ListInstanceProfilesForRole",
+                "iam:RemoveRoleFromInstanceProfile",
+                "iam:ListInstanceProfiles"
+            ],
+            "Effect": "Allow",
+            "Resource": [ "arn:aws:iam::<AWS_ACCOUNT_ID>:instance-profile/*" ]
         },
         {
             "Sid": "ECSBatch",

@@ -1,7 +1,5 @@
 # ParallelClusterMaker - HPC Cloud Automation
 
-*Note: Text versions of the documentation can be found in the ParallelClusterMaker/docs folder.*
-
 ## Disclaimer
 
 **This Open Source software is neither endorsed by nor supported by Amazon Web Services!** 
@@ -22,9 +20,10 @@ ParallelClusterMaker is an Open Source command line wrapper toolkit that makes i
 
 You can find more information about AWS ParallelCluster by visiting:
 
+https://aws-parallelcluster.readthedocs.io/en/latest/index.html
 https://github.com/aws/aws-parallelcluster
 
-The parent directory ParallelClusterMaker contains two subdirectories:
+The top-level directory of the ParallelClusterMaker Github repository contains two subdirectories:
 
 * **JumphostMaker** creates a dedicated free tier EC2 instance that can be
 used to administer AWS ParallelCluster stacks.
@@ -32,12 +31,13 @@ used to administer AWS ParallelCluster stacks.
 * **ClusterMaker** builds and destroys AWS ParallelCluster stacks.
 
 ClusterMaker can be run locally via OSX (and, in theory, Windows), but the
-recommended practice is to use JumphostMaker to first stand up a jumphost that
-can then be used to administer ParallelCluster stacks.
+recommended practice is to use JumphostMaker to first stand up a standalone EC2 instance (a.k.a. "jumphost") that can then be used to administer ParallelCluster stacks.
+
+Please consult the EXAMPLES.md file for some suggestions on how to use ParallelClusterMaker's command line arguments.
 
 ## ParallelClusterMaker Features
 
-ParallelClusterMaker supports the following features through the command line:
+ParallelClusterMaker supports the following features through its command line interface:
 
 * User-configurable time-based cron-style cluster life cycle management that
 causes stacks to self-terminate when `--cluster_lifetime` has been exceeded.
@@ -45,14 +45,13 @@ The default is 30 days.
 
 * Command line designation of dev, test, stage, and prod operating levels.
 
-* Administrative control over allowed EC2 instance types for the admin and
-compute node roles.
+* Administrative control over the allowed types of EC2 instance for the admin and compute node roles.
 
 * Job scheduling with AWS Batch, Grid Engine, Torque, or Slurm.
 
-* Separate instance types for the master and compute instances.
+* Separate selectable instance types for the master and compute instances.
 
-* User selection of "optimal" instances with AWS Batch as a scheduler.
+* User selection of "optimal" instances when AWS Batch is selected as a scheduler.  Additionally, the user is free to select one of the EC2 instances that could potentially hold Junior's attention.
 
 * Identification of the cluster's owner, email address, and department using
 an easily extendable tagging framework.
@@ -71,7 +70,7 @@ instance termination due to spot price market fluctuations.
 * Customization of Grid Engine parallel environments.
 
 * Optional inclusion of a customizable HPC performance script repository to
-enable immediate "quick and dirty" comparative testing of cluster stacks.
+enable immediate "quick and dirty" comparative testing of traditional HPC schedulers (Grid Engine, Slurm, and Torque).  Support for AWS Batch will be provided in a future release.
 
 * Variable EBS volume sizes (up to 16 TB).
 
@@ -86,6 +85,8 @@ instances.
 
 * Creation of cluster-specific, custom-sized Amazon FSX for Lustre (FSxL)
 file systems.
+
+* Support for hydrating and dehydrating the Lustre file system from pre-existing S3 buckets.
 
 * Automounting of external NFS file systems from EMC, Netapp, Qumulo, WekaIO
 Panzura, Nasuni, etc.
@@ -229,15 +230,17 @@ Last login: Sat Jul 21 23:13:35 2018 from 64.192.133.129
 ParallelClusterMaker provides an optional suite of performance tests that 
 are included with new ParallelCluster stacks when the appropriate option
 (`--enable_hpc_performance_tests=true`) is invoked at installation.  These
-scripts live in ~/src/ParallelClusterMaker/ClusterMaker/performance.
+scripts live in ~/src/ParallelClusterMaker/ClusterMaker/performance but come
+with the following caveats that will be addressed in future releases:
+
+- AWS Batch is not supported because the scripts are largely written in Python and invoked using shell wrappers.
+
+- Cluster submission scripts for Torque support are not provided.
 
 Extensive documentation for these tests are included in the "performance"
 subdirectory as README files.
 
-At this time, only Grid Engine is natively supported.  However, support for
-additional schedulers will be added in future releases.
-
-Example usage:
+This example submits 10 of the hashtest jobs to a Grid Engine cluster:
 
 ```
 $ cd src/ParallelClusterMaker/ClusterMaker/performance/rmarable-test01
@@ -255,7 +258,7 @@ so please consider this carefully if your clusters are operating in an
 environment where security is a priority.  A future release will provide more
 flexibility for controlling http access.
 
-## How to Manage EC2 Key Pairs for Cluster Stacks
+## Managing EC2 Key Pairs for Cluster Stacks
 
 ParallelCluster creates a unique EC2 key pair for each cluster stack and EC2
 jumphost, storing the respective resulting PEM files in cluster_data_dir and
@@ -269,7 +272,7 @@ secure fashion.
 The kill_cluster and kill_pcluster_jumphost scripts will delete the respective
 EC2 key pairs as part of the cluster or jumphost destruction process.
 
-## Deleting a pcluster Stack or EC2 Jumphost
+## Deleting a Cluster Stack or EC2 Jumphost
 
 There are three ways to delete a cluster stack:
 
@@ -310,10 +313,10 @@ A notification will be sent to cluster_owner_email over SNS when a cluster
 stack termination event occurrs.  The user can then run kill-pcluster.py to
 remove artifacts associated with the deleted stack from the local environment.
 
-By default, any EFS or FSxL file systems associated with this cluster will
-also be terminated along with the cluster stack.  For FXSxL, this behavior
-can be overridden for FSxL by setting `delete_fsx=true` in the
-delete_cluster.yml Ansible playbook.
+Any EFS or FSxL file systems associated with this cluster will also be terminated along with the cluster stack.
+
+If the Lambda script is used to destroy the cluster when cluster_lifetime has
+exceeded, the kill-cluster.py script should still be run to clean up any artifacts that still remain.
 
 After the ParallelCluster stack has been deleted, the pcluster jumphost can
 also be deleted by running the `kill-pcluster-jumphost.$INSTANCE_NAME.sh`
@@ -326,7 +329,7 @@ $ cd ~/src/ParallelClusterMaker/JumphostMaker
 $ ./kill-pcluster-jumphost.$INSTANCE_NAME.sh
 ```
 
-## Serial Numbers
+## Cluster and Jumphost Serial Numbers
 
 ParallelClusterMaker generates unique "serial numbers" for every EC2 jumphost
 and ParallelCluster stack that are used for resource tagging and to associate
@@ -366,7 +369,7 @@ This may be addressed in a future release.  If greater performance from the
 shared storage is required, the operator is encouraged to use EFS max_io or
 FSxL instead.
 
-## EFS
+## Elastic File System (EFS) Support
 
 EFS can be used as a shared storage option for ParallelCluster by setting
 `--enable_efs=true.`  Creating a new EFS file system and mount target will
@@ -384,153 +387,72 @@ consult the official documentation:
 
 https://aws-parallelcluster.readthedocs.io/en/latest/configuration.html#efs-section
 
-Support for encryption and selecting between max_io and general_purpose modes can be 
-enabled by setting the appropriate command line switches to `true`.
+Support for encryption and selecting between max_io and general_purpose modes can be enabled by setting the appropriate command line switches to `true`.
 
 As of 4/20/2019, provisioning a 1024 MiB/sec file system costs approximately
 $6,200/month.  For that reason, `efs_throughput_mode` has been completely
 disabled to prevent unexpected and unpleasant surprises with the AWS bill.
 This will be re-enabled as a future update.
 
-## FSx for Lustre (FSxL)
+## FSx for Lustre (FSxL) Support
 
 FSx for Lustre (FSxL) can be leveraged for scratch space on a ParallelCluster
-stack by setting `--enable_fsx=true` and waiting an additional 5-7 minutes to
-create the Lustre file system, mount point, and security group.
-
-All cluster instances will mount the FSxL file system at /fsx.  The current
-implementation only supports "ephemeral" scratch, that is, S3 hydration and
-export is not supported.  This may change in a future release.
+stack by setting `--enable_fsx=true.`  All cluster instances will mount the FSxL file system at /fsx. 
 
 The **minimum** permitted file system size is 3600 GB (or 3.6 TB).  This is
 the current default.  Larger file systems can be built by setting `--fsx_size`
-to the desired value.
+to the desired value in **increments of 3600 GB.**  The build process will abort
+if presented with an incorrect value for fsx_size.
 
-Please be advised that ParallelClusterMaker currently supports only one FSxL
-mount per cluster and will only create FSxL mount targets in the cluster's
-selected Availability Zone.  This may be changed in a future release.
+FSxL on Ubuntu is not currently supported by ParallelCluster.  A theoretical workaround would be provide a custom Ubuntu AMI containing all of the required Lustre kernel drivers to ParallelClusterMaker with the `--custom_api argument.`  This functionlity may be provided in a future release.
 
-By default, all FSxL file systems will be deleted along with the cluster
-stack.  To override this behavior, change `--delete_fsx` to `false` when
-invoking the kill_cluster.py script.
+ParallelClusterMaker also supports hydration and dehyration of Lustre file systems using pre-existing S3 buckets as outlined in the AWS public documentation:
 
-ParallelClusterMaker does **not** support FSxL on Ubuntu because installation
-of the Lustre client process necessitates a reboot of all cluster instances,
-which in turn breaks the ParallelCluster Cloudformation template deployment.
-This may be revisited in a future release but for now, there are numerous 
-checks in place to prevent the operator from setting `--enable_fsx=true` 
-when `--base_os=ubuntu1604`.
+https://docs.aws.amazon.com/fsx/latest/LustreGuide/fsx-data-repositories.html
 
-## External NFS Servers
+Please note that the automatic dehydration at cluster deletion is not supported.  This feature may be provided in a future release.
+
+The FSx chunk size, import and export paths, and bucket names can all be configured through ParallelClusterMaker switches.  In the example below, a cluster called "louievega" will hydrate its 7.2 TB Lustre file system from s3://s3DataImportBucket and dehydrate to s3://s3DataExportBucket, using a chunk size of 5 GB:
+
+```
+$ ./make-pcluster.py -A us-west-2b -E rodney.marable@gmail.com -O rmarable -N louievega --enable_fsx=true --fsx_size=7200 --enable_fsx_hydration=true --fsx_s3_import_bucket=s3DataImportBucket --fsx_s3_export_bucket=s3DataExportBucket --fsx_chunk_size=5000
+```
+
+Please consult EXAMPLES.md for command line examples reflecting some other relevant use cases.
+
+## Mounting External NFS Servers
 
 Support for external NFS access is configured in the "create_pcluster.yml"
-and "delete_pcluster.yml" playbooks.
+and "delete_pcluster.yml" playbooks.  
 
-This example mounts an external file system called "storage.domain.com" onto
-a ParallelClusterMaker-spawned stack:
+The cluster mount points are listed in a Jinja2 template file:
+
+```
+$ cat ClusterMaker/templates/external_nfs_mount_list.j2
+################################################################################
+# Name:		external_nfs_mount_list.{{ cluster_name }}.conf
+# Author:	Rodney Marable <rodney.marable@gmail.com>
+# Created On:	May 21, 2019
+# Last Changed:	May 21, 2019
+# Deployed On:	{{ lookup('pipe','date \"+%B %-d, %Y\"') }}
+# Purpose:	List NFS external file systems to be mounted by postinstall.sh
+# Notes:	Comment out lines that don't contain a file system mount point
+################################################################################
+#
+#home
+#departments
+performance
+pkg
+#projects
+scratch
+#tools
+```
+
+This example would mount the file systems described in the aforementioned template from an external NFS file system called "storage.domain.com" onto all instances of a ParallelClusterMaker-spawned stack:
 
 `--enable_external_nfs=true` and `--external_nfs_server=storage.domain.com`
 
-Please do **NOT** enable this feature without having a working external NFS
-file system prepared to serve mount requests to this domain name!
-
-A future release will provide more flexibility with mounting external NFS
-file systems on new cluster stacks.
-
-# Suggested ParallelClusterMaker Invocations
-
-Here are some ways that the ParallelClusterMaker toolkit can be used:
-
-```
-$ cd src/ParallelClusterMaker/ClusterMaker
-```
-
-* Create a cluster named "bb8" in us-east-2b that uses only shared EBS with 
-Torque as the scheduler:
-
-```
-$ ./make-pcluster.py -A us-east-2b -E rodney.marable@gmail.com -O rmarable -N bb8 --scheduler=torque
-```
-
-* Create a cluster named "morpheus" in us-east-1a with an encrypted EFS file
-system and support for TLS encryption using Slurm as the scheduler:
-
-```
-$ ./make-pcluster.py -A us-east-1a -E rodney.marable@gmail.com -O rmarable -N morpheus --enable_efs=true --efs_encryption=true --scheduler=slurm
-```
-
-* Create a cluster named "tombrady12goat" in us-west-2b with a 16 TB FSxL file
-system using Grid Engine as the scheduler:
-
-```
-$ ./make-pcluster.py -A us-west-2b -E rodney.marable@gmail.com -O rmarable -N tombradygoat --enable_fsx=true --fsx_size=16384
-```
-
-* Create an AWS Batch environment named "terrordome" in us-east-2a that uses
-only shared EBS and can scale up to 64 cores:
-
-```
-$ ./make-cluster.py -A us-east-2a -E rodney.marable@gmail.com -O rmarable -N creed --scheduler=awsbatch --desired_vcpus=64
-```
-
-* Create a super massive production cluster named "lukecage" with a maximum
-of 3,072 compute cores in eu-west-1b that uses a 32 TB Lustre file system for
-scratch and an EFS file system for shared storage, Amazon Linux 2 as the base
-operating system, Grid Engine as the scheduler, system, and Ganglia for
-cluster monitoring:
-
-#
-			        WARNING 
-
-	    DO **NOT** INVOKE THIS COMMAND TO BUILD THIS CLUSTER
-	    UNLESS YOU ARE PREPARED FOR THE BILL THAT WILL ENSUE!
-
-```
-$ ./make-cluster.py -A eu-west-1b -E rodney.marable@gmail.com -O rmarable -N lukecage --base_os=alinux2 --enable_ganglia=true --master_instance_type=m5.2xlarge --compute_instance_type=r5.12xlarge --enable_fsx=true --fsx_size=32768 --enable_efs=true --prod_level=prod --max_queue_size=64
-```
-
-## Customizing Departments
-
-ParallelClusterMaker currently supports the following "departments" by using
-the `--cluster_owner_department` switch:
-
-* research (default)
-* hpc
-* analytics
-* compchem
-* compbio
-* datasci
-* design
-* clinical
-* commercial
-* development
-* finance
-* infrastructure
-* manufacturing
-* operations
-* proteomics
-* qa
-* robotics
-* scicomp
-
-## Customizing Projects
-
-Operators can use the "--project_id" (or "-P") command line argument to to
-tag all resources with belonging to a cluster stack or an EC2 jumphost with
-this value.  Please refer to the examples below for adding "projectMayhem"
-as a tag for which additional cost or consumption data could be generated:
-
-JumphostMaker example:
-
-```
-$ ./make-pcluster-jumphost.py -N jumphost03 -O rmarable -E rodney.marable@gmail.com -A us-west-2b --project_id=projectMayhem --cluster_owner_department=compchem --scheduler=sge --ansible_verbosity=-vv
-```
-
-ClusterMaker example:
-
-```
-$ ./make-cluster.py --cluster_name batch019 --cluster_owner rmarable --cluster_owner_email=rodney.marable@gmail.com --cluster_owner_department=compbio --az=eu-west-1a --project_id=projectMayhem --scheduler awsbatch --desired_vcpus=50
-```
+The template can easily by customized for your environment by uncommenting any of the existing file systems or by adding others as needed.  Please do **NOT** enable this feature without having a working external NFS file system that is properly configured to share these file systems with cluster instances in the cloud.
 
 ## Intel HyperThreading
 
@@ -676,7 +598,50 @@ There is no additional charge for AWS Batch.  You only pay for the AWS
 Resources (e.g. EC2 Instances) you create to store and run your batch jobs.
 ```
 
-# Shared jumphosts
+## Identifying Cluster Resources by Department
+
+ParallelClusterMaker currently supports the following "departments" by using
+the `--cluster_owner_department` switch:
+
+* research (default)
+* hpc
+* analytics
+* compchem
+* compbio
+* datasci
+* design
+* clinical
+* commercial
+* development
+* finance
+* infrastructure
+* manufacturing
+* operations
+* proteomics
+* qa
+* robotics
+* scicomp
+
+## Identifying Clusters with a Project ID
+
+Operators can use the "--project_id" (or "-P") command line argument to to
+tag all resources with belonging to a cluster stack or an EC2 jumphost with
+this value.  Please refer to the examples below for adding "projectMayhem"
+as a tag for which additional cost or consumption data could be generated:
+
+JumphostMaker example:
+
+```
+$ ./make-pcluster-jumphost.py -N jumphost03 -O rmarable -E rodney.marable@gmail.com -A us-west-2b --project_id=projectMayhem --cluster_owner_department=compchem --scheduler=sge --ansible_verbosity=-vv
+```
+
+ClusterMaker example:
+
+```
+$ ./make-cluster.py --cluster_name batch019 --cluster_owner rmarable --cluster_owner_email=rodney.marable@gmail.com --cluster_owner_department=compbio --az=eu-west-1a --project_id=projectMayhem --scheduler awsbatch --desired_vcpus=50
+```
+
+# Shared Jumphosts
 
 As of May 2019, permissions to build ParallelCluster stacks when using an EC2
 jumphost are provided through a custom IAM EC2 instance profile that restricts

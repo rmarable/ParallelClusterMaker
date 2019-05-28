@@ -1,0 +1,17 @@
+################################################################################
+# Name:		external_nfs_mount_list.{{ cluster_name }}.conf
+# Author:	Rodney Marable <rodney.marable@gmail.com>
+# Created On:	May 21, 2019
+# Last Changed:	May 21, 2019
+# Deployed On:	{{ lookup('pipe','date \"+%B %-d, %Y\"') }}
+# Purpose:	List NFS external file systems to be mounted by postinstall.sh
+# Notes:	Comment out lines that don't contain a file system mount point
+################################################################################
+#
+#home
+#departments
+performance
+pkg
+#projects
+scratch
+#tools

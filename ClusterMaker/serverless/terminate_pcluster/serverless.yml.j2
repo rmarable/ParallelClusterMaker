@@ -2,7 +2,7 @@
 # Name:         serverless.yml
 # Author:       Rodney Marable <rodney.marable@gmail.com>
 # Created On:   August 20, 2019
-# Last Changed: May 17, 2019
+# Last Changed: May 22, 2019
 # Deployed On:  {{ lookup('pipe','date \"+%B %-d, %Y\"') }}
 # Purpose:      Serverless config to support automated self-termination of
 # 		pcluster stack {{ cluster_name }}
@@ -13,12 +13,11 @@ service: auto-terminate-parallelclustermaker-stacks
 provider:
   name: aws
   runtime: python3.7
-  memorySize: 256
-  timeout: 60
+  memorySize: 128
+  timeout: 15
   region: {{ region }}
-  stackName: terminate-pcluster-{{ cluster_serial_number }}
+  stackName: {{ serverless_stack_name }}
   stage: {{ prod_level }}
-  deploymentBucket: serverless-pcluster-{{ cluster_serial_number }}
   tags:
     ClusterID: {{ cluster_name }}
     ClusterOwner: {{ cluster_owner }}
@@ -29,13 +28,17 @@ provider:
 {% if 'UNDEFINED' not in project_id %}    ProjectID: {{ project_id }}{% endif %}
     ProdLevel: {{ prod_level }}
     DEPLOYMENT_DATE: {{ DEPLOYMENT_DATE }}
-    Purpose: 'Auto-terminate cluster stacks built with ParallelClusterMaker'
+    Purpose: 'Auto-terminate cluster stack {{ cluster_name }} - Built by ParallelClusterMaker'
+
+custom:
+  s3ServerlessBucket: {{ s3_serverless_bucket }}
+  s3BucketName: {{ s3_bucketname }}
 
 functions:
   terminate-parallelclustermaker-stack:
-    handler: handler.terminate__pcluster_{{ cluster_serial_number }}
-    name: terminate-{{ cluster_name }}-{{ prod_level }}-{{ cluster_serial_datestamp }}
-    role: TerminateParallelClusterMakerStack{{ cluster_owner }}{{ cluster_serial_datestamp }}
+    handler: {{ serverless_handler }}.handler
+    name: {{ serverless_function_name }}
+    role: arn:aws:iam::{{ aws_account_id }}:role/{{ serverless_ec2_iam_role }}
     events:
       - schedule:
           rate: {{ cron_lifetime_string }}
@@ -43,150 +46,7 @@ functions:
 
 resources:
   Resources:
-    TerminateParallelClusterMakerStack{{ cluster_owner }}{{ cluster_serial_datestamp }}:
-      Type: AWS::IAM::Role
+    S3BucketTerminateClusterStack:
+      Type: AWS::S3::Bucket
       Properties:
-        Path: /
-        RoleName: terminate-pcluster-role-{{ cluster_serial_number }}
-        AssumeRolePolicyDocument:
-          Version:  '2012-10-17'
-          Statement:
-            - Effect: Allow
-              Principal:
-                Service:
-                  - ec2.amazonaws.com
-                  - lambda.amazonaws.com
-              Action: sts:AssumeRole
-        Policies:
-          - PolicyName: terminate-pcluster-policy-{{ cluster_serial_number }}
-            PolicyDocument:
-              Version:  '2012-10-17'
-              Statement:
-                - Effect: Allow
-                  Action:
-                    - logs:CreateLogGroup
-                    - logs:CreateLogStream
-                    - logs:PutLogEvents
-                  Resource:
-                    Fn::Join:
-                      - ""
-                      - - "arn:aws:logs:*:*:*"
-                - Effect: Allow
-                  Action:
-                    - s3:ListBucket
-                    - s3:DeleteBucket
-                  Resource:
-                    Fn::Join:
-                      - ""
-                      - - "arn:aws:s3:::"
-                        - "Ref" : "ServerlessDeploymentBucket"
-                - Effect: Allow
-                  Action:
-                    - s3:GetObject
-                    - s3:PutObject
-                    - s3:DeleteObject
-                  Resource:
-                    Fn::Join:
-                      - ""
-                      - - "arn:aws:s3:::"
-                        - "Ref" : "ServerlessDeploymentBucket"
-                - Effect: Allow
-                  Action:
-                    - s3:ListBucket
-                    - s3:DeleteBucket
-                  Resource:
-                    Fn::Join:
-                      - ""
-                      - - "arn:aws:s3:::{{ s3_bucketname }}"
-                - Effect: Allow
-                  Action:
-                    - s3:GetObject
-                    - s3:PutObject
-                    - s3:DeleteObject
-                  Resource:
-                    Fn::Join:
-                      - ""
-                      - - "arn:aws:s3:::{{ s3_bucketname }}/*"
-                - Effect: Allow
-                  Action:
-                    - cloudformation:DescribeStacks
-                    - cloudformation:DeleteStack
-                  Resource:
-                    Fn::Join:
-                      - ""
-                      - - "arn:aws:cloudformation:{{ region }}:{{ aws_account_id }}:stack/pcluster-{{ cluster_name }}-{{ prod_level }}/*"
-                - Effect: Allow
-                  Action:
-                    - autoscaling:DeleteAutoScalingGroup
-                    - autoscaling:DeleteLaunchConfiguration
-                    - autoscaling:DeletePolicy
-                    - autoscaling:DescribeAutoScalingInstances
-                    - autoscaling:DescribeAutoScalingGroups
-                    - autoscaling:DescribeLaunchConfigurations
-                    - autoscaling:DescribeScalingActivities
-                    - autoscaling:UpdateAutoScalingGroup
-                    - autoscaling:TerminateInstanceInAutoScalingGroup
-                    - cloudformation:DeleteStack
-                    - cloudformation:DescribeStackEvent
-                    - cloudformation:DescribeStackResource
-                    - cloudformation:DescribeStackResources
-                    - cloudformation:DescribeStacks
-                    - cloudformation:ListStacks
-                    - cloudwatch:DeleteAlarms
-                    - dynamodb:DeleteItem
-                    - dynamodb:DeleteTable
-                    - dynamodb:DescribeTable
-                    - ec2:DeleteNetworkInterface
-                    - ec2:DeletePlacementGroup
-                    - ec2:DeleteSecurityGroup
-                    - ec2:DeleteVolume
-                    - ec2:DescribeAddresses
-                    - ec2:DescribeAvailabilityZone
-                    - ec2:DescribeImages
-                    - ec2:DescribeInstanceAttribute
-                    - ec2:DescribeInstances
-                    - ec2:DescribeInstanceStatus
-                    - ec2:DescribeKeyPairs
-                    - ec2:DescribeNetworkInterfaces
-                    - ec2:DescribePlacementGroups
-                    - ec2:DescribeSecurityGroups
-                    - ec2:DescribeSnapshots
-                    - ec2:DescribeSubnets
-                    - ec2:DescribeVolumes
-                    - ec2:DescribeVpcAttribute
-                    - ec2:DescribeVpcs
-                    - ec2:DisassociateAddress
-                    - ec2:ReleaseAddress
-                    - ec2:RevokeSecurityGroupIngress
-                    - ec2:TerminateInstances
-                    - iam:DeleteRolePolicy
-                    - iam:ListRolePolicies
-                    - iam:RemoveRoleFromInstanceProfile
-                    - sns:CreateTopic
-                    - sns:DeleteTopic
-                    - sns:GetTopicAttributes
-                    - sns:Publish
-                    - sqs:DeleteMessage
-                    - sqs:DeleteQueue
-                    - sqs:GetQueueAttributes
-                    - sqs:SetQueueAttributes
-                  Resource:
-                    Fn::Join:
-                      - ""
-                      - - "*"
-                - Effect: Allow
-                  Action:
-                    - iam:ListRoles
-                    - iam:ListRolePolicies
-                    - iam:DeleteRole
-                  Resource:
-                    Fn::Join:
-                      - ""
-                      - - "arn:aws:iam::{{ aws_account_id }}:role/*"
-                - Effect: Allow
-                  Action:
-                    - iam:DeleteInstanceProfile
-                  Resource:
-                    Fn::Join:
-                      - ""
-                      - - "arn:aws:iam::{{ aws_account_id }}:instance-profile/*"
+        BucketName: ${self:custom.s3ServerlessBucket}

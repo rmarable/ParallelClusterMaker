@@ -2,7 +2,7 @@
 # Name:		config.{{ cluster_name }}
 # Author:	Rodney Marable <rodney.marable@gmail.com>
 # Created On:	April 20, 2019
-# Last Changed: May 10, 2019
+# Last Changed: May 25, 2019
 # Deployed On:	{{ lookup('pipe','date \"+%B %-d, %Y\"') }}
 # Purpose:	ParallelCluster configuration for {{ cluster_name }}
 ################################################################################
@@ -10,13 +10,7 @@
 [global]
 cluster_template = {{ cluster_name }}
 update_check = true
-{% if scheduler == 'awsbatch' %}
-{% if local_os == 'Darwin' %}
-sanity_check = true
-{% else %}
 sanity_check = false
-{% endif %}
-{% endif %}
 
 [aws]
 aws_region_name = {{ region }}
@@ -26,13 +20,15 @@ vpc_id = {{ vpc_id }}
 master_subnet_id = {{ subnet_id }}
 {% if use_private_compute_subnet == 'true' %}
 compute_subnet_id = {{ private_compute_subnet_id }}
+use_public_ips = false
 {% else %}
-compute_subnet_id = {{ subnet_id }}
+use_public_ips = true
 {% endif %}
 
 [cluster {{ cluster_name }}]
 base_os = {{ base_os }}
 cluster_type = {{ cluster_type }}
+ec2_iam_role = {{ ec2_iam_role }}
 scheduler = {{ scheduler }}
 {% if cluster_type == 'spot' %}
 {% if scheduler == 'awsbatch' %}
@@ -43,6 +39,12 @@ spot_price = {{ spot_price }}
 {% endif %}
 scaling_settings = {{ scaling_settings }}
 ebs_settings = {{ ebs_settings }}
+{% if enable_efs == 'true' %}
+efs_settings = {{ efs_settings }}
+{% endif %}
+{% if enable_fsx == 'true' %}
+fsx_settings = {{ fsx_settings }}
+{% endif %}
 key_name = {{ ec2_keypair }}
 {% if enable_ganglia == 'true' %}
 extra_json = { "cluster" : { "ganglia_enabled" : "yes" } }
@@ -50,13 +52,12 @@ extra_json = { "cluster" : { "ganglia_enabled" : "yes" } }
 vpc_settings = {{ vpc_name }}
 master_instance_type = {{ master_instance_type }}
 master_root_volume_size = {{ master_root_volume_size }}
-{% if scheduler == 'awsbatch' %}
 compute_instance_type = {{ compute_instance_type }}
+{% if scheduler == 'awsbatch' %}
 min_vcpus = {{ min_vcpus }}
 max_vcpus = {{ max_vcpus }}
 desired_vcpus = {{ desired_vcpus }}
 {% else %}
-compute_instance_type = {{ compute_instance_type }}
 compute_root_volume_size = {{ compute_root_volume_size }}
 maintain_initial_size = {{ maintain_initial_size | bool | lower }}
 initial_queue_size = {{ initial_queue_size }}
@@ -87,18 +88,35 @@ encrypted_ephemeral = {{ ebs_encryption | bool | lower }}
 shared_dir = {{ ebs_shared_dir }}
 volume_size = {{ ebs_shared_volume_size }}
 volume_type = {{ ebs_shared_volume_type }}
-
 {% if enable_efs == 'true' %}
-# Since all EFS configuration is performed through the postinstall script, 
-# leaving this stanza intact is fine as it will never actually be used.
-# Native ParallelCluster support for EFS may be enabled in a future release.
+
+# The use of existing EFS file systems is not currently supported.
+#
+# Provisioned EFS is disabled due to cost considerations.
+# This may change in a future release.  
 
 [efs {{ efs_settings }}]
-shared_dir = efs
+shared_dir =  {{ efs_root }}
 encrypted = {{ efs_encryption | bool | lower }}
-performance_mode = generalPurpose
-# efs_throughput_node is disabled per the documentation but may be supported
-# in a future release.
-#throughput_mode = provisioned
-#provisioned_throughput = 1024
+performance_mode = {{ efs_performance_mode }}
+throughput_mode = {{ efs_throughput_mode }}
+{% endif %}
+{% if enable_fsx == 'true' %}
+
+# The following features are currently unsupported:
+#    - FSx maintenance window selection (fsx_maintenance_window)
+#    - Using an existing Lustre file system 
+#
+# Note: fsx_size must be in multples of 3,600 GB.  This is enforced by the
+# make-pcluster.py script.
+
+[fsx {{ fsx_settings }}]
+shared_dir = {{ fsx_root }}
+storage_capacity = {{ fsx_size }}
+weekly_maintenance_start_time = 4:20:00
+{% if enable_fsx_hydration == 'true' %}
+export_path = s3://{{ fsx_s3_export_bucket }}/{{ fsx_s3_export_path }}
+import_path = s3://{{ fsx_s3_import_bucket }}/{{ fsx_s3_import_path }}
+imported_file_chunk_size = {{ fsx_chunk_size }}
+{% endif %}
 {% endif %}

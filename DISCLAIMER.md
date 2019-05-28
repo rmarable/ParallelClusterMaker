@@ -17,4 +17,8 @@ Please be advised that you will **NOT** be able to open cases with AWS Support i
  -- Planet Patrol
 ```
 
-Please report any bugs, issues, or otherwise unexpected behavior to Rodney Marable (rodney.marable@gmail.com) through the normal Github channels.
+## Reporting Bugs & Issues
+
+Please report any bugs, issues, or otherwise unexpected behavior to Rodney Marable (rodney.marable@gmail.com) through the normal Github issue reporting channel for this project:
+
+https://github.com/rmarable/ParallelClusterMaker/issues

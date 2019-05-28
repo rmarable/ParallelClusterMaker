@@ -2,8 +2,9 @@
 # Name:		create_pcluster.yml
 # Author:	Rodney Marable <rodney.marable@gmail.com>
 # Created On:	April 20, 2019
-# Last Changed:	May 17, 2019
+# Last Changed:	May 27, 2019
 # Purpose:	Ansible playbook to create new ParallelCluster stacks
+# Notes:        EFS and FSxL are handled by Parallelcluster
 ################################################################################
 
 ---
@@ -25,7 +26,7 @@
       register: start_overall_timer
 
     - debug: 
-        msg: "Debug {{ debug_mode }}"
+        msg: "Debug mode => {{ debug_mode }}"
 
     - name: Create a local state directory for this cluster
       file:
@@ -52,9 +53,9 @@
         region: "{{ region }}"
       delegate_to: localhost
 
-    - name: Create S3 buckets to support this cluster stack
+    - name: Create s3_bucketname to support this cluster stack
       s3_bucket:
-        name: "{{ item.bucket }}"
+        name: "{{ s3_bucketname }}"
         tags:
           ClusterID: "{{ cluster_name }}"
           ClusterStackType: ParallelCluster
@@ -66,14 +67,11 @@
           ClusterOwnerDepartment: "{{ cluster_owner_department }}"
           ProdLevel: "{{ prod_level }}"
           DEPLOYMENT_DATE: "{{ DEPLOYMENT_DATE }}"
-      with_items:
-        - { bucket: '{{ s3_bucketname }}' }
-        - { bucket: 'serverless-pcluster-{{ cluster_serial_number }}' }
       when: '"UNDEFINED" in project_id'
 
-    - name: Create S3 buckets to support this cluster stack and append the ProjectID tag 
+    - name: Create s3_bucketname to support this cluster stack and append the ProjectID tag 
       s3_bucket:
-        name: "{{ item.bucket }}"
+        name: "{{ s3_bucketname }}"
         tags:
           ClusterID: "{{ cluster_name }}"
           ClusterStackType: ParallelCluster
@@ -86,102 +84,8 @@
           ProjectID: "{{ project_id }}"
           ProdLevel: "{{ prod_level }}"
           DEPLOYMENT_DATE: "{{ DEPLOYMENT_DATE }}"
-      with_items:
-        - { bucket: '{{ s3_bucketname }}' }
-        - { bucket: 'serverless-pcluster-{{ cluster_serial_number }}' }
       when: '"UNDEFINED" not in project_id'
           
-    - block:
-      - name: Start a timer to record how long it takes to complete all EFS activities for this cluster
-        command: date +%Y-%m-%d\ \@\ %H:%M:%S
-        register: start_efs_timer
-      - name: Create a new security group to support EFS
-        ec2_group:
-          name: pcluster-{{ cluster_name }}-efs
-          description: Permit NFS traffic to the EFS security group
-          vpc_id: "{{ vpc_id }}"
-          region: "{{ region }}"
-          rules:
-            - proto: tcp
-              ports:
-                - 2049
-              cidr_ip: 172.31.0.0/16
-        register: efs_sg
-      - debug:
-           msg: "Launching an EFS file system for cluster {{ cluster_name }} on {{ start_efs_timer.stdout }} in {{ region }} with encrypted_efs == {{ efs_encryption }}..."
-      - name: Create a new EFS file system for this cluster
-        efs:
-          name: efs_pcluster_{{ cluster_name }}
-          state: present
-          region: "{{ region }}"
-          performance_mode: "{{ efs_performance_mode }}"
-          encrypt: "{{ efs_encryption | bool | lower }}"
-          tags:
-            name: efs_pcluster_{{ cluster_name }}
-            ClusterID: "{{ cluster_name }}"
-            ClusterSerialNumber: "{{ cluster_serial_number }}"
-            ClusterOwner: "{{ cluster_owner }}"
-            ClusterStackType: "EFS"
-            ClusterOwnerEmail: "{{ cluster_owner_email }}"
-            ClusterOwnerDepartment: "{{ cluster_owner_department }}"
-            Encryption: "{{ efs_encryption }}"
-            ProjectID: "{{ project_id }}"
-            ProdLevel: "{{ prod_level }}"
-            DEPLOYMENT_DATE: "{{ DEPLOYMENT_DATE }}"
-            status: active
-          targets:
-            - subnet_id: "{{ subnet_id }}"
-              security_groups: [ "{{ efs_sg.group_id }}" ]
-      - name: Append the ProjectID tag if it is defined
-        efs:
-          name: efs_pcluster_{{ cluster_name }}
-          state: present
-          tags:
-            ProjectID: "{{ project_id }}"
-          when: '"UNDEFINED" not in project_id'
-      - name: Get facts about the newly created EFS file system
-        efs_facts:
-          tags:
-            ClusterSerialNumber: "{{ cluster_serial_number }}"
-        register: EFS_PCLUSTER
-      - name: Create efs_temp_dir
-        file:
-          path: "{{ efs_temp_dir }}"
-          state: directory
-      - name: Dump the EFS file system mountpoint to a temp file
-        local_action: copy content={{ EFS_PCLUSTER }} dest={{ efs_temp_file }}
-      - name: Parse the EFS file system mountpoint value from the temp file
-        shell: cat {{ efs_temp_file }} | jq '.ansible_facts.efs[].filesystem_address' | tr -d \"
-        register: efs_pcluster_mount_point
-      - name: Parse the EFS mount target ID from the temp file
-        shell: cat {{ efs_temp_file }} | jq '.ansible_facts.efs[].mount_targets[].mount_target_id'
-        register: efs_pcluster_mount_target_id
-      - name: Parse the EFS file system ID from the temp file
-        shell: cat {{ efs_temp_file }} | jq '.ansible_facts.efs[].filesystem_id'
-        register: efs_pcluster_fsid
-      - name: Stop the EFS creation timer 
-        command: date +%Y-%m-%d\ \@\ %H:%M:%S
-        register: stop_efs_timer
-      - name: Template the EFS build summary report to be sent via SNS
-        template:
-          src: "{{ sns_efs_build_summary_report_src }}"
-          dest: "{{ sns_efs_build_summary_report_dest }}"
-          mode: 0755
-      - name: Distribute the EFS build summary report via SNS
-        sns:
-          msg: "{{ lookup('file', '{{ sns_efs_build_summary_report_dest }}') }}"
-          subject: "Cluster Deployment Update: {{ cluster_name }}"
-          topic: sns_alerts_{{ cluster_name }}
-          region: "{{ region }}"
-        delegate_to: localhost
-      - debug:
-          msg:
-              - ""
-              - "Initiated EFS build @ {{ start_efs_timer.stdout }}"
-              - "Completed EFS build @ {{ stop_efs_timer.stdout }}"
-              - ""
-      when: 'enable_efs == "true"'
-
     - name: Create a new security group for mounting external NFS file systems
       ec2_group:
         name: pcluster-{{ cluster_name }}-externalNfs
@@ -207,52 +111,6 @@
       register: external_nfs_sg
       when: 'enable_external_nfs == "true"'
 
-    - block:
-      - name: Start a timer to record how long it takes to complete all FSxL activities for this cluster
-        command: date +%Y-%m-%d\ \@\ %H:%M:%S
-        register: start_fsx_timer
-      - debug:
-          msg: "Launching an FSxL file system for cluster {{ cluster_name }} on {{ start_fsx_timer.stdout }} in {{ region }}"
-      - name: Create a new security group to support FSxL
-        ec2_group:
-          name: pcluster-{{ cluster_name }}-fsx
-          description: Permit Lustre traffic to the FSxL security group
-          vpc_id: "{{ vpc_id }}"
-          region: "{{ region }}"
-          rules:
-            - proto: tcp
-              ports:
-                - 988
-              cidr_ip: 172.31.0.0/16
-        register: fsx_sg
-      - name: Create the FSxL temporary directory
-        file:
-          path: "{{ fsx_temp_dir }}"
-          state: directory
-          mode: 0755
-      - name: Template the FSxL file system creation and deletion scripts
-        template:
-          src: "{{ item.src }}"
-          dest: "{{ item.dest }}"
-          mode: 0755
-        with_items:
-          - {src: '{{ fsx_create_fs_src }}', dest: '{{ fsx_create_fs_script }}'}
-          - {src: '{{ fsx_delete_fs_src }}', dest: '{{ fsx_delete_fs_script }}'}
-      - name: PUT the FSxL file system creation and deletion scripts into S3
-        aws_s3:
-          bucket: "{{ s3_bucketname }}"
-          src: "{{ item.src }}"
-          object: "{{ item.dest }}"
-          permission: public-read
-          encrypt: False
-          mode: put
-        with_items:
-          - {src: '{{ fsx_create_fs_script }}', dest: '{{ s3_script_path }}/{{ fsx_create_fs_object }}'}
-          - {src: '{{ fsx_delete_fs_script }}', dest: '{{ s3_script_path }}/{{ fsx_delete_fs_object }}'}
-      - name: Create a new Lustre file system for this cluster
-        shell: sh {{ fsx_create_fs_script }}
-      when: 'enable_fsx == "true"'
-
     - name: Generate a new EC2 keypair for this cluster
       ec2_key:
         name: "{{ ec2_keypair }}"
@@ -267,7 +125,17 @@
         mode: 0600
       when: ec2_private_key.changed
 
-    - name: Template custom scripts (preinstall, postinstall, and generate_cron_lifetime_string) and templates (pcluster configuration)
+    - name: Create local staging directories for cluster data and file transfers
+      file:
+        path: "{{ item }}"
+        state: directory
+        mode: 0755
+      with_items:
+        - "{{ stage_dir }}"
+        - "{{ serverless_stage_dir }}"
+        - "{{ serverless_template_dir }}"
+
+    - name: Template custom scripts (preinstall, postinstall, and generate_cron_lifetime_string) and the cluster config file
       template:
         src: "{{ item.src }}"
         dest: "{{ item.dest }}"
@@ -291,96 +159,128 @@
         - { src: '{{ preinstall_src }}', dest: '{{ s3_script_path }}/{{ preinstall_s3_dest }}' }
         - { src: '{{ postinstall_src }}', dest: '{{ s3_script_path }}/{{ postinstall_s3_dest }}' }
 
-    - name: Create local staging directories a.k.a. stage_dir and children
-      file:
-        path: "{{ item }}"
-        state: directory
-        mode: 0755
-      with_items:
-        - "{{ stage_dir }}"
-        - "{{ serverless_stage_dir }}"
-        - "{{ serverless_template_dir }}"
+    - block:
+      - name: Template the external NFS file system mount list to the cluster state directory
+        template:
+          src: "{{ external_nfs_mount_list_template_orig }}"
+          dest: "{{ external_nfs_mount_list_template_src }}"
+          mode: 0755
+      - name: Template the external NFS file system mount list to the staging directory
+        template:
+          src: "{{ external_nfs_mount_list_template_orig }}"
+          dest: "{{ stage_dir }}/{{ external_nfs_mount_list_template_dest }}"
+          mode: 0755
+      - name: PUT the external NFS file system mount list into s3_bucketname
+        aws_s3:
+          bucket: "{{ s3_bucketname }}"
+          src: "{{ external_nfs_mount_list_template_src }}"
+          object: "{{ s3_script_path }}/{{ external_nfs_mount_list_template_dest }}"
+          permission: public-read
+          encrypt: False
+          mode: put
+      when: 'enable_external_nfs == "true"'
 
-    - name: Template the cluster SSH access script to stage_dir
+    - name: Template the cluster SSH access and kill-pcluster shell scripts to stage_dir
       template:
-        src: "{{ local_workingdir }}/templates/access_cluster.j2"
-        dest: "{{ stage_dir }}/access_cluster.{{ cluster_name }}.py"
+        src: "{{ item.src }}"
+        dest: "{{ item.dest }}"
         mode: 0755
+        with_items:
+          - { src: "{{ cluster_template_dir }}/access_cluster.j2", dest: "{{ stage_dir }}/access_cluster.{{ cluster_name }}.py" }
+          - { src: "{{ cluster_template_dir }}/kill_pcluster.j2", dest: "{{ stage_dir }}/kill_pcluster.{{ cluster_name }}.sh" }
 
-    - name: Template a cluster-friendly version of bang.sh to stage_dir
-      template:
-        src: "{{ performance_template_dir }}/bang_cluster_friendly.j2"
-        dest: "{{ stage_dir }}/bang.{{ cluster_name }}.sh"
-        mode: 0755
-      when: 'enable_hpc_performance_tests == "true"'
-
-    - name: Template the custom shell scripts to stage_dir
-      template:
-        src: "{{ performance_template_dir }}/{{ item }}.j2"
-        dest: "{{ stage_dir }}/{{ item }}.{{ cluster_name }}.sh"
-        mode: 0755
-      with_items:
-        - combine_csv_summary_files_for_plotting
-        - combine_sge_data_files_for_plotting
-        - create_sge_task_array_csv_files
-        - perf-qsub
-        - perf-sbatch
-        - perf-stest
-      when: 'enable_hpc_performance_tests == "true"'
-
-    - name: Generate custom performance test qsub and sbatch scripts
-      shell: sh {{ performance_rootdir }}/{{ item }}.sh {{ perftest_custom_start_number }} {{ perftest_custom_step_size }} {{ perftest_custom_total_tests }}
-      args:
-        chdir: "{{ performance_rootdir }}"
-      with_items:
-        -  generate_qsub_custom_templates
-        -  generate_sbatch_custom_templates
-      when: 'enable_hpc_performance_tests == "true"'
-
-    - name: Template the custom performance test qsub and sbatch scripts to stage_dir
-      template:
-        src: "{{ item }}"
-        dest: "{{ stage_dir }}/{{ item | basename | regex_replace('.j2','') }}.{{ cluster_name }}.sh"
-        mode: 0755
-      with_fileglob:
-        - "{{ performance_template_dir }}/qsub-*.j2"
-        - "{{ performance_template_dir }}/sbatch-*.j2"
-      when: 'enable_hpc_performance_tests == "true"'
-
-    - name: Template the custom performance Python scripts to stage_dir
-      template:
-        src: "{{ performance_template_dir }}/{{ item }}.j2"
-        dest: "{{ stage_dir }}/{{ item }}.{{ cluster_name }}.py"
-        mode: 0755
-      with_items:
-        - hashtest
-        - fibonacci_hashtest
-        - print_fibonacci
-      when: 'enable_hpc_performance_tests == "true"'
-
-    - name: Copy the Axb_random matrix test configuration file to stage_dir
-      command: cp {{ performance_rootdir }}/MATRIX_SIZES.conf {{ stage_dir }}/MATRIX_SIZES.conf
-      when: 'enable_hpc_performance_tests == "true"'
-
-    - name: Copy the performance shell and Python scripts to stage_dir
-      command: cp {{ performance_rootdir }}/{{ item }} {{ stage_dir }}
-      with_items:
-        - Axb_random.py
-        - compress_logfiles.py
-        - bite_Axb_random.sh
-        - bite_fibonacci_hashtest.sh
-        - bite_hashtest.sh
-        - cleanup_performance.sh
-        - csv_summary_time_measurement.sh
-        - make_sge_cluster_plots.py
-        - rebuild_sge_csv.sh
-      when: 'enable_hpc_performance_tests == "true"'
-
-    - name: Copy the ParallelClusterMaker performance toolkit documentation to stage_dir
-      command: cp {{ item }} {{ stage_dir }}
-      with_fileglob:
-        - "{{ performance_rootdir }}/README*.*"
-      when: 'enable_hpc_performance_tests == "true"'
+    - block:
+      - name: Template a cluster-friendly version of bang.sh to stage_dir
+        template:
+          src: "{{ performance_template_dir }}/bang_cluster_friendly.j2"
+          dest: "{{ stage_dir }}/bang.{{ cluster_name }}.sh"
+          mode: 0755
+      - name: Template the custom HPC performance shell scripts to stage_dir
+        template:
+          src: "{{ performance_template_dir }}/{{ item }}.j2"
+          dest: "{{ stage_dir }}/{{ item }}.{{ cluster_name }}.sh"
+          mode: 0755
+        with_items:
+          - combine_csv_summary_files_for_plotting
+          - combine_sge_data_files_for_plotting
+          - create_sge_task_array_csv_files
+          - perf-stest
+      - name: Template the custom SGE-specific HPC performance shell scripts to stage_dir
+        template:
+          src: "{{ performance_template_dir }}/{{ item }}.j2"
+          dest: "{{ stage_dir }}/{{ item }}.{{ cluster_name }}.sh"
+          mode: 0755
+        with_items:
+          - perf-qsub
+        when: 'scheduler == "sge"'
+      - name: Template the custom Slurm-specific HPC performance shell scripts to stage_dir
+        template:
+          src: "{{ performance_template_dir }}/{{ item }}.j2"
+          dest: "{{ stage_dir }}/{{ item }}.{{ cluster_name }}.sh"
+          mode: 0755
+        with_items:
+          - perf-sbatch
+        when: 'scheduler == "slurm"'
+      - name: Generate custom performance test qsub scripts for SGE
+        shell: sh {{ performance_rootdir }}/{{ item }}.sh {{ perftest_custom_start_number }} {{ perftest_custom_step_size }} {{ perftest_custom_total_tests }}
+        args:
+          chdir: "{{ performance_rootdir }}"
+        with_items:
+          -  generate_qsub_custom_templates
+        when: 'scheduler == "sge"'
+      - name: Generate custom performance test sbatch scripts for Slurm
+        shell: sh {{ performance_rootdir }}/{{ item }}.sh {{ perftest_custom_start_number }} {{ perftest_custom_step_size }} {{ perftest_custom_total_tests }}
+        args:
+          chdir: "{{ performance_rootdir }}"
+        with_items:
+          -  generate_sbatch_custom_templates
+        when: "scheduler == 'slurm'"
+      - name: Template the custom performance test qsub scripts for SGE to stage_dir
+        template:
+          src: "{{ item }}"
+          dest: "{{ stage_dir }}/{{ item | basename | regex_replace('.j2','') }}.{{ cluster_name }}.sh"
+          mode: 0755
+        with_fileglob:
+          - "{{ performance_template_dir }}/qsub-*.j2"
+        when: "scheduler == 'sge'"
+      - name: Template the custom performance test sbatch scripts for Slurm to stage_dir
+        template:
+          src: "{{ item }}"
+          dest: "{{ stage_dir }}/{{ item | basename | regex_replace('.j2','') }}.{{ cluster_name }}.sh"
+          mode: 0755
+        with_fileglob:
+          - "{{ performance_template_dir }}/sbatch-*.j2"
+        when: "scheduler == 'slurm'"
+      - name: Template the custom performance Python scripts to stage_dir
+        template:
+          src: "{{ performance_template_dir }}/{{ item }}.j2"
+          dest: "{{ stage_dir }}/{{ item }}.{{ cluster_name }}.py"
+          mode: 0755
+        with_items:
+          - hashtest
+          - fibonacci_hashtest
+          - print_fibonacci
+      - name: Copy the Axb_random matrix test configuration file to stage_dir
+        command: cp {{ performance_rootdir }}/MATRIX_SIZES.conf {{ stage_dir }}/MATRIX_SIZES.conf
+      - name: Copy the performance shell and Python scripts to stage_dir
+        command: cp {{ performance_rootdir }}/{{ item }} {{ stage_dir }}
+        with_items:
+          - Axb_random.py
+          - compress_logfiles.py
+          - bite_Axb_random.sh
+          - bite_fibonacci_hashtest.sh
+          - bite_hashtest.sh
+          - cleanup_performance.sh
+          - csv_summary_time_measurement.sh
+          - make_sge_cluster_plots.py
+          - rebuild_sge_csv.sh
+      - name: Copy the ParallelClusterMaker performance toolkit documentation to stage_dir
+        command: cp {{ item }} {{ stage_dir }}
+        with_fileglob:
+          - "{{ performance_rootdir }}/README*.*"
+      when:
+        - enable_hpc_performance_tests == "true"
+        - scheduler != "awsbatch"
 
     - name: Start the stack creation timer
       command: date +%Y-%m-%d\ \@\ %H:%M:%S
@@ -396,15 +296,18 @@
           - "Cluster StackName: {{ cluster_name }}"
           - "Launch Timestamp:  {{ start_stack_creation_timer.stdout }}"
           - "Availabilty Zone:  {{ az }}"
-          - "Scheduler:         {{ scheduler }}" 
+          - "HPC Scheduler:     {{ scheduler }}" 
+          - "EFS Enabled:       {{ enable_efs | bool | upper }}"
+          - "FSxL Enabled:      {{ enable_fsx | bool | upper }}"
+          - "External NFS:      {{ enable_external_nfs | bool | upper }}"
           - ""
-          - "This process will take approximately 30 minutes to complete."
+          - "This process will take about 45 minutes to complete."
           - ""
           - "Run this command to monitor the stack progress in real time:"
           - ""
-          - "pcluster status --region us-east-1 rmarable-batch01"
+          - "pcluster status --region {{ region }} {{ cluster_name }}"
           - ""
-      when: '"awsbatch" not in scheduler'
+      when: 'scheduler != "awsbatch"'
 
     - debug:
         msg:
@@ -416,14 +319,16 @@
           - "Cluster StackName: {{ cluster_name }}"
           - "Launch Timestamp:  {{ start_stack_creation_timer.stdout }}"
           - "Availabilty Zone:  {{ az }}"
-          - "Scheduler:         {{ scheduler }}" 
+          - "HPC Scheduler:     {{ scheduler }}" 
+          - "EFS Enabled:       {{ enable_efs | bool | upper }}"
+          - "External NFS:      {{ enable_external_nfs | bool | upper }}"
           - ""
-          - "This process will take about 10 minutes to complete."
+          - "This process will take about 20 minutes to complete."
           - ""
           - "Run this command to monitor the stack progress in real time:"
           - ""
-          - "pcluster status --region us-east-1 rmarable-batch01"
-          - ""            
+          - "pcluster status --region {{ region }} {{ cluster_name }}"
+          - ""
       when: 'scheduler == "awsbatch"'
 
     - name: Launch the new ParallelCluster stack
@@ -471,14 +376,14 @@
       set_fact:
         cron_lifetime_string: "{{ cron_lifetime_string_raw.stdout }}"
 
-    - name: Template the terminate_pcluster Lambda function to serverless_stage_dir
+    - name: Template the terminate_pcluster Lambda function to the serverless staging directory
       template:
-        src: "{{ serverless_template_dir }}/{{ item }}.j2"
-        dest: "{{ serverless_stage_dir }}/{{ item }}"
+        src: "{{ serverless_template_dir }}/{{ item.src }}"
+        dest: "{{ serverless_stage_dir }}/{{ item.dest }}"
         mode: 0755
       with_items:
-        - handler.py
-        - serverless.yml
+        - { src: 'handler.py.j2', dest: '{{ serverless_handler_dest }}' }
+        - { src: 'serverless.yml.j2', dest: 'serverless.yml' }
 
     - debug:
         msg:
@@ -488,7 +393,7 @@
           - "This operation typically completes within 5 minutes..."
           - ""
 
-    - name: Deploy a Lambda function to terminate the stack when cluster_lifetime has exceeded
+    - name: Deploy the Lambda function to terminate the cluster stack when cluster_lifetime has exceeded
       serverless:
         service_path: "{{ serverless_stage_dir }}"
         region: "{{ region }}"
@@ -497,7 +402,7 @@
       ignore_errors: true
       when: 'debug_mode == "false"'
 
-    - name: Deploy a Lambda function to terminate the stack when cluster_lifetime has exceeded with verbose mode enabled
+    - name: Deploy the Lambda function to terminate the cluster stack when cluster_lifetime has exceeded
       serverless:
         service_path: "{{ serverless_stage_dir }}"
         region: "{{ region }}"
@@ -505,7 +410,7 @@
         state: present
         verbose: true
       ignore_errors: true
-      when: 'debug_mode == "false"'
+      when: 'debug_mode == "true"'
 
     - name: Stop lambda_timer
       command: date +%Y-%m-%d\ \@\ %H:%M:%S
@@ -518,10 +423,10 @@
     - name: Accept the SSH fingerprint of the master instance
       shell: ssh-keyscan -H {{ MasterPublicIP.stdout }} >> {{ ssh_known_hosts }}
 
-    - name: Create a source tree directory on the master instance
+    - name: Create a performance source tree directory on the master instance
       command: ssh -i {{ ssh_keypair }} {{ ec2_user }}@{{ MasterPublicIP.stdout }} mkdir -p {{ item }}
       with_items:
-        - "{{ Axb_random_dest }}"
+        - "{{ master_performance_dir_dest }}"
 
     - name: Create a staging directory on the master instance
       command: ssh -i {{ ssh_keypair }} {{ ec2_user }}@{{ MasterPublicIP.stdout }} mkdir -p {{ item }}
@@ -531,78 +436,101 @@
     - name: Transfer the local staging directory to the master instance
       command: scp -i {{ ssh_keypair }} -r {{ stage_dir }} {{ ec2_user }}@{{ MasterPublicIP.stdout }}:{{ stage_dir }}
 
-    - name: Transfer the standard qsub submission script to the master instance
-      command: scp -i {{ ssh_keypair }}i {{ local_workingdir }}/qsub_default_submission_script.sh {{ ec2_user }}@{{ MasterPublicIP.stdout }}:{{ ec2_user_home }}
-      when: not enable_hpc_performance_tests
+    - name: Transfer the standard SGE submission script to the master instance
+      command: scp -i {{ ssh_keypair }} {{ local_workingdir }}/qsub_default_submission_script.sh {{ ec2_user }}@{{ MasterPublicIP.stdout }}:{{ ec2_user_home }}
+      when: 'scheduler == "sge"'
 
-    - name: Transfer the standard sbatch submission script to the master instance
-      command: scp -i {{ ssh_keypair }}i {{ local_workingdir }}/sbatch_default_submission_script.sh {{ ec2_user }}@{{ MasterPublicIP.stdout }}:{{ ec2_user_home }}
-      when: not enable_hpc_performance_tests
-    - name: Move the performance source tree to its final destination directory on the master instance
-      command: ssh -i {{ ssh_keypair }} {{ ec2_user }}@{{ MasterPublicIP.stdout }} mv {{ stage_dir }}/* {{ Axb_random_dest }}
-      when: 'enable_hpc_performance_tests == "true"'
+    - name: Transfer the standard Slurm submission script to the master instance
+      command: scp -i {{ ssh_keypair }} {{ local_workingdir }}/sbatch_default_submission_script.sh {{ ec2_user }}@{{ MasterPublicIP.stdout }}:{{ ec2_user_home }}
+      when: 'scheduler == "slurm"'
 
-    - name: Symlink the custom shell scripts on the master instance
-      command: ssh -i {{ ssh_keypair }} {{ ec2_user }}@{{ MasterPublicIP.stdout }} cd {{ Axb_random_dest }}; ln -s {{ item }}.{{ cluster_name }}.sh {{ item }}.sh
-      with_items:
-        - bang
-        - combine_csv_summary_files_for_plotting
-        - combine_sge_data_files_for_plotting
-        - create_sge_task_array_csv_files
-        - perf-qsub
-        - perf-sbatch
-        - perf-stest
-      ignore_errors: true
-      when: 'enable_hpc_performance_tests == "true"'
-
-    - name: Symlink the custom Python scripts on the master instance
-      command: ssh -i {{ ssh_keypair }} {{ ec2_user }}@{{ MasterPublicIP.stdout }} cd {{ Axb_random_dest }}; ln -s {{ item }}.{{ cluster_name }}.py {{ item }}.py
-      with_items:
-        - fibonacci_hashtest
-        - hashtest
-        - print_fibonacci
-      ignore_errors: true
-      when: 'enable_hpc_performance_tests == "true"'
+    - block:
+      - name: Move the performance source tree to its final destination directory on the master instance
+        command: ssh -i {{ ssh_keypair }} {{ ec2_user }}@{{ MasterPublicIP.stdout }} mv {{ stage_dir }}/* {{ master_performance_dir_dest }}
+      - name: Symlink the custom shell scripts on the master instance
+        command: ssh -i {{ ssh_keypair }} {{ ec2_user }}@{{ MasterPublicIP.stdout }} cd {{ master_performance_dir_dest }}; ln -s {{ item }}.{{ cluster_name }}.sh {{ item }}.sh
+        with_items:
+          - bang
+          - combine_csv_summary_files_for_plotting
+          - combine_sge_data_files_for_plotting
+          - create_sge_task_array_csv_files
+          - perf-stest
+        ignore_errors: true
+      - name: Symlink the custom SGE shell scripts on the master instance
+        command: ssh -i {{ ssh_keypair }} {{ ec2_user }}@{{ MasterPublicIP.stdout }} cd {{ master_performance_dir_dest }}; ln -s {{ item }}.{{ cluster_name }}.sh {{ item }}.sh
+        with_items:
+          - perf-qsub
+        ignore_errors: true
+        when: 'scheduler == "sge"'
+      - name: Symlink the custom shell scripts on the master instance
+        command: ssh -i {{ ssh_keypair }} {{ ec2_user }}@{{ MasterPublicIP.stdout }} cd {{ master_performance_dir_dest }}; ln -s {{ item }}.{{ cluster_name }}.sh {{ item }}.sh
+        with_items:
+          - perf-sbatch
+        ignore_errors: true
+        when: 'scheduler == "slurm"'
+      - name: Symlink the custom Python scripts on the master instance
+        command: ssh -i {{ ssh_keypair }} {{ ec2_user }}@{{ MasterPublicIP.stdout }} cd {{ master_performance_dir_dest }}; ln -s {{ item }}.{{ cluster_name }}.py {{ item }}.py
+        with_items:
+          - fibonacci_hashtest
+          - hashtest
+          - print_fibonacci
+        ignore_errors: true
+      when:
+        - enable_hpc_performance_tests == "true"
+        - scheduler != 'awsbatch'
 
     - block:
       - name: Create an EBS shared storage HPC performance test directory
         command: ssh -i {{ ssh_keypair }} {{ ec2_user }}@{{ MasterPublicIP.stdout }} sudo mkdir -p {{ ebs_hpc_performance_dir }}
-      - name: Set permissions and ownership for the EBS shared storage HPC performance test directory
+      - name: Set ownership for the EBS shared storage HPC performance test directory
         command: ssh -i {{ ssh_keypair }} {{ ec2_user }}@{{ MasterPublicIP.stdout }} sudo chown -R {{ ec2_user }}:{{ ec2_user }} {{ ebs_hpc_performance_dir }}
       - name: Copy the final performance source tree from the master instance to the EBS shared storage HPC performance test directory
-        command: ssh -i {{ ssh_keypair }} {{ ec2_user }}@{{ MasterPublicIP.stdout }} cp -a {{ Axb_random_dest }}/* {{ ebs_hpc_performance_dir }}
-      when: 'enable_hpc_performance_tests == "true"'
+        command: ssh -i {{ ssh_keypair }} {{ ec2_user }}@{{ MasterPublicIP.stdout }} cp -a {{ master_performance_dir_dest }}/* {{ ebs_hpc_performance_dir }}
+      when:
+        - enable_hpc_performance_tests == "true"
+        - scheduler != 'awsbatch'
 
     - block:
       - name: Create an EFS shared storage HPC performance test directory
         command: ssh -i {{ ssh_keypair }} {{ ec2_user }}@{{ MasterPublicIP.stdout }} sudo mkdir -p {{ efs_hpc_performance_dir }}
-      - name: Set permissions and ownership for the EFS shared storage HPC performance test directory
+      - name: Set ownership for the EFS shared storage HPC performance test directory
         command: ssh -i {{ ssh_keypair }} {{ ec2_user }}@{{ MasterPublicIP.stdout }} sudo chown -R {{ ec2_user }}:{{ ec2_user }} {{ efs_hpc_performance_dir }}
       - name: Copy the final performance source tree from the master instance to the EFS shared storage HPC performance test directory
-        command: ssh -i {{ ssh_keypair }} {{ ec2_user }}@{{ MasterPublicIP.stdout }} cp -a {{ Axb_random_dest }}/* {{ efs_hpc_performance_dir }}
-      when: 'enable_hpc_performance_tests == "true" and enable_efs == "true"'
+        command: ssh -i {{ ssh_keypair }} {{ ec2_user }}@{{ MasterPublicIP.stdout }} cp -a {{ master_performance_dir_dest }}/* {{ efs_hpc_performance_dir }}
+      when:
+        - enable_hpc_performance_tests == "true"
+        - enable_efs == "true"
+        - scheduler != 'awsbatch'
 
     - block:
       - name: Create an external NFS shared storage HPC performance test directory
         command: ssh -i {{ ssh_keypair }} {{ ec2_user }}@{{ MasterPublicIP.stdout }} sudo mkdir -p {{ external_nfs_hpc_performance_dir }}
-      - name: Set permissions and ownership for the external NFS shared storage HPC performance test directory
+      - name: Set ownership for the external NFS shared storage HPC performance test directory
         command: ssh -i {{ ssh_keypair }} {{ ec2_user }}@{{ MasterPublicIP.stdout }} sudo chown -R {{ ec2_user }}:{{ ec2_user }} {{ external_nfs_hpc_performance_dir }}
       - name: Copy the final performance source tree from the master instance to the external NFS shared storage HPC performance test directory
-        command: ssh -i {{ ssh_keypair }} {{ ec2_user }}@{{ MasterPublicIP.stdout }} cp -a {{ Axb_random_dest }}/* {{ external_nfs_hpc_performance_dir }}
-      when: 'enable_hpc_performance_tests == "true" and enable_external_nfs == "true"'
+        command: ssh -i {{ ssh_keypair }} {{ ec2_user }}@{{ MasterPublicIP.stdout }} cp -a {{ master_performance_dir_dest }}/* {{ external_nfs_hpc_performance_dir }}
+      when:
+        - enable_hpc_performance_tests == "true"
+        - enable_external_nfs == "true"
+        - scheduler != 'awsbatch'
 
     - block:
       - name: Create an FSxL shared storage HPC performance test directory
         command: ssh -i {{ ssh_keypair }} {{ ec2_user }}@{{ MasterPublicIP.stdout }} sudo mkdir -p {{ fsx_hpc_performance_dir }}
-      - name: Set permissions and ownership for the FSxL shared storage HPC performance test directory
+      - name: Set ownership for the FSxL shared storage HPC performance test directory
         command: ssh -i {{ ssh_keypair }} {{ ec2_user }}@{{ MasterPublicIP.stdout }} sudo chown -R {{ ec2_user }}:{{ ec2_user }} {{ fsx_hpc_performance_dir }}
       - name: Copy the final performance source tree from the master instance to the external NFS shared storage HPC performance test directory
-        command: ssh -i {{ ssh_keypair }} {{ ec2_user }}@{{ MasterPublicIP.stdout }} cp -a {{ Axb_random_dest }}/* {{ fsx_hpc_performance_dir }}
-      when: 'enable_hpc_performance_tests == "true" and enable_fsx == "true"'
+        command: ssh -i {{ ssh_keypair }} {{ ec2_user }}@{{ MasterPublicIP.stdout }} cp -a {{ master_performance_dir_dest }}/* {{ fsx_hpc_performance_dir }}
+      when:
+        - enable_hpc_performance_tests == "true"
+        - enable_fsx == "true"
+        - scheduler != 'awsbatch'
 
     - name: Remove the staging directory on the master instance
       command: ssh -i {{ ssh_keypair }} {{ ec2_user }}@{{ MasterPublicIP.stdout }} rm -rf {{ stage_dir_parent }}
-      when: 'enable_hpc_performance_tests == "true"'
+      when:
+        - enable_hpc_performance_tests == "true"
+        - scheduler != 'awsbatch'
 
     - name: Copy the custom scripts from the local staging directory to the cluster_data directory
       shell: cp -av {{ stage_dir }}/* {{ cluster_data_dir }}
@@ -614,24 +542,19 @@
         key_prefix: "{{ s3_cluster_data_dir }}"
         region: "{{ region }}" 
 
-    - name: Remove the local staging directory
-      file: path="{{ item }}" state=absent
-      with_items:
-        - "{{ stage_dir }}"
-      when: 'enable_hpc_performance_tests == "true"'
-
-    - name: Remove the FSxL temp directory
-      file: path="{{ item }}" state=absent
-      with_items:
-        - "{{ fsx_temp_dir }}"
-      when: 'enable_fsx == "true"'
-
-    - name: Remove all custom qsub and sbatch performance templates from the src tree
-      file: path="{{ item }}" state=absent
-      with_fileglob:
-        - "{{ performance_template_dir }}/qsub-*.j2"
-        - "{{ performance_template_dir }}/sbatch-*.j2"
-      when: 'enable_hpc_performance_tests == "true"'
+    - block:
+      - name: Remove the local staging directory
+        file: path="{{ item }}" state=absent
+        with_items:
+          - "{{ stage_dir }}"
+      - name: Remove all custom qsub and sbatch performance templates from the src tree
+        file: path="{{ item }}" state=absent
+        with_fileglob:
+          - "{{ performance_template_dir }}/qsub-*.j2"
+          - "{{ performance_template_dir }}/sbatch-*.j2"
+      when:
+        - enable_hpc_performance_tests == "true"
+        - scheduler != 'awsbatch'
 
     - name: Stop the overall stack timer
       command: date +%Y-%m-%d\ \@\ %H:%M:%S
@@ -661,17 +584,23 @@
           - "                   Cluster Build Summary Report"
           - "=================================================================="
           - ""
-          - ""
-          - "Launched the stack build: {{ start_overall_timer.stdout }}"
+          - "Launched the environment: {{ start_overall_timer.stdout }}"
           - "Initiated stack creation: {{ start_stack_creation_timer.stdout }}"
-          - "Completed pcluster build: {{ stop_stack_creation_timer.stdout }}"
+          - "Completed stack creation: {{ stop_stack_creation_timer.stdout }}"
           - "Finished the environment: {{ stop_overall_timer.stdout }}"
+          - "Lifetime (days:hr:min):   {{ cluster_lifetime }}"
           - ""
-          - "ParallelCluster Stack:  {{ cluster_name }}"
-          - "AWS Availability Zone:  {{ az }}"
-          - "Selected HPC Scheduler: {{ scheduler }}" 
+          - "Cluster Stack Name:    {{ cluster_name }}"
+          - "AWS Availability Zone: {{ az }}"
+          - "HPC Scheduler Type:    {{ scheduler }}" 
+          - "Master Instance Type:  {{ master_instance_type }}"
+          - "Compute Instance Type: {{ compute_instance_type }}"
           - ""
-          - "Choose an option to access the master instance:"
+          - "EFS Enabled:  {{ enable_efs | bool | upper }}"
+          - "FSxL Enabled: {{ enable_fsx | bool | upper }}"
+          - "External NFS: {{ enable_external_nfs | bool | upper }}"
+          - ""
+          - "Choose an option to access the cluster's master instance:"
           - ""
           - "(1) ParallelClusterMaker access script:"
           - "    ./access_cluster.py -N {{ cluster_name }}"
@@ -679,12 +608,18 @@
           - "(2) ParallelCluster ssh alias:"
           - "    pcluster ssh {{ cluster_name }} -i {{ ssh_keypair }}"
           - ""
-          - "(3) Vanilla ssh with the cluster's private key:"
-          - "    ssh -i {{ ssh_keypair }} {{ ec2_user }}@{{ MasterPublicIP.stdout }}   "
+          - "(3) Vanilla ssh with the cluster's private SSH key:"
+          - "    ssh -i {{ ssh_keypair }} {{ ec2_user }}@{{ MasterPublicIP.stdout }}"
           - ""
-          - "To destroy this cluster, run the following command::"
+          - "To destroy this cluster, choose one of the following options:"
           - ""
-          - "$ ./kill-pcluster.py -N {{ cluster_birth_name }} -O {{ cluster_owner }} -A {{ az }}"
+          - "(1) ParallelClusterMaker terminate stack wrapper script:"
+          - "    ./{{ cluster_data_dir }}/kill_pcluster.{{ cluster_name }}.sh"
+          - ""
+          - "(2) Manually with the kill-pcluster Python script:"
+          - "    ./kill-pcluster.py -N {{ cluster_birth_name }} -O {{ cluster_owner }} -A {{ az }}"
+          - ""
+          - "(3) Wait for cluster_lifetime to expire.
           - ""
 
     - debug:

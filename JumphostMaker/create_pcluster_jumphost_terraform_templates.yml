@@ -19,7 +19,7 @@
     - vars_files/{{ instance_name }}.yml
 
   tasks:
-    - name: Create a custom script archive directory for this pcluster-jumphost
+    - name: Create a custom script archive directory
       file:
         path: "{{ instance_data_dir }}"
         state: directory

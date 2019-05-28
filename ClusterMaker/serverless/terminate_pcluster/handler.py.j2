@@ -1,82 +1,124 @@
 ################################################################################
-# Name:         terminate-pcluster-{{ cluster_name }}.py
+# Name:         {{ serverless_handler }}.py
 # Author:       Rodney Marable <rodney.marable@gmail.com>
 # Created On:   June 28, 2018
-# Last Changed: May 17, 2019
+# Last Changed: May 27, 2019
 # Deployed On:  {{ lookup('pipe','date \"+%B %-d, %Y\"') }}
 # Purpose:      Lambda function for auto-scheduled self-termination of pcluster
-# 		stack {{ cluster_name }}
+# 		stack {{ cluster_serial_number }}
 ################################################################################
 
-def terminate_pcluster_{{ cluster_serial_number }}(event, context):
-
 # Load some required Python libraries.
-    
-    import boto3
-    import sys
-    import time
 
-# Define some critical variables.
+import boto3
+import botocore
+import sys
+import time
+from botocore.exceptions import ClientError
 
-    cluster_name = '{{ cluster_name }}'
-    cluster_owner = '{{ cluster_owner }}'
+def handler(event, context):
+
+# Define a function that returns execution status.
+
+    def return_execution_status(statusData, statusCode):
+        return {
+            "statusCode": str(statusCode),
+            "statusData": str(statusData)
+            }
+
+# Define some important parameters.
+
     cluster_stack_name = 'parallelcluster-{{ cluster_name }}'
-    s3_bucketname = '{{ s3_bucketname }}'
+    cluster_stack_termination_timestamp = str(time.strftime('%c'))
+    sns_topic_arn = 'arn:aws:sns:{{ region }}:{{ aws_account_id }}:sns_alerts_{{ cluster_name }}'
 
-{% if enable_efs == 'true' %}
-# Delete the EFS file system associated with this ParallelCluster stack.
+# Define the cluster stack termination message.
 
-    efs_client = boto3.client('efs')
-    efs_mount_target = efs_client.delete_mount_target(MountTargetId={{ efs_pcluster_mount_target_id }})
-    delete_efs_fsid = efs_client.delete_file_system(FileSystemId={{ efs_pcluster_fsid }})
+    termination_message='''
 
-{% endif %}
-{% if enable_fsx == 'true' %}
-# Delete the FSx file system associated with this ParallelCluster stack.
+                    ***** Stack Termination Alert *****
 
-    fsx_client = boto3.client('fsx')
-    fsx_fsid = s3.Object('{{ s3_bucketname }}', '{{ s3_object_path }}/{{ fsx_fsid_object }}')
-    delete_fsx_fsid = fsx_client.delete_file_system(FileSystemId=fsx_fsid)
+Cluster Name:      {{ cluster_name }}
+Lambda Function:   terminate-{{ cluster_name}}-{{ prod_level }}-{{ cluster_serial_datestamp }}
+Termination Date:  ' + cluster_stack_termination_timestamp '
+EC2 IAM Role:      {{ serverless_ec2_iam_role }}
+EC2 IAM Policy:    {{ serverless_ec2_iam_policy }}
+{% if enable_fsx_hydration == 'true' %}FSx Hydration Policy:    {{ sx_hydration_policy }}{% endif %}
 
-{% endif %}
+Please run "kill-pcluster.py" from the ParallelClusterMaker launch environment (i.e. OSX or an EC2 jumphost) to complete the removal process for this cluster stack.
+
+'''
+
 # Delete the ParallelCluster stack.
 
     cfn_client = boto3.client('cloudformation')
-    q = cfn_client.delete_stack(StackName=cluster_stack_name)
+    try:
+        p = cfn_client.describe_stacks(StackName=cluster_stack_name)
+    except (botocore.exceptions.ClientError):
+        statusData = 'Cluster stack ' + cluster_stack_name + ' was not found in account {{ aws_account_id }}.'
+        return_execution_status(statusData, 501)
+    else:
+        q = cfn_client.delete_stack(StackName=cluster_stack_name)
 
 # Delete s3_bucketname and any objects it contained.
 
     s3 = boto3.resource('s3')
-    s3_objects_to_delete = s3.meta.client.list_objects(Bucket="{{ s3_bucketname }}")
-    s3_keys_to_delete = {'Objects' : []}
-    s3_keys_to_delete['Objects'] = [{'Key' : k} for k in [obj['Key'] for obj in s3_objects_to_delete.get('Contents', [])]]
-    s3.meta.client.delete_objects(Bucket="{{ s3_bucketname }}", Delete=s3_keys_to_delete)    
-    bucket_to_delete = s3.Bucket('{{ s3_bucketname }}')
-    p = bucket_to_delete.delete()
+    s3client = boto3.client('s3')
+    try:
+        r = s3client.head_bucket(Bucket='{{ s3_bucketname }}')
+        s3_objects_to_delete = s3.meta.client.list_objects(Bucket='{{ s3_bucketname }}')
+        s3_keys_to_delete = {'Objects' : []}
+        s3_keys_to_delete['Objects'] = [{'Key' : k} for k in [obj['Key'] for obj in s3_objects_to_delete.get('Contents', [])]]
+        s3.meta.client.delete_objects(Bucket='{{ s3_bucketname }}', Delete=s3_keys_to_delete)    
+        bucket_to_delete = s3.Bucket('{{ s3_bucketname }}')
+        s = bucket_to_delete.delete()
+    except (botocore.exceptions.ClientError):
+        statusData='s3://{{ s3_bucketname }} is missing!'
+        return_execution_status(statusData, 502)
 
-# Send a termination alert to cluster_owner_email via SNS.
+# Delete the IAM role and policy associated with the cluster.
 
-    sns = boto3.resource('sns')
-    topic = sns.Topic('arn:aws:sns:{{ region }}:{{ aws_account_id }}:sns_alerts_{{ cluster_name }}')
-    r = topic.publish(
-        Message='ParallelCluster stack {{ cluster_name }} was terminated by the terminate-pcluster Lambda function on ' + str(time.strftime('%c')),
-        Subject='ParallelCluster stack {{ cluster_name }} Termination Alert',
-        MessageStructure='string',
-        MessageAttributes={
-            'string': {
-                'DataType': 'string',
-                'StringValue': 'string',
-                'BinaryValue': b'bytes'
-            }
-        }
-    )
+    iam_client = boto3.client('iam')
+{% if enable_fsx_hydration == 'true' %}    fsx_hydration_policy = 'pclustermaker-fsx-s3-policy-{{ cluster_serial_number }}'{% endif %}
+    ec2_iam_policy = 'pclustermaker-policy-{{ cluster_serial_number }}'
+    ec2_iam_role = 'pclustermaker-role-{{ cluster_serial_number }}'
 
-# Delete the SNS topic associated with this pcluster stack.
+    try:
+        t1 = iam_client.delete_role_policy(RoleName=ec2_iam_role, PolicyName=ec2_iam_policy)
+{% if enable_fsx_hydration == 'true' %}        t2 = iam_client.delete_role_policy(RoleName=ec2_iam_role, PolicyName=enable_fsx_hydration){% endif %}
+    except (iam_client.exceptions.NoSuchEntityException):
+        statusData='Unable to delete {{ ec2_iam_role }} {% if enable_fsx_hydration == 'true' }%or {{ enable_fsx_iam_policy }}{% endif %}!'
+        return_execution_status(statusData, 503)
 
-    sns_client = boto3.client('sns')
-    s = sns_client.delete_topic(TopicArn='arn:aws:sns:{{ region }}:{{ aws_account_id }}:sns_alerts_{{ cluster_name }}')
+    try:
+        t3 = iam_client.delete_role(RoleName=ec2_iam_role)
+    except (iam_client.exceptions.NoSuchEntityException):
+        statusData='Unable to delete {{ ec2_iam_role }}!'
+        return_execution_status(statusData, 503)
 
-# Return the results.
+# Send a termination alert to cluster_owner_email by publishing to the SNS
+# topic endpoint for this cluster stack.
 
-    return delete_efs_fsid, delete_fsx_fsid, p, q, r, s
+    sns = boto3.client('sns')
+    try:
+        u = sns.publish(
+            TopicArn=sns_topic_arn,
+            Message=termination_message,
+            Subject='[ParallelClusterMaker] Stack Termination Notice',
+        )
+    except (sns.exceptions.NotFoundException):
+        statusData='SNS topic sns_alerts_{{ cluster_name }} is missing!'
+        return_execution_status(statusData, 504)
 
+# Delete the SNS topic associated with this cluster stack.
+
+    try:
+        v = sns.delete_topic(TopicArn=sns_topic_arn)
+    except (sns.exceptions.NotFoundException):
+        statusData='SNS topic sns_alerts_{{ cluster_name }} is missing!'
+        return_execution_status(statusData, 505)
+
+# Return a 200 status if the stack was cleanly deleted.
+
+    statusData = 'Successfully deleted cluster stack {{ cluster_name }} on ' + cluster_stack_termination_timestamp + '.'
+    return_execution_status(statusData, 200)

@@ -2,7 +2,7 @@
 # Name:		preinstall.{{ cluster_name }}.sh
 # Author:	Rodney Marable <rodney.marable@gmail.com>
 # Created On:	April 20, 2019
-# Last Changed:	April 30, 2019
+# Last Changed:	May 21, 2019
 # Deployed On:	{{ lookup('pipe','date \"+%B %-d, %Y\"') }}
 # Purpose:	Perform preinstall tasks on cluster {{ cluster_name }}
 ################################################################################
@@ -56,9 +56,7 @@ sudo pip install --upgrade cryptography
 rm -rf $ubuntu_install_dir
 {% endif %}
 
-# Upgrade AWS CLI to ensure the bug reported by rodney.marable@gmail.com won't 
-# impact the operator's ability to deploy AWS FSxL file systems:
-# https://docs.aws.amazon.com/cli/latest/userguide/install-bundle.html
+# Upgrade awscli to the most current version.
 
 awscli_upgrade_dir=/tmp/{{ cluster_name }}/awscli_upgrade
 mkdir -p $awscli_upgrade_dir
@@ -80,25 +78,4 @@ do
 	sudo echo 0 > /sys/devices/system/cpu/cpu$cpunum/online
 done
 EOF
-{% endif %}
-{% if enable_fsx == 'true' %}
-{% if ec2_user == 'ec2-user' or ec2_user == 'centos' %}
-
-# Install the Lustre client on all cluster instances.
-
-fsx_client_install_dir=/tmp/{{ cluster_name }}/fsxl
-mkdir -p $fsx_client_install_dir
-pushd $fsx_client_install_dir
-sudo rpm -ivh https://downloads.whamcloud.com/public/lustre/lustre-2.10.5/el7.5.1804/client/RPMS/x86_64/kmod-lustre-client-2.10.5-1.el7.x86_64.rpm --nodeps
-sudo rpm -ivh https://downloads.whamcloud.com/public/lustre/lustre-2.10.5/el7.5.1804/client/RPMS/x86_64/lustre-client-2.10.5-1.el7.x86_64.rpm --nodeps
-{% else %}
-
-# FSxL on Ubuntu is not supported by ParallelClusterMaker because the client
-# installation process requires rebooting the instance, which breaks the
-# ParallelCluster installation process:
-#
-# https://docs.aws.amazon.com/fsx/latest/LustreGuide/install-lustre-client.html
-#
-# This may be addressed in a future release.
-{% endif %}
 {% endif %}

@@ -2,7 +2,7 @@
 # Name:		{{ instance_name }}.tf
 # Author:	Rodney Marable <rodney.marable@gmail.com>
 # Created On:	April 16, 2019
-# Last Changed:	May 13, 2019
+# Last Changed:	May 26, 2019
 # Deployed On:	{{ lookup('pipe','date \"+%B %-d, %Y\"') }}
 # Purpose:	Terraform template for {{ instance_name }}
 ################################################################################
@@ -11,7 +11,7 @@ resource "aws_instance"  "{{ instance_name }}" {
   availability_zone         = "{{ az }}"
   ami                       = "{{ aws_ami }}"
   ebs_optimized             = "{{ ebs_optimized }}"
-  iam_instance_profile      = "{{ iam_instance_profile }}"
+  iam_instance_profile      = "{{ jumphost_iam_instance_profile }}"
   instance_type             = "{{ ec2_instance_type }}"
   key_name                  = "{{ ec2_keypair }}"
   provider                  = "{{ provider }}"
