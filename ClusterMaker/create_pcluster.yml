@@ -619,7 +619,7 @@
           - "(2) Manually with the kill-pcluster Python script:"
           - "    ./kill-pcluster.py -N {{ cluster_birth_name }} -O {{ cluster_owner }} -A {{ az }}"
           - ""
-          - "(3) Wait for cluster_lifetime to expire.
+          - "(3) Wait for cluster_lifetime to expire."
           - ""
 
     - debug:
