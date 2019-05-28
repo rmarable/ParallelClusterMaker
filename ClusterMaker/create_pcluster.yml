@@ -186,8 +186,8 @@
         dest: "{{ item.dest }}"
         mode: 0755
         with_items:
-          - { src: "{{ cluster_template_dir }}/access_cluster.j2", dest: "{{ stage_dir }}/access_cluster.{{ cluster_name }}.py" }
-          - { src: "{{ cluster_template_dir }}/kill_pcluster.j2", dest: "{{ stage_dir }}/kill_pcluster.{{ cluster_name }}.sh" }
+          - { src: '{{ cluster_template_dir }}/access_cluster.j2', dest: '{{ stage_dir }}/access_cluster.{{ cluster_name }}.py' }
+          - { src: '{{ cluster_template_dir }}/kill_pcluster.j2', dest: '{{ stage_dir }}/kill_pcluster.{{ cluster_name }}.sh' }
 
     - block:
       - name: Template a cluster-friendly version of bang.sh to stage_dir
