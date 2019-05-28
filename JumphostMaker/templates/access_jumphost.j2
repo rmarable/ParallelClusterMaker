@@ -2,7 +2,7 @@
 # Name:		access_jumphost.{{ instance_name }}.sh
 # Author:       Rodney Marable <rodney.marable@gmail.com>
 # Created On:   April 20, 2019
-# Last Changed: April 29, 2019
+# Last Changed: May 28, 2019
 # Deployed On:	{{ lookup('pipe','date \"+%B %-d, %Y\"') }}
 # Purpose:	Provide a quick mechanism for SSH-ing into pcluster-jumphosts
 ################################################################################
@@ -53,6 +53,8 @@ paste $IPLIST.addrs $IPLIST.names > $IPLIST.combined
 # was originally created with the EC2 key pair.
 # If the pcluster-jumphost has multiple members, create a menu for the user to
 # pick a specific individual target instance.
+# Send a ServerKeepAlive every 30 seconds and keep the SSH connection alive
+# for a maximum of 2 hours.
 
 if [[ $IPLIST_COLS -eq 0 ]]
 then
@@ -64,7 +66,7 @@ elif [[ $IPLIST_COLS -eq 1 ]]
 then
 	echo ""
 	echo "Connecting to `cat $IPLIST.combined | awk '{printf("%s (%s)", $1, $2)}'`..."
-	ssh -i $EC2_KEYPAIR_FILE -l $EC2_USER `cat $IPLIST.addrs`
+	ssh -i $EC2_KEYPAIR_FILE -o ServerAliveInterval 30 -o ServerAliveCount 240 -l $EC2_USER `cat $IPLIST.addrs`
 else
 	echo ""
 	echo "Multiple members of pcluster-jumphost \"{{ instance_name }}\" were found:"
