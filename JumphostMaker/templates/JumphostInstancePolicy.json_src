@@ -300,20 +300,30 @@
             "Resource": "*"
         },
         {
-            "Sid": "IAMRole",
+            "Sid": "IAMListGlobal",
             "Action": [
-                "iam:PassRole",
-                "iam:CreateRole",
-                "iam:DeleteRole",
-                "iam:GetRole",
                 "iam:ListGroups",
                 "iam:ListRoles",
+                "iam:ListRolePolicies",
                 "iam:ListUsers"
             ],
             "Effect": "Allow",
             "Resource": [
                 "arn:aws:iam::<AWS_ACCOUNT_ID>:group/*",
-                "arn:aws:iam::<AWS_ACCOUNT_ID>:user/*",
+                "arn:aws:iam::<AWS_ACCOUNT_ID>:role/*",
+                "arn:aws:iam::<AWS_ACCOUNT_ID>:user/*"
+            ]
+        },
+        {
+            "Sid": "IAMRole",
+            "Action": [
+                "iam:PassRole",
+                "iam:CreateRole",
+                "iam:DeleteRole",
+                "iam:GetRole"
+            ],
+            "Effect": "Allow",
+            "Resource": [
                 "arn:aws:iam::<AWS_ACCOUNT_ID>:role/parallelcluster-*",
                 "arn:aws:iam::<AWS_ACCOUNT_ID>:role/pclustermaker-role-*",
                 "arn:aws:iam::<AWS_ACCOUNT_ID>:role/kill-pclustermaker-role-*",
@@ -330,7 +340,6 @@
                 "iam:AttachRolePolicy",
                 "iam:DetachRolePolicy",
                 "iam:DeleteRolePolicy",
-                "iam:ListRolePolicies",
                 "iam:SimulatePrincipalPolicy"
             ],
             "Effect": "Allow",
