@@ -345,6 +345,7 @@
                 "iam:DeleteInstanceProfile",
                 "iam:GetInstanceProfile",
                 "iam:ListInstanceProfilesForRole",
+                "iam:AddRoleToInstanceProfile",
                 "iam:RemoveRoleFromInstanceProfile",
                 "iam:ListInstanceProfiles"
             ],
