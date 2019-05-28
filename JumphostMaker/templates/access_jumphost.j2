@@ -66,7 +66,7 @@ elif [[ $IPLIST_COLS -eq 1 ]]
 then
 	echo ""
 	echo "Connecting to `cat $IPLIST.combined | awk '{printf("%s (%s)", $1, $2)}'`..."
-	ssh -i $EC2_KEYPAIR_FILE -o ServerAliveInterval 30 -o ServerAliveCount 240 -l $EC2_USER `cat $IPLIST.addrs`
+	ssh -i $EC2_KEYPAIR_FILE -o ServerAliveInterval=30 -o ServerAliveCountMax=240 -l $EC2_USER `cat $IPLIST.addrs`
 else
 	echo ""
 	echo "Multiple members of pcluster-jumphost \"{{ instance_name }}\" were found:"
@@ -88,7 +88,7 @@ else
 	selection=$((selection-1))
 	echo ""
 	echo "Connecting to ${INSTANCE_PUBLIC_IP[$selection]} (${INSTANCE_EC2_NAMES[$selection]})..."
-	ssh -i $EC2_KEYPAIR_FILE $EC2_USER@${INSTANCE_PUBLIC_IP[$selection]}
+	ssh -i $EC2_KEYPAIR_FILE -o ServerAliveInterval=30 -o ServerAliveCountMax=240 $EC2_USER@${INSTANCE_PUBLIC_IP[$selection]}
 fi
 
 # Cleanup and exit.
