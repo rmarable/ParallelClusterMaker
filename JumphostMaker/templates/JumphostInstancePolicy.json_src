@@ -227,7 +227,9 @@
                 "s3:ListBucket",
                 "s3:GetBucketPolicy",
                 "s3:GetBucketRequestPayment",
+                "s3:GetBucketTagging",
                 "s3:GetBucketVersioning",
+                "s3:PutBucketVersioning",
                 "s3:PutBucketTagging"
             ],
             "Effect": "Allow",
