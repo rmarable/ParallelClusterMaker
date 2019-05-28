@@ -191,7 +191,7 @@
             "Effect": "Allow",
             "Resource": [
                 "arn:aws:cloudformation:*:<AWS_ACCOUNT_ID>:stack/parallelcluster-*",
-                "arn:aws:cloudformation:*:<AWS_ACCOUNT_ID>:stack/kill-pcluster-*"
+                "arn:aws:cloudformation:*:<AWS_ACCOUNT_ID>:stack/terminate-pcluster-*"
             ]
         },
         {
@@ -264,7 +264,7 @@
             "Effect": "Allow",
             "Resource": [
                 "arn:aws:lambda:*:<AWS_ACCOUNT_ID>:function:parallelcluster-*",
-                "arn:aws:lambda:*:<AWS_ACCOUNT_ID>:function:kill-*"
+                "arn:aws:lambda:*:<AWS_ACCOUNT_ID>:function:terminate-*"
             ]
         },
         {
@@ -322,6 +322,7 @@
             "Action": [
                 "iam:AddRoleToInstanceProfile",
                 "iam:RemoveRoleFromInstanceProfile",
+                "iam:GetRolePolicy",
                 "iam:PutRolePolicy",
                 "iam:AttachRolePolicy",
                 "iam:DetachRolePolicy",

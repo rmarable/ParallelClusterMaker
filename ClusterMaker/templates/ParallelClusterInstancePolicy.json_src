@@ -191,7 +191,7 @@
             "Resource": [
                 "arn:aws:cloudformation:*:<AWS_ACCOUNT_ID>:stack/parallelcluster-<CLUSTER_NAME>/*",
                 "arn:aws:cloudformation:*:<AWS_ACCOUNT_ID>:stack/parallelcluster-<CLUSTER_SERIAL_NUMBER>-*",
-                "arn:aws:cloudformation:*:<AWS_ACCOUNT_ID>:stack/kill-pcluster-<CLUSTER_SERIAL_NUMBER>-*"
+                "arn:aws:cloudformation:*:<AWS_ACCOUNT_ID>:stack/terminate-pcluster-<CLUSTER_SERIAL_NUMBER>-*"
             ]
         },
         {
@@ -264,7 +264,7 @@
             "Effect": "Allow",
             "Resource": [
                 "arn:aws:lambda:*:<AWS_ACCOUNT_ID>:function:parallelcluster-*",
-                "arn:aws:lambda:*:<AWS_ACCOUNT_ID>:function:kill-<CLUSTER_NAME>-<PROD_LEVEL>-<CLUSTER_SERIAL_DATESTAMP>"
+                "arn:aws:lambda:*:<AWS_ACCOUNT_ID>:function:terminate-<CLUSTER_NAME>-<PROD_LEVEL>-<CLUSTER_SERIAL_DATESTAMP>"
             ]
         },
         {
@@ -323,6 +323,7 @@
             "Action": [
                 "iam:AddRoleToInstanceProfile",
                 "iam:RemoveRoleFromInstanceProfile",
+                "iam:GetRolePolicy",
                 "iam:PutRolePolicy",
                 "iam:AttachRolePolicy",
                 "iam:DetachRolePolicy",
