@@ -614,7 +614,7 @@
           - "To destroy this cluster, choose one of the following options:"
           - ""
           - "(1) ParallelClusterMaker terminate stack wrapper script:"
-          - "    ./{{ cluster_data_dir }}/kill_pcluster.{{ cluster_name }}.sh"
+          - "    .{{ cluster_data_dir }}/kill_pcluster.{{ cluster_name }}.sh"
           - ""
           - "(2) Manually with the kill-pcluster Python script:"
           - "    ./kill-pcluster.py -N {{ cluster_birth_name }} -O {{ cluster_owner }} -A {{ az }}"

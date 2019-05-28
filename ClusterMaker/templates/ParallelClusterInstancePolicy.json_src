@@ -231,7 +231,9 @@
                 "s3:GetBucketVersioning",
                 "s3:GetBucketTagging",
                 "s3:PutBucketVersioning",
-                "s3:PutBucketTagging"
+                "s3:PutBucketTagging",
+                "s3:GetEncryptionConfiguration",
+                "s3:PutEncryptionConfiguration"
             ],
             "Effect": "Allow",
             "Resource": [
