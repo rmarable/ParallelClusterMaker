@@ -226,6 +226,7 @@
                 "s3:DeleteBucket",
                 "s3:ListBucket",
                 "s3:GetBucketVersioning",
+                "s3:GetBucketRequestPayment",
                 "s3:PutBucketTagging"
             ],
             "Effect": "Allow",
