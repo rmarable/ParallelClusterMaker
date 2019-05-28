@@ -339,6 +339,7 @@
         {
             "Sid": "IAMInstanceProfile",
             "Action": [
+                "iam:PassRole",
                 "iam:CreateInstanceProfile",
                 "iam:DeleteInstanceProfile",
                 "iam:GetInstanceProfile",
