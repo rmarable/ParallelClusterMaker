@@ -2,7 +2,7 @@
 # Name:         {{ serverless_handler }}.py
 # Author:       Rodney Marable <rodney.marable@gmail.com>
 # Created On:   June 28, 2018
-# Last Changed: May 27, 2019
+# Last Changed: May 28, 2019
 # Deployed On:  {{ lookup('pipe','date \"+%B %-d, %Y\"') }}
 # Purpose:      Lambda function for auto-scheduled self-termination of pcluster
 # 		stack {{ cluster_serial_number }}
@@ -43,7 +43,7 @@ Lambda Function:   terminate-{{ cluster_name}}-{{ prod_level }}-{{ cluster_seria
 Termination Date:  ' + cluster_stack_termination_timestamp '
 EC2 IAM Role:      {{ serverless_ec2_iam_role }}
 EC2 IAM Policy:    {{ serverless_ec2_iam_policy }}
-{% if enable_fsx_hydration == 'true' %}FSx Hydration Policy:    {{ sx_hydration_policy }}{% endif %}
+{% if enable_fsx_hydration == 'true' %}FSx Hydration Policy:    {{ fsx_hydration_policy }}{% endif %}
 
 Please run "kill-pcluster.py" from the ParallelClusterMaker launch environment (i.e. OSX or an EC2 jumphost) to complete the removal process for this cluster stack.
 
@@ -87,7 +87,8 @@ Please run "kill-pcluster.py" from the ParallelClusterMaker launch environment (
         t1 = iam_client.delete_role_policy(RoleName=ec2_iam_role, PolicyName=ec2_iam_policy)
 {% if enable_fsx_hydration == 'true' %}        t2 = iam_client.delete_role_policy(RoleName=ec2_iam_role, PolicyName=enable_fsx_hydration){% endif %}
     except (iam_client.exceptions.NoSuchEntityException):
-        statusData='Unable to delete {{ ec2_iam_role }} {% if enable_fsx_hydration == 'true' }%or {{ enable_fsx_iam_policy }}{% endif %}!'
+{% if enable_fsx_hydration == 'true' %}        statusData='Unable to delete {{ ec2_iam_role }} or {{ enable_fsx_iam_policy }}!'{% endif %}
+{% if enable_fsx_hydration == 'false' %}        statusData='Unable to delete {{ ec2_iam_role }}'{% endif %}
         return_execution_status(statusData, 503)
 
     try:
