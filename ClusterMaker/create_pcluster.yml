@@ -2,7 +2,7 @@
 # Name:		create_pcluster.yml
 # Author:	Rodney Marable <rodney.marable@gmail.com>
 # Created On:	April 20, 2019
-# Last Changed:	May 27, 2019
+# Last Changed:	May 28, 2019
 # Purpose:	Ansible playbook to create new ParallelCluster stacks
 # Notes:        EFS and FSxL are handled by Parallelcluster
 ################################################################################
@@ -185,9 +185,9 @@
         src: "{{ item.src }}"
         dest: "{{ item.dest }}"
         mode: 0755
-        with_items:
-          - { src: '{{ cluster_template_dir }}/access_cluster.j2', dest: '{{ stage_dir }}/access_cluster.{{ cluster_name }}.py' }
-          - { src: '{{ cluster_template_dir }}/kill_pcluster.j2', dest: '{{ stage_dir }}/kill_pcluster.{{ cluster_name }}.sh' }
+      with_items:
+        - { src: '{{ cluster_template_dir }}/access_cluster.j2', dest: '{{ stage_dir }}/access_cluster.{{ cluster_name }}.py' }
+        - { src: '{{ cluster_template_dir }}/kill_pcluster.j2', dest: '{{ stage_dir }}/kill_pcluster.{{ cluster_name }}.sh' }
 
     - block:
       - name: Template a cluster-friendly version of bang.sh to stage_dir
