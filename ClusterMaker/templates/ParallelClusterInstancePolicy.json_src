@@ -315,7 +315,7 @@
                 "arn:aws:iam::<AWS_ACCOUNT_ID>:role/parallelcluster-<CLUSTER_NAME>-*",
                 "arn:aws:iam::<AWS_ACCOUNT_ID>:role/parallelcluster-<CLUSTER_OWNER>-*",
                 "arn:aws:iam::<AWS_ACCOUNT_ID>:role/pclustermaker-role-<CLUSTER_SERIAL_NUMBER>",
-                "arn:aws:iam::<AWS_ACCOUNT_ID>:role/kill-pcluster-role-<CLUSTER_SERIAL_NUMBER>"
+                "arn:aws:iam::<AWS_ACCOUNT_ID>:role/terminate-pcluster-role-<CLUSTER_SERIAL_NUMBER>"
             ]
         },
         {
@@ -336,7 +336,7 @@
                 "arn:aws:iam::<AWS_ACCOUNT_ID>:role/parallelcluster-<CLUSTER_NAME>-*",
                 "arn:aws:iam::<AWS_ACCOUNT_ID>:role/parallelcluster-<CLUSTER_OWNER>-*",
                 "arn:aws:iam::<AWS_ACCOUNT_ID>:role/pclustermaker-role-<CLUSTER_SERIAL_NUMBER>",
-                "arn:aws:iam::<AWS_ACCOUNT_ID>:role/kill-pcluster-role-<CLUSTER_SERIAL_NUMBER>"
+                "arn:aws:iam::<AWS_ACCOUNT_ID>:role/terminate-pcluster-role-<CLUSTER_SERIAL_NUMBER>"
             ]
         },
         {
