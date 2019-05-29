@@ -2,7 +2,7 @@
 # Name:		create_pcluster.yml
 # Author:	Rodney Marable <rodney.marable@gmail.com>
 # Created On:	April 20, 2019
-# Last Changed:	May 28, 2019
+# Last Changed:	May 29, 2019
 # Purpose:	Ansible playbook to create new ParallelCluster stacks
 # Notes:        EFS and FSxL are handled by Parallelcluster
 ################################################################################
@@ -388,7 +388,11 @@
     - debug:
         msg:
           - ""
-          - "Deploying self-termination functionality @ {{ start_lambda_timer.stdout }}"
+          - "Deploying cluster self-termination functionality:"
+          - ""
+          - "ClusterName      = {{ cluster_name }}"
+          - "AvailabilityZone = {{ az }}"
+          - "StartingTime     = {{ start_lambda_timer.stdout }}"
           - ""
           - "This operation typically completes within 5 minutes..."
           - ""

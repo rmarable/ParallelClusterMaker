@@ -14,10 +14,11 @@ TODO
 __pycache__/
 debug_tools/
 vars_files/
-ClusterMaker/active_pclusters
+ClusterMaker/active_clusters
 ClusterMaker/cluster_data/
 ClusterMaker/performance/csv/
 ClusterMaker/performance/logs/
 ClusterMaker/performance/summary/
 JumphostMaker/pcluster_jumphost_data/
 JumphostMaker/active_pcluster_jumphosts/
+JumphostMaker/kill-pcluster-jumphost.*.sh

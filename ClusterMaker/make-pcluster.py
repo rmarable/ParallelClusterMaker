@@ -957,7 +957,7 @@ private_compute_subnet_id: {private_compute_subnet_id}
 
 # EC2 instance parameters
 
-ec2_keypair: "{{{{ cluster_name }}}}"
+ec2_keypair: "{{{{ cluster_serial_number }}}}"
 ec2_user: {ec2_user}
 ec2_user_home: {ec2_user_home}
 ec2_user_src: "{{{{ ec2_user_home }}}}/src"
