@@ -72,10 +72,10 @@ region = az[:-1]
 security_group = args.security_group
 turbot_account = args.turbot_account
 
-# Raise an error if cluster_name or cluster_owner contain uppercase letters.
+# Raise an error if instance_name or instance_owner contain uppercase letters.
 
-if any(char0.isupper() for char0 in cluster_name) or any(char1.isupper() for char1 in cluster_owner):
-    error_msg='cluster_name and cluster_owner must not contain uppercase letters!'
+if any(char0.isupper() for char0 in instance_name) or any(char1.isupper() for char1 in instance_owner):
+    error_msg='instance_name and instance_owner must not contain uppercase letters!'
     refer_to_docs_and_quit(error_msg)
 
 # Get the version of Terraform being used to build the pcluster-jumphost.
