@@ -4,7 +4,7 @@
 # Name:		make-pcluster.py
 # Author:	Rodney Marable <rodney.marable@gmail.com>
 # Created On:	April 20, 2019
-# Last Changed:	May 28, 2019
+# Last Changed:	May 29, 2019
 # Purpose:	Python3 wrapper for customizing ParallelCluster stacks
 ################################################################################
 
@@ -58,17 +58,17 @@ parser.add_argument('--cluster_lifetime', help='automatically terminate the clus
 parser.add_argument('--cluster_owner_department', choices=['analytics', 'clinical', 'commercial', 'compbio', 'compchem', 'datasci', 'design', 'development', 'hpc', 'imaging', 'manufacturing', 'medical', 'modeling', 'operations', 'proteomics', 'robotics', 'qa', 'research', 'scicomp'], help='department of the cluster_owner (default = hpc)', required=False, default='hpc')
 parser.add_argument('--cluster_type', choices=['ondemand', 'spot'], help='build the cluster with ondemand or spot instances (default = spot)', required=False, default='spot')
 parser.add_argument('--compute_instance_type', help='compute EC2 instance type (default = c5.xlarge)', required=False, default='c5.xlarge')
-parser.add_argument('--compute_root_volume_size', help='compute EBS root volume size in GB (default = 250)', required=False, default=250)
+parser.add_argument('--compute_root_volume_size', help='compute EBS root volume size in GB (default = 250)', required=False, type=int, default=250)
 parser.add_argument('--custom_ami', help='ID of a Custom AMI to use instead of default published AMIs - a valid base_os is still required.', required=False, default='NONE')
 parser.add_argument('--debug_mode', '-D', choices=['true', 'false'], help='Enable debug mode (default = false)', required=False, default='false')
-parser.add_argument('--desired_vcpus', help='initial number of vcpus to deploy when using Batch (default = 4)', required=False, default=4)
+parser.add_argument('--desired_vcpus', help='initial number of vcpus to deploy when using Batch (default = 4)', required=False, type=int, default=4)
 parser.add_argument('--ebs_encryption', choices=['true', 'false'], help='enable EBS encryption (default = false)', required=False, default='false')
 parser.add_argument('--ebs_shared_dir', help='shared EBS file system path (default = /shared)', required=False, default='/shared')
-parser.add_argument('--ebs_shared_volume_size', help='EBS shared volume size in GB (default = 250)', required=False, default=250)
+parser.add_argument('--ebs_shared_volume_size', help='EBS shared volume size in GB (default = 250)', required=False, type=int, default=250)
 parser.add_argument('--ebs_shared_volume_type', choices=['gp2', 'io1', 'st1'], help='EBS volume type (default = gp2)', required=False, default='gp2')
 parser.add_argument('--efs_encryption', choices=['true', 'false'], help='enable EFS encryption in transit (default = false)', required=False, default='false')
 parser.add_argument('--efs_performance_mode', choices=['generalPurpose', 'maxIO'], help='select the EFS performance mode (default = generalPurpose)', required=False, default='generalPurpose')
-parser.add_argument('--enable_efs', help='enable Elastic File System (EFS) support (default = false)', required=False, default='false')
+parser.add_argument('--enable_efs', choices=['true', 'false'], help='enable Elastic File System (EFS) support (default = false)', required=False, default='false')
 parser.add_argument('--enable_external_nfs', choices=['true', 'false'], help='enable support for external NFS file system mounts (default = false)', required=False, default='false')
 parser.add_argument('--enable_fsx', choices=['true', 'false'], help='enable Amazon FSx for Lustre support (default = false)', required=False, default='false')
 parser.add_argument('--enable_ganglia', choices=['true', 'false'], help='enable Ganglia on the master instance', required=False, default='false')
@@ -80,23 +80,23 @@ parser.add_argument('--fsx_s3_import_bucket', help='designate s3://fsx_s3_import
 parser.add_argument('--fsx_s3_import_path', help='append an import path to s3_import_path (default = import)', required=False, default='import')
 parser.add_argument('--fsx_s3_export_bucket', help='designate s3://fsx_s3_export_bucket as the export bucket that will dehydrate the Lustre file system for this cluster (default = UNDEFINED)', required=False, default='UNDEFINED')
 parser.add_argument('--fsx_s3_export_path', help='append an export path to s3_export_bucket (default = export)', required=False, default='export')
-parser.add_argument('--fsx_size', help='Lustre file system size in GB - must use multiples of 3600 (default = 3600)', required=False, default=3600)
+parser.add_argument('--fsx_size', help='Lustre file system size in GB - must use multiples of 3600 (default = 3600)', required=False, type=int, default=3600)
 parser.add_argument('--fsx_chunk_size', help='chunk size (MB) of S3 objects imported into Lustre (default = 1024)', required=False, type=int, default=1024)
 parser.add_argument('--hyperthreading', choices=['true', 'false'], help='enable Intel Hyperthreading (default = true)', required=False, default='true')
-parser.add_argument('--initial_queue_size', help='initial number of compute nodes to deploy (default = 2)', required=False, default=2)
-parser.add_argument('--maintain_initial_size', help='keep initial_queue_size instances always running (default = false)', required=False, default='false')
+parser.add_argument('--initial_queue_size', help='initial number of compute nodes to deploy (default = 2)', required=False, type=int, default=2)
+parser.add_argument('--maintain_initial_size', choices=['true', 'false'], help='keep initial_queue_size instances always running (default = false)', required=False, default='false')
 parser.add_argument('--master_instance_type', help='master EC2 instance type (default = c5.xlarge)', required=False, default='c5.xlarge')
-parser.add_argument('--master_root_volume_size', help='master EBS root volume size in GB (default = 250)', required=False, default=250)
-parser.add_argument('--max_queue_size', help='maximum number of compute nodes to deploy (default = 10)', required=False, default=10)
-parser.add_argument('--max_vcpus', help='maximum number of allowed vcpus when using Batch (default = 20)', required=False, default=20)
-parser.add_argument('--min_vcpus', help='minimum number of vcpus to maintain when using Batch (default = 0)', required=False, default=0)
-parser.add_argument('--perftest_custom_start_number', help='starting number of custom performance cluster jobs to submit (default = 10)', required=False, default=10)
-parser.add_argument('--perftest_custom_step_size', help='step size of the custom performance qsub scripts (default = 10)', required=False, default=10)
-parser.add_argument('--perftest_custom_total_tests', help='number of performance tests to run (default = 10)', required=False, default=10)
+parser.add_argument('--master_root_volume_size', help='master EBS root volume size in GB (default = 250)', required=False, type=int, default=250)
+parser.add_argument('--max_queue_size', help='maximum number of compute nodes to deploy (default = 10)', required=False, type=int, default=10)
+parser.add_argument('--max_vcpus', help='maximum number of allowed vcpus when using Batch (default = 20)', required=False, type=int, default=20)
+parser.add_argument('--min_vcpus', help='minimum number of vcpus to maintain when using Batch (default = 0)', required=False, type=int, default=0)
+parser.add_argument('--perftest_custom_start_number', help='starting number of custom performance cluster jobs to submit (default = 10)', required=False, type=int, default=10)
+parser.add_argument('--perftest_custom_step_size', help='step size of the custom performance qsub scripts (default = 10)', required=False, type=int, default=10)
+parser.add_argument('--perftest_custom_total_tests', help='number of performance tests to run (default = 10)', required=False, type=int, default=10)
 parser.add_argument('--placement_group', choices=['NONE', 'DYNAMIC'], help='create a dynamic placement group for this cluster, use with caution (default=NONE)', required=False, default='NONE')
 parser.add_argument('--prod_level', choices=['dev', 'test', 'stage', 'prod'], help='operating stage of the cluster (default = dev)', required=False, default='dev')
 parser.add_argument('--project_id', '-P', help='project name or ID number (default = UNDEFINED)', required=False, default='UNDEFINED')
-parser.add_argument('--scaledown_idletime', choices=['true', 'false'], help='amount of time in minutes without a job after which the compute node will terminate (default = 5)', required=False, default=5)
+parser.add_argument('--scaledown_idletime', help='amount of time in minutes without a job after which the compute node will terminate (default = 5)', required=False, type=int, default=5)
 parser.add_argument('--scheduler', '-S', choices=['sge', 'torque', 'slurm', 'awsbatch'], help='cluster scheduler (default = sge)', required=False, default='sge')
 parser.add_argument('--sge_pe_type', choices=['make', 'mpi', 'smp'], help='select a Grid Engine parallel environment type (default = smp)', required=False, default='smp')
 parser.add_argument('--turbot_account', '-T', help='Turbot account ID (default = abd).  Set to "disabled" in non-Turbot environments.', required=False, default='disabled')
@@ -180,28 +180,230 @@ turbot_account = args.turbot_account
 #use_private_subnet = args.use_private_subnet
 #compute_cidr_subnet = args.compute_cidr_subnet
 
-# Define a dictionary of cluster_parameters that require decimal values.
+# Print a header for cluster variable validation.
 
-decimal_vals_required = {
-    'compute_root_volume_size': compute_root_volume_size,
-    'desired_vcpus': desired_vcpus,
-    'ebs_shared_volume_size': ebs_shared_volume_size,
-    'fsx_chunk_size': fsx_chunk_size,
-    'fsx_size': fsx_size,
-    'master_root_volume_size': master_root_volume_size,
-    'max_queue_size': max_queue_size,
-    'min_vcpus': min_vcpus,
-    'max_vcpus': max_vcpus,
-    'perftest_custom_start_number': perftest_custom_start_number,
-    'perftest_custom_step_size': perftest_custom_step_size,
-    'perftest_custom_total_tests': perftest_custom_total_tests,
-    'scaledown_idletime': scaledown_idletime
-}
+if debug_mode == 'true':
+    print_TextHeader(cluster_name, 'Validating cluster parameters', 80)
+    print('')
+    print('Performing parameter validation...')
+    print('')
+
+# Raise an error if cluster_name or cluster_owner contain uppercase letters.
+
+if any(char0.isupper() for char0 in cluster_name) or any(char1.isupper() for char1 in cluster_owner):
+    error_msg='cluster_name and cluster_owner must not contain uppercase letters!'
+    refer_to_docs_and_quit(error_msg)
+
+# Redefine cluster_name here to ensure compatibility with the original script
+# by preserving "cluster_name" as "cluster_birth_name" for echoing command 
+# line arguments: "-O rmarable -N dev01" ==> rmarable-dev01
+
+cluster_birth_name = cluster_name
+cluster_name = cluster_owner + '-' + cluster_birth_name
+
+# Perform error checking on the selected AWS Region and Availability Zone. 
+# Abort if a non-existent Region or Availability Zone was chosen.
+
+try:
+    ec2client = boto3.client('ec2', region_name = region)
+    az_information = ec2client.describe_availability_zones()
+except (ValueError):
+    illegal_az_msg(az)
+except (botocore.exceptions.EndpointConnectionError):
+    illegal_az_msg(az)
+else:
+    p_val('region', debug_mode)
+    p_val('az', debug_mode)
+
+# Parse the subnet_id, vpc_id, and vpc_name from the selected AWS Region and
+# Availability Zone.
+
+subnet_information = ec2client.describe_subnets(
+    Filters=[ { 'Name': 'availabilityZone', 'Values': [ az, ] }, ],
+)
+vpc_information = ec2client.describe_vpcs()
+
+try:
+    subnet_id = subnet_information['Subnets'][0]['SubnetId']
+except IndexError:
+    error_msg='AvailabilityZone ' + az + ' does not contain any valid subnets!'
+    refer_to_docs_and_quit(error_msg)
+p_val('subnet_id', debug_mode)
+for vpc in vpc_information["Vpcs"]:
+    vpc_id = vpc["VpcId"]
+    p_val('vpc_id', debug_mode)
+    vpc_name = vpc_information['Vpcs'][0]['Tags'][0]['Value']
+    p_val('vpc_name', debug_mode)
+
+# Parse the AWS Account ID.
+
+stsclient = boto3.client('sts', region_name=region, endpoint_url='https://sts.' + region + '.amazonaws.com')
+aws_account_id = stsclient.get_caller_identity()["Account"]
+
+# Set the vars_file_path.
+
+vars_file_path = './vars_files/' + cluster_name + ".yml"
+
+# Create the vars_file directory if it does not already exist.
+
+cwd = os.getcwd()
+try:
+    os.makedirs('./vars_files')
+except OSError as e:
+    if e.errno != errno.EEXIST:
+        raise
+
+# Check for the presence of an existing vars_file for this cluster.
+# If an existing vars_file is found, abort to prevent the potential creation
+# of duplicate stacks.
+
+if os.path.isfile(vars_file_path):
+    print('')
+    print('*** WARNING ***')
+    print('An existing vars_file for cluster "' + cluster_name + '" was found!')
+    print('')
+    print('Please delete this cluster properly and retry the build:')
+    print('$ ./kill-pcluster.py -N ' + cluster_birth_name + ' -O ' + cluster_owner + ' -A ' + az)
+    print('$ ' + cluster_build_command)
+    print('')
+    print('Aborting...')
+    sys.exit(1)
+else:
+    p_val('vars_file_path', debug_mode)
+
+# Check for the presence of an existing cluster with the same name.  If an
+# existing cluster is found, abort to prevent creating duplicate stacks.
+
+status_cmd_string = 'pcluster status --region ' + region + ' ' + cluster_name
+
+with open(os.devnull, 'w') as devnull:
+    p = subprocess.run(status_cmd_string, shell=True, stdout=devnull)
+    if p.returncode == 0:
+        error_msg='pcluster stack "' + cluster_name + '" is already deployed in ' + region + '!'
+        refer_to_docs_and_quit(error_msg)
+    else:
+        if debug_mode == 'true':
+            p_val('cluster_name', debug_mode)
+
+# Set the state directory for this cluster.
+
+cluster_data_dir = './cluster_data/' + prod_level + '/' + cluster_name + '/'
+
+# Check for an existing state directory for this cluster.
+
+try:
+    os.makedirs(cluster_data_dir)
+except OSError as e:
+    if e.errno != errno.EEXIST:
+        raise
+p_val('cluster_data_dir', debug_mode)
+
+# Generate a cluster_serial_number file to store useful state information
+# about each active cluster stack.
+
+SERIAL_DIR = './active_clusters'
+try:
+    os.makedirs(SERIAL_DIR)
+except OSError as e:
+    if e.errno != errno.EEXIST:
+        raise
+
+DEPLOYMENT_DATE = time.strftime("%-d.%B.%Y")
+Deployed_On = time.strftime("%B %-d, %Y")
+cluster_serial_datestamp = DateTime.utcnow().strftime('%S%M%H%d%m%Y')
+cluster_serial_number = cluster_name + '-' + cluster_serial_datestamp
+cluster_serial_number_file = SERIAL_DIR + '/' + cluster_name + '.serial'
+
+if not os.path.isfile(cluster_serial_number):
+    print('%s' % (cluster_serial_number), file=open(cluster_serial_number_file, 'w'))
+p_val('cluster_serial_number', debug_mode)
+p_val('cluster_serial_number_file', debug_mode)
+
+# Validate the prod_level and cluster_owner_department.  These values are
+# limited by the command line argument parser so there is no need for futher
+# error checking.
+
+p_val('cluster_owner_department', debug_mode)
+
+# Perform a minimal check to ensure cluster_owner_email resembles a valid
+# email address.
+
+if validate_email(cluster_owner_email):
+    p_val('cluster_owner_email', debug_mode)
+else:
+    error_msg='"' + cluster_owner_email + '"' + ''' does not appear to be a valid email address!
+Reference: https://en.wikipedia.org/wiki/Email_address'''
+    refer_to_docs_and_quit(error_msg)
+
+# Validate the project_id if it was provided.
+
+if project_id != 'UNDEFINED':
+    p_val('project_id', debug_mode)
+
+# Perform error checking on the selected operating system.
+# Configure the ec2_user account and home directory path to match base_os.
+
+if base_os == 'alinux':
+    ec2_user = 'ec2-user'
+elif base_os == 'centos6' or base_os == 'centos7':
+    ec2_user = 'centos'
+elif base_os == 'ubuntu1404' or base_os == 'ubuntu1604':
+    ec2_user = 'ubuntu'
+else:
+    p_fail(base_os, 'base_os', base_os_allowed)
+ec2_user_home = '/home/' + ec2_user
+p_val('base_os', debug_mode)
+
+# Validate the production level.  Since these options are controlled by the
+# command line argument parser, no further error checking is needed.
+
+p_val('prod_level', debug_mode)
+
+# Validate the scheduler and all other associated parameters.  These values
+# are limited by the command line argument parser so there is no need for
+# additional error checking.
+
+p_val('scheduler', debug_mode)
+if scheduler == 'sge':
+    p_val('sge_pe_type', debug_mode)
+
+# Set the master_instance_type and compute_instance_type to default if no
+# specific instance_type was provided.  Change these values by editing the
+# default_instance_types dictionary defined in parallelclustermaker_aux_data.
+
+if scheduler != 'awsbatch':
+    if master_instance_type == 'default':
+        master_instance_type = default_master_instance_type
+    if compute_instance_type == 'default':
+        compute_instance_type =  default_compute_instance_type
+else:
+    if compute_instance_type == 'default':
+        compute_instance_type = 'optimal'
+    #
+    # The HPC performance tests are all written largely in Python for use with
+    # traditional HPC schedulers (Grid Engine, Slurm, and Torque) and do not
+    # support AWS Batch.  This will be addressed in a future release. 
+    #
+    if enable_hpc_performance_tests ==  'true':
+        error_msg='The ParallelClusterMaker performance tests do not (yet) work with AWS Batch!'
+        refer_to_docs_and_quit(error_msg)
+
+# Perform error checking on master_instance_type and compute_instance_type
+# to ensure supported EC2 instance types were selected.
+
+if master_instance_type not in ec2_instances_full_list:
+    p_fail(master_instance_type, 'master_instance_type', ec2_instances_cloudhpc)
+p_val('master_instance_type', debug_mode)
+p_val('master_root_volume_size', debug_mode)
+
+if compute_instance_type not in ec2_instances_full_list:
+    p_fail(compute_instance_type, 'compute_instance_type', ec2_instances_full_list)
+p_val('compute_instance_type', debug_mode)
+p_val('compute_root_volume_size', debug_mode)
 
 # FSxL is not currently supported when using AWS Batch as a scheduler or if
 # base_os is neither Amazon Linux (alinux) or CentOS 7 (centos7):
 #
-# https://aws-parallelcluster.readthedocs.io/en/latest/configuration.html#fsx
 # https://aws-parallelcluster.readthedocs.io/en/latest/configuration.html#fsx
 #
 # Lustre options should not be used without setting enable_fsx=true.
@@ -227,6 +429,15 @@ if enable_fsx == 'false':
         refer_to_docs_and_quit(error_msg)
 p_val('enable_fsx', debug_mode)
 
+# Check to ensure the Lustre volume size is divisible by 3600.
+
+if enable_fsx == 'true':
+    if fsx_size%3600 == 0:
+        p_val('fsx_size', debug_mode)
+    else:
+        error_msg='fsx_size must be divisible by 3600!'
+        refer_to_docs_and_quit(error_msg)
+
 # Perform error checking and validation on fsx_chunk_size, which should range
 # between 1,024 MB (1 GB) and 512,000 MB (500 GB).
 # Furthermore, Lustre-S3 hydration options should *never* be used without
@@ -242,8 +453,19 @@ if enable_fsx_hydration == 'true':
 
 s3 = boto3.resource('s3')
 
-# If an import bucket was provided but an export bucket was not, assume the
-# import bucket will serve both functions.
+# Perform error checking against the auto-generated name for s3_bucketname
+# If s3_bucketname doesn't exist, create it during the cfncluster stack build.
+
+s3_bucketname = 'parallelclustermaker-' + cluster_serial_number
+
+if s3.Bucket(s3_bucketname) not in s3.buckets.all():
+    p_val('s3_bucketname', debug_mode)
+else:
+    error_msg = 'Found an existing S3 bucket associated with this cluster!'
+    refer_to_docs_and_quit(error_msg)
+
+# If an FSx-S3 import bucket was provided but a corresponding export bucket
+# was not, assume the import bucket will serve both functions.
 # Future releases will support import and export path validity checks.
 
 if fsx_s3_import_bucket != 'UNDEFINED' and fsx_s3_export_bucket == 'UNDEFINED':
@@ -276,132 +498,6 @@ if enable_fsx == 'true':
 p_val('fsx_s3_import_bucket', debug_mode)
 p_val('fsx_s3_export_bucket', debug_mode)
 
-# Check to ensure the Lustre volume size is divisible by 3600.
-
-if enable_fsx == 'true':
-    if fsx_size%3600 == 0:
-        p_val('fsx_size', debug_mode)
-    else:
-        error_msg='fsx_size must be divisible by 3600!'
-        refer_to_docs_and_quit(error_msg)
-
-# Set the master_instance_type and compute_instance_type to default if no
-# specific instance_type was provided.  Change these values by editing the
-# default_instance_types dictionary defined in parallelclustermaker_aux_data.
-
-if scheduler != 'awsbatch':
-    if master_instance_type == 'default':
-        master_instance_type = default_master_instance_type
-    if compute_instance_type == 'default':
-        compute_instance_type =  default_compute_instance_type
-else:
-    if compute_instance_type == 'default':
-        compute_instance_type = 'optimal'
-    #
-    # The HPC performance tests are all written largely in Python for use with
-    # traditional HPC schedulers (Grid Engine, Slurm, and Torque) and do not
-    # support AWS Batch.  This will be addressed in a future release. 
-    #
-    if enable_hpc_performance_tests ==  'true':
-        error_msg='The ParallelClusterMaker performance tests do not (yet) work with AWS Batch!'
-        refer_to_docs_and_quit(error_msg)
-
-# Set the vars_file_path.
-# Combine cluster_name + cluster_owner to ensure unique cluster stack names.
-# Note that cluster_name will be formally redefined a little further down.
-
-vars_file_path = './vars_files/' + cluster_owner + '-' + cluster_name + ".yml"
-
-# Create the vars_file directory if it does not already exist.
-
-cwd = os.getcwd()
-try:
-    os.makedirs('./vars_files')
-except OSError as e:
-    if e.errno != errno.EEXIST:
-        raise
-
-# Print a header for cluster variable validation.
-
-if debug_mode == 'true':
-    print_TextHeader(cluster_owner + '-' + cluster_name, 'Validating cluster parameters', 80)
-    print('')
-    print('Performing parameter validation...')
-    print('')
-p_val('vars_file_path', debug_mode)
-
-# Perform error checking on the selected AWS Region and Availability Zone. 
-# Abort if a non-existent Region or Availability Zone was chosen.
-
-try:
-    ec2client = boto3.client('ec2', region_name = region)
-    az_information = ec2client.describe_availability_zones()
-except (ValueError):
-    illegal_az_msg(az)
-except (botocore.exceptions.EndpointConnectionError):
-    illegal_az_msg(az)
-else:
-    p_val('region', debug_mode)
-    p_val('az', debug_mode)
-
-# Check for the presence of an existing cluster with the same name.
-# If an existing cluster is found, abort to prevent the potential creation
-# of duplicate stacks.
-
-status_cmd_string = 'pcluster status --region ' + region + ' ' + cluster_name
-
-with open(os.devnull, 'w') as devnull:
-    p = subprocess.run(status_cmd_string, shell=True, stdout=devnull)
-    if p.returncode == 0:
-        error_msg='pcluster stack "' + cluster_owner + '-' + cluster_name + '" is already deployed in ' + region + '!'
-        refer_to_docs_and_quit(error_msg)
-    else:
-        if debug_mode == 'true':
-            p_val('cluster_name', debug_mode)
-
-# Check for the presence of an existing vars_file for this cluster.
-# If an existing vars_file is found, abort to prevent the potential creation
-# of duplicate stacks.
-
-if os.path.isfile(vars_file_path):
-    print('')
-    print('*** WARNING ***')
-    print('An existing vars_file for cluster "' + cluster_owner + '-' + cluster_name + '" was found!')
-    print('')
-    print('Please delete this cluster properly and retry the build:')
-    print('$ ./kill-pcluster.py -N ' + cluster_name + ' -O ' + cluster_owner + ' -A ' + az)
-    print('$ ' + cluster_build_command)
-    print('')
-    print('Aborting...')
-    sys.exit(1)
-else:
-    p_val('vars_file_path', debug_mode)
-
-# Set some critical environment variables to support Turbot.
-# https://turbot.com/about/
-
-if turbot_account != 'disabled':
-    turbot_profile = 'turbot__' + turbot_account + '__' + cluster_owner
-    os.environ['AWS_PROFILE'] = turbot_profile
-    os.environ['AWS_DEFAULT_REGION'] = region
-    boto3.setup_default_session(profile_name=turbot_profile)
-    p_val('turbot_account', debug_mode)
-    p_val('turbot_profile', debug_mode)
-
-# Perform error checking on the decimal_vals_required dictionary to ensure its
-# key values are decimals.  This is also critical for ensuring that all 
-# cluster stacks are unique entities.
-
-for key in decimal_vals_required:
-    if is_number(decimal_vals_required[key]):
-        p_val(key, debug_mode)
-    else:
-        error_msg='''"' + key + '" must be a decimal!
-
-Current parameter value:
-    ' + key + ' = ' + decimal_vals_required[key])'''
-        refer_to_docs_and_quit(error_msg)
-
 # Check to ensure external NFS support has been properly enabled.
 
 if (enable_external_nfs == 'true') and (external_nfs_server == ''):
@@ -410,6 +506,14 @@ if (enable_external_nfs == 'true') and (external_nfs_server == ''):
 else:
     p_val('enable_external_nfs', debug_mode)
     p_val('external_nfs_server', debug_mode)
+
+# Todo - if enable_external_nfs=true, check to ensure external_nfs_server
+# actually exists through a ping test or running showmount/rpcinfo to verify
+# NFS shares are being exported.  Something like:
+#
+# $ showmount -e external_nfs_server (fail if empty)
+# $ rpcinfo -t remote_nfs_server nfs 4 (fail if empty)
+# $ ping -c 4 remote_nfs_server (fail if packet_loss > 0)
 
 # Set external_nfs_server to a dummy value if external NFS support has not
 # been enabled.
@@ -424,6 +528,27 @@ p_val('ebs_shared_volume_type', debug_mode)
 p_val('ebs_shared_volume_size', debug_mode)
 if ebs_encryption == 'true':
     p_val('ebs_encryption', debug_mode)
+
+# Check to ensure requested EBS volume sizes are not larger than 16 TB.
+
+if int(master_root_volume_size) > 16000 or int(compute_root_volume_size) > 16000 or int(ebs_shared_volume_size) > 16000:
+    error_msg='''Maximum allowed EBS volume size is 16 TB (16000 GB)!
+master_root_volume_size  = ' + str(master_root_volume_size) + ' GB
+compute_root_volume_size = ' + str(compute_root_volume_size) + ' GB
+ebs_shared_volume_size   = ' + str(ebs_shared_volume_size) + ' GB'''
+    refer_to_docs_and_quit(error_msg)
+    sys.exit(1)
+
+# Perform a minimal check to ensure ebs_shared_dir looks like a valid path.
+
+if ebs_shared_dir.startswith('/'):
+    p_val('ebs_shared_dir', debug_mode)
+else:
+    print('ebs_shared_dir = ' + ebs_shared_dir)
+    print('')
+    error_msg='''"' + ebs_shared_dir+ '"' ' does not appear to be a Unix file path!
+Try using "/' + ebs_shared_dir + '" instead.'''
+    refer_to_docs_and_quit(error_msg)
 
 # Validate EFS based on the selected performance mode.
 
@@ -443,153 +568,6 @@ if custom_ami != 'NONE':
         refer_to_docs_and_quit(error_msg)
     else:
         p_val('custom_ami', debug_mode)
-
-# Todo - if enable_external_nfs=true, check to ensure external_nfs_server
-# actually exists through a ping test or running showmount/rpcinfo to verify
-# NFS shares are being exported.  Something like:
-#
-# $ showmount -e external_nfs_server (fail if empty)
-# $ rpcinfo -t remote_nfs_server nfs 4 (fail if empty)
-# $ ping -c 4 remote_nfs_server (fail if packet_loss > 0)
-
-# Redefine cluster_name here to preserve compatibility with the original
-# script arguments relating "-O rmarable -N dev01" ==> rmarable-dev01.
-
-cluster_birth_name = cluster_name
-cluster_name = cluster_owner + '-' + cluster_name
-
-# Check to ensure requested EBS volume sizes are not larger than 16 TB.
-
-if int(master_root_volume_size) > 16000 or int(compute_root_volume_size) > 16000 or int(ebs_shared_volume_size) > 16000:
-    error_msg='''Maximum allowed EBS volume size is 16 TB (16000 GB)!
-master_root_volume_size  = ' + str(master_root_volume_size) + ' GB
-compute_root_volume_size = ' + str(compute_root_volume_size) + ' GB
-ebs_shared_volume_size   = ' + str(ebs_shared_volume_size) + ' GB'''
-    refer_to_docs_and_quit(error_msg)
-    sys.exit(1)
-
-# Set the state directory for this cluster.
-
-cluster_data_dir = './cluster_data/' + prod_level + '/' + cluster_name + '/'
-
-# Check for an existing state directory for this cluster.
-
-try:
-    os.makedirs(cluster_data_dir)
-except OSError as e:
-    if e.errno != errno.EEXIST:
-        raise
-
-# Generate a cluster_serial_number file to store useful state information
-# about each active cluster stack.
-
-SERIAL_DIR = './active_clusters'
-try:
-    os.makedirs(SERIAL_DIR)
-except OSError as e:
-    if e.errno != errno.EEXIST:
-        raise
-
-DEPLOYMENT_DATE = time.strftime("%-d.%B.%Y")
-Deployed_On = time.strftime("%B %-d, %Y")
-
-cluster_serial_datestamp = DateTime.utcnow().strftime('%S%M%H%d%m%Y')
-cluster_serial_number = cluster_name + '-' + cluster_serial_datestamp
-cluster_serial_number_file = SERIAL_DIR + '/' + cluster_name + '.serial'
-
-if not os.path.isfile(cluster_serial_number):
-    print('%s' % (cluster_serial_number), file=open(cluster_serial_number_file, 'w'))
-
-p_val('prod_level', debug_mode)
-p_val('cluster_owner_department', debug_mode)
-p_val('cluster_serial_number', debug_mode)
-p_val('cluster_serial_number_file', debug_mode)
-
-# Validate the project_id if it was provided.
-
-if project_id != 'UNDEFINED':
-    p_val('project_id', debug_mode)
-
-# Perform error checking on master_instance_type and compute_instance_type
-# to ensure supported EC2 instance types were selected.
-
-if master_instance_type not in ec2_instances_full_list:
-    p_fail(master_instance_type, 'master_instance_type', ec2_instances_cloudhpc)
-p_val('master_instance_type', debug_mode)
-p_val('master_root_volume_size', debug_mode)
-
-if compute_instance_type not in ec2_instances_full_list:
-    p_fail(compute_instance_type, 'compute_instance_type', ec2_instances_full_list)
-p_val('compute_instance_type', debug_mode)
-p_val('compute_root_volume_size', debug_mode)
-
-# Validate the scheduler and all other associated parameters.
-
-p_val('scheduler', debug_mode)
-if scheduler == 'sge':
-    p_val('sge_pe_type', debug_mode)
-
-# Perform a minimal check to ensure ebs_shared_dir looks like a valid path.
-
-if ebs_shared_dir.startswith('/'):
-    p_val('ebs_shared_dir', debug_mode)
-else:
-    print('ebs_shared_dir = ' + ebs_shared_dir)
-    print('')
-    error_msg='''"' + ebs_shared_dir+ '"' ' does not appear to be a Unix file path!
-Try using "/' + ebs_shared_dir + '" instead.'''
-    refer_to_docs_and_quit(error_msg)
-
-# Perform a minimal check to ensure cluster_owner_email resembles a valid
-# email address.
-
-if validate_email(cluster_owner_email):
-    p_val('cluster_owner_email', debug_mode)
-else:
-    error_msg=''''cluster_owner_email = ' + cluster_owner_email
-
-This does not appear to be a valid email address!
-Please refer to: https://en.wikipedia.org/wiki/Email_address'''
-    refer_to_docs_and_quit(error_msg)
-
-# Parse the subnet_id, vpc_id, and vpc_name from the selected AWS Region and
-# Availability Zone.
-
-subnet_information = ec2client.describe_subnets(
-    Filters=[ { 'Name': 'availabilityZone', 'Values': [ az, ] }, ],
-)
-vpc_information = ec2client.describe_vpcs()
-
-try:
-    subnet_id = subnet_information['Subnets'][0]['SubnetId']
-except IndexError:
-    error_msg='AvailabilityZone ' + az + ' does not contain any valid subnets!'
-    refer_to_docs_and_quit(error_msg)
-p_val('subnet_id', debug_mode)
-for vpc in vpc_information["Vpcs"]:
-    vpc_id = vpc["VpcId"]
-    p_val('vpc_id', debug_mode)
-    vpc_name = vpc_information['Vpcs'][0]['Tags'][0]['Value']
-    p_val('vpc_name', debug_mode)
-
-# Parse the AWS Account ID.
-
-stsclient = boto3.client('sts', region_name=region, endpoint_url='https://sts.' + region + '.amazonaws.com')
-aws_account_id = stsclient.get_caller_identity()["Account"]
-
-# Perform error checking on the selected operating system.
-# Configure the ec2_user account and home directory path to match base_os.
-
-if base_os == 'alinux':
-    ec2_user = 'ec2-user'
-elif base_os == 'centos6' or base_os == 'centos7':
-    ec2_user = 'centos'
-elif base_os == 'ubuntu1404' or base_os == 'ubuntu1604':
-    ec2_user = 'ubuntu'
-else:
-    p_fail(base_os, 'base_os', base_os_allowed)
-ec2_user_home = '/home/' + ec2_user
-p_val('base_os', debug_mode)
 
 # Compute EC2 spot prices from: https://aws.amazon.com/ec2/spot/pricing/
 # Pad the spot_price with a buffer to protect against spot price market
@@ -743,16 +721,16 @@ else:
 if debug_mode == 'true':
     p_val('fsx_hydration_iam_policy', debug_mode)
 
-# Perform error checking against the auto-generated name for s3_bucketname
-# If s3_bucketname doesn't exist, create it during the cfncluster stack build.
+# Define some critical environment variables to support Turbot.
+# https://turbot.com/about/
 
-s3_bucketname = 'parallelclustermaker-' + cluster_serial_number
-
-if s3.Bucket(s3_bucketname) not in s3.buckets.all():
-    p_val('s3_bucketname', debug_mode)
-else:
-    error_msg = 'Found an existing S3 bucket associated with this cluster!'
-    refer_to_docs_and_quit(error_msg)
+if turbot_account != 'disabled':
+    turbot_profile = 'turbot__' + turbot_account + '__' + cluster_owner
+    os.environ['AWS_PROFILE'] = turbot_profile
+    os.environ['AWS_DEFAULT_REGION'] = region
+    boto3.setup_default_session(profile_name=turbot_profile)
+    p_val('turbot_account', debug_mode)
+    p_val('turbot_profile', debug_mode)
 
 # Define the cluster_parameters dictionary.
 # This data is needed to build the vars_file.

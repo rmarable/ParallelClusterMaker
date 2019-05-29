@@ -4,7 +4,7 @@
 # Name:         make-pcluster-jumphost.py
 # Author:       Rodney Marable <rodney.marable@gmail.com>
 # Created On:   April 18, 2019
-# Last Changed: May 28, 2019
+# Last Changed: May 29, 2019
 # Purpose:      Create an EC2 jumphost to run the ParallelClusterMaker toolkit
 ################################################################################
 
@@ -49,12 +49,12 @@ parser.add_argument('--instance_owner_email', '-E', help='email address of the p
 # Set reasonable defaults for anything that is not explicitly defined.
 
 parser.add_argument('--ansible_verbosity', help='Set the Ansible verbosity level (default = none)', required=False, default='')
+parser.add_argument('--debug_mode', '-D', choices=['true', 'false'], help='Enable debug mode (default = false)', required=False, default='false')
 parser.add_argument('--instance_owner_department', choices=['analytics', 'clinical', 'commercial', 'compbio', 'compchem', 'datasci', 'design', 'development', 'hpc', 'imaging', 'manufacturing', 'medical', 'modeling', 'operations', 'proteomics', 'robotics', 'qa', 'research', 'scicomp'], help='department of the instance_owner (default = hpc)', required=False, default='hpc')
 parser.add_argument('--prod_level', choices=['dev', 'test', 'stage', 'prod'], help='operating stage of the jumphost  (default = dev)', required=False, default='dev')
 parser.add_argument('--project_id', '-P', help='project name or ID number (default = UNDEFINED)', required=False, default='UNDEFINED')
 parser.add_argument('--security_group', help='primary security group for the EC2 pcluster-jumphost (default = parallelclustermaker_jumphost)', required=False, default='parallelclustermaker_jumphost')
 parser.add_argument('--turbot_account', '-T', help='Turbot account ID (default = abd).  Set to "disabled" in non-Turbot environments.', required=False, default='disabled')
-parser.add_argument('--debug_mode', '-D', choices=['true', 'false'], help='Enable debug mode (default = false)', required=False, default='false')
 
 # Create variables from optional instance_parameters provided via command line.
 
@@ -71,6 +71,12 @@ project_id = args.project_id
 region = az[:-1]
 security_group = args.security_group
 turbot_account = args.turbot_account
+
+# Raise an error if cluster_name or cluster_owner contain uppercase letters.
+
+if any(char0.isupper() for char0 in cluster_name) or any(char1.isupper() for char1 in cluster_owner):
+    error_msg='cluster_name and cluster_owner must not contain uppercase letters!'
+    refer_to_docs_and_quit(error_msg)
 
 # Get the version of Terraform being used to build the pcluster-jumphost.
 # Abort if Terraform is not installed.
@@ -104,15 +110,6 @@ if not ANSIBLE_VERSION:
     print('https://bit.ly/2KHuyY5')
     print('Aborting...')
     sys.exit(1)
-
-# Set some critical environment variables to support Turbot.
-# https://turbot.com/about/
-
-if turbot_account != 'disabled':
-    turbot_profile = 'turbot__' + turbot_account + '__' + instance_owner
-    os.environ['AWS_PROFILE'] = turbot_profile
-    os.environ['AWS_DEFAULT_REGION'] = region
-    boto3.setup_default_session(profile_name=turbot_profile)
 
 # Set the vars_file_path.
 
@@ -314,21 +311,20 @@ else:
 
 # Create an IAM EC2 instance profile for the pcluster-jumphost if it does not
 # already exist.
-# todo - change iam_instance* and iam_json* to jumphost_*
 
 iam = boto3.client('iam')
 jumphost_iam_instance_policy = 'jumphostmaker-policy-' + instance_serial_number
 jumphost_iam_instance_profile = 'jumphostmaker-profile-' + instance_serial_number
 jumphost_iam_instance_role = 'jumphostmaker-role-' + instance_serial_number
-iam_json_policy_src = 'templates/JumphostInstancePolicy.json_src'
-iam_json_policy_template = instance_data_dir + 'JumphostInstancePolicy.json'
+jumphost_json_policy_src = 'templates/JumphostInstancePolicy.json_src'
+jumphost_json_policy_template = instance_data_dir + 'JumphostInstancePolicy.json'
 
 try:
     check_role = iam.get_role(RoleName=jumphost_iam_instance_role)
     print('Found IAM EC2 instance role: ' + jumphost_iam_instance_role)
 except ClientError as e:
     if e.response['Error']['Code'] == 'NoSuchEntity':
-        with open(iam_json_policy_src, 'r') as ec2_instance_role_src:
+        with open(jumphost_json_policy_src, 'r') as ec2_instance_role_src:
             filedata_stage_0 = ec2_instance_role_src.read()
             ec2_instance_role_src.close()
             # Customize the IAM JSON policy template using cluster_parameters
@@ -338,7 +334,7 @@ except ClientError as e:
             # Remove <INSTANCE_OWNER> substitution if teams share jumphosts.
             filedata_stage_3 = filedata_stage_2.replace('<INSTANCE_OWNER>', instance_owner)
             filedata = filedata_stage_3
-        with open(iam_json_policy_template, 'w') as ec2_instance_role_dest:
+        with open(jumphost_json_policy_template, 'w') as ec2_instance_role_dest:
             ec2_instance_role_dest.write(filedata)
             ec2_instance_role_dest.close()
         pcluster_jumphost_ec2_instance_role = iam.create_role(
@@ -346,7 +342,7 @@ except ClientError as e:
             AssumeRolePolicyDocument='{ "Version": "2012-10-17", "Statement": [ { "Effect": "Allow", "Principal": { "Service": [ "ec2.amazonaws.com" ] }, "Action": "sts:AssumeRole" } ] }',
             Description='ParallelClusterMaker EC2 instance role'
             )
-        with open(iam_json_policy_template, 'r') as policy_input:
+        with open(jumphost_json_policy_template, 'r') as policy_input:
             pcluster_jumphost_ec2_policy = iam.put_role_policy(
                 RoleName=jumphost_iam_instance_role,
                 PolicyName=jumphost_iam_instance_policy,
@@ -370,6 +366,15 @@ except ClientError as e:
 if debug_mode == 'true':
     p_val('jumphost_iam_instance_role', debug_mode)
     p_val('jumphost_iam_instance_profile', debug_mode)
+
+# Set some critical environment variables to support Turbot.
+# https://turbot.com/about/
+
+if turbot_account != 'disabled':
+    turbot_profile = 'turbot__' + turbot_account + '__' + instance_owner
+    os.environ['AWS_PROFILE'] = turbot_profile
+    os.environ['AWS_DEFAULT_REGION'] = region
+    boto3.setup_default_session(profile_name=turbot_profile)
 
 # Define the instance_parameters dictionary for populating the vars_file.
 
@@ -405,8 +410,8 @@ instance_parameters = {
     'vars_file_path': vars_file_path,
     'vpc_id': vpc_id,
     'vpc_name': vpc_name,
-    'DEPLOYMENT_DATE': DEPLOYMENT_DATE,
     'ANSIBLE_VERSION': ANSIBLE_VERSION,
+    'DEPLOYMENT_DATE': DEPLOYMENT_DATE,
     'TERRAFORM_VERSION': TERRAFORM_VERSION
 }
 
@@ -449,8 +454,8 @@ if debug_mode == 'true':
     print('vpc_name = ' + vpc_name)
     print('instance_serial_number = ' + instance_serial_number)
     print('instance_serial_number_file = ' + instance_serial_number_file)
-    print('DEPLOYMENT_DATE = ' + DEPLOYMENT_DATE)
     print('ANSIBLE_VERSION = ' + ANSIBLE_VERSION)
+    print('DEPLOYMENT_DATE = ' + DEPLOYMENT_DATE)
     print('TERRAFORM_VERSION = ' + TERRAFORM_VERSION)
 
 # Generate the vars_file for this pcluster-jumphost.
