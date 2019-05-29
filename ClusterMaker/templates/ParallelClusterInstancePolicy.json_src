@@ -261,6 +261,7 @@
                 "lambda:GetFunctionConfiguration",
                 "lambda:InvokeFunction",
                 "lambda:ListVersionsByFunction",
+                "lambda:PublishVersion",
                 "lambda:AddPermission",
                 "lambda:RemovePermission"
             ],
