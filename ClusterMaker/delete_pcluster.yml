@@ -2,7 +2,7 @@
 # Name:		delete_pcluster.yml
 # Author:	Rodney Marable <rodney.marable@gmail.com>
 # Created On:	February 20, 2019
-# Last Changed:	May 25, 2019
+# Last Changed:	May 28, 2019
 # Purpose:	Ansible playbook to delete ParallelCluster stacks
 ################################################################################
 
@@ -137,25 +137,13 @@
     - name: Delete the IAM policies associated with the cluster stack
       iam_policy:
         iam_type: role
-        iam_name: "{{ ec2_iam_role }}"
-        policy_name: "{{ item }}"
+        iam_name: "{{ item.role }}"
+        policy_name: "{{ item.policy }}"
         region: "{{ region }}"
         state: absent
       with_items:
-        - "{{ ec2_iam_policy }}"
-        - "{{ fsx_hydration_iam_policy }}"
-      ignore_errors: yes
-
-    - name: Delete the IAM policies associated with the kill-pcluster Lambda function
-      iam_policy:
-        iam_type: role
-        iam_name: "{{ serverless_ec2_iam_role }}"
-        policy_name: "{{ item }}"
-        region: "{{ region }}"
-        state: absent
-      with_items:
-        - "{{ serverless_ec2_iam_policy }}"
-        - "{{ fsx_hydration_iam_policy }}"
+        - { role: '{{ ec2_iam_role }}', policy: '{{ ec2_iam_policy }|}' }
+        - { role: '{{ serverless_ec2_iam_role }}', policy: '{{ serverless_ec2_iam_policy }|}' }
       ignore_errors: yes
 
     - name: Delete the IAM roles associated with the cluster stack and kill-pcluster Lambda function
@@ -168,6 +156,24 @@
         - "{{ ec2_iam_role }}"
         - "{{ serverless_ec2_iam_role }}"
       ignore_errors: yes
+
+    - block:
+      - name: Delete the IAM policy associated with Lustre-S3 hydration
+        iam_policy:
+          iam_type: role
+          iam_name: "{{ fsx_hydration_iam_role }}"
+          policy_name: "{{ fsx_hydration_iam_policy }}"
+          region: "{{ region }}"
+          state: absent
+        ignore_errors: yes
+      - name: Delete the IAM role associated with Lustre-S3 hydration
+        iam:
+          name: "{{ fsx_hydration_iam_role }}"
+          iam_type: role
+          region: "{{ region }}"
+          state: absent
+        ignore_errors: yes
+      when: 'enable_fsx_hydration == "true"'
 
     - name: Delete the cluster data directory
       file:

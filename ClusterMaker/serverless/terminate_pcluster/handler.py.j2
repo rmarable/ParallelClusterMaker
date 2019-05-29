@@ -43,7 +43,9 @@ Lambda Function:   terminate-{{ cluster_name}}-{{ prod_level }}-{{ cluster_seria
 Termination Date:  ' + cluster_stack_termination_timestamp '
 EC2 IAM Role:      {{ serverless_ec2_iam_role }}
 EC2 IAM Policy:    {{ serverless_ec2_iam_policy }}
-{% if enable_fsx_hydration == 'true' %}FSx Hydration Policy:    {{ fsx_hydration_policy }}{% endif %}
+{% if enable_fsx_hydration == 'true' %}
+FSx Hydration Policy:    {{ fsx_hydration_policy }}
+{% endif %}
 
 Please run "kill-pcluster.py" from the ParallelClusterMaker launch environment (i.e. OSX or an EC2 jumphost) to complete the removal process for this cluster stack.
 
@@ -79,16 +81,24 @@ Please run "kill-pcluster.py" from the ParallelClusterMaker launch environment (
 # Delete the IAM role and policy associated with the cluster.
 
     iam_client = boto3.client('iam')
-{% if enable_fsx_hydration == 'true' %}    fsx_hydration_policy = 'pclustermaker-fsx-s3-policy-{{ cluster_serial_number }}'{% endif %}
+{% if enable_fsx_hydration == 'true' %}
+    fsx_hydration_policy = 'pclustermaker-fsx-s3-policy-{{ cluster_serial_number }}'
+{% endif %}
     ec2_iam_policy = 'pclustermaker-policy-{{ cluster_serial_number }}'
     ec2_iam_role = 'pclustermaker-role-{{ cluster_serial_number }}'
 
     try:
         t1 = iam_client.delete_role_policy(RoleName=ec2_iam_role, PolicyName=ec2_iam_policy)
-{% if enable_fsx_hydration == 'true' %}        t2 = iam_client.delete_role_policy(RoleName=ec2_iam_role, PolicyName=enable_fsx_hydration){% endif %}
+{% if enable_fsx_hydration == 'true' %}
+        t2 = iam_client.delete_role_policy(RoleName=ec2_iam_role, PolicyName=enable_fsx_hydration)
+{% endif %}
     except (iam_client.exceptions.NoSuchEntityException):
-{% if enable_fsx_hydration == 'true' %}        statusData='Unable to delete {{ ec2_iam_role }} or {{ enable_fsx_iam_policy }}!'{% endif %}
-{% if enable_fsx_hydration == 'false' %}        statusData='Unable to delete {{ ec2_iam_role }}'{% endif %}
+{% if enable_fsx_hydration == 'true' %}
+        statusData='Unable to delete {{ ec2_iam_role }} or {{ enable_fsx_iam_policy }}!'
+{% endif %}
+{% if enable_fsx_hydration == 'false' %}
+        statusData='Unable to delete {{ ec2_iam_role }}'
+{% endif %}
         return_execution_status(statusData, 503)
 
     try:

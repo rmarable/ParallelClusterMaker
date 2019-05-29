@@ -2,13 +2,14 @@
 # Name:         kill_pcluster.{{ cluster_name }}.sh
 # Author:       Rodney Marable <rodney.marable@gmail.com>
 # Created On:   May 27, 2019
-# Last Changed: May 27, 2019
+# Last Changed: May 28, 2019
 # Deployed On:  {{ lookup('pipe','date \"+%B %-d, %Y\"') }}
 # Purpose:      Shell script to destroy cluster {{ cluster_name }}
 ################################################################################
 
 #!/bin/sh
 
-PYTHON3=`/usr/bin/env python3`
+PYTHON3=`which python3`
 
-$PYTHON3 kill-pcluster.py -N {{ cluster_birth_name }} -O {{ cluster_owner }} -A {{ az }} --ansible_verbosity=-vv"
+cd {{ ec2_user_home }}/src/ParallelClusterMaker/ClusterMaker
+$PYTHON3 kill-pcluster.py -N {{ cluster_birth_name }} -O {{ cluster_owner }} -E {{ cluster_owner_email }} -A {{ az }} --ansible_verbosity=-vv"

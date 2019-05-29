@@ -321,6 +321,7 @@
         {
             "Sid": "IAMRole",
             "Action": [
+                "iam:ListInstanceProfilesForRole",
                 "iam:PassRole",
                 "iam:CreateRole",
                 "iam:DeleteRole",
@@ -359,7 +360,6 @@
                 "iam:CreateInstanceProfile",
                 "iam:DeleteInstanceProfile",
                 "iam:GetInstanceProfile",
-                "iam:ListInstanceProfilesForRole",
                 "iam:AddRoleToInstanceProfile",
                 "iam:RemoveRoleFromInstanceProfile",
                 "iam:ListInstanceProfiles"
