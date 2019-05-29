@@ -326,8 +326,7 @@
             "Resource": [
                 "arn:aws:iam::<AWS_ACCOUNT_ID>:role/parallelcluster-*",
                 "arn:aws:iam::<AWS_ACCOUNT_ID>:role/pclustermaker-role-*",
-                "arn:aws:iam::<AWS_ACCOUNT_ID>:role/kill-pclustermaker-role-*",
-                "arn:aws:iam::<AWS_ACCOUNT_ID>:role/terminate-pcluster-role-*"
+                "arn:aws:iam::<AWS_ACCOUNT_ID>:role/kill-pclustermaker-role-*"
             ]
         },
         {
@@ -346,8 +345,7 @@
             "Resource": [
                 "arn:aws:iam::<AWS_ACCOUNT_ID>:role/parallelcluster-*",
                 "arn:aws:iam::<AWS_ACCOUNT_ID>:role/pclustermaker-role-*",
-                "arn:aws:iam::<AWS_ACCOUNT_ID>:role/pclustermaker-role-*",
-                "arn:aws:iam::<AWS_ACCOUNT_ID>:role/terminate-pcluster-role-*"
+                "arn:aws:iam::<AWS_ACCOUNT_ID>:role/kill-pclustermaker-role-*"
             ]
         },
         {
