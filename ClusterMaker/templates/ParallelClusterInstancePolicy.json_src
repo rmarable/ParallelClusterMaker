@@ -182,6 +182,7 @@
                 "cloudformation:DescribeStackEvents",
                 "cloudformation:DescribeStackResource",
                 "cloudformation:DescribeStackResources",
+                "cloudformation:ListStackResources",
                 "cloudformation:GetTemplate",
                 "cloudformation:CreateStack",
                 "cloudformation:DeleteStack",
