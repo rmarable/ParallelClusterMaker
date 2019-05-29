@@ -4,7 +4,7 @@
 # Name:         make-pcluster-jumphost.py
 # Author:       Rodney Marable <rodney.marable@gmail.com>
 # Created On:   April 18, 2019
-# Last Changed: May 26, 2019
+# Last Changed: May 28, 2019
 # Purpose:      Create an EC2 jumphost to run the ParallelClusterMaker toolkit
 ################################################################################
 
@@ -223,7 +223,11 @@ subnet_information = ec2client.describe_subnets(
 )
 vpc_information = ec2client.describe_vpcs()
 
-subnet_id = subnet_information['Subnets'][0]['SubnetId']
+try:
+    subnet_id = subnet_information['Subnets'][0]['SubnetId']
+except IndexError:
+    error_msg='AvailabilityZone ' + az + ' does not contain any valid subnets!'
+    refer_to_docs_and_quit(error_msg)
 p_val('subnet_id', debug_mode)
 for vpc in vpc_information["Vpcs"]:
     vpc_id = vpc["VpcId"]
