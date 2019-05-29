@@ -7,7 +7,7 @@
 You **cannot** open AWS support support cases or engage AWS engineers in the Amazon public forums for assistance with this Open Source software.
 
 If you choose to use this Open Source software in production, please be forewarned that bugs may still be present which may cause unexpected (and undocumented)
-behavior.
+behavior that is destructive to your environment.
 
 _**In other words: use this Open Source software at your own risk!**_
 
@@ -16,7 +16,7 @@ Marable (rodney.marable@gmail.com) through the normal Github channels.
 
 ## About ParallelClusterMaker
 
-ParallelClusterMaker is an Open Source command line wrapper toolkit that makes it easier to automate the creation and destruction of AWS ParallelCluster stacks. It is designed to enable  scientists and engineers to leverage HPC in the cloud without requiring deep infrastructure knowledge.
+ParallelClusterMaker is an Open Source command line wrapper toolkit that makes it easier to automate the creation and destruction of AWS ParallelCluster stacks. It is designed to enable scientists and engineers to leverage HPC in the cloud without requiring deep infrastructure knowledge and is a useful teaching tool for those looking to deepen their knowledge about HPC in general.
 
 You can find more information about AWS ParallelCluster by visiting:
 
