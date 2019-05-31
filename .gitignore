@@ -12,7 +12,7 @@
 .swp
 TODO
 __pycache__/
-debug_tools/
+tools/
 vars_files/
 ClusterMaker/active_clusters
 ClusterMaker/cluster_data/

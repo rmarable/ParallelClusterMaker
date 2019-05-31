@@ -2,10 +2,9 @@
 # Name:		postinstall.{{ cluster_name }}.sh
 # Author:	Rodney Marable <rodney.marable@gmail.com>
 # Created On:	April 20, 2019
-# Last Changed:	May 21, 2019
+# Last Changed:	May 30, 2019
 # Deployed On:	{{ lookup('pipe','date \"+%B %-d, %Y\"') }}
 # Purpose:	Perform postinstall tasks on cluster {{ cluster_name }}
-# Note:		EFS and FSxL are handled by ParallelCluster
 ################################################################################
 #
 #!/bin/bash
@@ -173,29 +172,10 @@ MasterServer)
 	cd {{ pkg_dir }}
 	git clone https://github.com/spack/spack.git
 	chown -R {{ ec2_user }}:{{ ec2_user }} {{ pkg_dir }}
-	#echo "Sending an instance deployment notification via SNS..."
-	#sns_message="A new master instance has been created for {{ cluster_name }} on `date '+%Y-%m-%d @ %H:%M:%S'`."
-	#sns_subject="[pcluster {{ cluster_name }}] New Master Instance Alert"
-	#aws --region {{ region }} sns publish --topic-arn arn:aws:sns:{{ region }}:{{ aws_account_id }}:sns_alerts_{{ cluster_name }} --message $sns_subject --subject $sns_subject
-{% if scheduler == 'sge' %}
-###############################################################################
-	# Todo - enable SGE accounting:
-	# https://github.com/awslabs/cfncluster-cookbook/issues/15
-	#sudo env "SGE_ROOT=/opt/sge SGE_SINGLE_LINE=1" /opt/sge/bin/lx-amd64/qconf -am {{ ec2_user }}
-	#SGE_ROOT=/opt/sge SGE_SINGLE_LINE=1 /opt/sge/bin/lx-amd64/qconf -sconf > /tmp/_global.{{ cluster_name }}
-	#sed -i "s/reporting=false/reporting=true/g" /tmp/_global.{{ cluster_name }}
-	#sed -i "s/joblog=false/joblog=true/g" /tmp/_global.{{ cluster_name }}
-	#SGE_ROOT=/opt/sge /opt/sge/bin/lx-amd64/qconf -Mconf /tmp/_global.{{ cluster_name }}
-###############################################################################
-{% endif %}
 	;;
 ComputeFleet)
 	echo "Customize the pcluster stack compute instances here."
 	echo "Ready to finish joining the cluster!"
-	#echo "Sending an instance deployment notification via SNS..."
-	#sns_message="A new compute instance has been spawned for {{ cluster_name }} on `date '+%Y-%m-%d @ %H:%M:%S'`."
-	#sns_subject="[pcluster {{ cluster_name }}] New Compute Instance Alert"
-	#aws --region {{ region }} sns publish --topic-arn arn:aws:sns:{{ region }}:{{ aws_account_id }}:sns_alerts_{{ cluster_name }} --message $sns_subject --subject $sns_subject
 	;;
 esac
 

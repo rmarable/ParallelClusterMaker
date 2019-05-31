@@ -193,7 +193,6 @@ with contextlib.suppress(FileNotFoundError):
         print('To rebuild the cluster:')
         print('')
         print('$ ' + cli_input.readlines()[-1])
-        print('')
 
 # Delete cluster_serial_number_file and vars_file_path.
 

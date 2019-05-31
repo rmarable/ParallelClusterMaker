@@ -1,14 +1,18 @@
 # INSTALL.md
 
+## License and Disclaimer Information
+
+Please refer to the LICENSE and DISCLAIMER.md documents included with this Open Source software for the specific terms and conditions that govern its use.
+
 ## Introduction
 
 ParallelClusterMaker is Open Source software that simplifies the automation
 of creating, deleting, and administering AWS ParallelCluster stacks.
 
 The recommended way to use ParallelClusterMaker is to stand up a dedicated
-jumphost using the code in ParallelClusterMaker/JumphostMaker, and from this
-dedicated jumphost, run the code in ParallelClusterMaker/ClusterMaker to
-build and administer ParallelCluster stacks.
+EC2 jumphost using the code in ParallelClusterMaker/JumphostMaker, and from
+this dedicated jumphost, run the code in ParallelClusterMaker/ClusterMaker to
+construct, administer, and destroy ParallelCluster stacks.
 
 Guidance is also provided for launching new ParallelCluster stacks using
 the code in ParallelClusterMaker/ClusterMaker directly from OSX.  Please be 
@@ -18,13 +22,12 @@ unforeseen problems with your local environment.
 In theory, this toolkit can also be used on Windows machines, but this method
 has not been tested and will **not** be supported.
 
-## Using a Dedicated EC2 Jumphost
+## Create a Dedicated EC2 Jumphost
 
-The recommended way to leverage this code is to create a dedicated jumphost
+The recommended way to leverage this code is to create a dedicated EC2 jumphost
 to launch ParallelCluster stacks.
 
-* Create a 'src' directory and clone the ParallelCluster Git repo to your local
-environment:
+* Create a 'src' subdirectory in your **local** home directory and clone the ParallelCluster Git repo to the aforementioned local environment:
 
 ```
 $ cd ~
@@ -33,13 +36,14 @@ $ cd src
 $ git clone https://github.com/rmarable/ParallelClusterMaker.git
 ```
 
-* Install Terraform using the guidance provided here:
+* Install Terraform **on your local machine** using the guidance provided here:
 
 https://www.terraform.io/downloads.html
 
-* Create and activate a virtual Python3 environment called "pcluster-jumphost"
-to support the jumphost installation with either pyenv (recommended) or
-virtualenv.  For more information on these virtulizers, please visit:
+* Create and activate a virtual Python3 environment **on your local machine** with a suggested name of "pcluster-jumphost" to support the EC2 jumphost installation with either pyenv
+(recommended) or virtualenv.
+
+For more information on these virtulizers, please visit:
 
 pyenv: homehttps://github.com/pyenv/pyenv#installation
 virtualenv: https://virtualenv.pypa.io/en/latest/installation/
@@ -55,15 +59,16 @@ $ cd ~/src/ParallelClusterMaker/JumphostMaker
 $ pip install requirements.pcluster_jumphost.txt.
 ```
 
-Build the jumphost using the "make-pcluster-jumphost.py" script, substituting
-appropriate values for your use case:
+Build the jumphost using the "JumphostMaker/make-pcluster-jumphost.py" script,
+substituting appropriate values for your specific use case:
 
 ```
 $ ./make-pcluster-jumphost.py -A us-east-2c -N jumphost20190420 -O rmarable -E rodney.marable@gmail.com
 ```
 
-When the jumphost becomes available, login and change to the ClusterMaker
-source code directory:
+The jumphost installation will take approximately five (5) minutes to finish.
+When it becomes available, login and 'cd' to the ClusterMaker source code
+directory:
 
 ```
 $ ./access_jumphost -N jumphost20190420
@@ -71,11 +76,12 @@ $ cd ParallelClusterMaker/ClusterMaker
 ```
 
 * You are now ready to build ParallelCluster stacks.  Please consult README.md
-for more detailed information on leveraging the scripts in this toolkit.
+for more detailed information on leveraging the other scripts in this toolkit.
 
-## Building an Installation Environment on OSX
+## Creating an Installation Environment on OSX
 
-Please be forewarned that this method is **not** recommended, requires more
+Please be forewarned that this method is **not** recommended! A detail-oriented
+and knowledgable source will be necessary if this occurs.  It requires
 work, and may seriously damage your local OSX environment.
 
 "Play at your own risk!"
@@ -95,7 +101,7 @@ $ git clone https://github.com/rmarable/ParallelClusterMaker.git
 $ /usr/bin/ruby -e "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/master/install)"
 ```
 
-* Use Homebrew to install some other critical applications:
+* Use Homebrew to install some other critical applications (OSX users only):
 
 ```
 $ brew install ansible autoconf automake gcc jq libtool make readline
@@ -222,7 +228,7 @@ scheduler.
 $ ./kill-pcluster.py -N test01 -O rmarable -A us-east-1a
 ```
 
-* Once you are done working with the cluster, disable the virtual Python
+* When you are done working with the cluster, disable the virtual Python
 environment:
 
 ```
@@ -242,4 +248,7 @@ make-pcluster.py script and its companion tools.
 
 Any bugs, issues, or otherwise unexpected behavior should be reported to
 Rodney Marable (rodney.marable@gmail.com) using the normal Github channels.  
-Pull requests for additional functionality are always welcome.
+
+Pull requests for additional functionality are always welcome.  Please ensure
+that all tests conducted to verify the safety and usefulness of your code
+are otherwise working as expected.

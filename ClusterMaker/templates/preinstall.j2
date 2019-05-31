@@ -2,7 +2,7 @@
 # Name:		preinstall.{{ cluster_name }}.sh
 # Author:	Rodney Marable <rodney.marable@gmail.com>
 # Created On:	April 20, 2019
-# Last Changed:	May 21, 2019
+# Last Changed:	May 30, 2019
 # Deployed On:	{{ lookup('pipe','date \"+%B %-d, %Y\"') }}
 # Purpose:	Perform preinstall tasks on cluster {{ cluster_name }}
 ################################################################################
@@ -22,8 +22,9 @@ sudo rpm -qa kernel | sed 's/^kernel-//'  | xargs -I {} dracut -f /boot/initramf
 # Install support for Python-3.6.
 
 sudo yum -y install python36
-sudo pip-3.6 install ansible boto3 matplotlib numpy pandas requests seaborn scipy tailhead
-sudo pip-3.6 install --upgrade pip
+sudo easy_install pip
+sudo /usr/local/bin/pip3.6 install --upgrade pip
+sudo /usr/local/bin/pip3.6 install ansible boto3 matplotlib numpy pandas requests seaborn scipy tailhead
 {% endif %}
 {% if base_os == 'centos7' %}
 # Enable centos7 to properly support Python-3.6.

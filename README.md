@@ -1,18 +1,23 @@
 # ParallelClusterMaker - HPC Cloud Automation
 
+## License
+
+Please refer to the LICENSE document included with this Open Source software for the specific terms and conditions that govern its use.
+
 ## Disclaimer
 
-**This Open Source software is neither endorsed by nor supported by Amazon Web Services!** 
+The author assumes absolutely no responsibility or liability for any losses or damages incurred in conjunction with the use of this Open Source software.
 
-You **cannot** open AWS support support cases or engage AWS engineers in the Amazon public forums for assistance with this Open Source software.
+If you choose to use this Open Source software in production, please be forewarned that bugs or other undocumented features might be present which can cause unexpected behavior that could result in the catastrophic destruction of your environment.
 
-If you choose to use this Open Source software in production, please be forewarned that bugs may still be present which may cause unexpected (and undocumented)
-behavior that is destructive to your environment.
+**Please be advised that this Open Source software is neither endorsed nor supported by Amazon Web Services.**
 
-_**In other words: use this Open Source software at your own risk!**_
+Please be further advised that you will **NOT** be able to open cases with AWS Support if you run into any problems or issues using this Open Source software, and you may **NOT** engage AWS HPC or customer support engineers in the public forums if you have questions regarding the installation or operation of this Open Source software.
 
-Please report any bugs, issues, or otherwise unexpected behavior to Rodney
-Marable (rodney.marable@gmail.com) through the normal Github channels.
+```
+"Play at your own risk!"
+ -- Planet Patrol
+```
 
 ## About ParallelClusterMaker
 
@@ -20,20 +25,22 @@ ParallelClusterMaker is an Open Source command line wrapper toolkit that makes i
 
 You can find more information about AWS ParallelCluster by visiting:
 
-https://aws-parallelcluster.readthedocs.io/en/latest/index.html
-https://github.com/aws/aws-parallelcluster
+Documentation: https://aws-parallelcluster.readthedocs.io/en/latest/index.html
+Github Repository: https://github.com/aws/aws-parallelcluster
 
-The top-level directory of the ParallelClusterMaker Github repository contains two subdirectories:
+The ParallelClusterMaker Github repository contains two project subdirectories:
 
 * **JumphostMaker** creates a dedicated free tier EC2 instance that can be
-used to administer AWS ParallelCluster stacks.
+used to build and maintain AWS ParallelCluster stacks.
+
+JumphostMaker should be run locally on OSX or Linux.  Our recommended best practice is to use JumphostMaker to create a standalone EC2 instance (a.k.a. "jumphost") that can then be used to administer ParallelCluster stacks.
 
 * **ClusterMaker** builds and destroys AWS ParallelCluster stacks.
 
-ClusterMaker can be run locally via OSX (and, in theory, Windows), but the
-recommended practice is to use JumphostMaker to first stand up a standalone EC2 instance (a.k.a. "jumphost") that can then be used to administer ParallelCluster stacks.
+ClusterMaker can also be run locally via OSX but the operator is strongly urged
+to use JumphostMaker to first stand up a standalone EC2 instance (a.k.a. "jumphost") which can then be used to administer ParallelCluster stacks.
 
-Please consult the EXAMPLES.md file for some suggestions on how to use ParallelClusterMaker's command line arguments.
+Please consult the EXAMPLES.md file for some suggestions on how to use ParallelClusterMaker's command line arguments to satisfy a variety of HPC use cases.
 
 ## ParallelClusterMaker Features
 
@@ -51,7 +58,7 @@ The default is 30 days.
 
 * Separate selectable instance types for the master and compute instances.
 
-* User selection of "optimal" instances when AWS Batch is selected as a scheduler.  Additionally, the user is free to select one of the EC2 instances that could potentially hold Junior's attention.
+* User selection of "optimal" instances when AWS Batch is selected as a scheduler.  Additionally, the user is free to select any of the EC2 instances that Batch supports for building computational environments.
 
 * Identification of the cluster's owner, email address, and department using
 an easily extendable tagging framework.
@@ -62,9 +69,9 @@ an easily extendable tagging framework.
 
 * Dynamic EC2 placement groups.
 
-* Selective disabling of Intel HyperThreading (note: only on Amazon Linux 2).
+* Selective disabling of Intel HyperThreading (note: this feature is currently available only on Amazon Linux 2).
 
-* Default selection of spot instances with a pricing buffer to help prevent
+* Default selection of EC2 Spot instances with a pricing buffer to help prevent
 instance termination due to spot price market fluctuations.
 
 * Customization of Grid Engine parallel environments.
@@ -74,25 +81,20 @@ enable immediate "quick and dirty" comparative testing of traditional HPC schedu
 
 * Variable EBS volume sizes (up to 16 TB).
 
-* EBS RAID volumes.
-
-* Variable-sized shared EBS scratch mounted as /local_scratch on all cluster
-instances.
+* Variable-sized shared EBS scratch mounted as /local_scratch on all cluster instances.
 
 * Creation of cluster-specific Amazon Elastic File System (EFS). 
 
 * Encryption of EFS in transit and at rest.
 
 * Creation of cluster-specific, custom-sized Amazon FSX for Lustre (FSxL)
-file systems.
+file systems.  Caveat: the file size of any Lustre file system must be divisible by 3600.
 
 * Support for hydrating and dehydrating the Lustre file system from pre-existing S3 buckets.
 
-* Automounting of external NFS file systems from EMC, Netapp, Qumulo, WekaIO
-Panzura, Nasuni, etc.
+* Automounting of external NFS file systems from Vast, EMC, Netapp, Qumulo, WekaIO, Panzura, Nasuni, etc.
 
-* Email notifications via SNS whenever significant cluster stack events are
-recorded.
+* Email notifications via SNS whenever ParallelClusterMaker is executed.
 
 * Selective enablement of Ganglia for capturing cluster metrics.
 
@@ -107,20 +109,19 @@ be added in future releases.
 
 ## Installation of ParallelClusterMaker for the Impatient
 
-The INSTALL.md document provides detailed guidance and instructions on how to
-install ParallelClusterMaker using an EC2 jumphost (the preferred method) or
-locally on OSX.
+These instructions are provided for the impatient.
 
-These instructions are for the impatient.  We strongly suggest that you review
-the installation documentation carefully to avoid potentially costly and
-time-consuming mistakes.
+**We strongly suggest that you review the installation documentation carefully to avoid potentially costly and time-consuming mistakes.**
 
-## Building an Installation Environment on EC2
+Please read the INSTALL.md document for detailed guidance and instructions on how to install ParallelClusterMaker using an EC2 jumphost (the preferred method) or locally on OSX.
 
-To build a ParallelClusterMaker environment on EC2, refer to the guidelines
-in the INSTALL.md file ("Building an installation environment on EC2").
+### Building an Installation Environment on EC2
 
+To properly build a ParallelClusterMaker environment on EC2, please refer to the guidelines in the INSTALL.md file ("Building an installation environment on EC2").
+
+```
 Please note that this is the **recommended** way to leverage this toolkit.
+```
 
 * Install and enable a virtual Python environment with either virtualenv or
 pyenv.
@@ -136,14 +137,14 @@ command line switches.
 new ParallelCluster stacks.  Please see the "Building New ParallelCluster
 Stacks" section below for additional guidance.
 
-## Building an Installation Environment on OSX
+### Building an Installation Environment on OSX
+
+Please note that this is **not** the recommended method and may seriously 
+damage your local OSX environment.
 
 It is strongly recommended that you refer to the guidelines outlined in
 "Building an Installation Environment on OSX" in the INSTALL.md file  to
 build a ParallelClusterMaker environment on OSX.
-
-Please note that this is **not** the recommended method and may seriously 
-damage your local OSX environment.
 
 "Play at your own risk!" 
   -- Planet Patrol
@@ -168,8 +169,8 @@ damage your local OSX environment.
 * Configure the AWS CLI.
 
 * Ensure that the IAM account or role you are using to build ParallelCluster
-stacks has permission to run the required API calls by either assigning admin
-rights or creating a custom role using this template as a source:
+stacks has permission to run the required API calls by either assigning it
+admin rights or creating a custom role using this template as a source:
 
 ```ParallelClusterMaker/JumphostMaker/templates/ParallelClusterInstancePolicy.json_src```
 
@@ -179,7 +180,7 @@ rights or creating a custom role using this template as a source:
 the included requirements.txt file in each toolkit subdirectory once the
 virtual Python environment is available.
 
-* Install the Serverless Toolkit.
+* Install the Serverless Toolkit and its dependencies.
 
 * In the AWS Management Console, apply a formal name to the VPC(s) within any
 region you wish to deploy cluster stacks.
@@ -189,9 +190,9 @@ new ParallelCluster stacks.  Please see below for additional guidance.
 
 ## Building New ParallelCluster Stacks
 
-After satisfying the installation and system requirements above, you can use
-"make_cluster.py" to build new ParallelCluster stacks.  If you are building
-from your local OSX environment, please remember to change into the proper
+After satisfying the installation and system requirements outlined above, use
+"make_cluster.py" to build new ParallelCluster stacks.  If building from a
+local OSX environment, please remember to change into the proper
 subdirectory beforehand (~/src/ParallelClusterMaker/ClusterMaker).  This
 example will create a new cluster named rmarable-test01 in us-east-1a using
 the toolkit defaults:
@@ -233,7 +234,7 @@ are included with new ParallelCluster stacks when the appropriate option
 scripts live in ~/src/ParallelClusterMaker/ClusterMaker/performance but come
 with the following caveats that will be addressed in future releases:
 
-- AWS Batch is not supported because the scripts are largely written in Python and invoked using shell wrappers.
+- AWS Batch is not currently supported.
 
 - Cluster submission scripts for Torque support are not provided.
 
@@ -272,7 +273,7 @@ secure fashion.
 The kill_cluster and kill_pcluster_jumphost scripts will delete the respective
 EC2 key pairs as part of the cluster or jumphost destruction process.
 
-## Deleting a Cluster Stack or EC2 Jumphost
+## Deleting ParallelClusterMaker Resources
 
 There are three ways to delete a cluster stack:
 
@@ -397,20 +398,20 @@ This will be re-enabled as a future update.
 ## FSx for Lustre (FSxL) Support
 
 FSx for Lustre (FSxL) can be leveraged for scratch space on a ParallelCluster
-stack by setting `--enable_fsx=true.`  All cluster instances will mount the FSxL file system at /fsx. 
+stack by setting `--enable_fsx=true.`  All cluster instances will mount the resulting FSxL file system at /fsx. 
 
 The **minimum** permitted file system size is 3600 GB (or 3.6 TB).  This is
 the current default.  Larger file systems can be built by setting `--fsx_size`
 to the desired value in **increments of 3600 GB.**  The build process will abort
 if presented with an incorrect value for fsx_size.
 
-FSxL on Ubuntu is not currently supported by ParallelCluster.  A theoretical workaround would be provide a custom Ubuntu AMI containing all of the required Lustre kernel drivers to ParallelClusterMaker with the `--custom_api argument.`  This functionlity may be provided in a future release.
+FSxL on Ubuntu is not currently supported by ParallelClusterMaker.
 
 ParallelClusterMaker also supports hydration and dehyration of Lustre file systems using pre-existing S3 buckets as outlined in the AWS public documentation:
 
 https://docs.aws.amazon.com/fsx/latest/LustreGuide/fsx-data-repositories.html
 
-Please note that the automatic dehydration at cluster deletion is not supported.  This feature may be provided in a future release.
+Please note that automatic Lustre dehydration at the time of the cluster's deletion is not supported.  This feature may be provided in a future release.
 
 The FSx chunk size, import and export paths, and bucket names can all be configured through ParallelClusterMaker switches.  In the example below, a cluster called "louievega" will hydrate its 7.2 TB Lustre file system from s3://s3DataImportBucket and dehydrate to s3://s3DataExportBucket, using a chunk size of 5 GB:
 
@@ -654,9 +655,13 @@ Shared jumphosts between multiple team members will be addressed in a future
 release.  For now, operators are advised to maintain a single jumphost per
 cluster_owner.
 
-# Reporting Bugs
+# Reporting Bugs & Requesting New Features
 
 Please report any bugs, issues, or otherwise unexpected behavior to Rodney
-Marable <rodney.marable@gmail.com> through the normal Github channels.
+Marable <rodney.marable@gmail.com> through the normal Github issue reporting channel for this repository:
 
-Pull requests for additional functionality are always welcome.
+https://github.com/rmarable/ParallelClusterMaker/issues
+
+Pull requests providing additional functionality or bug fixes are always welcome:
+
+https://github.com/rmarable/ParallelClusterMaker/pulls

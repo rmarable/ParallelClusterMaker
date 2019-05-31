@@ -4,7 +4,7 @@
 # Name:		bang.{{ cluster_name }}.sh
 # Author:	Rodney Marable <rodney.marable@gmail.com>
 # Created On:	January 12, 2018
-# Last Changed: August 9, 2018
+# Last Changed: May 29, 2019
 # Deployed On:  {{ lookup('pipe','date \"+%B %-d, %Y\"') }}
 # Purpose:	Wrapper script for running Axb_random.py on {{ cluster_name }}
 ################################################################################
@@ -14,10 +14,11 @@
 # This version of bang.sh is customized for automated performance testing on
 # pcluster stack {{ cluster_name }} using Axb_random.py.
 #
+#{%if scheduler == 'sge' %}
 # To submit the full performance suite to a Grid Engine cluster:
 #
 # $ ./perf-qsub.{{ cluster_name }}.sh
-#
+#{% endif %}
 # Change MATRIX_SIZES.conf to reflect the matrices to be solved. This array is
 # also included as the 'title' field in the make_plots scripts.
 #
@@ -30,13 +31,6 @@
 source ./MATRIX_SIZES.conf
 
 # Set the CLUSTER_NAME.
-#
-# When running on a Grid Engine cluster, use the official cluster name to
-# ensure your data can be compared against other clusters. For pcluster,
-# this means CLUSTER_NAME should appear in the output of 'pcluster list.'
-#
-# It may be helpful to append (or prepend) "efs" or "ebs" to CLUSTER_NAME to
-# better clarify the storage that was tested.
 #
 # Note: If you use periods in CLUSTER_NAME, please be advised they will be
 # replaced with dashes to prevent issues with the downstream data parsers.

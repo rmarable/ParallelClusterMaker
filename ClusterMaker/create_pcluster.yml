@@ -2,7 +2,7 @@
 # Name:		create_pcluster.yml
 # Author:	Rodney Marable <rodney.marable@gmail.com>
 # Created On:	April 20, 2019
-# Last Changed:	May 29, 2019
+# Last Changed:	May 30, 2019
 # Purpose:	Ansible playbook to create new ParallelCluster stacks
 # Notes:        EFS and FSxL are handled by Parallelcluster
 ################################################################################
@@ -132,6 +132,7 @@
         mode: 0755
       with_items:
         - "{{ stage_dir }}"
+        - "{{ performance_stage_dir }}"
         - "{{ serverless_stage_dir }}"
         - "{{ serverless_template_dir }}"
 
@@ -159,6 +160,15 @@
         - { src: '{{ preinstall_src }}', dest: '{{ s3_script_path }}/{{ preinstall_s3_dest }}' }
         - { src: '{{ postinstall_src }}', dest: '{{ s3_script_path }}/{{ postinstall_s3_dest }}' }
 
+    - name: Template the cluster SSH access and kill-pcluster shell scripts to stage_dir
+      template:
+        src: "{{ item.src }}"
+        dest: "{{ item.dest }}"
+        mode: 0755
+      with_items:
+        - { src: '{{ cluster_template_dir }}/access_cluster.j2', dest: '{{ stage_dir }}/access_cluster.{{ cluster_name }}.py' }
+        - { src: '{{ cluster_template_dir }}/kill_pcluster.j2', dest: '{{ stage_dir }}/kill_pcluster.{{ cluster_name }}.sh' }
+
     - block:
       - name: Template the external NFS file system mount list to the cluster state directory
         template:
@@ -180,43 +190,30 @@
           mode: put
       when: 'enable_external_nfs == "true"'
 
-    - name: Template the cluster SSH access and kill-pcluster shell scripts to stage_dir
-      template:
-        src: "{{ item.src }}"
-        dest: "{{ item.dest }}"
-        mode: 0755
-      with_items:
-        - { src: '{{ cluster_template_dir }}/access_cluster.j2', dest: '{{ stage_dir }}/access_cluster.{{ cluster_name }}.py' }
-        - { src: '{{ cluster_template_dir }}/kill_pcluster.j2', dest: '{{ stage_dir }}/kill_pcluster.{{ cluster_name }}.sh' }
-
     - block:
-      - name: Template a cluster-friendly version of bang.sh to stage_dir
-        template:
-          src: "{{ performance_template_dir }}/bang_cluster_friendly.j2"
-          dest: "{{ stage_dir }}/bang.{{ cluster_name }}.sh"
-          mode: 0755
-      - name: Template the custom HPC performance shell scripts to stage_dir
+      - name: Template the common HPC performance shell scripts to stage_dir
         template:
           src: "{{ performance_template_dir }}/{{ item }}.j2"
-          dest: "{{ stage_dir }}/{{ item }}.{{ cluster_name }}.sh"
+          dest: "{{ performance_stage_dir }}/{{ item }}.{{ cluster_name }}.sh"
           mode: 0755
         with_items:
+          - bang
           - combine_csv_summary_files_for_plotting
-          - combine_sge_data_files_for_plotting
-          - create_sge_task_array_csv_files
-          - perf-stest
+          - perf-standalone-test
       - name: Template the custom SGE-specific HPC performance shell scripts to stage_dir
         template:
           src: "{{ performance_template_dir }}/{{ item }}.j2"
-          dest: "{{ stage_dir }}/{{ item }}.{{ cluster_name }}.sh"
+          dest: "{{ performance_stage_dir }}/{{ item }}.{{ cluster_name }}.sh"
           mode: 0755
         with_items:
+          - combine_sge_data_files_for_plotting
           - perf-qsub
+          - create_sge_task_array_csv_files
         when: 'scheduler == "sge"'
       - name: Template the custom Slurm-specific HPC performance shell scripts to stage_dir
         template:
           src: "{{ performance_template_dir }}/{{ item }}.j2"
-          dest: "{{ stage_dir }}/{{ item }}.{{ cluster_name }}.sh"
+          dest: "{{ performance_stage_dir }}/{{ item }}.{{ cluster_name }}.sh"
           mode: 0755
         with_items:
           - perf-sbatch
@@ -238,7 +235,7 @@
       - name: Template the custom performance test qsub scripts for SGE to stage_dir
         template:
           src: "{{ item }}"
-          dest: "{{ stage_dir }}/{{ item | basename | regex_replace('.j2','') }}.{{ cluster_name }}.sh"
+          dest: "{{ performance_stage_dir }}/{{ item | basename | regex_replace('.j2','') }}.{{ cluster_name }}.sh"
           mode: 0755
         with_fileglob:
           - "{{ performance_template_dir }}/qsub-*.j2"
@@ -246,7 +243,7 @@
       - name: Template the custom performance test sbatch scripts for Slurm to stage_dir
         template:
           src: "{{ item }}"
-          dest: "{{ stage_dir }}/{{ item | basename | regex_replace('.j2','') }}.{{ cluster_name }}.sh"
+          dest: "{{ performance_stage_dir }}/{{ item | basename | regex_replace('.j2','') }}.{{ cluster_name }}.sh"
           mode: 0755
         with_fileglob:
           - "{{ performance_template_dir }}/sbatch-*.j2"
@@ -254,16 +251,16 @@
       - name: Template the custom performance Python scripts to stage_dir
         template:
           src: "{{ performance_template_dir }}/{{ item }}.j2"
-          dest: "{{ stage_dir }}/{{ item }}.{{ cluster_name }}.py"
+          dest: "{{ performance_stage_dir }}/{{ item }}.{{ cluster_name }}.py"
           mode: 0755
         with_items:
           - hashtest
           - fibonacci_hashtest
           - print_fibonacci
       - name: Copy the Axb_random matrix test configuration file to stage_dir
-        command: cp {{ performance_rootdir }}/MATRIX_SIZES.conf {{ stage_dir }}/MATRIX_SIZES.conf
-      - name: Copy the performance shell and Python scripts to stage_dir
-        command: cp {{ performance_rootdir }}/{{ item }} {{ stage_dir }}
+        command: cp {{ performance_rootdir }}/MATRIX_SIZES.conf {{ performance_stage_dir }}/MATRIX_SIZES.conf
+      - name: Copy the common performance shell and Python scripts to stage_dir
+        command: cp {{ performance_rootdir }}/{{ item }} {{ performance_stage_dir }}
         with_items:
           - Axb_random.py
           - compress_logfiles.py
@@ -272,10 +269,14 @@
           - bite_hashtest.sh
           - cleanup_performance.sh
           - csv_summary_time_measurement.sh
+      - name: Copy the common performance shell and Python scripts to stage_dir
+        command: cp {{ performance_rootdir }}/{{ item }} {{ performance_stage_dir }}
+        with_items:
           - make_sge_cluster_plots.py
           - rebuild_sge_csv.sh
+        when: "scheduler == 'sge'"
       - name: Copy the ParallelClusterMaker performance toolkit documentation to stage_dir
-        command: cp {{ item }} {{ stage_dir }}
+        command: cp {{ item }} {{ performance_stage_dir }}
         with_fileglob:
           - "{{ performance_rootdir }}/README*.*"
       when:
@@ -294,6 +295,7 @@
           - "=================================================================="
           - ""
           - "Cluster StackName: {{ cluster_name }}"
+          - "SerialDateStamp:   {{ cluster_serial_datestamp }}"
           - "Launch Timestamp:  {{ start_stack_creation_timer.stdout }}"
           - "Availabilty Zone:  {{ az }}"
           - "HPC Scheduler:     {{ scheduler }}" 
@@ -317,6 +319,7 @@
           - "=================================================================="
           - ""
           - "Cluster StackName: {{ cluster_name }}"
+          - "SerialDateStamp:   {{ cluster_serial_datestamp }}"
           - "Launch Timestamp:  {{ start_stack_creation_timer.stdout }}"
           - "Availabilty Zone:  {{ az }}"
           - "HPC Scheduler:     {{ scheduler }}" 
@@ -417,15 +420,11 @@
     - name: Accept the SSH fingerprint of the master instance
       shell: ssh-keyscan -H {{ MasterPublicIP.stdout }} >> {{ ssh_known_hosts }}
 
-    - name: Create a performance source tree directory on the master instance
+    - name: Create performance source tree and staging directories on the master instance
       command: ssh -i {{ ssh_keypair }} {{ ec2_user }}@{{ MasterPublicIP.stdout }} mkdir -p {{ item }}
       with_items:
         - "{{ master_performance_dir_dest }}"
-
-    - name: Create a staging directory on the master instance
-      command: ssh -i {{ ssh_keypair }} {{ ec2_user }}@{{ MasterPublicIP.stdout }} mkdir -p {{ item }}
-      with_items:
-        - "{{ stage_dir_parent }}"
+        - "{{ stage_dir }}"
 
     - name: Transfer the local staging directory to the master instance
       command: scp -i {{ ssh_keypair }} -r {{ stage_dir }} {{ ec2_user }}@{{ MasterPublicIP.stdout }}:{{ stage_dir }}
@@ -439,24 +438,24 @@
       when: 'scheduler == "slurm"'
 
     - block:
-      - name: Move the performance source tree to its final destination directory on the master instance
-        command: ssh -i {{ ssh_keypair }} {{ ec2_user }}@{{ MasterPublicIP.stdout }} mv {{ stage_dir }}/* {{ master_performance_dir_dest }}
+      - name: Copy the performance source tree to its final destination directory on the master instance
+        shell: scp -i {{ ssh_keypair }} {{ performance_stage_dir }}/* {{ ec2_user }}@{{ MasterPublicIP.stdout }}:{{ master_performance_dir_dest }} 
       - name: Symlink the custom shell scripts on the master instance
         command: ssh -i {{ ssh_keypair }} {{ ec2_user }}@{{ MasterPublicIP.stdout }} cd {{ master_performance_dir_dest }}; ln -s {{ item }}.{{ cluster_name }}.sh {{ item }}.sh
         with_items:
           - bang
           - combine_csv_summary_files_for_plotting
-          - combine_sge_data_files_for_plotting
-          - create_sge_task_array_csv_files
-          - perf-stest
+          - perf-standalone-test
         ignore_errors: true
       - name: Symlink the custom SGE shell scripts on the master instance
         command: ssh -i {{ ssh_keypair }} {{ ec2_user }}@{{ MasterPublicIP.stdout }} cd {{ master_performance_dir_dest }}; ln -s {{ item }}.{{ cluster_name }}.sh {{ item }}.sh
         with_items:
+          - combine_sge_data_files_for_plotting
+          - create_sge_task_array_csv_files
           - perf-qsub
         ignore_errors: true
         when: 'scheduler == "sge"'
-      - name: Symlink the custom shell scripts on the master instance
+      - name: Symlink the custom Slurm shell scripts on the master instance
         command: ssh -i {{ ssh_keypair }} {{ ec2_user }}@{{ MasterPublicIP.stdout }} cd {{ master_performance_dir_dest }}; ln -s {{ item }}.{{ cluster_name }}.sh {{ item }}.sh
         with_items:
           - perf-sbatch
@@ -521,13 +520,13 @@
         - scheduler != 'awsbatch'
 
     - name: Remove the staging directory on the master instance
-      command: ssh -i {{ ssh_keypair }} {{ ec2_user }}@{{ MasterPublicIP.stdout }} rm -rf {{ stage_dir_parent }}
+      command: ssh -i {{ ssh_keypair }} {{ ec2_user }}@{{ MasterPublicIP.stdout }} rm -rf {{ stage_dir }}
       when:
         - enable_hpc_performance_tests == "true"
         - scheduler != 'awsbatch'
 
     - name: Copy the custom scripts from the local staging directory to the cluster_data directory
-      shell: cp -av {{ stage_dir }}/* {{ cluster_data_dir }}
+      shell: cp -a {{ stage_dir }}/* {{ cluster_data_dir }}
 
     - name: Copy the cluster_data directory to s3_bucketname
       s3_sync:
@@ -538,14 +537,21 @@
 
     - block:
       - name: Remove the local staging directory
-        file: path="{{ item }}" state=absent
+        file:
+          path: "{{ item }}"
+          state: absent
         with_items:
           - "{{ stage_dir }}"
-      - name: Remove all custom qsub and sbatch performance templates from the src tree
-        file: path="{{ item }}" state=absent
-        with_fileglob:
-          - "{{ performance_template_dir }}/qsub-*.j2"
-          - "{{ performance_template_dir }}/sbatch-*.j2"
+      - name: Remove all custom qsub performance templates from the src tree
+        file:
+          path: "{{ performance_template_dir }}/qsub-*.j2"
+          state: absent
+        when: 'scheduler == "sge"'
+      - name: Remove all custom sbatch performance templates from the src tree
+        file:
+          path: "{{ performance_template_dir }}/sbatch-*.j2"
+          state: absent
+        when: 'scheduler == "slurm"'
       when:
         - enable_hpc_performance_tests == "true"
         - scheduler != 'awsbatch'
@@ -585,6 +591,7 @@
           - "Lifetime (days:hr:min):   {{ cluster_lifetime }}"
           - ""
           - "Cluster Stack Name:    {{ cluster_name }}"
+          - "SerialDateStamp:       {{ cluster_serial_datestamp }}"
           - "AWS Availability Zone: {{ az }}"
           - "HPC Scheduler Type:    {{ scheduler }}" 
           - "Master Instance Type:  {{ master_instance_type }}"

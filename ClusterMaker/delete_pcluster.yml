@@ -2,7 +2,7 @@
 # Name:		delete_pcluster.yml
 # Author:	Rodney Marable <rodney.marable@gmail.com>
 # Created On:	February 20, 2019
-# Last Changed:	May 29, 2019
+# Last Changed:	May 30, 2019
 # Purpose:	Ansible playbook to delete ParallelCluster stacks
 ################################################################################
 
@@ -85,11 +85,13 @@
       when: ec2_private_key.changed
 
     - name: Remove all custom qsub and sbatch performance templates from the src tree
-      file: path="{{ item }}" state=absent
+      file:
+        path: "{{ item }}"
+        state: absent
       with_fileglob:
-        - "{{ performance_template_dir }}/qsub-*.j2"
         - "{{ performance_template_dir }}/sbatch-*.j2"
-      when: 'enable_hpc_performance_tests == "true"'
+        - "{{ performance_template_dir }}/qsub-*.j2"
+      ignore_errors: yes
 
     - name: Delete the S3 bucket associated with this cluster
       s3_bucket:
@@ -144,8 +146,8 @@
         region: "{{ region }}"
         state: absent
       with_items:
-        - { role: '{{ ec2_iam_role }}', policy: '{{ ec2_iam_policy }|}' }
-        - { role: '{{ serverless_ec2_iam_role }}', policy: '{{ serverless_ec2_iam_policy }|}' }
+        - { role: '{{ ec2_iam_role }}', policy: '{{ ec2_iam_policy }}' }
+        - { role: '{{ serverless_ec2_iam_role }}', policy: '{{ serverless_ec2_iam_policy }}' }
       ignore_errors: yes
 
     - name: Delete the IAM roles associated with the cluster stack and kill-pcluster Lambda function
@@ -175,7 +177,7 @@
           region: "{{ region }}"
           state: absent
         ignore_errors: yes
-      when: 'enable_fsx_hydration == "true"'
+      when: enable_fsx_hydration is defined and enable_fsx_hydration == "true"
 
     - name: Delete the cluster data directory
       file:
