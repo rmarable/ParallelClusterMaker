@@ -1,24 +1,26 @@
-# Suggested ParallelClusterMaker Invocations
+# ParallelClusterMaker Examples
 
 Here are some suggested ways that the ParallelClusterMaker toolkit can be used to build ParallelCluster stacks for a wide variety of use cases.
 
 The most inportant default options for ParallelClusterMaker are as follows:
 
+```
 base_os = alinux (Amazon Linux)
 master_instance_type = c5.xlarge
 compute_instance_type = c5.xlarge
+```
 
-The root EBS volume size for the compute and master instances is **250 GB.**
+* The root EBS volume size for the compute and master instances is **250 GB.**
 
-The default scheduler is SGE.
+* The default scheduler is SGE.
 
-The cluster autoscaler will start out with 2 execute instances, flexing up to
-10 total.
+* The cluster autoscaler will start out with 2 execute instances, flexing up to
+10 total, with a 10m cooldown.
 
-When using AWS Batch as the scheduler, the cluster uses a default "optimal"
+* When using AWS Batch as the scheduler, the cluster uses a default "optimal"
 mix of c4, m4, and r4 instance types that will flex out to 20 total cores.
 
-cluster_lifetime is set to 30 days.  On day 31, the cluster will be terminated
+* cluster_lifetime is set to 30 days.  On day 31, the cluster will be terminated
 along with any EFS and FSX file systems that were built with ParallelClusterMaker.
 
 # Grid Engine Examples
@@ -26,7 +28,7 @@ along with any EFS and FSX file systems that were built with ParallelClusterMake
 * Create a cluster named "bbking" in us-east-1b that uses shared EBS for storage and Grid Engine as the scheduler.  All other values are ParallelClusterMaker defaults:
 
 ```
-$ ./make-pcluster.py -A us-east-1b -E rodney.marable@gmail.com -O rmarable -N bb8 --scheduler=sge
+$ ./make-pcluster.py -A us-east-1b -E rodney.marable@gmail.com -O rmarable -N bbking --scheduler=sge
 ```
 
 * Create a cluster named "tombrady12goat" in us-west-2b with a 14.4 TB FSxL file
@@ -44,17 +46,39 @@ $ ./make-pcluster.py -A us-west-2c -O rmarable -E rodney.marable@gmail.com --ena
 
 ##                                WARNING
 ##
-##            DO **NOT** INVOKE THESE COMMANDS TO BUILD CLUSTERS
+##            DO **NOT** INVOKE THESE COMMANDS TO BUILD CLUSTERS:
+##			LUKECAGE, GODZILLA, OR MIGHTYMOUSE
 ##          UNLESS YOU ARE PREPARED FOR THE BILL THAT WILL ENSUE!
 
-* Create a super massive production cluster named "lukecage" with a maximum
-of 3,072 compute cores built from m5.2xlarge instance in eu-west-1b that uses
-a 36.2 TB Lustre file system for scratch, EFS for shared storage, Grid Engine
-as the scheduler, Amazon Linux 2 as the base operating system, and Ganglia for
-cluster monitoring:
+
+* Create a dev cluster named "lukecage" with a maximum of 1,024 compute cores
+built from m5.4xlarge instances in eu-west-1b that uses a 36 TB Lustre file
+system for scratch, EFS for additional shared storage, Grid Engine as the
+scheduler, and Amazon Linux 2 as the base operating system with Ganglia
+enabled for cluster monitoring:
 
 ```
-$ ./make-cluster.py -A eu-west-1b -E rodney.marable@gmail.com -O rmarable -N lukecage --base_os=alinux2 --enable_ganglia=true --master_instance_type=m5.2xlarge --compute_instance_type=r5.12xlarge --enable_fsx=true --fsx_size=36000 --enable_efs=true --prod_level=prod --max_queue_size=64
+$ ./make-cluster.py -A eu-west-1b -E rodney.marable@gmail.com -O rmarable -N lukecage --base_os=alinux2 --enable_ganglia=true --master_instance_type=m5.4xlarge --compute_instance_type=m5.4xlarge --enable_fsx=true --fsx_size=36000 --enable_efs=true --prod_level=prod --max_queue_size=64
+```
+
+* Create a test cluster named "godzilla" with 72 initial cores that can flex
+up to a  maximum of 9,216 compute cores built from c5.9xlarge instances in
+Tokyo that uses a 90 TB Lustre file system for scratch, EFS for additional
+shared storage, Grid Engine as the scheduler, and Amazon Linux 2 as the base
+operating system, with Ganglia for cluster monitoring.  This cluster should 
+wind instances down if they have been idle for two hours:
+
+```
+$ ./make-cluster.py -A ap-northeast-1b -E rodney.marable@gmail.com -O rmarable -N godzilla --base_os=alinux2 --enable_ganglia=true --master_instance_type=c5.2xlarge --compute_instance_type=c5.9xlarge --enable_fsx=true --fsx_size=90000 --enable_efs=true --prod_level=prod --max_queue_size=256 --scaledown_idletime=120 --initial_queue_size=4
+
+* Create a production cluster named "mightymouse" based in Dublin with a
+maximum of 96,000 compute cores built from m5.xlarge (master) and r5.metal
+(compute) instances that uses a 720 TB Lustre file system for scratch, EFS
+for additional shared storage, Grid Engine as the scheduler, and Amazon
+Linux 2 as the base operating system, with Ganglia for cluster monitoring:
+
+```
+$ ./make-cluster.py -A eu-west-1b  -E rodney.marable@gmail.com -O rmarable -N mightymouse --base_os=alinux2 --enable_ganglia=true --master_instance_type=m5. --compute_instance_type=r5.metal --enable_fsx=true --fsx_size=720000 --enable_efs=true --prod_level=prod --max_queue_size=1256
 ```
 
 * Create a Slurm cluster named "koolkeith" in eu-central-1a that will deploy

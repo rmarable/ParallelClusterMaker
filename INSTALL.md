@@ -241,7 +241,7 @@ If you are using virtualenv:
 $ deactivate
 ```
 
-Please consult README.md and EXAMPLE.md for additional information on how to use the make-pcluster.py script and its companion tools. 
+Please consult README.md and EXAMPLES.md for additional information on how to use the make-pcluster.py script and its companion tools. 
  
 ## Reporting Bugs & Requesting New Features
 
