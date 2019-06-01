@@ -53,38 +53,49 @@ $ ./make-pcluster.py -A us-west-2c -O rmarable -E rodney.marable@gmail.com --ena
 ```
 
 ###############################################################################
-### WARNING: DO **NOT** BUILD THE CLUSTERS NAMED LUKECAGE, GODZILLA, OR MIGHTYMOUSE UNLESS YOU ARE PREPARED FOR THE BILL THAT WILL ENSUE!
+### WARNING: DO **NOT** BUILD THE CLUSTERS DESCRIBED BELOW (LUKECAGE, GODZILLA, MIGHTYMOUSE, OR GILGAMESH) UNLESS YOU ARE PREPARED FOR THE BILL THAT WILL ENSUE!
 ###############################################################################
 
 * Create a dev cluster named "lukecage" with a maximum of 1,024 compute cores
 built from m5.4xlarge instances in eu-west-1b that uses a 36 TB Lustre file
 system for scratch, EFS for additional shared storage, Grid Engine as the
-scheduler, and Amazon Linux 2 as the base operating system with Ganglia
+scheduler, and Amazon Linux as the base operating system with Ganglia
 enabled for cluster monitoring:
 
 ```
-$ ./make-cluster.py -A eu-west-1b -E rodney.marable@gmail.com -O rmarable -N lukecage --base_os=alinux2 --enable_ganglia=true --master_instance_type=m5.4xlarge --compute_instance_type=m5.4xlarge --enable_fsx=true --fsx_size=36000 --enable_efs=true --prod_level=prod --max_queue_size=64
+$ ./make-cluster.py -A eu-west-1b -E rodney.marable@gmail.com -O rmarable -N lukecage --base_os=alinux --enable_ganglia=true --master_instance_type=m5.4xlarge --compute_instance_type=m5.4xlarge --enable_fsx=true --fsx_size=36000 --enable_efs=true --prod_level=prod --max_queue_size=64
 ```
 
 * Create a test cluster named "godzilla" with 72 initial cores that can flex
 up to a  maximum of 9,216 compute cores built from c5.9xlarge instances in
 Tokyo that uses a 90 TB Lustre file system for scratch, EFS for additional
-shared storage, Grid Engine as the scheduler, and Amazon Linux 2 as the base
+shared storage, Grid Engine as the scheduler, and Amazon Linux as the base
 operating system, with Ganglia for cluster monitoring.  This cluster should 
 wind instances down if they have been idle for two hours:
 
 ```
-$ ./make-cluster.py -A ap-northeast-1b -E rodney.marable@gmail.com -O rmarable -N godzilla --base_os=alinux2 --enable_ganglia=true --master_instance_type=c5.2xlarge --compute_instance_type=c5.9xlarge --enable_fsx=true --fsx_size=90000 --enable_efs=true --prod_level=prod --max_queue_size=256 --scaledown_idletime=120 --initial_queue_size=4
+$ ./make-cluster.py -A ap-northeast-1b -E rodney.marable@gmail.com -O rmarable -N godzilla --base_os=alinux --enable_ganglia=true --master_instance_type=c5.2xlarge --compute_instance_type=c5.9xlarge --enable_fsx=true --fsx_size=90000 --enable_efs=true --prod_level=prod --max_queue_size=256 --scaledown_idletime=120 --initial_queue_size=4
 ```
 
 * Create a production cluster named "mightymouse" based in Dublin with a
 maximum of 96,000 compute cores built from m5.xlarge (master) and r5.metal
 (compute) instances that uses a 720 TB Lustre file system for scratch, EFS
 for additional shared storage, Grid Engine as the scheduler, and Amazon
-Linux 2 as the base operating system, with Ganglia for cluster monitoring:
+Linux as the base operating system, with Ganglia for cluster monitoring:
 
 ```
-$ ./make-cluster.py -A eu-west-1b  -E rodney.marable@gmail.com -O rmarable -N mightymouse --base_os=alinux2 --enable_ganglia=true --master_instance_type=m5. --compute_instance_type=r5.metal --enable_fsx=true --fsx_size=720000 --enable_efs=true --prod_level=prod --max_queue_size=1256
+$ ./make-cluster.py -A eu-west-1b  -E rodney.marable@gmail.com -O rmarable -N mightymouse --base_os=alinux --enable_ganglia=true --master_instance_type=m5. --compute_instance_type=r5.metal --enable_fsx=true --fsx_size=720000 --enable_efs=true --prod_level=prod --max_queue_size=256
+```
+
+* Create a production cluster named "gilgamesh" based in Virginia using Slurm
+as a scheduler with a maximum of 256 p3.16xlarge instances as execute nodes
+(2,048 GPUs and 16,384 compute cores), an r4.xlarge instance for the master
+node, a 3.6 PB (petabyte) Lustre file system that will hydrate to and from S3,
+and Amazon Linux as the base operating system.  It will use Ganglia for cluster
+monitoring:
+
+```
+$ ./make-cluster.py -A us-east-1  -E rodney.marable@gmail.com -O rmarable -N gilgamesh --base_os=alinux --enable_ganglia=true --master_instance_type=r4.xlarge --compute_instance_type=p3.16xlarge --enable_fsx=true --fsx_size=3600000 --enable_fsx_hydration=true --fsx_s3_import_bucket=GilgameshSourceDataBucket --fsx_s3_export_bucket=GilgameshOutputDataBucket --prod_level=prod --max_queue_size=256 --scheduler=slurm
 ```
 
 ###############################################################################
