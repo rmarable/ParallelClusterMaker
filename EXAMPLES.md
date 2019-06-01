@@ -53,11 +53,7 @@ $ ./make-pcluster.py -A us-west-2c -O rmarable -E rodney.marable@gmail.com --ena
 ```
 
 ###############################################################################
-###                                WARNING
-###
-###            DO **NOT** INVOKE THESE COMMANDS TO BUILD CLUSTERS
-###			LUKECAGE, GODZILLA, OR MIGHTYMOUSE
-###          UNLESS YOU ARE PREPARED FOR THE BILL THAT WILL ENSUE!
+### WARNING: DO **NOT** INVOKE THESE COMMANDS TO BUILD CLUSTERS LUKECAGE, GODZILLA, OR MIGHTYMOUSE UNLESS YOU ARE PREPARED FOR THE BILL THAT WILL ENSUE!
 ###############################################################################
 
 * Create a dev cluster named "lukecage" with a maximum of 1,024 compute cores
