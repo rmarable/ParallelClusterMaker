@@ -4,7 +4,7 @@
 # Name:		make-pcluster.py
 # Author:	Rodney Marable <rodney.marable@gmail.com>
 # Created On:	April 20, 2019
-# Last Changed:	May 30, 2019
+# Last Changed:	June 1, 2019
 # Purpose:	Python3 wrapper for customizing ParallelCluster stacks
 ################################################################################
 
@@ -96,7 +96,7 @@ parser.add_argument('--perftest_custom_total_tests', help='number of performance
 parser.add_argument('--placement_group', choices=['NONE', 'DYNAMIC'], help='create a dynamic placement group for this cluster, use with caution (default=NONE)', required=False, default='NONE')
 parser.add_argument('--prod_level', choices=['dev', 'test', 'stage', 'prod'], help='operating stage of the cluster (default = dev)', required=False, default='dev')
 parser.add_argument('--project_id', '-P', help='project name or ID number (default = UNDEFINED)', required=False, default='UNDEFINED')
-parser.add_argument('--scaledown_idletime', help='amount of time in minutes without a job after which the compute node will terminate (default = 5)', required=False, type=int, default=5)
+parser.add_argument('--scaledown_idletime', help='amount of time in minutes without a job after which the compute node will terminate (default = 15)', required=False, type=int, default=15)
 parser.add_argument('--scheduler', '-S', choices=['sge', 'torque', 'slurm', 'awsbatch'], help='cluster scheduler (default = sge)', required=False, default='sge')
 parser.add_argument('--sge_pe_type', choices=['make', 'mpi', 'smp'], help='select a Grid Engine parallel environment type (default = smp)', required=False, default='smp')
 parser.add_argument('--turbot_account', '-T', help='Turbot account ID (default = abd).  Set to "disabled" in non-Turbot environments.', required=False, default='disabled')
