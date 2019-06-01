@@ -75,6 +75,7 @@ wind instances down if they have been idle for two hours:
 
 ```
 $ ./make-cluster.py -A ap-northeast-1b -E rodney.marable@gmail.com -O rmarable -N godzilla --base_os=alinux2 --enable_ganglia=true --master_instance_type=c5.2xlarge --compute_instance_type=c5.9xlarge --enable_fsx=true --fsx_size=90000 --enable_efs=true --prod_level=prod --max_queue_size=256 --scaledown_idletime=120 --initial_queue_size=4
+```
 
 * Create a production cluster named "mightymouse" based in Dublin with a
 maximum of 96,000 compute cores built from m5.xlarge (master) and r5.metal
@@ -97,7 +98,9 @@ to the Imaging team and will self-terminate after 3 days.  This is an example
 of an HPC environment that might over the weekend to train an ML algorithm
 against a very large repository of images.
 
+```
 $ ./make-pcluster.py -A eu-north-1b -E rodney.marable@gmail.com -O rmarable -N winterfell --scheduler=awsbatch --min_vcpus=25 --max_vcpus=1000 --desired_vcpus=250 --owner_department=imaging --cluster_lifetime=3:0:0 --enable_efs=true
+```
 
 * Create an AWS Batch environment named "terrordome" in us-east-2a that uses
 shared EBS and can scale up to 64 cores:
