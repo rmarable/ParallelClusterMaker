@@ -69,7 +69,7 @@ an easily extendable tagging framework.
 
 * Dynamic EC2 placement groups.
 
-* Selective disabling of Intel HyperThreading (note: this feature is currently available only on Amazon Linux 2).
+* Selective disabling of Intel HyperThreading (note: this feature is currently available only on Amazon Linux).
 
 * Default selection of EC2 Spot instances with a pricing buffer to help prevent
 instance termination due to spot price market fluctuations.

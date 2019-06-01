@@ -202,14 +202,14 @@ $ ./make-pcluster.py --help
 
 ## Example ParallelCluster Stack Build
 
-* This example builds a small Grid Engine cluster running Amazon Linux 2 using
-c5.xlarge instances running Amazon Linux 2.  This command can be run from a
+* This example builds a small Grid Engine cluster running Amazon Linux using
+c5.xlarge instances running Amazon Linux.  This command can be run from a
 jumphost or a properly configured OSX environment, substituting where needed
 to match your use case:
 
 ```
 $ cd ~/src/ParallelClusterMaker/ClusterMaker
-$ ./make-pcluster -N test01 -O rmarable -E rodney.marable@gmail.com -A us-east-1a --master_instance_type=c5.xlarge --compute_instance_type=c5.xlarge --max_queue_size=4 --base_os=alinux2
+$ ./make-pcluster -N test01 -O rmarable -E rodney.marable@gmail.com -A us-east-1a --master_instance_type=c5.xlarge --compute_instance_type=c5.xlarge --max_queue_size=4 --base_os=alinux
 ```
 
 * The build process will take about 30 minutes to complete.  Once the cluster

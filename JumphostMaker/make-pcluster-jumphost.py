@@ -4,7 +4,7 @@
 # Name:         make-pcluster-jumphost.py
 # Author:       Rodney Marable <rodney.marable@gmail.com>
 # Created On:   April 18, 2019
-# Last Changed: May 31, 2019
+# Last Changed: June 1, 2019
 # Purpose:      Create an EC2 jumphost to run the ParallelClusterMaker toolkit
 ################################################################################
 
@@ -179,7 +179,7 @@ p_val('instance_serial_number_file', debug_mode)
 ec2_instance_type = 't2.micro'
 p_val('ec2_instance_type', debug_mode)
 
-# Set the EBS volume type to gp2.
+# Set the EBS volume type to gp2 and the volume size to 8 GB.
 
 ebs_volume_type = 'gp2'
 ebs_optimized = 'False'
