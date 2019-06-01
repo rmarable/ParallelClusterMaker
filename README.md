@@ -1,6 +1,6 @@
 # ParallelClusterMaker - HPC Cloud Automation
 
-## License
+## License Information
 
 Please refer to the LICENSE document included with this Open Source software for the specific terms and conditions that govern its use.
 
@@ -8,9 +8,9 @@ Please refer to the LICENSE document included with this Open Source software for
 
 The author assumes absolutely no responsibility or liability for any losses or damages incurred in conjunction with the use of this Open Source software.
 
-If you choose to use this Open Source software in production, please be forewarned that bugs or other undocumented features might be present which can cause unexpected behavior that could result in the catastrophic destruction of your environment.
+If you choose to use this Open Source software in production environments, please be forewarned that bugs may still be present, unexpected behavior might be observed, and some features may not be completely documented.
 
-**Please be advised that this Open Source software is neither endorsed nor supported by Amazon Web Services.**
+**This Open Source software is neither endorsed nor supported by Amazon Web Services.**
 
 Please be further advised that you will **NOT** be able to open cases with AWS Support if you run into any problems or issues using this Open Source software, and you may **NOT** engage AWS HPC or customer support engineers in the public forums if you have questions regarding the installation or operation of this Open Source software.
 

@@ -494,6 +494,8 @@ if enable_fsx == 'true':
     print('*** IMPORTANT ***')
     print('Please ensure these paths exist before hydrating or dehydrating an S3 bucket')
     print('from the Lustre file system associated with this cluster.')
+if debug_mode == 'true':
+    print('')
 p_val('fsx_s3_import_bucket', debug_mode)
 p_val('fsx_s3_export_bucket', debug_mode)
 
@@ -647,8 +649,10 @@ except ClientError as e:
                 )
         print('Created ec2_iam_policy: ' + ec2_iam_policy)
 if debug_mode == 'true':
+    print('')
     p_val('ec2_iam_policy', debug_mode)
     p_val('ec2_iam_role', debug_mode)
+    print('')
 
 # Create serverless_ec2_iam_role, which will be attached to the Lambda
 # function that destroys the stack after cluster_lifetime has expired.
@@ -675,6 +679,7 @@ except ClientError as e:
                 )
         print('Created serverless_ec2_iam_policy: ' + serverless_ec2_iam_policy)
 if debug_mode == 'true':
+    print('')
     p_val('serverless_ec2_iam_policy', debug_mode)
     p_val('serverless_ec2_iam_role', debug_mode)
 
@@ -692,6 +697,8 @@ if enable_fsx_hydration == 'true':
         policy_stage_1 = policy_stage_0.replace('<FSX_S3_EXPORT_BUCKET>', fsx_s3_export_bucket)
         policy_stage_2 = policy_stage_1.replace('<FSX_S3_IMPORT_BUCKET>', fsx_s3_import_bucket)
         filedata = policy_stage_2
+    if debug_mode == 'true':
+        print('')
     print('Created fsx_hydration_iam_policy: ' + fsx_hydration_iam_policy)
     with open(fsx_hydration_policy_template, 'w') as fsx_hydration_policy_dest:
         fsx_hydration_policy_dest.write(filedata)
@@ -718,6 +725,7 @@ else:
     fsx_hydration_iam_policy = 'UNDEFINED'
 
 if debug_mode == 'true':
+    print('')
     p_val('fsx_hydration_iam_policy', debug_mode)
 
 # Define some critical environment variables to support Turbot.
@@ -836,7 +844,7 @@ if debug_mode == 'true':
     print('cluster_type = ' + cluster_type)
     if cluster_type == 'spot':
         if 'UNDEFINED' not in str(spot_price):
-            print('spot_price = $' + str(spot_price) + ' per hour')
+            print('    spot_price = $' + str(spot_price) + ' per hour')
     print('compute_instance_type = ' + compute_instance_type)
     print('compute_root_volume_size = ' + str(compute_root_volume_size) + ' GB')
     if custom_ami != 'NONE':
@@ -861,16 +869,16 @@ if debug_mode == 'true':
         print('enable_fsx_hydration = ' + enable_fsx_hydration)
         print('fsx_size = ' + str(fsx_size) + ' GB')
         if enable_fsx_hydration == 'true':
-            print('fsx_chunk_size = ' + enable_fsx_chunk_size)
+            print('fsx_chunk_size = ' + str(fsx_chunk_size))
             print('fsx_hydration_iam_policy = ' + fsx_hydration_iam_policy)
-            print('fsx_s3_export_bucket = ' + enable_fsx_s3_export_bucket)
+            print('fsx_s3_export_bucket = ' + fsx_s3_export_bucket)
             print('fsx_s3_export_path = ' + fsx_s3_export_path)
-            print('fsx_s3_import_bucket = ' + enable_fsx_s3_import_bucket)
+            print('fsx_s3_import_bucket = ' + fsx_s3_import_bucket)
             print('fsx_s3_import_path = ' + fsx_s3_import_path)
     if enable_ganglia:
         print('enable_ganglia = ' + enable_ganglia)
-    if enable_hpc_performance_tests:
-        print('enable_hpc_performance_tests = ' + enable_hpc_performance_tests)
+    print('enable_hpc_performance_tests = ' + enable_hpc_performance_tests)
+    if enable_hpc_performance_tests == 'true':
         if 'awsbatch' not in scheduler:
             print('perftest_custom_start_number = ' + str(perftest_custom_start_number))
             print('perftest_custom_step_size = ' + str(perftest_custom_step_size))
@@ -884,28 +892,29 @@ if debug_mode == 'true':
     if project_id != 'UNDEFINED':
         print('project_id = ' + project_id)
     print('region = ' + region)
+    print('s3_bucketname = s3://' + s3_bucketname)
+    print('scheduler = ' + scheduler)
+    if 'awsbatch' not in scheduler:
+        print('    initial_queue_size = ' + str(initial_queue_size))
+        print('    maintain_initial_size = ' + str(maintain_initial_size))
+        print('    max_queue_size = ' + str(max_queue_size))
+    if scheduler == 'batch':
+        print('    desired_vcpus = ' + desired_vcpus)
+        print('    min_vcpus = ' + min_vcpus)
+        print('    max_vcpus = ' + max_vcpus)
+    if scheduler == 'sge':
+        print('    enable_sge_pe = ' + enable_sge_pe)
+        print('    sge_pe_type = ' + sge_pe_type)
+    print('scaledown_idletime = ' + str(scaledown_idletime))
     print('serverless_ec2_iam_policy = ' + serverless_ec2_iam_policy)
     print('serverless_ec2_iam_role = ' + serverless_ec2_iam_role)
     print('subnet_id = ' + subnet_id)
     if use_private_compute_subnet == 'true':
-        print('use_private_compute_subnet = ' + use_private_compute_subnet)
-        print('private_compute_cidr_subnet = ' + private_compute_cidr_subnet)
-        print('private_compute_subnet_id = ' + private_compute_subnet_id)
+        print('    use_private_compute_subnet = ' + use_private_compute_subnet)
+        print('    private_compute_cidr_subnet = ' + private_compute_cidr_subnet)
+        print('    private_compute_subnet_id = ' + private_compute_subnet_id)
     print('vpc_id = ' + vpc_id)
     print('vpc_name = ' + vpc_name)
-    print('scheduler = ' + scheduler)
-    if 'awsbatch' not in scheduler:
-        print('initial_queue_size = ' + str(initial_queue_size))
-        print('max_queue_size = ' + str(max_queue_size))
-    if scheduler == 'batch':
-        print('desired_vcpus = ' + desired_vcpus)
-        print('min_vcpus = ' + min_vcpus)
-        print('max_vcpus = ' + max_vcpus)
-    if scheduler == 'sge':
-        print('enable_sge_pe = ' + enable_sge_pe)
-        print('sge_pe_type = ' + sge_pe_type)
-    print('scaledown_idletime = ' + str(scaledown_idletime))
-    print('s3_bucketname = s3://' + s3_bucketname)
 
 # Generate the vars_file for this cluster.
 
@@ -914,7 +923,7 @@ vars_file_part_1 = '''\
 # Name:         {cluster_name}.yml
 # Author:       Rodney Marable <rodney.marable@gmail.com>
 # Created On:   April 20, 2019
-# Last Changed: May 29, 2019
+# Last Changed: May 31, 2019
 # Deployed On:  {Deployed_On}
 # Purpose:      ParallelCluster configuration for cluster "{cluster_name}"
 # Notes:	Automatically generated by ParallelClusterMaker
@@ -958,7 +967,7 @@ private_compute_subnet_id: {private_compute_subnet_id}
 
 # EC2 instance parameters
 
-ec2_keypair: "{{{{ cluster_serial_number }}}}"
+ec2_keypair: "{{{{ cluster_serial_number }}}}_{{{{ region }}}}""
 ec2_user: {ec2_user}
 ec2_user_home: {ec2_user_home}
 ec2_user_src: "{{{{ ec2_user_home }}}}/src"

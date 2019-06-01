@@ -12,6 +12,7 @@
 .swp
 TODO
 __pycache__/
+deprecated/
 tools/
 vars_files/
 ClusterMaker/active_clusters

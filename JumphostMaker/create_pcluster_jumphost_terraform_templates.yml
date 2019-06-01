@@ -2,13 +2,13 @@
 # Name:		create_pcluster_jumphost_terraform_templates.yml
 # Author:	Rodney Marable <rodney.marable@gmail.com>
 # Created On:	April 20, 2019
-# Last Changed:	April 29, 2019
+# Last Changed:	May 31, 2019
 # Purpose:	Ansible playbook for new pcluster-jumphost Terraform templates
 ################################################################################
 
 ---
 
-- name: Provision installation templates for a new Terraform instance
+- name: Provision installation templates for building a new pcluster-jumphost
   hosts: local
   connection: local
   gather_facts: false
@@ -19,7 +19,7 @@
     - vars_files/{{ instance_name }}.yml
 
   tasks:
-    - name: Create a custom script archive directory
+    - name: Create a state directory for the pcluster-jumphost 
       file:
         path: "{{ instance_data_dir }}"
         state: directory
@@ -35,7 +35,6 @@
         - { src: '{{ build_pcluster_jumphost_src }}', dest: '{{ instance_data_dir }}/{{ build_pcluster_jumphost_script }}' }
         - { src: '{{ kill_pcluster_jumphost_src }}', dest: '{{ instance_data_dir }}/{{ kill_pcluster_jumphost_script }}' }
         - { src: '{{ provider_tf_src }}', dest: '{{ instance_data_dir }}/{{ provider_tf_dest }}' }
-          #- { src: '{{ remove_pcluster_jumphost_data_dir_src }}', dest: '{{ instance_data_dir }}/{{ remove_pcluster_jumphost_data_dir_dest }}' }
         - { src: '{{ tf_ec2_instance_src }}', dest: '{{ instance_data_dir }}/{{ tf_ec2_instance_dest }}' }
 
     - name: Symlink kill_pcluster_jumphost and the main src_tree

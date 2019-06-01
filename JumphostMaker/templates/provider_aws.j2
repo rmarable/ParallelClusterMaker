@@ -2,7 +2,7 @@
 # Name:         provider_aws.{{ instance_name }}.tf
 # Author:       Rodney Marable <rodney.marable@gmail.com>
 # Created On:   April 13, 2018
-# Last Changed: April 16, 2019
+# Last Changed: May 31, 2019
 # Purpose:      Designate AWS regions for use in Terraform templates
 # Reference:	https://www.terraform.io/docs/configuration/providers.html
 # Notes:	Do NOT delete as all Terraform scripts depend on this file!
@@ -35,8 +35,33 @@ provider "aws" {
 }
 
 provider "aws" {
+  alias   = "canada_vpc"
+  region  = "ca-central-1"
+}
+
+provider "aws" {
+  alias   = "brasil_vpc"
+  region  = "sa-east-1"
+}
+
+provider "aws" {
   alias   = "eire_vpc"
   region  = "eu-west-1"
+}
+
+provider "aws" {
+  alias   = "london_vpc"
+  region  = "eu-west-2"
+}
+
+provider "aws" {
+  alias   = "paris_vpc"
+  region  = "eu-west-3"
+}
+
+provider "aws" {
+  alias   = "sweden_vpc"
+  region  = "eu-north-1" 
 }
 
 provider "aws" {
@@ -45,12 +70,48 @@ provider "aws" {
 }
 
 provider "aws" {
+  alias   = "hk_vpc"
+  region  = "ap-east-1"
+}
+
+provider "aws" {
+  alias   = "mumbai_vpc"
+  region  = "ap-south-1"
+}
+
+provider "aws" {
+  alias   = "tokyo_vpc"
+  region  = "ap-northeast-1"
+}
+
+provider "aws" {
+  alias   = "seoul_vpc"
+  region  = "ap-northeast-2"
+}
+
+provider "aws" {
+  alias   = "osaka_vpc"
+  region  = "ap-northeast-3"
+}
+
+provider "aws" {
+  alias   = "singapore_vpc"
+  region  = "ap-southeast-1"
+}
+
+provider "aws" {
   alias   = "sydney_vpc"
   region  = "ap-southeast-2"
 }
+
 {% else %}
 provider "aws" {
   alias   = "{{ turbot_account }}usea1"
   region  = "us-east-1"
+}
+
+provider "aws" {
+  alias   = "{{ turbot_account }}usea2"
+  region  = "us-east-2"
 }
 {% endif %}

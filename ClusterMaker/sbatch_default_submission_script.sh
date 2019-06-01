@@ -20,9 +20,9 @@
 # Set the name of the cluster job.
 #SBATCH --job-name=my_default_slurm_job
 
-# Set the maximum execution time to 2 hours.
+# Set the maximum execution time to 8 hours.
 # Format: D-HH:MM
-#SBATCH --time=02:00
+#SBATCH --time=08:00
 
 # Write job standard output to this file.
 # Uncomment the second option to include the jobID.

@@ -4,7 +4,7 @@
 # Name:		build_pcluster_jumphost.{{ instance_name }}.sh
 # Author:	Rodney Marable <rodney.marable@gmail.com>
 # Created On:	April 18, 2019
-# Last Changed:	May 11, 2019
+# Last Changed:	May 31, 2019
 # Deployed On:	{{ lookup('pipe','date \"+%B %-d, %Y\"') }}
 # Purpose:	Perform some additional post-istallation configuration steps
 #		on pcluster-jumphost {{ instance_name }}
@@ -50,19 +50,20 @@ npm install -g serverless
 sudo pip3 install --upgrade pip
 sudo ln -s /usr/local/bin/pip3 /usr/bin/pip3
 
-# Clone the source code for ParallelClusterMaker and install some critical
-# Python libraries.
+# Clone the source code for ParallelClusterMaker.
 
 cd $SRC
-#git clone https://github.com/rmarable/ParallelClusterMaker.git
-git clone https://rmarable:d2b1ff01e15795f030bc95d374184f3e0e90b702@github.com/rmarable/ParallelClusterMaker.git
+git clone https://github.com/rmarable/ParallelClusterMaker.git
+
+# Install some critical Python libraries.
+
 cd $SRC/ParallelClusterMaker/ClusterMaker
 sudo pip3 install -r requirements.ParallelClusterMaker.txt
 sudo pip3 install --upgrade awscli
 sudo pip3 install boto
 
-# Install a default ParallelCluster configuration file so the pcluster commands
-# will work as expected out of the box.
+# Install a default ParallelCluster configuration file to ensure pcluster
+# will work as expected at first invocation.
 
 mkdir -p $EC2_HOME/.parallelcluster
 cat << EOF > $EC2_HOME/.parallelcluster/config

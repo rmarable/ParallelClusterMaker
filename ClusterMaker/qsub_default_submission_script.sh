@@ -11,7 +11,7 @@
 # Set the name of the cluster job.
 #$ -N my_gridengine_job
 
-# Set the shell (default = bash) to use when running the job,
+# Set the shell to use when running the job (default = bash).
 #$ -S /bin/bash
 
 # Set the maximum job execution time to 8 hours.

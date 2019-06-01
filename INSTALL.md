@@ -241,14 +241,14 @@ If you are using virtualenv:
 $ deactivate
 ```
 
-Please consult the README.md file for additional information on how to use the
-make-pcluster.py script and its companion tools.
+Please consult README.md and EXAMPLE.md for additional information on how to use the make-pcluster.py script and its companion tools. 
+ 
+## Reporting Bugs & Requesting New Features
 
-## Reporting Bugs
+Please report any bugs, issues, or potential improvements to Rodney Marable (rodney.marable@gmail.com) through the normal Github issue reporting channel for this project:
 
-Any bugs, issues, or otherwise unexpected behavior should be reported to
-Rodney Marable (rodney.marable@gmail.com) using the normal Github channels.  
+https://github.com/rmarable/ParallelClusterMaker/issues
 
-Pull requests for additional functionality are always welcome.  Please ensure
-that all tests conducted to verify the safety and usefulness of your code
-are otherwise working as expected.
+Pull requests providing additional functionality or bug fixes are always welcome:
+
+https://github.com/rmarable/ParallelClusterMaker/pulls

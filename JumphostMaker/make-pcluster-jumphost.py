@@ -4,7 +4,7 @@
 # Name:         make-pcluster-jumphost.py
 # Author:       Rodney Marable <rodney.marable@gmail.com>
 # Created On:   April 18, 2019
-# Last Changed: May 29, 2019
+# Last Changed: May 31, 2019
 # Purpose:      Create an EC2 jumphost to run the ParallelClusterMaker toolkit
 ################################################################################
 
@@ -27,12 +27,13 @@ from nested_lookup import nested_lookup
 # Source: jumphostmaker_aux_data.py
 
 from jumphostmaker_aux_data import add_security_group_rule
+from jumphostmaker_aux_data import ctrlC_Abort
 from jumphostmaker_aux_data import get_ami_info
 from jumphostmaker_aux_data import illegal_az_msg
-from jumphostmaker_aux_data import p_val
 from jumphostmaker_aux_data import p_fail
-from jumphostmaker_aux_data import ctrlC_Abort
+from jumphostmaker_aux_data import p_val
 from jumphostmaker_aux_data import print_TextHeader
+from jumphostmaker_aux_data import refer_to_docs_and_quit
 
 # Parse input from the command line.
 
@@ -43,17 +44,17 @@ parser = argparse.ArgumentParser(description='make-pcluster-jumphost.py: Command
 parser.add_argument('--az', '--AvailabilityZone', '-A', help='AWS Availability Zone (REQUIRED)', required=True)
 parser.add_argument('--instance_name', '-N', help='name of the pcluster-jumphost (REQUIRED)', required=True)
 parser.add_argument('--instance_owner', '-O', help='ActiveDirectory username of the pcluster-jumphost instance_owner (REQUIRED)', required=True)
-parser.add_argument('--instance_owner_email', '-E', help='email address of the pcluster-jumphost instance_owner (REQUIRED)', required=True)
+parser.add_argument('--instance_owner_email', '-E', help='Email address of the pcluster-jumphost instance_owner (REQUIRED)', required=True)
 
 # Configure arguments for the optional parameters.
 # Set reasonable defaults for anything that is not explicitly defined.
 
 parser.add_argument('--ansible_verbosity', help='Set the Ansible verbosity level (default = none)', required=False, default='')
 parser.add_argument('--debug_mode', '-D', choices=['true', 'false'], help='Enable debug mode (default = false)', required=False, default='false')
-parser.add_argument('--instance_owner_department', choices=['analytics', 'clinical', 'commercial', 'compbio', 'compchem', 'datasci', 'design', 'development', 'hpc', 'imaging', 'manufacturing', 'medical', 'modeling', 'operations', 'proteomics', 'robotics', 'qa', 'research', 'scicomp'], help='department of the instance_owner (default = hpc)', required=False, default='hpc')
-parser.add_argument('--prod_level', choices=['dev', 'test', 'stage', 'prod'], help='operating stage of the jumphost  (default = dev)', required=False, default='dev')
-parser.add_argument('--project_id', '-P', help='project name or ID number (default = UNDEFINED)', required=False, default='UNDEFINED')
-parser.add_argument('--security_group', help='primary security group for the EC2 pcluster-jumphost (default = parallelclustermaker_jumphost)', required=False, default='parallelclustermaker_jumphost')
+parser.add_argument('--instance_owner_department', choices=['analytics', 'clinical', 'commercial', 'compbio', 'compchem', 'datasci', 'design', 'development', 'hpc', 'imaging', 'manufacturing', 'medical', 'modeling', 'operations', 'proteomics', 'robotics', 'qa', 'research', 'scicomp'], help='Department of the instance_owner (default = hpc)', required=False, default='hpc')
+parser.add_argument('--prod_level', choices=['dev', 'test', 'stage', 'prod'], help='Operating stage of the jumphost  (default = dev)', required=False, default='dev')
+parser.add_argument('--project_id', '-P', help='Project name or ID number (default = UNDEFINED)', required=False, default='UNDEFINED')
+parser.add_argument('--security_group', help='Primary security group for the EC2 pcluster-jumphost (default = parallelclustermaker_jumphost)', required=False, default='parallelclustermaker_jumphost')
 parser.add_argument('--turbot_account', '-T', help='Turbot account ID (default = abd).  Set to "disabled" in non-Turbot environments.', required=False, default='disabled')
 
 # Create variables from optional instance_parameters provided via command line.
@@ -75,7 +76,7 @@ turbot_account = args.turbot_account
 # Raise an error if instance_name or instance_owner contain uppercase letters.
 
 if any(char0.isupper() for char0 in instance_name) or any(char1.isupper() for char1 in instance_owner):
-    error_msg='instance_name and instance_owner must not contain uppercase letters!'
+    error_msg='instance_name and instance_owner may not contain uppercase letters!'
     refer_to_docs_and_quit(error_msg)
 
 # Get the version of Terraform being used to build the pcluster-jumphost.
@@ -86,13 +87,11 @@ terraform_version_string = "terraform -version | head -1 | awk '{print $2}'"
 TERRAFORM_VERSION = subprocess.check_output(terraform_version_string, shell=True, universal_newlines=True, stderr=subprocess.DEVNULL)
 
 if not TERRAFORM_VERSION:
+    error_msg='Terraform is missing! Please visit: https://www.terraform.io/downloads'
+    refer_to_docs_and_quit(error_msg)
+else:
     print('')
-    print('*** ERROR ***')
-    print('Terraform is missing!')
-    print('')
-    print('Please visit https://www.terraform.io/downloads for installation guidance.')
-    print('Aborting...')
-    sys.exit(1)
+    p_val('Terraform: version = ' + TERRAFORM_VERSION, debug_mode)
 
 # Get the version of Ansible being used to build the pcluster-jumphost.
 # Abort if Ansible is not installed.
@@ -102,14 +101,8 @@ ansible_version_string = "ansible --version | head -1 | awk '{print $2}' | tr -d
 ANSIBLE_VERSION = subprocess.check_output(ansible_version_string, shell=True, universal_newlines=True, stderr=subprocess.DEVNULL)
 
 if not ANSIBLE_VERSION:
-    print('')
-    print('*** ERROR ***')
-    print('Ansible is missing!')
-    print('')
-    print('Please review the Ansible documentation for installation guidance:')
-    print('https://bit.ly/2KHuyY5')
-    print('Aborting...')
-    sys.exit(1)
+    error_msg='Ansible is missing! Please visit: https://bit.ly/2KHuyY5'
+    refer_to_docs_and_quit(error_msg)
 
 # Set the vars_file_path.
 
@@ -128,8 +121,9 @@ except OSError as e:
 # If an existing vars_file exists, abort to prevent potential duplications.
 
 if os.path.isfile(vars_file_path):
+    error_msg='Ansible is missing! Please visit: https://bit.ly/2KHuyY5'
     print('')
-    print('  ERROR  '.center(80, '*'))
+    print('  WARNING  '.center(80, '*'))
     print(('  Found an existing ' + vars_file_path + ' ').center(80,'-'))
     print('')
     print('Please delete this file and retry the build:')
@@ -145,7 +139,6 @@ else:
     else:
         print('')
         print('Performing parameter validation...')
-        print('')
     p_val('vars_file_path', debug_mode)
 
 # Set the state directory for this pcluster-jumphost.
@@ -181,9 +174,9 @@ if not os.path.isfile(instance_serial_number):
 p_val('instance_serial_number', debug_mode)
 p_val('instance_serial_number_file', debug_mode)
 
-# Select t3a.micro as the EC2 instance type.
+# Select t2.micro as the EC2 instance type.
 
-ec2_instance_type = 't3a.micro'
+ec2_instance_type = 't2.micro'
 p_val('ec2_instance_type', debug_mode)
 
 # Set the EBS volume type to gp2.
@@ -229,12 +222,15 @@ p_val('subnet_id', debug_mode)
 for vpc in vpc_information["Vpcs"]:
     vpc_id = vpc["VpcId"]
     p_val('vpc_id', debug_mode)
-    vpc_name = vpc_information['Vpcs'][0]['Tags'][0]['Value']
+    try:
+        vpc_name = vpc_information['Vpcs'][0]['Tags'][0]['Value']
+    except KeyError:
+        error_msg=vpc_id + ' (' + az + ') lacks a valid Name tag!'
+        refer_to_docs_and_quit(error_msg)
     p_val('vpc_name', debug_mode)
 
-# Perform error checking on the selected security_group.
-# If the user fails to supply a valid security_group, create a new one with
-# ingress rules appropriate for accessing this pcluster-jumphost.
+# If the user fails to supply a valid security_group, create a new default
+# permitting inbound SSH traffic for accessing the jumphost.
 
 ec2 = boto3.resource('ec2', region_name = region)
 
@@ -244,7 +240,7 @@ if not sg_id:
     security_group_name = security_group
     security_group = ec2.create_security_group(
         GroupName=security_group_name,
-        Description='parallelclustermaker-jumphost EC2 security group',
+        Description='EC2 security group - created by JumphostMaker',
         VpcId=vpc_id
     )
     add_security_group_rule(region, security_group, "tcp", "0.0.0.0/0", 22, 22)
@@ -276,17 +272,22 @@ sns_subscription = sns_client.subscribe(
     Protocol='email',
     Endpoint=instance_owner_email
     )
-print('Subscribed ' + instance_owner_email + ' to SNS topic: ' + sns_topic_name)
+if debug_mode == 'true':
+    print('')
+    print('Subscribed ' + instance_owner_email + ' to SNS topic: ' + sns_topic_name)
+    print('')
 p_val('sns_topic_name', debug_mode)
 
 # Create a new EC2 key pair and PEM file for the pcluster-jumphost within
 # the deployment region of choice if either doesn't already exist.
 
-ec2_keypair = 'pcluster-jumphost_' + instance_owner + '_' + instance_name + '_' + region
+ec2_keypair = instance_serial_number + '_' + region
 secret_key_file = instance_data_dir + ec2_keypair + '.pem'
 
 try:
     ec2_keypair_status = ec2client.describe_key_pairs(KeyNames=[ec2_keypair])
+    if debug_mode == 'true':
+        print('')
     print('Found EC2 keypair: ' + ec2_keypair)
 except ClientError as e:
     if e.response['Error']['Code'] == 'InvalidKeyPair.NotFound':
@@ -307,6 +308,8 @@ if not os.path.isfile(secret_key_file):
     print('Aborting...')
     sys.exit(1)
 else:
+    if debug_mode == 'true':
+        print('')
     p_val('ec2_keypair', debug_mode)
 
 # Create an IAM EC2 instance profile for the pcluster-jumphost if it does not
@@ -321,6 +324,8 @@ jumphost_json_policy_template = instance_data_dir + 'JumphostInstancePolicy.json
 
 try:
     check_role = iam.get_role(RoleName=jumphost_iam_instance_role)
+    if debug_mode == 'true':
+        print('')
     print('Found IAM EC2 instance role: ' + jumphost_iam_instance_role)
 except ClientError as e:
     if e.response['Error']['Code'] == 'NoSuchEntity':
@@ -348,6 +353,8 @@ except ClientError as e:
                 PolicyName=jumphost_iam_instance_policy,
                 PolicyDocument=policy_input.read()
                 )
+        if debug_mode == 'true':
+            print('')
         print('Created EC2 instance role: ' + jumphost_iam_instance_role)
 
 try:
@@ -364,6 +371,7 @@ except ClientError as e:
         print('Added: ' + jumphost_iam_instance_role + ' to ' + jumphost_iam_instance_profile)
 
 if debug_mode == 'true':
+    print('')
     p_val('jumphost_iam_instance_role', debug_mode)
     p_val('jumphost_iam_instance_profile', debug_mode)
 
@@ -465,7 +473,7 @@ vars_file_main_part = '''\
 # Name:    	{instance_name}.yml
 # Author:  	Rodney Marable <rodney.marable@gmail.com>
 # Created On:   April 20, 2019
-# Last Changed: May 26, 2019
+# Last Changed: May 31, 2019
 # Deployed On:  {DEPLOYMENT_DATE}
 # Purpose: 	Build template for pcluster-jumphost
 ################################################################################
@@ -473,8 +481,9 @@ vars_file_main_part = '''\
 # Build tool information
 
 ansible_version: {ANSIBLE_VERSION}
-terraform_version: {TERRAFORM_VERSION}
+remove_pcluster_jumphost_data_dir: true
 vars_file_path: {vars_file_path}
+DEPLOYMENT_DATE: {DEPLOYMENT_DATE}
 
 # SNS topic
 
@@ -486,50 +495,53 @@ jumphost_iam_instance_policy: {jumphost_iam_instance_policy}
 jumphost_iam_instance_profile: {jumphost_iam_instance_profile}
 jumphost_iam_instance_role: {jumphost_iam_instance_role}
 
-# EC2 keypair management
-
-ec2_keypair: {ec2_keypair}
-ssh_keypair_file: "{{{{ ec2_keypair }}}}.pem"
-#preserve_ec2_keypair: true
-remove_pcluster_jumphost_data_dir: true
-ssh_known_hosts: ~/.ssh/known_hosts
-
 # EC2 instance parameters
 
 aws_ami: {aws_ami}
 base_os: {base_os}
 ec2_instance_type: {ec2_instance_type}
+ec2_keypair: {ec2_keypair}
 ec2_user: {ec2_user}
 ec2_user_home: /home/{ec2_user}
 ec2_user_src: "{{{{ ec2_user_home }}}}/src"
+instance_data_dir: "{{{{ local_workingdir }}}}/pcluster_jumphost_data/{{{{ instance_name }}}}"
+instance_userdata_src: "{{{{ local_workingdir }}}}/templates/instance_userdata.j2"
+instance_userdata_script: instance_userdata.{{{{ instance_name }}}}.sh
 instance_name: {instance_name}
 instance_owner: {instance_owner}
-instance_owner_email: {instance_owner_email}
 instance_owner_department: {instance_owner_department}
-prod_level: {prod_level}
-project_id: {project_id}
+instance_owner_email: {instance_owner_email}
 instance_serial_number: {instance_serial_number}
 instance_serial_number_file: {instance_serial_number_file}
-DEPLOYMENT_DATE: {DEPLOYMENT_DATE}
+prod_level: {prod_level}
+project_id: {project_id}
+ssh_keypair_file: "{{{{ ec2_keypair }}}}.pem"
+ssh_known_hosts: ~/.ssh/known_hosts
 
 # EBS
 
 ebs_optimized: {ebs_optimized}
-instance_root_volume_size: {instance_root_volume_size}
 ebs_volume_type: {ebs_volume_type}
+instance_root_volume_size: {instance_root_volume_size}
 
 # AWS networking
 
 az: {az}
 region: {region}
 security_group: {security_group}
-vpc_security_group_ids: {vpc_security_group_ids}
 subnet_id: {subnet_id}
 vpc_id: {vpc_id}
 vpc_name: {vpc_name}
+vpc_security_group_ids: {vpc_security_group_ids}
+
+# Terraform
+
+terraform_version: {TERRAFORM_VERSION}
 provider: aws.{{{{ vpc_name }}}}
 provider_tf_src: "{{{{ local_workingdir }}}}/templates/provider_aws.j2"
 provider_tf_dest: provider_aws.tf
+tf_ec2_instance_src: "{{{{ local_workingdir }}}}/templates/DEFAULT_EC2_TEMPLATE.j2"
+tf_ec2_instance_dest: "{{{{ instance_name }}}}.tf"
 
 # Template paths
 
@@ -537,17 +549,12 @@ access_pcluster_jumphost_src: "{{{{ local_workingdir }}}}/templates/access_jumph
 access_pcluster_jumphost_dest: access_jumphost.{{{{ instance_name }}}}.sh
 build_pcluster_jumphost_src: "{{{{ local_workingdir }}}}/templates/build_pcluster_jumphost.j2"
 build_pcluster_jumphost_script: build_pcluster_jumphost.{{{{ instance_name }}}}.sh
-instance_data_dir: "{{{{ local_workingdir }}}}/pcluster_jumphost_data/{{{{ instance_name }}}}"
-instance_userdata_src: "{{{{ local_workingdir }}}}/templates/instance_userdata.j2"
-instance_userdata_script: instance_userdata.{{{{ instance_name }}}}.sh
 kill_pcluster_jumphost_src: "{{{{ local_workingdir }}}}/templates/kill_pcluster_jumphost.j2"
 kill_pcluster_jumphost_script: kill_pcluster_jumphost.{{{{ instance_name }}}}.sh
 remove_pcluster_jumphost_data_dir_src: "{{{{ local_workingdir }}}}/templates/remove_pcluster_jumphost_data_dir.j2"
 remove_pcluster_jumphost_data_dir_dest: remove_pcluster_jumphost_data_dir.{{{{ instance_name }}}}.sh
 stage_dir_parent: /tmp/_stagedir_Rmarable_InstanceMaker
 stage_dir: "{{{{ stage_dir_parent }}}}/{{{{ instance_name }}}}"
-tf_ec2_instance_src: "{{{{ local_workingdir }}}}/templates/DEFAULT_EC2_TEMPLATE.j2"
-tf_ec2_instance_dest: "{{{{ instance_name }}}}.tf"
 
 '''
 
@@ -586,7 +593,8 @@ subprocess.run('terraform apply \"terraform_environment\"', shell=True, cwd=inst
 # Cleanup and exit.
 
 print('')
-print('To access via SSH:')
+print('Access the jumphost via SSH:')
 print('$ ./access_jumphost.py -N ' + instance_name)
+print('')
 print('Exiting...')
 sys.exit(0)

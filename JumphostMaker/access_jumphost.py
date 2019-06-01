@@ -4,7 +4,7 @@
 # Name:         access_jumphost.py
 # Author:       Rodney Marable <rodney.marable@gmail.com>
 # Created On:   April 14, 2019
-# Last Changed: April 16, 2019
+# Last Changed: May 31, 2019
 # Purpose:	Quick way to SSH into Terraform-built pcluster-jumphosts
 ################################################################################
 
@@ -15,13 +15,18 @@ import os
 import subprocess
 import sys
 
+# Import some external lists and functions.
+# Source: jumphostmaker_aux_data.py
+
+from jumphostmaker_aux_data import refer_to_docs_and_quit
+
 # Parse input from the command line.
 
-parser = argparse.ArgumentParser(description='access_jumphost.py: Provide quick SSH access to pcluster-jumphost instances')
+parser = argparse.ArgumentParser(description='access_jumphost.py: Provide quick SSH access to pcluster-jumphost EC2 instances')
 
 # Configure arguments for the required variables.
 
-parser.add_argument('--instance_name', '-N', help='name of the pcluster-jumphost', required=True)
+parser.add_argument('--instance_name', '-N', help='name of the pcluster-jumphost EC2 instance', required=True)
 
 args = parser.parse_args()
 instance_name = args.instance_name
@@ -33,8 +38,6 @@ if os.path.exists('pcluster_jumphost_data/' + instance_name + '/access_jumphost.
     cmd_string = 'cd pcluster_jumphost_data/' + instance_name + '/ &&' + 'sh access_jumphost.' + instance_name + '.sh'
     subprocess.run(cmd_string, shell=True)
 else:
-    print('')
-    print('***ERROR***')
-    print('pcluster-jumphost "' + instance_name + '" does not appear to exist!')
-    print('Aborting...')
+    error_msg='pcluster-jumphost "' + instance_name + '" does not appear to exist!'
+    refer_to_docs_and_quit(error_msg)
     sys.exit(1)
