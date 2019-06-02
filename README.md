@@ -29,8 +29,8 @@ ParallelClusterMaker is an Open Source command line wrapper toolkit that makes i
 
 You can find more information about AWS ParallelCluster by visiting:
 
-Documentation: https://aws-parallelcluster.readthedocs.io/en/latest/index.html
-Github Repository: https://github.com/aws/aws-parallelcluster
+* Documentation: https://aws-parallelcluster.readthedocs.io/en/latest/index.html
+* Github Repository: https://github.com/aws/aws-parallelcluster
 
 The ParallelClusterMaker Github repository contains two project subdirectories:
 
