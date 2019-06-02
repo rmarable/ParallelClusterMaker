@@ -6,13 +6,17 @@ Please refer to the LICENSE document included with this Open Source software for
 
 ## Disclaimer
 
-The author assumes absolutely no responsibility or liability for any losses or damages incurred in conjunction with the use of this Open Source software.
+By using this Open Source software:
 
-If you choose to use this Open Source software in production environments, please be forewarned that bugs may still be present, unexpected behavior might be observed, and some features may not be completely documented. 
+* You accept all potential risks involved with your use of this Open Source software.
 
-**This Open Source software is neither endorsed nor supported by Amazon Web Services.**
+* You agree that the author shall have no responsibility or liability for any losses or damages incurred in conjunction with your use of such use.
 
-Please be further advised that you will **NOT** be able to open cases with AWS Support if you run into any problems or issues using this Open Source software, and you may **NOT** engage AWS HPC or customer support engineers in the public forums if you have questions regarding the installation or operation of this Open Source software.
+* You acknowledge that bugs may still be present, unexpected behavior might be observed, and some features may not be completely documented. 
+
+**This Open Source software is authored by Rodney Marable in his individual capacity and is neither endorsed nor supported by Amazon Web Services.**
+
+You cannot create cases with AWS Technical Support or engage AWS support engineers in public forums if you have any questions, problems, or issues using this Open Source software.
 
 ```
 "Play at your own risk!"
