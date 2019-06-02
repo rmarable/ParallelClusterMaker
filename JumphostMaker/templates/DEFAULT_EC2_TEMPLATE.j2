@@ -2,7 +2,7 @@
 # Name:		{{ instance_name }}.tf
 # Author:	Rodney Marable <rodney.marable@gmail.com>
 # Created On:	April 16, 2019
-# Last Changed:	May 31, 2019
+# Last Changed:	June 2, 2019
 # Deployed On:	{{ lookup('pipe','date \"+%B %-d, %Y\"') }}
 # Purpose:	Terraform template for {{ instance_name }}
 ################################################################################
@@ -24,7 +24,7 @@ resource "aws_instance" "{{ instance_name }}" {
   tags {
     Name                    = "{{ instance_name }}"
     EC2InstanceBuilder      = "Terraform"
-    Purpose                 = "plcuster-jumphost for {{ instance_owner }}"
+    Purpose                 = "pcluster-jumphost for {{ instance_owner }}"
     InstanceSerialNumber    = "{{ instance_serial_number }}"
     InstanceOwner           = "{{ instance_owner }}"
     InstanceOwnerEmail      = "{{ instance_owner_email }}"
