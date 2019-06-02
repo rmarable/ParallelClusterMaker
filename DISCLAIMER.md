@@ -10,7 +10,7 @@ By using this Open Source software:
 
 * You accept all potential risks involved with your use of this Open Source software.
 
-* You agree that the author shall have no responsibility or liability for any losses or damages incurred in conjunction with your use of such use.
+* You agree that the author shall have no responsibility or liability for any losses or damages incurred in conjunction with your use of this Open Source software.
 
 * You acknowledge that bugs may still be present, unexpected behavior might be observed, and some features may not be completely documented. 
 
