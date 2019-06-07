@@ -4,7 +4,7 @@
 # Name:         make-pcluster-jumphost.py
 # Author:       Rodney Marable <rodney.marable@gmail.com>
 # Created On:   April 18, 2019
-# Last Changed: June 1, 2019
+# Last Changed: June 6, 2019
 # Purpose:      Create an EC2 jumphost to run the ParallelClusterMaker toolkit
 ################################################################################
 
@@ -155,7 +155,7 @@ except OSError as e:
 
 # Generate a instance_serial_number to track individual pcluster-jumphosts.
 
-DEPLOYMENT_DATE = time.strftime("%-d.%B.%Y")
+DEPLOYMENT_DATE = time.strftime("%B %-d, %Y")
 TIMESTAMP = time.strftime("%s")
 SERIAL_DIR = './active_pcluster_jumphosts'
 try:

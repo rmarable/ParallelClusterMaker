@@ -4,7 +4,7 @@
 # Name:		make-pcluster.py
 # Author:	Rodney Marable <rodney.marable@gmail.com>
 # Created On:	April 20, 2019
-# Last Changed:	June 1, 2019
+# Last Changed:	June 6, 2019
 # Purpose:	Python3 wrapper for customizing ParallelCluster stacks
 ################################################################################
 
@@ -308,7 +308,7 @@ except OSError as e:
     if e.errno != errno.EEXIST:
         raise
 
-DEPLOYMENT_DATE = time.strftime("%-d.%B.%Y")
+DEPLOYMENT_DATE = time.strftime("%B %-d, %Y")
 Deployed_On = time.strftime("%B %-d, %Y")
 cluster_serial_datestamp = DateTime.utcnow().strftime('%S%M%H%d%m%Y')
 cluster_serial_number = cluster_name + '-' + cluster_serial_datestamp
@@ -538,7 +538,6 @@ master_root_volume_size  = ' + str(master_root_volume_size) + ' GB
 compute_root_volume_size = ' + str(compute_root_volume_size) + ' GB
 ebs_shared_volume_size   = ' + str(ebs_shared_volume_size) + ' GB'''
     refer_to_docs_and_quit(error_msg)
-    sys.exit(1)
 
 # Perform a minimal check to ensure ebs_shared_dir looks like a valid path.
 

@@ -56,7 +56,7 @@ The default is 30 days.
 
 * Command line designation of dev, test, stage, and prod operating levels.
 
-* Administrative control over the allowed types of EC2 instance for the admin and compute node roles.
+* Administrative control over the allowed EC2 instance types for the admin and compute node roles.
 
 * Job scheduling with AWS Batch, Grid Engine, Torque, or Slurm.
 
