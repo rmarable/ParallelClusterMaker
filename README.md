@@ -474,23 +474,28 @@ This feature will be extended to these operating systems in a future release.
 
 ParallelClusterMaker supports custom AMIs through the `--custom_ami` switch,
 provided the base_os is supported by ParallelCluster (currently CentOS 6/7,
-Amazon Linux, and Ubuntu 16.04 LTS).  The base_os of the custom_ami must
-also be supplied or the script will assume you are using Amazon Linux.
+Amazon Linux, and Ubuntu 14.04/16.04 LTS).  The base_os of the custom_ami must
+be supplied with the initial make-cluster invocation, and of course, the custom
+AMI must exist or the build will fail.
 
-Ubuntu support for FSxL can be enabled by installing the required Debian
-kernel packages, Lustre client, and Grub configuration per the public AWS
-documentation available at:
+The recommended way to incorporate custom AMIs into a ParallelCluster stack
+is to build a custom AMI with "pcluster createami" and use this subsequent 
+image ID with the `custom_ami` switch. 
+
+For example, Lustre support for Ubuntu can be enabled by building a AMI with
+the required Debian kernel packages, Lustre client, and Grub configuration per
+the public AWS documentation available at:
 
 https://docs.aws.amazon.com/fsx/latest/LustreGuide/install-lustre-client.html
 
-An FSxL-enabled Ubuntu stack could then be built using this command line,
-replacing the obvious with your own values:
+Assuming an AMI ID of "ami-123456789abc," a Lustre-enabled Ubuntu stack could
+then be built with ParallelClusterMaker using this command:
 
 ```
 $ ./make-cluster.py -N starscream -O rmarable -E rodney.marable@gmail.com -A us-west-2a --enable_fsx=true --custom_ami=ami-123456789abc --base_os=ubuntu1604
 ```
-
-Error checking is performed to ensure that the custom AMI exists.
+Similar use cases like encrypted EBS root volumes, custom Linux kernels, or
+complex local application installations can be supported with this approach.
 
 ## EC2 Placement Groups
 
