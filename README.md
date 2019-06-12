@@ -29,7 +29,7 @@ ParallelClusterMaker is an Open Source command line wrapper toolkit that makes i
 
 You can find more information about AWS ParallelCluster by visiting:
 
-* Documentation: https://aws-parallelcluster.readthedocs.io/en/latest/index.html
+* Documentation: https://docs.aws.amazon.com/parallelcluster/latest/ug/
 * Github Repository: https://github.com/aws/aws-parallelcluster
 
 The ParallelClusterMaker Github repository contains two project subdirectories:
@@ -390,7 +390,7 @@ systems may be added in a future release.
 To find more information about ParallelCluster's implementation of EFS, please
 consult the official documentation:
 
-https://aws-parallelcluster.readthedocs.io/en/latest/configuration.html#efs-section
+https://docs.aws.amazon.com/parallelcluster/latest/ug/efs-section.html
 
 Support for encryption and selecting between max_io and general_purpose modes can be enabled by setting the appropriate command line switches to `true`.
 
