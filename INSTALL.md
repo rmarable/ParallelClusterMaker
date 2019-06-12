@@ -80,9 +80,7 @@ for more detailed information on leveraging the other scripts in this toolkit.
 
 ## Creating an Installation Environment on OSX
 
-Please be forewarned that this method is **not** recommended! A detail-oriented
-and knowledgable source will be necessary if this occurs.  It requires
-work, and may seriously damage your local OSX environment.
+Please be forewarned that this method is **not** recommended! It is more complicated, requires additional work, and may seriously damage your local OSX environment.
 
 "Play at your own risk!"
   -- Planet Patrol
@@ -124,8 +122,8 @@ https://docs.aws.amazon.com/cli/latest/userguide/cli-chap-getting-started.html
 Please visit "https://docs.python-guide.org/dev/virtualenvs/" for more details
 on Python virtual envirionments, something everyone should be using.
 
-pyenv is cleaner and preferred, but it doesn't support using prompt that will
-support displaying the current Python version like virtualenv does without
+pyenv is cleaner and preferred, but it doesn't provide a prompt that will
+display the current active Python version like virtualenv does without
 some additional steps.  Please follow the installation guidelines provided
 here: https://github.com/pyenv/pyenv#installation
 
@@ -196,7 +194,7 @@ for more detailed information on leveraging the scripts in this toolkit.
 To view all available options for make-pcluster.py:
 
 ```
-$ cd ParallelClusterMaker/ClusterMaker
+$ cd ~/src/ParallelClusterMaker/ClusterMaker
 $ ./make-pcluster.py --help
 ```
 

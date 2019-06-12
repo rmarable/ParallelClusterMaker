@@ -65,7 +65,8 @@ The default is 30 days.
 * User selection of "optimal" instances when AWS Batch is selected as a scheduler.  Additionally, the user is free to select any of the EC2 instances that Batch supports for building computational environments.
 
 * Identification of the cluster's owner, email address, and department using
-an easily extendable tagging framework.
+an easily extendable tagging framework.  The cluster can also be associated
+with a specific project identification tag.
 
 * Custom AMIs.
 
@@ -113,11 +114,11 @@ be added in future releases.
 
 ## Installation of ParallelClusterMaker for the Impatient
 
-These instructions are provided for the impatient.
-
-**We strongly suggest that you review the installation documentation carefully to avoid potentially costly and time-consuming mistakes.**
-
 Please read the INSTALL.md document for detailed guidance and instructions on how to install ParallelClusterMaker using an EC2 jumphost (the preferred method) or locally on OSX.
+
+These instructions are provided for the impatient and/or lazy.
+
+**It is strongly suggested that the reader carefully review the installation documentation (INSTALL.md) to avoid potentially costly and time-consuming mistakes.**
 
 ### Building an Installation Environment on EC2
 
