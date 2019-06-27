@@ -100,6 +100,9 @@ $ /usr/bin/ruby -e "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/inst
 
 * Use Homebrew to install some other critical applications (OSX users only):
 
+If you already have Homebrew installed, be **very** careful about updating
+already-existing packages.
+
 ```
 $ brew install ansible autoconf automake gcc jq libtool make readline
 ```
