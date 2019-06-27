@@ -2,6 +2,12 @@
 
 ---
 
+Q: What version of ParallelCluster is currently supported?
+
+A: ParallelClusterMaker strives to stay aligned with the most recent production release of ParallelCluster (currently aws-parallelcluster-2.4.0).
+
+---
+
 Q: What functionality does ParallelClusterMaker have that is above and beyond the built-in functionality of AWS ParallelCluster? 
 
 A: Please consult the "ParallelClusterMaker Features" section in the README.md document for the specific functionality that ParallelClusterMaker provides as an augmentation of ParallelCluster.
