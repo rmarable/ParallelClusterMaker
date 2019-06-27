@@ -4,7 +4,7 @@
 # Name:		make-pcluster.py
 # Author:	Rodney Marable <rodney.marable@gmail.com>
 # Created On:	April 20, 2019
-# Last Changed:	June 6, 2019
+# Last Changed:	June 26, 2019
 # Purpose:	Python3 wrapper for customizing ParallelCluster stacks
 ################################################################################
 
@@ -14,12 +14,14 @@ import argparse
 import boto3
 import botocore
 import errno
+import json
 import os
 import subprocess
 import sys
 import time
 from botocore.exceptions import ClientError
 from datetime import datetime as DateTime
+from jq import jq
 from nested_lookup import nested_lookup
 from requests.exceptions import ConnectionError
 from validate_email import validate_email
@@ -27,6 +29,7 @@ from validate_email import validate_email
 # Import the list of supported EC2 instances and some external functions.
 # Source: parallelparallelclustermaker_aux_data.py
 
+from parallelclustermaker_aux_data import base_os_instance_check
 from parallelclustermaker_aux_data import ctrlC_Abort
 from parallelclustermaker_aux_data import default_instance_types
 from parallelclustermaker_aux_data import ec2_instances_full_list
@@ -187,11 +190,24 @@ if debug_mode == 'true':
     print('')
     print('Performing parameter validation...')
     print('')
+else:
+    print('')
 
 # Raise an error if cluster_name or cluster_owner contain uppercase letters.
 
 if any(char0.isupper() for char0 in cluster_name) or any(char1.isupper() for char1 in cluster_owner):
     error_msg='cluster_name and cluster_owner must not contain uppercase letters!'
+    refer_to_docs_and_quit(error_msg)
+
+# Get the version of Ansible being used to build the instance.
+
+ansible_version_string = "ansible --version | head -1 | awk '{print $2}' | tr -d '\n'"
+ANSIBLE_VERSION = subprocess.check_output(ansible_version_string, shell=True, universal_newlines=True, stderr=subprocess.DEVNULL)
+
+# Abort if Ansible is not installed.
+
+if not ANSIBLE_VERSION:
+    error_msg='Ansible is missing! Please visit: https://bit.ly/2KHuyY5'
     refer_to_docs_and_quit(error_msg)
 
 # Redefine cluster_name here to ensure compatibility with the original script
@@ -340,19 +356,18 @@ Reference: https://en.wikipedia.org/wiki/Email_address'''
 if project_id != 'UNDEFINED':
     p_val('project_id', debug_mode)
 
-# Perform error checking on the selected operating system.
 # Configure the ec2_user account and home directory path to match base_os.
 
 if base_os == 'alinux':
     ec2_user = 'ec2-user'
-elif base_os == 'centos6' or base_os == 'centos7':
+elif 'centos' in base_os:
     ec2_user = 'centos'
-elif base_os == 'ubuntu1404' or base_os == 'ubuntu1604':
+elif 'ubuntu' in base_os:
     ec2_user = 'ubuntu'
 else:
     p_fail(base_os, 'base_os', base_os_allowed)
 ec2_user_home = '/home/' + ec2_user
-p_val('base_os', debug_mode)
+p_val('ec2_user_home', debug_mode)
 
 # Validate the production level.  Since these options are controlled by the
 # command line argument parser, no further error checking is needed.
@@ -387,37 +402,64 @@ else:
         error_msg='The ParallelClusterMaker performance tests do not (yet) work with AWS Batch!'
         refer_to_docs_and_quit(error_msg)
 
-# Perform error checking on master_instance_type and compute_instance_type
-# to ensure supported EC2 instance types were selected.
+# Perform error checking on master_instance_type and compute_instance_type to
+# ensure the selections are valid EC2 instance types and are supported by the
+# selected operating system.
 
 if master_instance_type not in ec2_instances_full_list:
     p_fail(master_instance_type, 'master_instance_type', ec2_instances_cloudhpc)
+base_os_instance_check(base_os, master_instance_type, debug_mode)
 p_val('master_instance_type', debug_mode)
 p_val('master_root_volume_size', debug_mode)
 
 if compute_instance_type not in ec2_instances_full_list:
     p_fail(compute_instance_type, 'compute_instance_type', ec2_instances_full_list)
+base_os_instance_check(base_os, compute_instance_type, debug_mode)
 p_val('compute_instance_type', debug_mode)
 p_val('compute_root_volume_size', debug_mode)
 
-# FSxL is not currently supported when using AWS Batch as a scheduler or if
-# base_os is neither Amazon Linux (alinux) or CentOS 7 (centos7):
+# Validate the selected instances and operating system.
+
+p_val('base_os', debug_mode)
+print('Selected base operating system: ' + base_os)
+print('Selected master instance type: ' + master_instance_type)
+print('Selected compute instance type: ' + compute_instance_type)
+print('')
+
+# Configure a boto3 resource and client for communication with S3.
+
+s3 = boto3.resource('s3')
+s3_client = boto3.client('s3')
+
+# Perform error checking against the auto-generated name for s3_bucketname
+# If s3_bucketname doesn't exist, create it during the cfncluster stack build.
+
+s3_bucketname = 'parallelclustermaker-' + cluster_serial_number
+
+if s3.Bucket(s3_bucketname) not in s3.buckets.all():
+    p_val('s3_bucketname', debug_mode)
+else:
+    error_msg = 'Found an existing S3 bucket associated with this cluster!'
+    refer_to_docs_and_quit(error_msg)
+
+# Lustre is not currently supported when using AWS Batch as a scheduler unless
+# base_os is either Amazon Linux (alinux) or CentOS 7 (centos7):
 #
 # https://aws-parallelcluster.readthedocs.io/en/latest/configuration.html#fsx
 #
 # Lustre options should not be used without setting enable_fsx=true.
-# Furthermore, Lustre-S3 hydration options should not be used without setting
-# enable_fsx_hydration=true.
+# Furthermore, S3-to-Lustre and Lustre-to-S3 dehydration options should not be
+# used without setting enable_fsx_hydration=true.
 
 if enable_fsx == 'true':
     if (scheduler == 'awsbatch'):
         error_msg = 'FSxL is not currently supported when using AWS Batch as a scheduler!'
         refer_to_docs_and_quit(error_msg)
     if base_os not in ('alinux', 'centos7'):
-        error_msg = 'FSxL is only supported on Amazon Linux (alinux) or CentOS 7 (centos7)!'
+        error_msg = 'Lustre is only supported on Amazon Linux (alinux) or CentOS 7 (centos7)!'
         refer_to_docs_and_quit(error_msg)
     if (enable_fsx_hydration == 'false') and (('UNDEFINED' not in fsx_s3_import_bucket) or ('UNDEFINED' not in fsx_s3_export_bucket)):
-        error_msg = 'All Lustre-to-S3 interactions require: "enable_fsx_hydration=true"'
+        error_msg = 'All Lustre-S3 interactions require: "enable_fsx_hydration=true"'
         refer_to_docs_and_quit(error_msg)
 if enable_fsx == 'false':
     if enable_fsx_hydration == 'true': 
@@ -439,8 +481,8 @@ if enable_fsx == 'true':
 
 # Perform error checking and validation on fsx_chunk_size, which should range
 # between 1,024 MB (1 GB) and 512,000 MB (500 GB).
-# Furthermore, Lustre-S3 hydration options should *never* be used without
-# setting enable_fsx_hydration=true.
+# Furthermore, S3-to-Lustre hydration and Lustre-to-S3 options should *never*
+# be used without setting enable_fsx_hydration=true.
 
 if (int(fsx_chunk_size) > 528000) or (int(fsx_chunk_size) < 1024):
     error_msg='fsx_chunk_size must be between 1,024 MB (1 GB) and 528,000 MB (528 GB)!'
@@ -448,56 +490,65 @@ if (int(fsx_chunk_size) > 528000) or (int(fsx_chunk_size) < 1024):
 if enable_fsx_hydration == 'true':
     p_val('fsx_chunk_size', debug_mode)
 
-# Configure a boto3 resource for communication with S3.
+# Check to ensure the Lustre S3 import and export buckets and paths exist:
+#   - s3://fsx_s3_import_bucket/fsx_s3_import_path
+#   - s3://fsx_s3_export_bucket/fsx_s3_export_path
+#
+# If the S3-to-Lustre import bucket name is provided but a corresponding export
+# bucket was not, assume the import bucket will serve both functions.
 
-s3 = boto3.resource('s3')
-
-# Perform error checking against the auto-generated name for s3_bucketname
-# If s3_bucketname doesn't exist, create it during the cfncluster stack build.
-
-s3_bucketname = 'parallelclustermaker-' + cluster_serial_number
-
-if s3.Bucket(s3_bucketname) not in s3.buckets.all():
-    p_val('s3_bucketname', debug_mode)
-else:
-    error_msg = 'Found an existing S3 bucket associated with this cluster!'
-    refer_to_docs_and_quit(error_msg)
-
-# If an FSx-S3 import bucket was provided but a corresponding export bucket
-# was not, assume the import bucket will serve both functions.
-# Future releases will support import and export path validity checks.
-
-if fsx_s3_import_bucket != 'UNDEFINED' and fsx_s3_export_bucket == 'UNDEFINED':
-    fsx_s3_export_bucket = fsx_s3_import_bucket
-    print('')
-    print('*** WARNING ***')
-    print('fsx_s3_export_bucket was not specified!')
-    print('Lustre will be hydrated *and* dehydrated from S3 using the FSx import bucket.')
-
-# Perform error checking on the import and export S3 buckets when using Lustre.
-
-if enable_fsx == 'true':
-    if enable_fsx_hydration == 'true':
-        if (s3.Bucket(fsx_s3_import_bucket) not in s3.buckets.all()) or (s3.Bucket(fsx_s3_export_bucket) not in s3.buckets.all()):
-            error_msg = 'Please create valid import and export buckets before enabling FSX-S3 hydration.'
-            refer_to_docs_and_quit(error_msg)
+if enable_fsx == 'true' and enable_fsx_hydration == 'true':
+    if s3.Bucket(fsx_s3_import_bucket) not in s3.buckets.all():
+        error_msg = 'Lustre hydration is enabled but no S3 import bucket was found!'
+        refer_to_docs_and_quit(error_msg)
+    if fsx_s3_import_bucket != 'UNDEFINED' and fsx_s3_export_bucket == 'UNDEFINED':
+        print('*** WARNING ***')
+        print('fsx_s3_import bucket is defined but fsx_s3_export_bucket is unspecified!')
+        print('Lustre will hydrate *and* dehydrate from the S3 import bucket path.')
         print('')
-        if fsx_s3_import_path == 'import':
-            print('Using the default S3 import path: s3://' + fsx_s3_import_bucket + '/import')
+        fsx_s3_export_bucket = fsx_s3_import_bucket
+        fsx_s3_export_path = fsx_s3_import_path
+        fsx_s3_bucket_paths = { fsx_s3_import_bucket: fsx_s3_import_path }
+    if fsx_s3_import_bucket != 'UNDEFINED' and fsx_s3_export_bucket != 'UNDEFINED':
+        if s3.Bucket(fsx_s3_export_bucket) not in s3.buckets.all():
+            error_msg = 'Two-way Lustre hydration is enabled but no S3 export bucket was found!'
+            refer_to_docs_and_quit(error_msg)
         else:
-            print('Setting the S3 import path to: s3://' + fsx_s3_import_bucket + '/' + fsx_s3_import_path)
-        if fsx_s3_export_path == 'export':
-            print('Using the default S3 export path: s3://' + fsx_s3_import_bucket + '/export')
+            if fsx_s3_import_bucket == fsx_s3_export_bucket:
+                print('*** WARNING ***')
+                print('fsx_s3_import bucket and fsx_s3_export_bucket are set to the same value!')
+                print('Lustre will hydrate *and* dehydrate from the S3 import bucket.')
+                print('')
+                if fsx_s3_import_path == fsx_s3_export_path:
+                    print('*** WARNING ***')
+                    print('fsx_s3_import path and fsx_s3_export_path are set to the same value!')
+                    print('Lustre will hydrate *and* dehydrate from the S3 import path.')
+                    print('')
+                    fsx_s3_bucket_paths = { fsx_s3_import_bucket: fsx_s3_import_path }
+                else:
+                    fsx_s3_bucket_paths = {
+                        fsx_s3_import_bucket: fsx_s3_import_path,
+                        fsx_s3_export_bucket: fsx_s3_export_path
+                        }
+            else:
+                fsx_s3_bucket_paths = {
+                    fsx_s3_import_bucket: fsx_s3_import_path,
+                    fsx_s3_export_bucket: fsx_s3_export_path
+                    }
+    print('Setting S3-Lustre import path to: s3://' + fsx_s3_import_bucket + '/' + fsx_s3_import_path)
+    print('Setting Lustre-S3 export path to: s3://' + fsx_s3_export_bucket + '/' + fsx_s3_export_path)
+    for fsx_s3_bucket, fsx_s3_path in fsx_s3_bucket_paths.items():
+        check_fsx_s3_path = s3_client.list_objects_v2(
+            Bucket=fsx_s3_bucket,
+            Prefix=fsx_s3_path
+            )
+        check_fsx_s3_object_count = jq('.KeyCount').transform(text=json.dumps(check_fsx_s3_path, default=str), text_output=True)
+        if int(check_fsx_s3_object_count) == 0:
+            error_msg = 'Please ensure s3://' + fsx_s3_bucket + '/' + fsx_s3_path + ' exists!'
+            refer_to_docs_and_quit(error_msg)
         else:
-            print('Setting the S3 export path to: s3://' + fsx_s3_export_bucket + '/' + fsx_s3_export_path)
-    print('')
-    print('*** IMPORTANT ***')
-    print('Please ensure these paths exist before hydrating or dehydrating an S3 bucket')
-    print('from the Lustre file system associated with this cluster.')
-if debug_mode == 'true':
-    print('')
-p_val('fsx_s3_import_bucket', debug_mode)
-p_val('fsx_s3_export_bucket', debug_mode)
+            p_val('fsx_s3_bucket', debug_mode)
+            p_val('fsx_s3_path', debug_mode)
 
 # Check to ensure external NFS support has been properly enabled.
 
@@ -553,7 +604,6 @@ Try using "/' + ebs_shared_dir + '" instead.'''
 # Validate EFS based on the selected performance mode.
 
 if enable_efs == 'true':
-    p_val('efs_root', debug_mode)
     p_val('efs_performance_mode', debug_mode)
     p_val('efs_throughput_mode', debug_mode)
     p_val('efs_encryption', debug_mode)
@@ -613,7 +663,6 @@ ec2_iam_role = 'pclustermaker-role-' + cluster_serial_number
 ec2_json_policy_src = 'templates/ParallelClusterInstancePolicy.json_src'
 ec2_json_policy_template = cluster_data_dir + 'ParallelClusterInstancePolicy.json'
 
-print('')
 try:
     check_ec2_iam_role = iam.get_role(RoleName=ec2_iam_role)
     print('Found ec2_iam_role: ' + ec2_iam_role)
@@ -639,6 +688,7 @@ except ClientError as e:
             AssumeRolePolicyDocument='{ "Version": "2012-10-17", "Statement": [ { "Effect": "Allow", "Principal": { "Service": [ "ec2.amazonaws.com" ] }, "Action": "sts:AssumeRole" } ] }',
             Description='ParallelClusterMaker EC2 IAM instance role'
             )
+        print('')
         print('Created ec2_iam_role: ' + ec2_iam_role)
         with open(ec2_json_policy_template, 'r') as policy_input:
             pcluster_ec2_iam_policy = iam.put_role_policy(
@@ -821,6 +871,7 @@ cluster_parameters = {
     'vpc_id': vpc_id,
     'vpc_name': vpc_name,
     'Deployed_On': Deployed_On,
+    'ANSIBLE_VERSION': ANSIBLE_VERSION,
     'DEPLOYMENT_DATE': DEPLOYMENT_DATE
 }
 
@@ -829,6 +880,7 @@ cluster_parameters = {
 
 if debug_mode == 'true':
     print_TextHeader(cluster_name, 'Displaying cluster parameter values', 80)
+    print('ANSIBLE_VERSION = ' + ANSIBLE_VERSION)
     print('aws_account_id = ' + aws_account_id)
     print('base_os = ' + base_os)
     print('cluster_birth_name = ' + cluster_birth_name)
@@ -1011,10 +1063,11 @@ sns_destruction_summary_report_dest: "{{{{ cluster_data_dir }}}}/sns_destruction
 
 # User and environment configuration
 
-spack_user: spack
-spack_group: spack
+ANSIBLE_VERSION: {ANSIBLE_VERSION}
 ssh_keypair: "{{{{ cluster_data_dir }}}}/{{{{ ec2_keypair }}}}.pem"
 ssh_known_hosts: ~/.ssh/known_hosts
+spack_user: spack
+spack_group: spack
 
 # Cluster stack and autoscaling configuration
 

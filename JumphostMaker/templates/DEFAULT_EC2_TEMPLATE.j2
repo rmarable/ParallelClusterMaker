@@ -2,7 +2,7 @@
 # Name:		{{ instance_name }}.tf
 # Author:	Rodney Marable <rodney.marable@gmail.com>
 # Created On:	April 16, 2019
-# Last Changed:	June 2, 2019
+# Last Changed:	June 26, 2019
 # Deployed On:	{{ lookup('pipe','date \"+%B %-d, %Y\"') }}
 # Purpose:	Terraform template for {{ instance_name }}
 ################################################################################
@@ -10,7 +10,7 @@
 resource "aws_instance" "{{ instance_name }}" {
   availability_zone         = "{{ az }}"
   ami                       = "{{ aws_ami }}"
-  ebs_optimized             = "{{ ebs_optimized }}"
+  ebs_optimized             = "{{ ebs_optimized | bool | lower }}"
   iam_instance_profile      = "{{ jumphost_iam_instance_profile }}"
   instance_type             = "{{ ec2_instance_type }}"
   key_name                  = "{{ ec2_keypair }}"
@@ -21,7 +21,7 @@ resource "aws_instance" "{{ instance_name }}" {
   }
   vpc_security_group_ids    = ["{{ vpc_security_group_ids }}"]
   subnet_id                 = "{{ subnet_id }}"
-  tags {
+  tags =  {
     Name                    = "{{ instance_name }}"
     EC2InstanceBuilder      = "Terraform"
     Purpose                 = "pcluster-jumphost for {{ instance_owner }}"
@@ -34,7 +34,7 @@ resource "aws_instance" "{{ instance_name }}" {
 {% endif %}
     DEPLOYMENT_DATE         = "{{ DEPLOYMENT_DATE }}"
   }
-  volume_tags {
+  volume_tags =  {
     EC2InstanceBuilder      = "Terraform"
     Purpose                 = "EBS volume for pcluster-jumphost {{ instance_name }}"
     InstanceSerialNumber    = "{{ instance_serial_number }}"
@@ -52,6 +52,7 @@ resource "aws_instance" "{{ instance_name }}" {
     destination = "/tmp/{{ build_pcluster_jumphost_script }}"
   connection {
     type        = "ssh"
+    host        = self.public_ip
     user        = "{{ ec2_user }}"
     agent       =  false
     private_key = "${file("{{ ssh_keypair_file }}")}"
@@ -64,6 +65,7 @@ resource "aws_instance" "{{ instance_name }}" {
     ]
   connection {
     type        = "ssh"
+    host        = self.public_ip
     user        = "{{ ec2_user }}"
     agent       =  false
     private_key = "${file("{{ ssh_keypair_file }}")}"

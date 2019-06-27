@@ -4,7 +4,7 @@
 # Name:         make-pcluster-jumphost.py
 # Author:       Rodney Marable <rodney.marable@gmail.com>
 # Created On:   April 18, 2019
-# Last Changed: June 6, 2019
+# Last Changed: June 26, 2019
 # Purpose:      Create an EC2 jumphost to run the ParallelClusterMaker toolkit
 ################################################################################
 
@@ -80,11 +80,11 @@ if any(char0.isupper() for char0 in instance_name) or any(char1.isupper() for ch
     refer_to_docs_and_quit(error_msg)
 
 # Get the version of Terraform being used to build the pcluster-jumphost.
-# Abort if Terraform is not installed.
 
 terraform_version_string = "terraform -version | head -1 | awk '{print $2}'"
-
 TERRAFORM_VERSION = subprocess.check_output(terraform_version_string, shell=True, universal_newlines=True, stderr=subprocess.DEVNULL)
+
+# Abort if Terraform is not installed.
 
 if not TERRAFORM_VERSION:
     error_msg='Terraform is missing! Please visit: https://www.terraform.io/downloads'
@@ -94,11 +94,11 @@ else:
     p_val('Terraform: version = ' + TERRAFORM_VERSION, debug_mode)
 
 # Get the version of Ansible being used to build the pcluster-jumphost.
-# Abort if Ansible is not installed.
 
 ansible_version_string = "ansible --version | head -1 | awk '{print $2}' | tr -d '\n'"
-
 ANSIBLE_VERSION = subprocess.check_output(ansible_version_string, shell=True, universal_newlines=True, stderr=subprocess.DEVNULL)
+
+# Abort if Ansible is not installed.
 
 if not ANSIBLE_VERSION:
     error_msg='Ansible is missing! Please visit: https://bit.ly/2KHuyY5'
@@ -121,7 +121,6 @@ except OSError as e:
 # If an existing vars_file exists, abort to prevent potential duplications.
 
 if os.path.isfile(vars_file_path):
-    error_msg='Ansible is missing! Please visit: https://bit.ly/2KHuyY5'
     print('')
     print('  WARNING  '.center(80, '*'))
     print(('  Found an existing ' + vars_file_path + ' ').center(80,'-'))
@@ -137,8 +136,8 @@ else:
     if debug_mode == 'true':
         print_TextHeader(instance_name, 'Validating', 80)
     else:
-        print('')
         print('Performing parameter validation...')
+        print('')
     p_val('vars_file_path', debug_mode)
 
 # Set the state directory for this pcluster-jumphost.
@@ -580,21 +579,42 @@ print(cmd_string, file=open(instance_serial_number_file, "a"))
 
 subprocess.run(cmd_string, shell=True)
 
-# Create the new EC2 pcluster jumphost and security group with Terraform.
 # Abort if CTRL-C is typed within 5 seconds.
 
-ctrlC_Abort(5, 80, vars_file_path, instance_serial_number_file, instance_serial_number)
+ctrlC_Abort(5, 80, vars_file_path, instance_serial_number_file, instance_serial_number, instance_data_dir, region)
 print('Invoking Terraform to build ' + instance_name + '...')
 
 subprocess.run('terraform init -input=false', shell=True, cwd=instance_data_dir)
 subprocess.run('terraform plan -out terraform_environment', shell=True, cwd=instance_data_dir)
 subprocess.run('terraform apply \"terraform_environment\"', shell=True, cwd=instance_data_dir)
 
+# Generate the SNS message body.
+
+sns_message_body = '''\
+ParallelClusterMaker/JumphostMaker has spawned a new instance.
+
+InstanceName: {instance_name}
+DateStamp:    {sns_datestamp}
+TimeStamp:    {sns_timestamp}
+'''
+
+# Publish an SNS notification announcing creation of the jumphost.
+
+sns_instance_subject = '[ParallelClusterMaker/JumphostMaker] Pcluster Jumphost Instance Creation Notice'
+sns_client.publish(
+    TopicArn=sns_topic_arn,
+    Message=sns_message_body,
+    Subject=sns_instance_subject
+    )
+
 # Cleanup and exit.
 
 print('')
 print('Access the jumphost via SSH:')
 print('$ ./access_jumphost.py -N ' + instance_name)
+print('')
+print('Kill the jumphost:')
+print('$ ./kill_pcluster_jumphost.' + instance_name + '.sh')
 print('')
 print('Exiting...')
 sys.exit(0)

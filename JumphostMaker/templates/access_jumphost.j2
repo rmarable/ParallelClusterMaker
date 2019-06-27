@@ -2,7 +2,7 @@
 # Name:		access_jumphost.{{ instance_name }}.sh
 # Author:       Rodney Marable <rodney.marable@gmail.com>
 # Created On:   April 20, 2019
-# Last Changed: May 28, 2019
+# Last Changed: June 26, 2019
 # Deployed On:	{{ lookup('pipe','date \"+%B %-d, %Y\"') }}
 # Purpose:	Provide a quick mechanism for SSH-ing into pcluster-jumphosts
 ################################################################################
@@ -93,14 +93,14 @@ fi
 
 # Cleanup and exit.
 
-echo "-------------------------------------------------------------------------------------"
+echo "-------------------------------------------------------------------------------"
 echo "Reconnect to {{ instance_name }} by running one of the following:"
 echo ""
 echo "$ ./access_jumphost.py -N {{ instance_name }}"
 echo ""
-echo "or:"
+echo "Or:"
 echo ""
-echo "$ ssh -i $EC2_KEYPAIR_FILE $EC2_USER@$TargetIp"
+echo "$ ssh -i $EC2_KEYPAIR_FILE $EC2_USER@${INSTANCE_PUBLIC_IP[$selection]}
 for file in $IPLIST.* $IPLIST_COLS
 do
 	if [ -f $file ]

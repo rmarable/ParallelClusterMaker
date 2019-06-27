@@ -416,6 +416,20 @@ ParallelClusterMaker also supports hydration and dehyration of Lustre file syste
 
 https://docs.aws.amazon.com/fsx/latest/LustreGuide/fsx-data-repositories.html
 
+To enable this functionality, set values for the following parameters:
+```
+* --fsx_s3_import_bucket
+* --fsx_s3_import_path
+* --fsx_s3_export_bucket
+* --fsx_s3_export_path
+```
+
+The script will fail is the import bucket and path cannot be located or if an
+export bucket and path are defined and cannot be found.  The Lustre file system
+will hydrate to and from the import bucket if the export bucket is undefined.
+The script also supports using the same bucket with separate import and export
+paths.
+
 Please note that automatic Lustre dehydration at the time of the cluster's deletion is not supported.  This feature may be provided in a future release.
 
 The FSx chunk size, import and export paths, and bucket names can all be configured through ParallelClusterMaker switches.  In the example below, a cluster called "louievega" will hydrate its 7.2 TB Lustre file system from s3://s3DataImportBucket and dehydrate to s3://s3DataExportBucket, using a chunk size of 5 GB:

@@ -2,7 +2,7 @@
 # Name:		kill_pcluster_jumphost.{{ instance_name }}.sh
 # Author:	Rodney Marable <rodney.marable@gmail.com>
 # Created On:	April 20, 2019
-# Last Changed:	May 31, 2019
+# Last Changed:	June 26, 2019
 # Deployed On:	{{ lookup('pipe','date \"+%B %-d, %Y\"') }}
 # Purpose:	Destroy pcluster-jumphost {{ instance_name }}
 ###############################################################################
@@ -43,14 +43,13 @@ cd $SRC_TREE_DIR
 # Delete the ec2_keypair and PEM files associated with this instance family.
 
 aws ec2 delete-key-pair --key-name $EC2_KEYPAIR
+echo ""
 echo "Deleted EC2 keypair: $EC2_KEYPAIR"
-for file in $INSTANCE_DATA_DIR/$SSH_KEYPAIR_FILE $SRC_TREE_DIR/$SSH_KEYPAIR_FILE
-do
-	if [ -f $file ]
-	then
-		rm $file
-		echo "Deleted SSH keypair file: $file"
-	fi
+if [ -f $INSTANCE_DATA_DIR/$SSH_KEYPAIR_FILE ]
+then
+	rm $file
+	echo "Deleted SSH keypair file: $file"
+fi
 done
 
 {% if remove_pcluster_jumphost_data_dir == 'true' %}
@@ -59,7 +58,7 @@ done
 if [ -d $INSTANCE_DATA_DIR ]
 then
 	rm -rf $INSTANCE_DATA_DIR
-	echo "Deleted directory: $INSTANCE_DATA_DIR"
+	echo "Deleted state directory: $INSTANCE_DATA_DIR"
 fi
 {% endif %}
 
@@ -77,9 +76,10 @@ aws iam delete-role --role-name {{ jumphost_iam_instance_role }}
 echo "Deleted IAM EC2 instance profile: {{ jumphost_iam_instance_profile }}"
 echo "Deleted IAM role: {{ jumphost_iam_instance_role }}"
 
-# Remove config files and directories associated with {{ instance_name }}.
+# Remove all configuration files, state directories, and symlinks associated
+# with jumphost {{ instance_name }}.
 
-for file in {{ vars_file_path }} {{ instance_serial_number_file }}
+for file in {{ instance_serial_number_file }} {{ vars_file_path }}
 do
 	if [ -f $file ]
 	then
@@ -93,7 +93,7 @@ unlink kill-pcluster-jumphost.{{ instance_name }}.sh
 
 echo ""
 echo "###############################################################################"
-echo "Finished deleting EC2 jumphost: {{ instance_name }}"
+echo "## Finished deleting EC2 jumphost: {{ instance_name }}"
 echo "###############################################################################"
 echo ""
 echo "Exiting..."

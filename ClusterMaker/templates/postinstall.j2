@@ -2,7 +2,7 @@
 # Name:		postinstall.{{ cluster_name }}.sh
 # Author:	Rodney Marable <rodney.marable@gmail.com>
 # Created On:	April 20, 2019
-# Last Changed:	May 30, 2019
+# Last Changed:	June 26, 2019
 # Deployed On:	{{ lookup('pipe','date \"+%B %-d, %Y\"') }}
 # Purpose:	Perform postinstall tasks on cluster {{ cluster_name }}
 ################################################################################
@@ -178,6 +178,25 @@ ComputeFleet)
 	echo "Ready to finish joining the cluster!"
 	;;
 esac
+
+{% if enable_fsx_hydration == 'true' %}
+# Create scripts in /usr/local/bin that will:
+# - import s3://{{ fsx_s3_bucket }}/{{ fsx_s3_path }} from Lustre
+# - export s3://{{ fsx_s3_bucket }}/{{ fsx_s3_path }} to Lustre
+# - check the status of an export-S3-to-Lustre process
+
+sudo su -c "echo \"nohup find {{ fsx_root }} -type f -print0 | xargs -0 -n 1 sudo lfs hsm_restore &\" > /usr/local/bin/import-s3-to-lustre.sh"
+sudo su -c "echo \"nohup find {{ fsx_root }} -type f -print0 | xargs -0 -n 1 sudo lfs hsm_archive &\" > /usr/local/bin/export-lustre-to-s3.sh"
+sudo su -c "echo \"find {{ fsx_root }} -type f -print0 | xargs -0 -n 1 -P 8 sudo lfs hsm_action | grep "ARCHIVE" | wc -l\" > /usr/local/bin/check-lustre-export-progress.sh"
+
+# Make the scripts executable and change their ownership to root:root.
+
+for script in /usr/local/bin/import-s3-to-lustre.sh  /usr/local/bin/export-lustre-to-s3.sh /usr/local/bin/check-lustre-export-progress.sh
+do
+	sudo chmod 0755 $script
+	sudo chown root:root $script
+done
+{% endif %}
 
 # Create some local aliases for HPC operator convenience.  Prevent multiple
 # copies of each alias from proliferating in the ec2-user bash profile.

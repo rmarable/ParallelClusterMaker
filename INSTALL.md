@@ -40,12 +40,11 @@ $ git clone https://github.com/rmarable/ParallelClusterMaker.git
 
 https://www.terraform.io/downloads.html
 
-* Create and activate a virtual Python3 environment **on your local machine** with a suggested name of "pcluster-jumphost" to support the EC2 jumphost installation with either pyenv
-(recommended) or virtualenv.
+* Create and activate a virtual Python3 environment **on your local machine** with a suggested name of "pcluster-jumphost" to support the EC2 jumphost installation with either pyenv (recommended) or virtualenv.
 
 For more information on these virtulizers, please visit:
 
-pyenv: homehttps://github.com/pyenv/pyenv#installation
+pyenv: https://github.com/pyenv/pyenv#installation
 virtualenv: https://virtualenv.pypa.io/en/latest/installation/
 
 ```
