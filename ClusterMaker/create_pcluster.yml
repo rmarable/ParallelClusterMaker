@@ -2,7 +2,7 @@
 # Name:		create_pcluster.yml
 # Author:	Rodney Marable <rodney.marable@gmail.com>
 # Created On:	April 20, 2019
-# Last Changed:	May 30, 2019
+# Last Changed:	June 26, 2019
 # Purpose:	Ansible playbook to create new ParallelCluster stacks
 # Notes:        EFS and FSxL are handled by Parallelcluster
 ################################################################################
@@ -629,3 +629,15 @@
           - "    http://{{ MasterPublicIP.stdout }}/ganglia"
           - ""
       when: 'enable_ganglia == "true"'
+
+    - debug:
+         msg:
+          - ""
+          - "S3-Lustre import path: s3://{{ fsx_s3_import_bucket }}/{{ fsx_s3_import_path }}"
+          - "Lustre-S3 export path: s3://{{ fsx_s3_export_bucket }}/{{ fsx_s3_export_path }}"
+          - ""
+          - "Import S3 from Lustre:    /usr/local/bin/import-s3-to-lustre.sh"
+          - "Export Lustre to S3:      /usr/local/bin/export-lustre-to-s3.sh"
+          - "Check export job status:  /usr/local/bin/check-lustre-export-progress.sh"
+          -""
+      when: 'enable_fsx_hydration == "true"'
