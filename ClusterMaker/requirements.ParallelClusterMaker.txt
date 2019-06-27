@@ -21,6 +21,7 @@ idna
 Jinja2
 jmespath
 jq
+json
 kiwisolver
 MarkupSafe
 matplotlib

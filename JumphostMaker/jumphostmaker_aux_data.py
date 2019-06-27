@@ -2,7 +2,7 @@
 # Name:		jumphostmaker_aux_data.py
 # Author:	Rodney Marable <rodney.marable@gmail.com>
 # Created On:	April 16, 2019
-# Last Changed:	May 31, 2019
+# Last Changed:	June 25, 2019
 # Purpose:	Data structures and functions for make-pcluster-jumphost.py
 ################################################################################
 
@@ -30,9 +30,10 @@ def get_ami_info(base_os, region):
     ami_information = ec2client.describe_images(
         Owners=['137112412989'],
         Filters=[
-          {'Name': 'name', 'Values': ['amzn2-ami-hvm-2.0.20190508-x86_64-gp2']},
+          {'Name': 'name', 'Values': ['amzn2-ami-hvm-2.0.*']},
           {'Name': 'architecture', 'Values': ['x86_64']},
           {'Name': 'root-device-type', 'Values': ['ebs']},
+          {'Name': 'virtualization-type', 'Values': ['hvm']},
         ],
     )
     amis = sorted(ami_information['Images'],
@@ -94,18 +95,23 @@ def print_TextHeader(p, action, line_length):
 # Purpose: Print an abort header, capture CTRL-C when pressed, and remove any
 # orphaned state and config files created by the jumphost creation script.
 
-def ctrlC_Abort(sleep_time, line_length, vars_file_path, instance_serial_number_file, instance_serial_number):
+def ctrlC_Abort(sleep_time, line_length, vars_file_path, instance_serial_number_file, instance_serial_number, instance_data_dir, region):
     import boto3
     import os
     import sys
     import time
+    from botocore.exceptions import ClientError
+    ec2client = boto3.client('ec2')
     iam = boto3.client('iam')
+    ec2_keypair = instance_serial_number + '_' + region
+    secret_key_file = instance_data_dir + ec2_keypair + '.pem'
     jumphost_iam_instance_policy = 'jumphostmaker-policy-' + str(instance_serial_number)
     jumphost_iam_instance_profile = 'jumphostmaker-profile-' + str(instance_serial_number)
     jumphost_iam_instance_role = 'jumphostmaker-role-' + str(instance_serial_number)
     print('')
     print(''.center(line_length, '#'))
-    print('    Please type CTRL-C within 5 seconds to abort    '.center(line_length, '#'))
+    center_line = '    Please type CTRL-C within ' + str(sleep_time) + ' seconds to abort    '
+    print(center_line.center(line_length, '#'))
     print(''.center(line_length, '#'))
     print('')
     try:
@@ -127,15 +133,41 @@ def ctrlC_Abort(sleep_time, line_length, vars_file_path, instance_serial_number_
             print('No IAM role or policy exists for this jumphost.')
             print('')
         else:
-            iam.remove_role_from_instance_profile(InstanceProfileName=jumphost_iam_instance_profile, RoleName=jumphost_iam_instance_role)
-            iam.delete_instance_profile(InstanceProfileName=jumphost_iam_instance_profile)
-            iam.delete_role_policy(RoleName=jumphost_iam_instance_role, PolicyName=jumphost_iam_instance_policy)
-            iam.delete_role(RoleName=jumphost_iam_instance_role)
+            try:
+                iam.remove_role_from_instance_profile(InstanceProfileName=jumphost_iam_instance_profile, RoleName=jumphost_iam_instance_role)
+                print('Removed: ' + jumphost_iam_instance_profile + ' from ' + jumphost_iam_instance_role)
+            except ClientError as e:
+                if e.response['Error']['Code'] == 'NoSuchEntity':
+                    print('No IAM EC2 instance profile exists to remove from the jumphost instance role!')
+            try:
+                iam.delete_instance_profile(InstanceProfileName=jumphost_iam_instance_profile)
+                print('Deleted: ' + jumphost_iam_instance_profile)
+            except ClientError as e:
+                if e.response['Error']['Code'] == 'NoSuchEntity':
+                    print('No IAM EC2 instance profile exists for this jumphost!')
+            try:
+                iam.delete_role_policy(RoleName=jumphost_iam_instance_role, PolicyName=jumphost_iam_instance_policy)
+                print('Deleted: ' + jumphost_iam_instance_policy)
+            except ClientError as e:
+                if e.response['Error']['Code'] == 'NoSuchEntity':
+                    print('No IAM role policy exists for this jumphost!')
+            try:
+                iam.delete_role(RoleName=jumphost_iam_instance_role)
+                print('Deleted: ' + jumphost_iam_instance_role)
+            except ClientError as e:
+                if e.response['Error']['Code'] == 'NoSuchEntity':
+                    print('No IAM role exists for this instance!')
             print('')
-            print('Deleted: ' + jumphost_iam_instance_profile)
-            print('Deleted: ' + jumphost_iam_instance_policy)
-            print('Deleted: ' + jumphost_iam_instance_role)
-            print('')
+            try:
+                ec2_keypair_status = ec2client.describe_key_pairs(KeyNames=[ec2_keypair])
+                rm_ec2_keypair = ec2client.delete_key_pair(KeyName=ec2_keypair)
+                os.remove(secret_key_file)
+                print('Deleted EC2 keypair: ' + ec2_keypair)
+                print('Deleted EC2 secret key file: ' + secret_key_file)
+                print('')
+            except ClientError as e:
+                if e.response['Error']['Code'] == 'InvalidKeyPair.NotFound':
+                    print('No EC2 keypair exists for this jumphost.')
         print('Aborting...')
         sys.exit(1)
 
