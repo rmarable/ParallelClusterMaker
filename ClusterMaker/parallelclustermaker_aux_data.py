@@ -168,7 +168,6 @@ def print_TextHeader(cluster_name, header, line_length):
 
 def refer_to_docs_and_quit(error_msg):
     import sys
-    print('')
     print('*** ERROR ***')
     print(error_msg)
     print('')
@@ -216,3 +215,8 @@ ec2_instances_batch = ['optimal']
 # Full EC2 instance definitions
 
 ec2_instances_full_list = ec2_instances_general_purpose + ec2_instances_compute_optimized + ec2_instances_memory_optimized + ec2_instances_storage_optimized + ec2_instances_accelerated_computing + ec2_instances_batch
+
+# Elastic File Adapter (EFA)
+
+ec2_instances_efa = ['c5n.18xlarge', 'i3en.24xlarge', 'p3dn.24xlarge']
+base_os_efa = ['alinux', 'alinux2', 'centos7', 'ubuntu1604', 'ubuntu1804']

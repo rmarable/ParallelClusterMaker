@@ -25,8 +25,8 @@ You cannot create cases with AWS Technical Support or engage AWS support enginee
 
 ## About ParallelClusterMaker
 
-ParallelClusterMaker is an Open Source command line wrapper toolkit that makes it easier to automate the creation and destruction of AWS ParallelCluster stacks. It is designed to enable scientists and engineers to leverage HPC in the cloud without requiring deep infrastructure knowledge and is a useful teaching tool for those looking to deepen their knowledge about HPC in general.
-
+ParallelClusterMaker is an Open Source command line wrapper toolkit that makes it easier to automate the creation and destruction of AWS ParallelCluster stacks. It is designed to enable scientists and engineers to leverage HPC in the cloud without requiring deep infrastructure knowledge,is a useful teaching tool for those looking to deepen their knowledge about the AWS environment, and is also intended to reduce the administrative burden required for DevOps teams to support HPC stakeholders.
+ 
 You can find more information about AWS ParallelCluster by visiting:
 
 * Documentation: https://docs.aws.amazon.com/parallelcluster/latest/ug/
@@ -37,7 +37,8 @@ The ParallelClusterMaker Github repository contains two project subdirectories:
 * **JumphostMaker** creates a dedicated free tier EC2 instance that can be
 used to build and maintain AWS ParallelCluster stacks.
 
-JumphostMaker should be run locally on OSX or Linux.  Our recommended best practice is to use JumphostMaker to create a standalone EC2 instance (a.k.a. "jumphost") that can then be used to administer ParallelCluster stacks.
+JumphostMaker should ideally be run locally on OSX or Linux.  Our recommended
+best practice is to use JumphostMaker to create a standalone EC2 instance. 
 
 * **ClusterMaker** builds and destroys AWS ParallelCluster stacks.
 
@@ -45,6 +46,22 @@ ClusterMaker can also be run locally via OSX but the operator is strongly urged
 to use JumphostMaker to first stand up a standalone EC2 instance (a.k.a. "jumphost") which can then be used to administer ParallelCluster stacks.
 
 Please consult the EXAMPLES.md file for some suggestions on how to use ParallelClusterMaker's command line arguments to satisfy a variety of HPC use cases.
+
+## Note to DevOps Teams
+
+As noted above, ParallelClusterMaker is intended to reduce the administrative
+burden required for DevOps teams to support their HPC stakeholders; conversely,
+it can empower scientists, engineers, and analysts by letting them conduct HPC
+operations at massive scale without needing to involve their Devops team.
+
+* **JumphostMaker and ParallelClusterMaker do not make any changes to the existing networking environment already present in the operator's AWS account**.
+  * These tools do not create new VPCs, subnets, Internet or NAT gateways, routes, or Transit Gateways.
+  * They do not intentionally modify Route53 configurations, change default routes, or otherwise impact or deploy any infrastructure that is not explicitly documented or easily inferred by reviewing the code.
+
+* **JumphostMaker and ParallelClusterMaker create IAM roles, policies, and instance templates that are individualized for each jumphost and cluster stack.** 
+  * These JSON templates contain all required IAM permissions for both tools and can be easily customized to fit your use cases.
+  * They are located in the templates/ subdirectory.
+  * If you run into permissions problems building stacks, it's usually because of an IAM issue.  When speaking with your DevOps team, offer to provide them with this template which outlines all of the necessary permisisons to build a cluster or jumphost.
 
 ## ParallelClusterMaker Features
 
@@ -71,6 +88,8 @@ with a specific project identification tag.
 * Custom AMIs.
 
 * Adjustable EC2 autoscaling configuration.
+
+* Elastic Fabric Adapter (EFA) enablement for supported EC2 instance types.
 
 * Dynamic EC2 placement groups.
 
@@ -517,16 +536,48 @@ complex local application installations can be supported with this approach.
 EC2 placement groups can be enabled by setting `--placement_group=DYNAMIC`.
 ParallelCluster provides a mechanism for using an already-existing placement
 group, but this feature is not currently supported by ParallelClusterMaker.
+This may change in a subsequent release.
 
 ParallelClusterMaker will place the master and compute instances into the
 same placement group **if** the master and compute instance types are
-identical.  If not, only the compute instances will be placed.
+identical.  If not, only the compute instances will be included within the
+placement group.
 
 More information regarding EC2 placement groups can be found by visiting:
 
 http://docs.aws.amazon.com/AWSEC2/latest/UserGuide/placement-groups.html
 
 Per the AWS public documentation, please use this option with caution.
+
+## Elastic Fabric Adapter (EFA)
+
+Support for the new Elastic Fabric Adapter (EFA) capability can be enabled by setting `--enable_efa=true` and selecting a both a supported compute instance type (c5n.18xlarge, i3en.24xlarge, and p3dn.24xlarge) and operating system (Amazon Linux, CentOS 7, Ubuntu 16.04 LTS, and Ubuntu 18.04 LTS).
+
+EFA requires the compute instances to be spawned into an EC2 placement group.  ParallelClusterMaker will create a "dynamic" placement group and handle these configurations transparently.  The kill-pcluster script will also destroy the placement group when the cluster is terminated.
+
+Please refer to the AWS public documentation for more information about EFA and EC2 placement groups:
+
+https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/efa.html
+https://docs.aws.amazon.com/parallelcluster/latest/ug/efa.html
+https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/placement-groups.html
+
+If the operator attempts to enable EFA support with either a non-supported instance type or operating system, the script will fail:
+
+```
+$ ./make-pcluster.py -A us-east-1a -N dev01 -O rmarable -E rmarable@amazon.com --master_instance_type=c5.8xlarge --compute_instance_type=r5.metal --enable_efa=true
+
+Performing parameter validation...
+
+** ERROR **
+The selected compute instance type (r5.metal) does not support EFA!
+
+Please refer to the ParallelCluster documentation for more information:
+https://aws-parallelcluster.readthedocs.io/en/latest/index.html
+
+Aborting...
+```
+
+As noted earlier, ParallelClusterMaker does not currently support pre-existing placement groups.  This may be revisited in a future release.
 
 ## HPC Software Packages and Application Support
 
@@ -678,6 +729,35 @@ This means multiple users cannot share a jumphost to launch clusters, i.e.
 Shared jumphosts between multiple team members will be addressed in a future
 release.  For now, operators are advised to maintain a single jumphost per
 cluster_owner.
+
+# Troubleshooting
+
+ParallelClusterMaker and JumphostMaker will return errors that are clear and
+obvious where possible.  If you run into issues building jumphosts or cluster
+stacks, please try the following:
+
+* **Check IAM permissions.**  Ensure that you are allowed to invoke all of the
+IAM permissions outlined in these JSON policy documents:
+  * ClusterMaker/templates/ParallelClusterInstancePolicy.json_src
+  * JumphostMaker/templates/JumphostInstancePolicy.json_src
+
+If IAM is controlled by your organization's DevOps team, please provide them
+with these templates and request that you be allowed to assume a role that
+allows these permissions.  
+
+* **Spot Market issues.** If your cluster fails to build execute nodes due to
+an inability to acquire spot instances, you will see Ansible errors that look
+like this:
+
+Status: ComputeFleet - CREATE_IN_PROGRESS
+Status: parallelcluster-rmarable-rimshot - CREATE_FAILED
+Cluster creation failed.
+Failed events - AWS::CloudFormation::Stack parallelcluster-rmarable-rimshot
+The following resource(s) failed to create: [ComputeFleet].
+- AWS::AutoScaling::AutoScalingGroup ComputeFleet Received 0 SUCCESS signal(s) out of 1.  Unable to satisfy 100% MinSuccessfulInstancesPercent requirement
+
+Additional control of Spot market pricing will be provided in future releases.
+For now, it is suggested to retry the build or use ondemand instances.
 
 # Reporting Bugs & Requesting New Features
 

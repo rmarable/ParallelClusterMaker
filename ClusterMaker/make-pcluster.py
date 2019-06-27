@@ -29,9 +29,11 @@ from validate_email import validate_email
 # Import the list of supported EC2 instances and some external functions.
 # Source: parallelparallelclustermaker_aux_data.py
 
+from parallelclustermaker_aux_data import base_os_efa
 from parallelclustermaker_aux_data import base_os_instance_check
 from parallelclustermaker_aux_data import ctrlC_Abort
 from parallelclustermaker_aux_data import default_instance_types
+from parallelclustermaker_aux_data import ec2_instances_efa
 from parallelclustermaker_aux_data import ec2_instances_full_list
 from parallelclustermaker_aux_data import illegal_az_msg
 from parallelclustermaker_aux_data import is_number
@@ -72,6 +74,7 @@ parser.add_argument('--ebs_shared_volume_type', choices=['gp2', 'io1', 'st1'], h
 parser.add_argument('--efs_encryption', choices=['true', 'false'], help='enable EFS encryption in transit (default = false)', required=False, default='false')
 parser.add_argument('--efs_performance_mode', choices=['generalPurpose', 'maxIO'], help='select the EFS performance mode (default = generalPurpose)', required=False, default='generalPurpose')
 parser.add_argument('--enable_efs', choices=['true', 'false'], help='enable Elastic File System (EFS) support (default = false)', required=False, default='false')
+parser.add_argument('--enable_efa', choices=['true', 'false'], help='enable Elastic Fabric Adapter (EFA) support (default = false)', required=False, default='false')
 parser.add_argument('--enable_external_nfs', choices=['true', 'false'], help='enable support for external NFS file system mounts (default = false)', required=False, default='false')
 parser.add_argument('--enable_fsx', choices=['true', 'false'], help='enable Amazon FSx for Lustre support (default = false)', required=False, default='false')
 parser.add_argument('--enable_ganglia', choices=['true', 'false'], help='enable Ganglia on the master instance', required=False, default='false')
@@ -143,6 +146,7 @@ ebs_shared_volume_type = args.ebs_shared_volume_type
 efs_encryption = args.efs_encryption
 efs_performance_mode = args.efs_performance_mode
 enable_efs = args.enable_efs
+enable_efa = args.enable_efa
 enable_external_nfs = args.enable_external_nfs
 external_nfs_server = args.external_nfs_server
 enable_fsx = args.enable_fsx
@@ -175,22 +179,15 @@ perftest_custom_start_number = args.perftest_custom_start_number
 perftest_custom_step_size = args.perftest_custom_step_size
 perftest_custom_total_tests = args.perftest_custom_total_tests
 turbot_account = args.turbot_account
-#
-# NOTE: Deploying compute instances into private subnets is not currently
-# supported so for now, "--use_private_subnet" and "--compute_cidr_subnet"
-# are commented out.
-#
-#use_private_subnet = args.use_private_subnet
-#compute_cidr_subnet = args.compute_cidr_subnet
 
 # Print a header for cluster variable validation.
 
 if debug_mode == 'true':
     print_TextHeader(cluster_name, 'Validating cluster parameters', 80)
     print('')
-    print('Performing parameter validation...')
-    print('')
 else:
+    print('')
+    print('Performing parameter validation...')
     print('')
 
 # Raise an error if cluster_name or cluster_owner contain uppercase letters.
@@ -211,7 +208,7 @@ if not ANSIBLE_VERSION:
     refer_to_docs_and_quit(error_msg)
 
 # Redefine cluster_name here to ensure compatibility with the original script
-# by preserving "cluster_name" as "cluster_birth_name" for echoing command 
+# by preserving "cluster_name" as "cluster_birth_name" when echoing command 
 # line arguments: "-O rmarable -N dev01" ==> rmarable-dev01
 
 cluster_birth_name = cluster_name
@@ -325,6 +322,7 @@ except OSError as e:
         raise
 
 DEPLOYMENT_DATE = time.strftime("%B %-d, %Y")
+DEPLOYMENT_DATE_TAG = time.strftime("%-d-%B-%Y")
 Deployed_On = time.strftime("%B %-d, %Y")
 cluster_serial_datestamp = DateTime.utcnow().strftime('%S%M%H%d%m%Y')
 cluster_serial_number = cluster_name + '-' + cluster_serial_datestamp
@@ -402,6 +400,21 @@ else:
         error_msg='The ParallelClusterMaker performance tests do not (yet) work with AWS Batch!'
         refer_to_docs_and_quit(error_msg)
 
+# If Elastic Fabric Adapter (EFA) support is enabled, perform checks to ensure
+# the selected instance type and operating system are supported and a dynamic
+# EC2 placement group is defined in the ParallelCluster configuration.
+
+if enable_efa == 'true':
+    if compute_instance_type not in ec2_instances_efa:
+        error_msg = 'The selected compute instance type (' + compute_instance_type + ') does not support EFA!'
+        refer_to_docs_and_quit(error_msg)
+    if base_os not in base_os_efa:
+        error_msg = base_os + ' does not support Elastic Fabric Adapter (EFA)!'
+        refer_to_docs_and_quit(error_msg)
+    if placement_group == 'NONE':
+        placement_group = 'DYNAMIC'
+    p_val('placement_group', debug_mode)
+
 # Perform error checking on master_instance_type and compute_instance_type to
 # ensure the selections are valid EC2 instance types and are supported by the
 # selected operating system.
@@ -424,7 +437,6 @@ p_val('base_os', debug_mode)
 print('Selected base operating system: ' + base_os)
 print('Selected master instance type: ' + master_instance_type)
 print('Selected compute instance type: ' + compute_instance_type)
-print('')
 
 # Configure a boto3 resource and client for communication with S3.
 
@@ -826,6 +838,7 @@ cluster_parameters = {
     'ec2_user_home': ec2_user_home,
     'efs_encryption': efs_encryption,
     'efs_performance_mode': efs_performance_mode,
+    'enable_efa': enable_efa,
     'enable_efs': enable_efs,
     'enable_external_nfs': enable_external_nfs,
     'enable_fsx': enable_fsx,
@@ -872,7 +885,7 @@ cluster_parameters = {
     'vpc_name': vpc_name,
     'Deployed_On': Deployed_On,
     'ANSIBLE_VERSION': ANSIBLE_VERSION,
-    'DEPLOYMENT_DATE': DEPLOYMENT_DATE
+    'DEPLOYMENT_DATE': DEPLOYMENT_DATE_TAG
 }
 
 # Print the current values of all validated cluster_parameters to the console
@@ -881,6 +894,7 @@ cluster_parameters = {
 if debug_mode == 'true':
     print_TextHeader(cluster_name, 'Displaying cluster parameter values', 80)
     print('ANSIBLE_VERSION = ' + ANSIBLE_VERSION)
+    print('DEPLOYMENT_DATE = ' + DEPLOYMENT_DATE)
     print('aws_account_id = ' + aws_account_id)
     print('base_os = ' + base_os)
     print('cluster_birth_name = ' + cluster_birth_name)
@@ -908,6 +922,8 @@ if debug_mode == 'true':
     print('ec2_user_home = ' + ec2_user_home)
     print('ec2_iam_policy = ' + ec2_iam_policy)
     print('ec2_iam_role = ' + ec2_iam_role)
+    if enable_efa == 'true':
+        print('enable_efa = ' + enable_efa)
     if enable_external_nfs == 'true':
         print('enable_external_nfs = ' + enable_external_nfs)
         print('external_nfs_server = ' + external_nfs_server)
@@ -1016,9 +1032,13 @@ use_private_compute_subnet: {use_private_compute_subnet}
 private_compute_cidr_subnet: {private_compute_cidr_subnet}
 private_compute_subnet_id: {private_compute_subnet_id}
 
+# Elastic Fabric Adapter (EFA) paramters
+
+enable_efa: {enable_efa}
+
 # EC2 instance parameters
 
-ec2_keypair: "{{{{ cluster_serial_number }}}}_{{{{ region }}}}""
+ec2_keypair: "{{{{ cluster_serial_number }}}}_{{{{ region }}}}"
 ec2_user: {ec2_user}
 ec2_user_home: {ec2_user_home}
 ec2_user_src: "{{{{ ec2_user_home }}}}/src"
@@ -1400,9 +1420,9 @@ if debug_mode == 'true':
 # HPC operator.
 
 if enable_external_nfs == 'false':
-    ansible_build_cmd_string = 'ansible-playbook --extra-vars ' + '"' + 'cluster_name=' + cluster_name + ' cluster_birth_name=' + cluster_birth_name + ' cluster_serial_number=' + cluster_serial_number + ' enable_hpc_performance_tests=' + enable_hpc_performance_tests + ' enable_efs=' + enable_efs + ' enable_external_nfs=false' + ' enable_fsx=' + enable_fsx + ' enable_fsx_hydration=' + enable_fsx_hydration + ' debug_mode=' + debug_mode + ' ansible_python_interpreter=' + python3_path + '"' + ' create_pcluster.yml ' + ansible_verbosity
+    ansible_build_cmd_string = 'ansible-playbook --extra-vars ' + '"' + 'cluster_name=' + cluster_name + ' cluster_birth_name=' + cluster_birth_name + ' cluster_serial_number=' + cluster_serial_number + ' enable_hpc_performance_tests=' + enable_hpc_performance_tests + ' enable_efa=' + enable_efa + ' enable_efs=' + enable_efs + ' enable_external_nfs=false' + ' enable_fsx=' + enable_fsx + ' enable_fsx_hydration=' + enable_fsx_hydration + ' debug_mode=' + debug_mode + ' ansible_python_interpreter=' + python3_path + '"' + ' create_pcluster.yml ' + ansible_verbosity
 else:
-    ansible_build_cmd_string = 'ansible-playbook --extra-vars ' + '"' + 'cluster_name=' + cluster_name + ' cluster_birth_name=' + cluster_birth_name + ' cluster_serial_number=' + cluster_serial_number + ' enable_hpc_performance_tests=' + enable_hpc_performance_tests + ' enable_efs=' + enable_efs + ' enable_external_nfs=true' + ' external_nfs_server=' + external_nfs_server + ' enable_fsx=' + enable_fsx + ' enable_fsx_hydration=' + enable_fsx_hydration + ' debug_mode=' + debug_mode + ' ansible_python_interpreter=' + python3_path + '"' + ' create_pcluster.yml ' + ansible_verbosity
+    ansible_build_cmd_string = 'ansible-playbook --extra-vars ' + '"' + 'cluster_name=' + cluster_name + ' cluster_birth_name=' + cluster_birth_name + ' cluster_serial_number=' + cluster_serial_number + ' enable_hpc_performance_tests=' + enable_hpc_performance_tests + ' enable_efa=' + enable_efa + ' enable_efs=' + enable_efs + ' enable_external_nfs=true' + ' external_nfs_server=' + external_nfs_server + ' enable_fsx=' + enable_fsx + ' enable_fsx_hydration=' + enable_fsx_hydration + ' debug_mode=' + debug_mode + ' ansible_python_interpreter=' + python3_path + '"' + ' create_pcluster.yml ' + ansible_verbosity
 
 # Print the config file location and cluster build commands to the console.
 

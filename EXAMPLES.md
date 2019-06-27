@@ -157,3 +157,12 @@ Torque as the scheduler.
 ```
 $ ./make-pcluster.py -A ap-northeast-2b -E rodney.marable@gmail.com -O rmarable -N badbrains --scheduler=torque --initial_queue_size=5 maintain_initial_size=true --max_queue_size=50 --compute_instance_type=r5.xlarge --master_instance_type=t3.xlarge --enable_efs=true
 ```
+
+# Elastic Fabric Adapter Examples
+
+* Create a fixed single-node Grid Engine c5n.18xlarge cluster named "rimshot"
+in us-east-1a with an attached Elastic Fabric Adapter.
+
+```
+./make-pcluster.py -A us-east-1a -N rimshot -O rmarable -E rmarable@amazon.com --compute_instance_type=c5n.18xlarge --initial_queue_size=1 --maintain_initial_size=true --enable_efa=true --enable_hpc_performance_tests=true
+```
