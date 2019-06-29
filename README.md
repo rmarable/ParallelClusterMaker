@@ -25,7 +25,7 @@ You cannot create cases with AWS Technical Support or engage AWS support enginee
 
 ## About ParallelClusterMaker
 
-ParallelClusterMaker is an Open Source command line wrapper toolkit that makes it easier to automate the creation and destruction of AWS ParallelCluster stacks. It is designed to enable scientists and engineers to leverage HPC in the cloud without requiring deep infrastructure knowledge,is a useful teaching tool for those looking to deepen their knowledge about the AWS environment, and is also intended to reduce the administrative burden required for DevOps teams to support HPC stakeholders.
+ParallelClusterMaker is an Open Source command line wrapper toolkit that makes it easier to automate the creation and destruction of AWS ParallelCluster stacks. It is designed to enable scientists and engineers to leverage HPC in the cloud without requiring deep infrastructure knowledge, is a useful teaching tool for those looking to deepen their knowledge about the AWS environment, and is also intended to reduce the administrative burden required for DevOps teams to support HPC stakeholders.
  
 You can find more information about AWS ParallelCluster by visiting:
 
