@@ -59,7 +59,7 @@ parser.add_argument('--cluster_owner_email', '-E', help='email address of the cl
 
 parser.add_argument('--ansible_verbosity', help='Set the Ansible verbosity level (default = none)', required=False, default='')
 parser.add_argument('--base_os', choices=['alinux', 'centos6', 'centos7', 'ubuntu1404', 'ubuntu1604'], help='cluster base operating system (default = alinux a.k.a. Amazon Linux)', required=False, default='alinux')
-parser.add_argument('--cluster_lifetime', help='automatically terminate the cluster after this time period has elapsed in days:hours:minutes format (default = 30:0:0, i.e. one month)', required=False, default='30:0:0')
+parser.add_argument('--cluster_lifetime', help='automatically terminate the cluster after this time period has elapsed in days:hours:minutes format (default = 14:0:0, i.e. two weeks)', required=False, default='14:0:0')
 parser.add_argument('--cluster_owner_department', choices=['analytics', 'clinical', 'commercial', 'compbio', 'compchem', 'datasci', 'design', 'development', 'hpc', 'imaging', 'manufacturing', 'medical', 'modeling', 'operations', 'proteomics', 'robotics', 'qa', 'research', 'scicomp'], help='department of the cluster_owner (default = hpc)', required=False, default='hpc')
 parser.add_argument('--cluster_type', choices=['ondemand', 'spot'], help='build the cluster with ondemand or spot instances (default = spot)', required=False, default='spot')
 parser.add_argument('--compute_instance_type', help='compute EC2 instance type (default = c5.xlarge)', required=False, default='c5.xlarge')
