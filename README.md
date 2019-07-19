@@ -68,7 +68,7 @@ ParallelClusterMaker supports the following features through its command line in
 
 * User-configurable time-based cron-style cluster life cycle management that
 causes stacks to self-terminate when `--cluster_lifetime` has been exceeded.
-The default is 30 days.
+The default is 14 days.
 
 * Command line designation of dev, test, stage, and prod operating levels.
 
