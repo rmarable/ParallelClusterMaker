@@ -59,8 +59,7 @@ operations at massive scale without needing assistance from their Devops team.
   * They do not intentionally modify Route53 configurations, change default routes, or otherwise impact or deploy any infrastructure that is not explicitly documented or easily inferred by reviewing the code.
 
 * **JumphostMaker and ParallelClusterMaker create IAM roles, policies, and instance templates that are individualized for each jumphost and cluster stack.** 
-  * These JSON templates contain all required IAM permissions for both tools and can be easily customized to fit any HPC use case.
-  * They are located in the templates/ subdirectory.
+  * These JSON templates are located in the templates/ subdirectory and contain all required IAM permissions for both tools.  They can be easily customized to fit any HPC use case.
   * If you run into permissions problems building stacks, it's usually because of an IAM issue.  When speaking with your DevOps professionals, it is suggested that you share this template which outlines all of the necessary permisisons to build a cluster or jumphost and work with them to craft an appropriate solution for your environment.
 
 ## ParallelClusterMaker Features
