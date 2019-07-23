@@ -2,7 +2,7 @@
 # Name:		access_jumphost.{{ instance_name }}.sh
 # Author:       Rodney Marable <rodney.marable@gmail.com>
 # Created On:   April 20, 2019
-# Last Changed: June 26, 2019
+# Last Changed: July 23, 2019
 # Deployed On:	{{ lookup('pipe','date \"+%B %-d, %Y\"') }}
 # Purpose:	Provide a quick mechanism for SSH-ing into pcluster-jumphosts
 ################################################################################
@@ -30,7 +30,7 @@ for file in $EC2_KEYPAIR_FILE $INSTANCE_SERIAL_FILE $INSTANCE_VARS_FILE
 do
 	if [ ! -f $file ]
 	then
-		echo "*** Error ***"
+		echo "*** ERROR ***"
 		echo "Missing: $file"
 		echo "Aborting..."
 		exit 1
@@ -39,11 +39,12 @@ do
 	fi
 done
 
-# Get the public IP address and hostnam for this pcluster-jumphost.
+# Get the public IP address and hostname for this pcluster-jumphost.
 
 cd $INSTANCE_DATA_DIR
 INSTANCE_PUBLIC_IP=()
 INSTANCE_EC2_NAMES=()
+terraform refresh 2>&1>/dev/null
 terraform output | grep "_ip_address" | awk '{$1=""; $2=""; print $0}' | tr -d ',' | sed -e "s/^. //g" > $IPLIST.addrs
 terraform output | grep "_name_index" | awk '{$1=""; $2=""; print $0}' | tr -d ',' | sed -e "s/^. //g" > $IPLIST.names
 IPLIST_COLS=`cat $IPLIST.addrs | awk '{print NF; exit}'`
@@ -58,8 +59,10 @@ paste $IPLIST.addrs $IPLIST.names > $IPLIST.combined
 
 if [[ $IPLIST_COLS -eq 0 ]]
 then
-	echo "*** Error ***"
-	echo "EC2 pcluster-jumphost \"{{ instance_name }}\" doesn't seem to have any members!"
+	echo ""
+	echo "*** ERROR ***"
+	echo "No valid IP address for \"{{ instance_name }}\" was found."
+	echo "Please confirm the pcluster-jumphost instance is powered up!"
 	echo "Aborting..."
 	exit 1
 elif [[ $IPLIST_COLS -eq 1 ]]
@@ -100,7 +103,7 @@ echo "$ ./access_jumphost.py -N {{ instance_name }}"
 echo ""
 echo "Or:"
 echo ""
-echo "$ ssh -i $EC2_KEYPAIR_FILE $EC2_USER@${INSTANCE_PUBLIC_IP[$selection]}
+echo "$ ssh -i $EC2_KEYPAIR_FILE $EC2_USER@${INSTANCE_PUBLIC_IP[$selection]}"
 for file in $IPLIST.* $IPLIST_COLS
 do
 	if [ -f $file ]
