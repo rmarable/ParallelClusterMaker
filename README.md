@@ -42,8 +42,9 @@ best practice is to use JumphostMaker to create a standalone EC2 instance.
 
 * **ClusterMaker** builds and destroys AWS ParallelCluster stacks.
 
-ClusterMaker can also be run locally via OSX but the operator is strongly urged
-to use JumphostMaker to first stand up a standalone EC2 instance (a.k.a. "jumphost") which can then be used to administer ParallelCluster stacks.
+ClusterMaker can be run locally via OSX but the operator is strongly urged
+to use JumphostMaker to first stand up a standalone EC2 instance or a Docker
+container to build and administer ParallelCluster stacks.
 
 Please consult the EXAMPLES.md file for some suggestions on how to use ParallelClusterMaker's command line arguments to satisfy a variety of HPC use cases.
 
@@ -65,6 +66,9 @@ operations at massive scale without needing assistance from their Devops team.
 ## ParallelClusterMaker Features
 
 ParallelClusterMaker supports the following features through its command line interface:
+
+* Building new ParallelCluster stacks using a Docker container or a dedicated
+EC2 jumphost.
 
 * User-configurable time-based cron-style cluster life cycle management that
 causes stacks to self-terminate when `--cluster_lifetime` has been exceeded.

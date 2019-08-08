@@ -31,6 +31,20 @@ enable_fsx = false
 
 * When `enable_fsx=true`, the default size of a Lustre file system is 3600 GB.
 
+## Building a new ParallelCluster Stack Using a Docker Container
+
+Note - this assumes that Docker and all required prerequisites are already
+installed and the repository has been checked out:
+
+```
+$ cd ~/src/ParallelClusterMaker/Clustermaker
+$ docker build -t ec2instancemaker .
+$ docker run -it --entrypoint=/bin/bash ec2instancemaker:latest -i
+# pwd
+ /Ec2InstanceMaker
+ ./make-instance.py -h
+```
+
 ## Grid Engine Examples
 
 * Create a cluster named "falcon" in us-east-1b that uses shared EBS for storage and Grid Engine as the scheduler.  All other values are ParallelClusterMaker defaults:
