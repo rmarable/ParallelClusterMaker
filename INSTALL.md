@@ -9,12 +9,18 @@ Please refer to the LICENSE and DISCLAIMER.md documents included with this Open 
 ParallelClusterMaker is Open Source software that simplifies the automation
 of creating, deleting, and administering AWS ParallelCluster stacks.
 
-The recommended way to use ParallelClusterMaker is to stand up a dedicated
-EC2 jumphost using the code in ParallelClusterMaker/JumphostMaker, and from
-this dedicated jumphost, run the code in ParallelClusterMaker/ClusterMaker to
-construct, administer, and destroy ParallelCluster stacks.
+The recommended ways to use ParallelClusterMaker are as follows:
 
-Guidance is also provided for launching new ParallelCluster stacks using
+* Stand up a dedicated EC2 jumphost by using the source code found within
+ParallelClusterMaker/JumphostMaker.  From this dedicated jumphost, run the
+code in ParallelClusterMaker/ClusterMaker to build and destroy ParallelCluster
+stacks.
+
+* Use the dockerfile contained in ParallelClusterMaker/ClusterMaker to build
+an Amazon Linux Docker container.  From this Docker container, run the
+"make-cluster.py" script to instantiate new ParallelCluster stacks.
+
+* Guidance is also provided for launching new ParallelCluster stacks using
 the code in ParallelClusterMaker/ClusterMaker directly from OSX.  Please be 
 forewarned that this method requires installing Homebrew and may cause other
 unforeseen problems with your local environment.
@@ -76,6 +82,45 @@ $ cd ParallelClusterMaker/ClusterMaker
 
 * You are now ready to build ParallelCluster stacks.  Please consult README.md
 for more detailed information on leveraging the other scripts in this toolkit.
+
+## Building ParallelCluster Stacks Using a Docker Container
+
+New ParallelCluster stacks can be created by leveraging the dockerfile located
+in `ParallelClusterMaker/ClusterMaker/`.  Some users might prefer this method
+over using a "jumphost" for launching new HPC clusters.
+
+Install Docker by following the guidelines outlined here:
+
+https://docs.docker.com/install/
+
+Create $SRC_DIR (suggested: `~/src`).
+
+`$ mkdir -p $SRC_DIR`
+
+Clone the ParallelClusterMaker repository into $SRC_DIR.
+
+```
+$ cd $SRC_DIR
+$ git clone https://github.com/rmarable/ParallelClusterMaker
+$ cd ParallelClusterMaker
+```
+
+If needed, run `aws configure`.
+
+Edit `dockerfile` and either paste your AWS credentials where indicated or use
+environment variables as suggested in the AWS public documentation:
+
+https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-envvars.html
+
+Build the container, launch it interactively, and use this container to start
+building new HPC clusters:
+```
+$ docker build -t parallelclustermaker .
+$ docker run -it --entrypoint=/bin/bash parallelclustermaker:latest -i
+<nav># pwd
+/ParallelClusterMaker
+<nav># ./make-cluster.py -h
+```
 
 ## Creating an Installation Environment on OSX
 

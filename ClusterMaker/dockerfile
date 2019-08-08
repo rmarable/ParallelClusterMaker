@@ -1,0 +1,102 @@
+################################################################################
+# Name:		dockerfile
+# Author:	Rodney Marable <rodney.marable@gmail.com>
+# Created On:	August 7, 2019
+# Last Changed:	August 7, 2019
+# Purpose:	Run ParallelClusterMaker/ClusterMaker from an Amazon Linux
+#		Docker container
+################################################################################
+#
+# Usage:
+#
+# - Install Docker by visiting: https://docs.docker.com/install/.
+# - Clone the ParallelClusterMaker repository into $SRC_DIR.
+# - Build the container.
+# - Launch ParallelClusterMaker/ClusterMaker interactively.
+#
+#   $ mkdir -p $SRC_DIR
+#   $ cd $SRC_DIR
+#   $ git clone https://github.com/rmarable/ParallelClusterMaker.git
+#   $ cd $SRC_DIR/ParallelClusterMaker/ClusterMaker
+#   $ docker build -t parallelclustermaker
+#   $ docker run -it --entrypoint=/bin/bash clustermaker:latest -i
+#   # pwd
+#   /ParallelClusterMaker
+#   # ./make-cluster.py -h
+#
+################################################################################
+#
+# If needed, run "aws configure" on the container before spawning clusters.
+# Since the Docker container needs AWS credentials here, you must choose one
+# of the options below or make-instance.py WILL NOT work:
+# - Paste "aws_access_key_id" and "aws_secret_access_key" where indicated.
+# - Use environment variables per the guidance included in the AWS public 
+#   documentation (this is more secure and is the recommended method):
+#   https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-envvars.html
+#
+#ENV AWS_ACCESS_KEY_ID=[aws_access_key_id]
+#ENV AWS_SECRET_ACCESS_KEY=[aws_secret_access_key]
+
+################################################################################
+################      Do *NOT* change anything below this comment!    ##########
+################################################################################
+
+# Build the container from the official Amazon Linux Docker image.
+
+FROM amazonlinux:latest
+
+# Set the PATH and APP_HOME environment variables.
+
+ENV APP_HOME=/ParallelClusterMaker PATH=$APP_HOME:${PATH}
+
+# Create the ParallelClusterMaker source tree.
+
+RUN mkdir -p $APP_HOME
+WORKDIR $APP_HOME
+
+# Copy the locally installed ParallelClusterMaker/ClusterMaker repository to
+# the Docker container at /ParallelClusterMaker.
+
+COPY . $APP_HOME
+COPY templates $APP_HOME/templates
+
+# Install the required yum packages and Python libraries.
+
+RUN yum update -y
+RUN yum install -y \
+  atlas-devel \
+  autoconf \
+  automake \
+  g++ \
+  gcc \
+  gcc-gfortran \
+  git \
+  jq \
+  lapack64-devel \
+  libc-devel  \
+  libffi-devel \
+  libgfortran \
+  libtool \
+  linux-headers \
+  make \
+  openblas64-devel \
+  openssh \
+  openssl-devel \
+  python3 \
+  python3-devel \
+  python3-pip
+
+RUN pip3 install -r requirements.ParallelClusterMaker.txt
+
+# Set the default entrypoint.
+
+ENTRYPOINT ["make-pcluster.py"]
+
+# To use Bash interactively (which is recommended), uncomment ENTRYPOINT above
+# and build the container as follows:
+#
+# $ docker build -t parallelclustermaker .
+# $ docker run -it --entrypoint=/bin/bash parallelclustermaker:latest -i
+# # pwd
+# /ParallelClusterMaker
+# ./make-cluster.py -h
