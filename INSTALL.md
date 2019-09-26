@@ -122,7 +122,7 @@ $ docker run -it --entrypoint=/bin/bash parallelclustermaker:latest -i
 <nav># ./make-cluster.py -h
 ```
 
-## Creating an ParallelClusterMaker Installation Environment on OSX
+## Creating a ParallelClusterMaker Installation Environment on OSX
 
 Please be forewarned that this method is **not** recommended! It is more complicated, requires additional work, and may seriously damage your local OSX environment.
 
