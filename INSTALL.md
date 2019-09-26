@@ -9,21 +9,20 @@ Please refer to the LICENSE and DISCLAIMER.md documents included with this Open 
 ParallelClusterMaker is Open Source software that simplifies the automation
 of creating, deleting, and administering AWS ParallelCluster stacks.
 
-The recommended ways to use ParallelClusterMaker are as follows:
+There are three recommended ways to use ParallelClusterMaker:
 
-* Stand up a dedicated EC2 jumphost by using the source code found within
+1. Stand up a dedicated EC2 jumphost by using the source code found within
 ParallelClusterMaker/JumphostMaker.  From this dedicated jumphost, run the
 code in ParallelClusterMaker/ClusterMaker to build and destroy ParallelCluster
 stacks.
 
-* Use the dockerfile contained in ParallelClusterMaker/ClusterMaker to build
+1. Use the dockerfile contained in ParallelClusterMaker/ClusterMaker to build
 an Amazon Linux Docker container.  From this Docker container, run the
 "make-cluster.py" script to instantiate new ParallelCluster stacks.
 
-* Guidance is also provided for launching new ParallelCluster stacks using
-the code in ParallelClusterMaker/ClusterMaker directly from OSX.  Please be 
-forewarned that this method requires installing Homebrew and may cause other
-unforeseen problems with your local environment.
+1. Launch new cluster stacks directly from OSX.  Please be forewarned that
+this method requires installing Homebrew, a virtual Python environment, and
+other tools that may cause problems in your local environment.
 
 In theory, this toolkit can also be used on Windows machines, but this method
 has not been tested and will **not** be supported.
@@ -31,10 +30,9 @@ has not been tested and will **not** be supported.
 ## Create a Dedicated EC2 Jumphost
 
 The recommended way to leverage this code is to create a dedicated EC2 jumphost
-to launch ParallelCluster stacks.
+for launching new ParallelCluster stacks.
 
 * Create a 'src' subdirectory in your **local** home directory and clone the ParallelCluster Git repo to the aforementioned local environment:
-
 ```
 $ cd ~
 $ mkdir src
@@ -80,14 +78,16 @@ $ ./access_jumphost -N jumphost20190420
 $ cd ParallelClusterMaker/ClusterMaker
 ```
 
-* You are now ready to build ParallelCluster stacks.  Please consult README.md
-for more detailed information on leveraging the other scripts in this toolkit.
+* You are now ready to build new ParallelCluster stacks.  Please consult
+README.md for more detailed information on leveraging the other scripts in
+this toolkit.
 
 ## Building ParallelCluster Stacks Using a Docker Container
 
-New ParallelCluster stacks can be created by leveraging the dockerfile located
-in `ParallelClusterMaker/ClusterMaker/`.  Some users might prefer this method
-over using a "jumphost" for launching new HPC clusters.
+New ParallelCluster stacks can also be created by leveraging the dockerfile
+located in `ParallelClusterMaker/ClusterMaker/`.  Some users might prefer
+this method over using a "jumphost" or their OSX environment for deploying
+new HPC clusters.
 
 Install Docker by following the guidelines outlined here:
 
@@ -105,7 +105,7 @@ $ git clone https://github.com/rmarable/ParallelClusterMaker
 $ cd ParallelClusterMaker
 ```
 
-If needed, run `aws configure`.
+If needed, run `aws configure` **in your local environment.**
 
 Edit `dockerfile` and either paste your AWS credentials where indicated or use
 environment variables as suggested in the AWS public documentation:
@@ -122,7 +122,7 @@ $ docker run -it --entrypoint=/bin/bash parallelclustermaker:latest -i
 <nav># ./make-cluster.py -h
 ```
 
-## Creating an Installation Environment on OSX
+## Creating an ParallelClusterMaker Installation Environment on OSX
 
 Please be forewarned that this method is **not** recommended! It is more complicated, requires additional work, and may seriously damage your local OSX environment.
 
@@ -130,44 +130,31 @@ Please be forewarned that this method is **not** recommended! It is more complic
   -- Planet Patrol
 
 * Clone the ParallelClusterMaker toolkit into your local ~/src directory:
-
 ```
 $ mkdir ~/src
 $ cd ~/src
 $ git clone https://github.com/rmarable/ParallelClusterMaker.git
 ```
 
-* Install Homebrew (OSX users only):
-
+* Install Homebrew:
 ```
 $ /usr/bin/ruby -e "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/master/install)"
 ```
 
-* Use Homebrew to install some other critical applications (OSX users only):
-
-If you already have Homebrew installed, be **very** careful about updating
-already-existing packages.
+* Use Homebrew to install some other critical applications:
 
 ```
 $ brew install ansible autoconf automake gcc jq libtool make readline
 ```
 
-* Install Docker using the guidance provided here:
-
-https://docs.docker.com/docker-for-mac/install/
-
-* Install Python3 using the guidance provided here:
-
-https://realpython.com/installing-python/
-
-* Configure the AWS CLI according to the guidelines provided in the AWS public
-documentation:
+* If necessary, configure the AWS CLI according to the guidelines provided
+in the AWS public documentation:
 
 https://docs.aws.amazon.com/cli/latest/userguide/cli-chap-getting-started.html
 
 * Install and activate a virtual Python environment using virtualenv or pyenv.
 Please visit "https://docs.python-guide.org/dev/virtualenvs/" for more details
-on Python virtual envirionments, something everyone should be using.
+on Python virtual envirionments.
 
 pyenv is cleaner and preferred, but it doesn't provide a prompt that will
 display the current active Python version like virtualenv does without
@@ -176,22 +163,20 @@ here: https://github.com/pyenv/pyenv#installation
 
 Please be **very** careful or you may inadvertedly damage your local Python
 environment:
-
 ```
 $ brew install pyenv
 $ brew install pyenv-virtualenv
-$ pyenv version 3.7.2
+$ pyenv version 3.7.4
 $ pyenv virtualenv parallelclustermaker
 $ pyenv activate parallelclustermaker
 ```
 
 virtualenv should **not** be installed in the ParallelClusterMaker source
 folder to help keep the source tree clean and organized:
-
 ```
 $ pip install virtualenv
 $ virtualenv --version
-16.1.0
+16.7.5
 $ mkdir -p ~/src/parallelclustermaker
 $ virtualenv -p /usr/local/bin/python3.7 ~/src/parallelclustermaker
 $ export VIRTUALENVWRAPPER_PYTHON=/usr/local/bin/python3.7
@@ -200,7 +185,6 @@ $ source ~/src/parallelclustermaker/bin/activate
 
 * Install the required Python libraries into the Python virtual environment
 using the included requirements.txt files:
-
 ```
 $ cd ParallelClusterMaker/JumphostMaker
 $ pip install -r requirements.pcluster-jumphost.txt
@@ -210,7 +194,6 @@ $ cd ~
 ```
 
 * Install Node.js: http://tiny.amazon.com/i0txlrlo/docsawsamazsdkfv2devesett
-
 ```
 $ curl -o- https://raw.githubusercontent.com/creationix/nvm/v0.32.0/install.sh | bash
 $ export NVM_DIR="~/.nvm"
@@ -220,26 +203,31 @@ $ nvm install 10.15.3
 
 * Install the Serverless Toolkit following the guidelines provided here:
 https://serverless.com/framework/docs/providers/aws/guide/installation/
-
 ```
 $ npm install -g serverless
 ```
 
 * In the AWS Management Console, apply a formal name to the VPC(s) within any
 region you wish to deploy cluster stacks by navigating to:
-
 ```
 Console / VPC / Your VPCs
 ```
-Edit the Name field as desired.  For example, use "nova" for us-east-1, "cleveland" for us-east-2, "dublin" for eu-west-1, and so forth.
 
-* You are now ready to build ParallelCluster stacks.  Please consult README.md
-for more detailed information on leveraging the scripts in this toolkit.
+Edit the Name field as desired.  Some suggested examples:
+  * "nova" for us-east-1
+  * "cleveland" for us-east-2
+  * "dublin" for eu-west-1
+
+**Important note:** some environments may require assistance from their
+DevOps team to complete this step.**
+
+* You are now ready to build ParallelCluster stacks from your local OSX
+environment.  Please consult README.md for more detailed information on
+leveraging the scripts in this toolkit.
 
 ## About make-pcluster.py
 
 To view all available options for make-pcluster.py:
-
 ```
 $ cd ~/src/ParallelClusterMaker/ClusterMaker
 $ ./make-pcluster.py --help
@@ -251,7 +239,6 @@ $ ./make-pcluster.py --help
 c5.xlarge instances running Amazon Linux.  This command can be run from a
 jumphost or a properly configured OSX environment, substituting where needed
 to match your use case:
-
 ```
 $ cd ~/src/ParallelClusterMaker/ClusterMaker
 $ ./make-pcluster -N test01 -O rmarable -E rodney.marable@gmail.com -A us-east-1a --master_instance_type=c5.xlarge --compute_instance_type=c5.xlarge --max_queue_size=4 --base_os=alinux
@@ -259,7 +246,6 @@ $ ./make-pcluster -N test01 -O rmarable -E rodney.marable@gmail.com -A us-east-1
 
 * The build process will take about 30 minutes to complete.  Once the cluster
 becomes available, login to the head node via SSH:
-
 ```
 $ ./access_cluster.py --cluster_name="rmarable-test01" -A us-east-1a
 ```
@@ -268,20 +254,17 @@ $ ./access_cluster.py --cluster_name="rmarable-test01" -A us-east-1a
 scheduler.
 
 * To manually delete the cluster from your local environment:
-
 ```
 $ ./kill-pcluster.py -N test01 -O rmarable -A us-east-1a
 ```
 
 * When you are done working with the cluster, disable the virtual Python
 environment:
-
 ```
 $ pyenv deactivate
 ```
 
 If you are using virtualenv:
-
 ```
 $ deactivate
 ```

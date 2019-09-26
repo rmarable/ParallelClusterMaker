@@ -4,7 +4,7 @@ Here are some suggested ways that the ParallelClusterMaker toolkit can be used t
 
 ## ParallelClusterMaker Defaults
 
-The most inportant default options for ParallelClusterMaker are as follows:
+The most important default options for ParallelClusterMaker are as follows:
 
 ```
 base_os = alinux (Amazon Linux)

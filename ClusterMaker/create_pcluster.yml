@@ -2,9 +2,8 @@
 # Name:		create_pcluster.yml
 # Author:	Rodney Marable <rodney.marable@gmail.com>
 # Created On:	April 20, 2019
-# Last Changed:	June 27, 2019
+# Last Changed:	September 23, 2019
 # Purpose:	Ansible playbook to create new ParallelCluster stacks
-# Notes:        EFS and FSxL are handled by Parallelcluster
 ################################################################################
 
 ---
@@ -299,6 +298,7 @@
           - "Launch Timestamp:  {{ start_stack_creation_timer.stdout }}"
           - "Operating System:  {{ base_os }}"
           - "HPC Scheduler:     {{ scheduler }}" 
+          - "VPC Name:          {{ vpc_name }}"
           - "Availabilty Zone:  {{ az }}"
           - "EFA Enabled:       {{ enable_efa | bool | upper }}"
           - "EFS Enabled:       {{ enable_efs | bool | upper }}"
@@ -325,6 +325,7 @@
           - "Launch Timestamp:  {{ start_stack_creation_timer.stdout }}"
           - "Operating System:  {{ base_os }}"
           - "HPC Scheduler:     {{ scheduler }}" 
+          - "VPC Name:          {{ vpc_name }}"
           - "Availabilty Zone:  {{ az }}"
           - "EFA Enabled:       {{ enable_efa | bool | upper }}"
           - "EFS Enabled:       {{ enable_efs | bool | upper }}"
@@ -418,7 +419,7 @@
       register: stop_lambda_timer
 
     - name: Get the IP address of the master instance
-      shell: pcluster status --region {{ region }} {{ cluster_name }} | grep MasterPublicIP | awk '{print $2}'
+      shell: pcluster status --region {{ region }} -c {{ cluster_config_template }} {{ cluster_name }} | grep MasterPublicIP | awk '{print $2}'
       register: MasterPublicIP
 
     - name: Accept the SSH fingerprint of the master instance
@@ -594,13 +595,14 @@
           - "Finished the environment: {{ stop_overall_timer.stdout }}"
           - "Lifetime (days:hr:min):   {{ cluster_lifetime }}"
           - ""
-          - "Cluster Stack Name:    {{ cluster_name }}"
-          - "SerialDateStamp:       {{ cluster_serial_datestamp }}"
-          - "AWS Availability Zone: {{ az }}"
-          - "Master Instance Type:  {{ master_instance_type }}"
-          - "Compute Instance Type: {{ compute_instance_type }}"
-          - "Operating System:      {{ base_os }}"
-          - "HPC Scheduler Type:    {{ scheduler }}" 
+          - "Cluster Stack Name:         {{ cluster_name }}"
+          - "SerialDateStamp:            {{ cluster_serial_datestamp }}"
+          - "AWS Availability Zone:      {{ az }}"
+          - "Virtual Private Cloud Name: {{ vpc_name }}"
+          - "Master Instance Type:       {{ master_instance_type }}"
+          - "Compute Instance Type:      {{ compute_instance_type }}"
+          - "Operating System:           {{ base_os }}"
+          - "HPC Scheduler Type:         {{ scheduler }}" 
           - ""
           - "EFA Enabled:  {{ enable_efa | bool | upper }}"
           - "EFS Enabled:  {{ enable_efs | bool | upper }}"

@@ -2,7 +2,7 @@
 # Name:		delete_pcluster.yml
 # Author:	Rodney Marable <rodney.marable@gmail.com>
 # Created On:	February 20, 2019
-# Last Changed:	June 27, 2019
+# Last Changed:	September 20, 2019
 # Purpose:	Ansible playbook to delete ParallelCluster stacks
 ################################################################################
 
@@ -30,7 +30,7 @@
           - "Destroying: {{ cluster_name }} in {{ az }},"
           - "Start Time: {{ start_delete_timer.stdout }}"
           - ""
-          - "This process will take about 5 minutes to complete..."
+          - "This process will approximately 5 minutes to complete..."
           - "================================================================="
           - ""
 

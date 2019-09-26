@@ -4,7 +4,7 @@
 # Name:		make-pcluster.py
 # Author:	Rodney Marable <rodney.marable@gmail.com>
 # Created On:	April 20, 2019
-# Last Changed:	June 26, 2019
+# Last Changed:	September 22, 2019
 # Purpose:	Python3 wrapper for customizing ParallelCluster stacks
 ################################################################################
 
@@ -106,10 +106,14 @@ parser.add_argument('--scaledown_idletime', help='amount of time in minutes with
 parser.add_argument('--scheduler', '-S', choices=['sge', 'torque', 'slurm', 'awsbatch'], help='cluster scheduler (default = sge)', required=False, default='sge')
 parser.add_argument('--sge_pe_type', choices=['make', 'mpi', 'smp'], help='select a Grid Engine parallel environment type (default = smp)', required=False, default='smp')
 parser.add_argument('--turbot_account', '-T', help='Turbot account ID (default = abd).  Set to "disabled" in non-Turbot environments.', required=False, default='disabled')
+parser.add_argument('--vpc_name', help='Name of the VPC (default = vpc_default)', required=False, default='vpc_default')
 
-# Ddeploying compute instances into private subnets is not (yet) supported.
+# Deploying compute instances into private subnets is not (yet) supported.
 # Set --use_private_compute_subnet" and "--private_compute_cidr_subnet" to
 # "false" and explicitly disable these parser options.
+#
+# For now, leave this code commented out and the relevant parameters associated
+# with this feature set to 'false.'
 #
 #parser.add_argument('--use_private_compute_subnet', help='deploy the compute nodes into a nonroutable private network - NOT TESTED (default = false)', required=False, default='false')
 #parser.add_argument('--private_compute_cidr_subnet', help='designate a separate CIDR subnet for compute instances - NOT TESTED (default = false)', required=False, default='false')
@@ -179,6 +183,7 @@ perftest_custom_start_number = args.perftest_custom_start_number
 perftest_custom_step_size = args.perftest_custom_step_size
 perftest_custom_total_tests = args.perftest_custom_total_tests
 turbot_account = args.turbot_account
+vpc_name = args.vpc_name
 
 # Print a header for cluster variable validation.
 
@@ -228,25 +233,36 @@ else:
     p_val('region', debug_mode)
     p_val('az', debug_mode)
 
-# Parse the subnet_id, vpc_id, and vpc_name from the selected AWS Region and
-# Availability Zone.
+# Determine the vpc_id of the destination VPC based on the provided vpc_name
+# and the the selected AWS Region and Availability Zone.
 
-subnet_information = ec2client.describe_subnets(
-    Filters=[ { 'Name': 'availabilityZone', 'Values': [ az, ] }, ],
-)
-vpc_information = ec2client.describe_vpcs()
+if vpc_name == 'vpc_default':
+    vpc_information = ec2client.describe_vpcs(Filters=[{'Name': 'isDefault', 'Values': ['true']}])
+else:
+    vpc_information = ec2client.describe_vpcs(Filters=[{'Name': 'tag:Name', 'Values': [ vpc_name ]}])
 
+for vpc in vpc_information["Vpcs"]:
+    vpc_id = vpc["VpcId"]
+
+# Parse the subnet_id from the destination vpc_id.
+# More sophisticated subnet selection logic may be added in a future release.
+# Abort if a valid Name tag for this VPC does not exist or if the selected
+# Availability Zone does not have a valid subnet available.
+
+try:
+    subnet_information = ec2client.describe_subnets(
+        Filters=[ {'Name': 'availabilityZone', 'Values': [ az, ]}, {'Name': 'vpc-id', 'Values': [ vpc_id, ]} ],
+    )
+except NameError:
+    error_msg = '"' + vpc_name + '" is an undefined VPC!'
+    refer_to_docs_and_quit(error_msg)
+p_val('vpc_name', debug_mode)
 try:
     subnet_id = subnet_information['Subnets'][0]['SubnetId']
 except IndexError:
     error_msg='AvailabilityZone ' + az + ' does not contain any valid subnets!'
     refer_to_docs_and_quit(error_msg)
 p_val('subnet_id', debug_mode)
-for vpc in vpc_information["Vpcs"]:
-    vpc_id = vpc["VpcId"]
-    p_val('vpc_id', debug_mode)
-    vpc_name = vpc_information['Vpcs'][0]['Tags'][0]['Value']
-    p_val('vpc_name', debug_mode)
 
 # Parse the AWS Account ID.
 
@@ -1420,9 +1436,9 @@ if debug_mode == 'true':
 # HPC operator.
 
 if enable_external_nfs == 'false':
-    ansible_build_cmd_string = 'ansible-playbook --extra-vars ' + '"' + 'cluster_name=' + cluster_name + ' cluster_birth_name=' + cluster_birth_name + ' cluster_serial_number=' + cluster_serial_number + ' enable_hpc_performance_tests=' + enable_hpc_performance_tests + ' enable_efa=' + enable_efa + ' enable_efs=' + enable_efs + ' enable_external_nfs=false' + ' enable_fsx=' + enable_fsx + ' enable_fsx_hydration=' + enable_fsx_hydration + ' debug_mode=' + debug_mode + ' ansible_python_interpreter=' + python3_path + '"' + ' create_pcluster.yml ' + ansible_verbosity
+    ansible_build_cmd_string = 'ansible-playbook --extra-vars ' + '"' + 'cluster_name=' + cluster_name + ' cluster_birth_name=' + cluster_birth_name + ' cluster_serial_number=' + cluster_serial_number + ' enable_hpc_performance_tests=' + enable_hpc_performance_tests + ' enable_efa=' + enable_efa + ' enable_efs=' + enable_efs + ' enable_external_nfs=false' + ' enable_fsx=' + enable_fsx + ' enable_fsx_hydration=' + enable_fsx_hydration + ' vpc_name=' + vpc_name + ' debug_mode=' + debug_mode + ' ansible_python_interpreter=' + python3_path + '"' + ' create_pcluster.yml ' + ansible_verbosity
 else:
-    ansible_build_cmd_string = 'ansible-playbook --extra-vars ' + '"' + 'cluster_name=' + cluster_name + ' cluster_birth_name=' + cluster_birth_name + ' cluster_serial_number=' + cluster_serial_number + ' enable_hpc_performance_tests=' + enable_hpc_performance_tests + ' enable_efa=' + enable_efa + ' enable_efs=' + enable_efs + ' enable_external_nfs=true' + ' external_nfs_server=' + external_nfs_server + ' enable_fsx=' + enable_fsx + ' enable_fsx_hydration=' + enable_fsx_hydration + ' debug_mode=' + debug_mode + ' ansible_python_interpreter=' + python3_path + '"' + ' create_pcluster.yml ' + ansible_verbosity
+    ansible_build_cmd_string = 'ansible-playbook --extra-vars ' + '"' + 'cluster_name=' + cluster_name + ' cluster_birth_name=' + cluster_birth_name + ' cluster_serial_number=' + cluster_serial_number + ' enable_hpc_performance_tests=' + enable_hpc_performance_tests + ' enable_efa=' + enable_efa + ' enable_efs=' + enable_efs + ' enable_external_nfs=true' + ' external_nfs_server=' + external_nfs_server + ' enable_fsx=' + enable_fsx + ' enable_fsx_hydration=' + enable_fsx_hydration + ' vpc_name=' + vpc_name + ' debug_mode=' + debug_mode + ' ansible_python_interpreter=' + python3_path + '"' + ' create_pcluster.yml ' + ansible_verbosity
 
 # Print the config file location and cluster build commands to the console.
 

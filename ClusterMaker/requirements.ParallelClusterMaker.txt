@@ -4,6 +4,7 @@ asn1crypto
 aws-parallelcluster
 awscli
 bcrypt
+boto
 boto3
 botocore
 certifi
