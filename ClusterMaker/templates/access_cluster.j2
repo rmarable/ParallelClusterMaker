@@ -8,7 +8,7 @@
 # Name:         access_cluster.{{ cluster_name }}.py
 # Author:       Rodney Marable <rodney.marable@gmail.com>
 # Created On:   April 20, 2019
-# Last Changed: April 29, 2019
+# Last Changed: September 23, 2019
 # Deployed On:  {{ lookup('pipe','date \"+%B %-d, %Y\"') }}
 # Purpose:	Quick mechanism for SSH-ing into pcluster head nodes
 # Usage:	$ ./access_cluster.py --help
@@ -27,7 +27,7 @@ prod_level = '{{ prod_level }}'
 # Get the public IP address of the master instance.
 # If found, make an SSH connection to the master instance.
 
-cmd_string = 'pcluster status --region {{ region }} {{ cluster_name }} | grep MasterPublicIP | awk \'{print $2}\''
+cmd_string = 'pcluster status --region {{ region }} -c {{ cluster_config_template }} {{ cluster_name }} | grep MasterPublicIP | awk \'{print $2}\''
 
 with open(os.devnull, 'w') as devnull:
     master_public_ip = subprocess.getoutput(cmd_string)

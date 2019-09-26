@@ -37,29 +37,27 @@ The ParallelClusterMaker Github repository contains two project subdirectories:
 * **JumphostMaker** creates a dedicated free tier EC2 instance that can be
 used to build and maintain AWS ParallelCluster stacks.
 
-JumphostMaker should ideally be run locally on OSX or Linux.  Our recommended
-best practice is to use JumphostMaker to create a standalone EC2 instance. 
+Our recommended best practice is to use JumphostMaker to create a standalone EC2
+instance for launching new stacks with ClusterMaker.  
 
 * **ClusterMaker** builds and destroys AWS ParallelCluster stacks.
 
-ClusterMaker can be run locally via OSX but the operator is strongly urged
-to use JumphostMaker to first stand up a standalone EC2 instance or a Docker
-container to build and administer ParallelCluster stacks.
+ClusterMaker can be run from a local OSX or Linux environment ut the operator is strongly urged to use JumphostMaker to first stand up a standalone EC2 instance or to use a Docker container for building and administering ParallelCluster environments.
 
 Please consult the EXAMPLES.md file for some suggestions on how to use ParallelClusterMaker's command line arguments to satisfy a variety of HPC use cases.
 
 ## Note to DevOps Teams
 
 As noted above, ParallelClusterMaker is intended to reduce the administrative
-burden required for DevOps teams to support their HPC stakeholders; conversely,
-it can empower scientists, engineers, and analysts by letting them conduct HPC
-operations at massive scale without needing assistance from their Devops team.
+burden required for DevOps teams to support HPC stakeholders.  This empowers
+scientists, engineers, and analysts by letting them conduct HPC operations at
+massive scale without needing assistance from their Devops team.
 
 * **JumphostMaker and ParallelClusterMaker do not make any changes to the existing networking environment already present in the operator's AWS account**.
   * These tools do not create new VPCs, subnets, Internet or NAT gateways, routes, or Transit Gateways.
-  * They do not intentionally modify Route53 configurations, change default routes, or otherwise impact or deploy any infrastructure that is not explicitly documented or easily inferred by reviewing the code.
+  * They do not modify Route53 configurations, change default routes, or otherwise impact or deploy any infrastructure that is not explicitly documented or easily inferred from a review of the source code.
 
-* **JumphostMaker and ParallelClusterMaker create IAM roles, policies, and instance templates that are individualized for each jumphost and cluster stack.** 
+* **JumphostMaker and ParallelClusterMaker do create IAM roles, policies, and instance templates that are individualized for each jumphost and cluster stack.** 
   * These JSON templates are located in the templates/ subdirectory and contain all required IAM permissions for both tools.  They can be easily customized to fit any HPC use case.
   * If you run into permissions problems building stacks, it's usually because of an IAM issue.  When speaking with your DevOps professionals, it is suggested that you share this template which outlines all of the necessary permisisons to build a cluster or jumphost and work with them to craft an appropriate solution for your environment.
 
@@ -87,6 +85,8 @@ The default is 14 days.
 * Identification of the cluster's owner, email address, and department using
 an easily extendable tagging framework.  The cluster can also be associated
 with a specific project identification tag.
+
+* Deployment into any VPC with valid subnets and a Name tag.
 
 * Custom AMIs.
 
@@ -209,8 +209,8 @@ virtual Python environment is available.
 
 * Install the Serverless Toolkit and its dependencies.
 
-* In the AWS Management Console, apply a formal name to the VPC(s) within any
-region you wish to deploy cluster stacks.
+* Apply a name Tag to the VPC(s) within any region you wish to deploy cluster
+stacks using the Management Console or the AWS CLI.
 
 * cd into the ParallelClusterMaker/ClusterMaker directory and start building
 new ParallelCluster stacks.  Please see below for additional guidance.
