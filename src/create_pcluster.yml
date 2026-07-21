@@ -109,6 +109,23 @@
       no_log: true
       register: ec2_private_key
 
+    - name: Check whether the local private key file already exists
+      stat:
+        path: "{{ ssh_keypair }}"
+      register: local_pem_stat
+
+    - name: Abort if keypair exists in AWS but local key file is missing
+      fail:
+        msg:
+          - "ERROR: EC2 keypair '{{ ec2_keypair }}' already exists in AWS but the"
+          - "local private key file '{{ ssh_keypair }}' is absent."
+          - "AWS never returns key material for an existing keypair."
+          - "Delete the keypair from EC2 and re-run, or restore the .pem file:"
+          - "  aws ec2 delete-key-pair --key-name {{ ec2_keypair }} --region {{ region }}"
+      when:
+        - not ec2_private_key.changed
+        - not local_pem_stat.stat.exists
+
     - name: Save the private key
       copy:
         content: "{{ ec2_private_key.key.private_key }}"
@@ -243,6 +260,11 @@
           with_fileglob:
             - "{{ performance_rootdir }}/README*.*"
 
+    - name: Start the stack creation timer
+      command: date +%Y-%m-%d\ \@\ %H:%M:%S
+      changed_when: false
+      register: start_stack_creation_timer
+
     - name: Print cluster launch summary
       debug:
         msg:
@@ -266,11 +288,6 @@
           - "Stack build takes 30-45 minutes. Monitor progress with:"
           - "  pcluster describe-cluster --cluster-name {{ cluster_name }} --region {{ region }}"
           - ""
-
-    - name: Start the stack creation timer
-      command: date +%Y-%m-%d\ \@\ %H:%M:%S
-      changed_when: false
-      register: start_stack_creation_timer
 
     - name: Launch the new ParallelCluster v3 stack
       command: >
@@ -481,7 +498,7 @@
       community.aws.sns:
         msg: "{{ lookup('file', sns_build_summary_report_dest) }}"
         subject: "Cluster Deployment Update: {{ cluster_name }}"
-        topic: sns_alerts_{{ cluster_name }}
+        topic: "sns_alerts_{{ cluster_name }}"
         region: "{{ region }}"
       delegate_to: localhost
 

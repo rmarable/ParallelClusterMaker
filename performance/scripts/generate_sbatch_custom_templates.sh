@@ -30,11 +30,12 @@ _int_check "$TOTAL_TESTS"          TOTAL_TESTS
 
 # Generate the custom sbatch scripts.
 
+# shellcheck disable=SC2043
 for SBATCH_TEMPLATE_INPUT in Axb_random
 do
-	FINAL=$(( $STARTING_TEST_NUMBER + ($TOTAL_TESTS - 1) * $STEP_SIZE ))
+	FINAL=$(( STARTING_TEST_NUMBER + (TOTAL_TESTS - 1) * STEP_SIZE ))
 	JOBCOUNT=$STARTING_TEST_NUMBER
-	while [ $JOBCOUNT -le $FINAL ]
+	while [ "$JOBCOUNT" -le "$FINAL" ]
 	do
 		SBATCH_TEMPLATE_OUTPUT="sbatch-${SBATCH_TEMPLATE_INPUT}.$JOBCOUNT.sh.j2"
 		if [ ! -f "$PERFORMANCE_TEMPLATE_DIR/$SBATCH_TEMPLATE_OUTPUT" ]
@@ -46,7 +47,7 @@ do
 		fi
 		sed -e "s/JOBCOUNT/$JOBCOUNT/g" "$PERFORMANCE_TEMPLATE_DIR/sbatch_${SBATCH_TEMPLATE_INPUT}_template.j2" > "$PERF_DIR/sbatch-${SBATCH_TEMPLATE_INPUT}.${JOBCOUNT}.sh"
 		chmod +x "$PERF_DIR/sbatch-${SBATCH_TEMPLATE_INPUT}.${JOBCOUNT}.sh"
-		JOBCOUNT=$(( $JOBCOUNT + $STEP_SIZE ))
+		JOBCOUNT=$(( JOBCOUNT + STEP_SIZE ))
 	done
 done
 

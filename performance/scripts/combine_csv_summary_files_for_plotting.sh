@@ -18,10 +18,6 @@ then
 fi
 CLUSTER_NAME=$1
 
-# Set PYTHON3.
-
-PYTHON3=python3
-
 # Create a TIMESTAMP and set up some critical file and directory paths.
 # Combine all available CSV files from previous tests.
 
@@ -44,7 +40,7 @@ if [[ ! -d "$SUMMARY_DIR" ]]; then
 fi
 cd "$SUMMARY_DIR"
 shopt -s nullglob
-for csvfile in summary.$CLUSTER_NAME.*.csv
+for csvfile in "summary.$CLUSTER_NAME."*.csv
 do
 	tail -n+2 "$csvfile" >> "$SCRATCH_FILE"
 done

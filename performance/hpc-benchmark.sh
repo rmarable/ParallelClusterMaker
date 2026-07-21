@@ -167,9 +167,8 @@ cmd_install() {
     fi
 
     mkdir -p "$prefix"
-    local tmpdir
-    tmpdir=$(mktemp -d /tmp/hpc-benchmark-build.XXXXXX)
-    trap 'rm -rf "$tmpdir"' EXIT
+    _build_tmpdir=$(mktemp -d /tmp/hpc-benchmark-build.XXXXXX)
+    trap 'rm -rf "$_build_tmpdir"' EXIT
 
     IFS=',' read -ra TOOL_LIST <<< "$tools"
     for tool in "${TOOL_LIST[@]}"; do
@@ -180,12 +179,12 @@ cmd_install() {
         # ------------------------------------------------------------------ #
         stream)
             _info "Building STREAM..."
-            _fetch "$tmpdir/stream.c" "$STREAM_URL"
+            _fetch "$_build_tmpdir/stream.c" "$STREAM_URL"
             # STREAM_ARRAY_SIZE: at least 4x L3 cache; 80M elements ~= 600 MB
             # NTIMES=20 gives stable median; -O3 -march=native for real bandwidth
             gcc -O3 -march=native -fopenmp \
                 -DSTREAM_ARRAY_SIZE=80000000 -DNTIMES=20 \
-                -o "$prefix/stream" "$tmpdir/stream.c"
+                -o "$prefix/stream" "$_build_tmpdir/stream.c"
             _info "STREAM installed at $prefix/stream"
             ;;
 
@@ -195,9 +194,9 @@ cmd_install() {
         osu)
             _detect_mpi >/dev/null
             _info "Building OSU Micro-Benchmarks ${OSU_VERSION}..."
-            _fetch "$tmpdir/osu.tar.gz" "$OSU_URL"
-            tar -xzf "$tmpdir/osu.tar.gz" -C "$tmpdir"
-            local osu_src="$tmpdir/osu-micro-benchmarks-${OSU_VERSION}"
+            _fetch "$_build_tmpdir/osu.tar.gz" "$OSU_URL"
+            tar -xzf "$_build_tmpdir/osu.tar.gz" -C "$_build_tmpdir"
+            local osu_src="$_build_tmpdir/osu-micro-benchmarks-${OSU_VERSION}"
             pushd "$osu_src" >/dev/null
             ./configure --prefix="$prefix/osu" CC=mpicc CXX=mpicxx \
                 --enable-cuda=no >/dev/null 2>&1
@@ -212,9 +211,9 @@ cmd_install() {
         ior)
             _detect_mpi >/dev/null
             _info "Building IOR ${IOR_VERSION}..."
-            _fetch "$tmpdir/ior.tar.gz" "$IOR_URL"
-            tar -xzf "$tmpdir/ior.tar.gz" -C "$tmpdir"
-            local ior_src="$tmpdir/ior-${IOR_VERSION}"
+            _fetch "$_build_tmpdir/ior.tar.gz" "$IOR_URL"
+            tar -xzf "$_build_tmpdir/ior.tar.gz" -C "$_build_tmpdir"
+            local ior_src="$_build_tmpdir/ior-${IOR_VERSION}"
             pushd "$ior_src" >/dev/null
             ./configure --prefix="$prefix/ior" CC=mpicc >/dev/null 2>&1
             make -j"$(nproc)" install >/dev/null 2>&1
@@ -228,10 +227,10 @@ cmd_install() {
         hpcg)
             _detect_mpi >/dev/null
             _info "Building HPCG ${HPCG_VERSION}..."
-            _fetch "$tmpdir/hpcg.tar.gz" "$HPCG_URL"
-            tar -xzf "$tmpdir/hpcg.tar.gz" -C "$tmpdir"
+            _fetch "$_build_tmpdir/hpcg.tar.gz" "$HPCG_URL"
+            tar -xzf "$_build_tmpdir/hpcg.tar.gz" -C "$_build_tmpdir"
             local hpcg_src
-            hpcg_src=$(find "$tmpdir" -maxdepth 1 -type d -name 'hpcg-*' | sort | head -1)
+            hpcg_src=$(find "$_build_tmpdir" -maxdepth 1 -type d -name 'hpcg-*' | sort | head -1)
             [[ -d "$hpcg_src" ]] || _die "HPCG source directory not found after extract"
             mkdir -p "$hpcg_src/build"
             pushd "$hpcg_src/build" >/dev/null

@@ -52,7 +52,7 @@ Scheduling:
         # multiple subnets exist per AZ. Always specify subnet IDs explicitly
         # for production clusters.
         SubnetIds:
-{% for sid in compute_subnet_ids.split(',') %}
+{% for sid in (compute_subnet_ids if compute_subnet_ids is iterable and compute_subnet_ids is not string else compute_subnet_ids.split(',')) %}
           - {{ sid }}
 {% endfor %}
 {% if placement_group != 'NONE' %}

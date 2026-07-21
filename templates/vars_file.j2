@@ -87,8 +87,6 @@ sns_destruction_summary_report_dest: "{{ cluster_data_dir }}/sns_destruction_sum
 ANSIBLE_VERSION: "{{ ANSIBLE_VERSION }}"
 ssh_keypair: "{{ cluster_data_dir }}/{{ ec2_keypair }}.pem"
 ssh_known_hosts: ~/.ssh/known_hosts
-spack_user: spack
-spack_group: spack
 
 # Cluster stack and autoscaling configuration
 
@@ -121,10 +119,7 @@ pcluster_create_timeout: {{ pcluster_create_timeout }}
 
 s3_bucketname: "{{ s3_bucketname }}"
 s3_script_path: cluster_scripts/{{ prod_level }}
-s3_object_path: s3://{{ s3_bucketname }}/{{ s3_script_path }}
 s3_cluster_data_dir: "active_clusters"
-s3_url: https://s3.amazonaws.com/{{ s3_bucketname }}/cluster_scripts/{{ prod_level }}
-s3_read_write_resource: arn:aws:s3:::{{ s3_bucketname }}
 
 # Lambda stack termination function configuration
 
@@ -162,7 +157,6 @@ enable_ganglia: "{{ enable_ganglia }}"
 # EBS mount definitions
 
 ebs_root: /shared
-ebs_settings: custom
 ebs_encryption: "{{ ebs_encryption }}"
 ebs_performance_dir: "{{ ebs_root }}/performance/{{ cluster_name }}/{{ cluster_owner }}/{{ scheduler }}"
 ebs_shared_dir: "{{ ebs_shared_dir }}"
@@ -181,7 +175,6 @@ enable_fsx: "{{ enable_fsx }}"
 efs_root: /efs
 efs_hpc_performance_dir: "{{ efs_root }}/performance/{{ cluster_name }}/{{ cluster_owner }}/{{ scheduler }}"
 efs_pkg_dir: "{{ efs_root }}/pkg"
-efs_settings: customfs
 efs_encryption: "{{ efs_encryption }}"
 efs_performance_mode: "{{ efs_performance_mode }}"
 efs_throughput_mode: "{{ efs_throughput_mode }}"
@@ -203,7 +196,6 @@ external_nfs_hpc_performance_dir: "/nfs/performance/{{ cluster_name }}/{{ cluste
 # FSx for Lustre (FSxL) definitions
 
 fsx_root: /fsx
-fsx_settings: customfs
 fsx_size: {{ fsx_size }}
 fsx_hpc_performance_dir: "{{ fsx_root }}/performance/{{ cluster_name }}/{{ cluster_owner }}/{{ scheduler }}"
 fsx_pkg_dir: "{{ fsx_root }}/pkg"

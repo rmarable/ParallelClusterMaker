@@ -38,7 +38,7 @@ if [ ! -d "$SPACK_DIR" ]
 then
 	sudo mkdir -p "$SPACK_DIR"
 fi
-sudo chown -R {{ ec2_user }}:{{ ec2_user }} "$SPACK_DIR"
+sudo chown -R "{{ ec2_user }}:{{ ec2_user }}" "$SPACK_DIR"
 sudo chmod -R 755 "$SPACK_DIR"
 
 {% if 'ubuntu' in base_os %}
@@ -59,7 +59,7 @@ sudo dnf install -y gcc git lua lua-devel lua-filesystem nfs-utils parallel pigz
 if [ ! -d "$SRC" ]
 then
 	sudo mkdir -p "$SRC"
-	sudo chown -R {{ ec2_user }}:{{ ec2_user }} "$SRC"
+	sudo chown -R "{{ ec2_user }}:{{ ec2_user }}" "$SRC"
 	sudo chmod -R 755 "$SRC"
 fi
 {% if enable_external_nfs == 'true' %}
@@ -91,7 +91,7 @@ then
 	if [ ! -d "{{ pkg_dir }}" ]
 	then
 		sudo mkdir -p "{{ pkg_dir }}"
-		sudo chown -R {{ ec2_user }}:{{ ec2_user }} "{{ pkg_dir }}"
+		sudo chown -R "{{ ec2_user }}:{{ ec2_user }}" "{{ pkg_dir }}"
 		sudo chmod -R 755 "{{ pkg_dir }}"
 	fi
 fi
@@ -120,7 +120,7 @@ export LUAROCKS_PREFIX=/usr
 LUA_VER=$(lua -e 'print(_VERSION)' | awk '{print $2}')
 export LUA_CPATH="$LUAROCKS_PREFIX/lib/lua/${LUA_VER}/?.so;;"
 export LUA_PATH="$LUAROCKS_PREFIX/share/lua/${LUA_VER}/?.lua;$LUAROCKS_PREFIX/share/lua/${LUA_VER}/?/init.lua;;"
-./configure --prefix=/usr/local --with-module-root-path={{ pkg_dir }}/modulefiles --with-spiderCacheDir={{ pkg_dir }}/ModuleData/cachedir --with-updateSystemFn={{ pkg_dir }}/ModuleData/system.txt
+./configure --prefix=/usr/local --with-module-root-path="{{ pkg_dir }}/modulefiles" --with-spiderCacheDir="{{ pkg_dir }}/ModuleData/cachedir" --with-updateSystemFn="{{ pkg_dir }}/ModuleData/system.txt"
 sudo -E make install
 ln -sf /usr/local/lmod/lmod/libexec/lmod /usr/local/bin/lmod
 
@@ -131,9 +131,9 @@ sudo cp /usr/local/lmod/lmod/init/sh /etc/profile.d/lmod.sh
 cat << 'ENVEOF' >> /etc/profile.d/lmod_spack.sh
 #!/bin/sh
 
-export PATH=$PATH:{{ spack_root }}/bin
-export SPACK_ROOT={{ spack_root }}
-source {{ spack_root }}/share/spack/setup-env.sh
+export PATH="$PATH:{{ spack_root }}/bin"
+export SPACK_ROOT="{{ spack_root }}"
+source "{{ spack_root }}/share/spack/setup-env.sh"
 ENVEOF
 
 sudo cp /usr/local/lmod/lmod/init/csh /etc/profile.d/lmod.csh
@@ -142,7 +142,7 @@ cat << 'ENVEOF' >> /etc/profile.d/lmod_spack.csh
 
 setenv PATH "$PATH:{{ spack_root }}/bin"
 setenv SPACK_ROOT "{{ spack_root }}"
-source {{ spack_root }}/share/spack/setup-env.csh
+source "{{ spack_root }}/share/spack/setup-env.csh"
 ENVEOF
 
 fi  # end HeadNode-only Lmod/luarocks block
@@ -156,9 +156,9 @@ HeadNode)
 	echo "Customize the pcluster stack master instance here."
 	echo "Ready to finish joining the cluster!"
 	echo "Bootstrapping Spack..."
-	cd {{ pkg_dir }}
+	cd "{{ pkg_dir }}"
 	git clone --depth=1 --branch v0.23.0 https://github.com/spack/spack.git
-	chown -R {{ ec2_user }}:{{ ec2_user }} {{ pkg_dir }}
+	chown -R "{{ ec2_user }}:{{ ec2_user }}" "{{ pkg_dir }}"
 {% if enable_fsx == 'true' and enable_fsx_hydration == 'true' %}
 
 	# Create scripts in /usr/local/bin that will:
@@ -187,47 +187,47 @@ esac
 # copies of each alias from proliferating in the ec2-user bash profile.
 
 # src
-BASHRC={{ ec2_user_home }}/.bashrc
+BASHRC="{{ ec2_user_home }}/.bashrc"
 LINE_SRC="alias src='cd ~/src'"
 grep -qF -- "$LINE_SRC" "$BASHRC" || echo "$LINE_SRC" >> "$BASHRC"
 
 # ebs-pdir
-LINE_EBS="alias ebsdir='cd {{ ebs_performance_dir }}'" 
+LINE_EBS="alias ebsdir='cd \"{{ ebs_performance_dir }}\"'"
 grep -qF -- "$LINE_EBS" "$BASHRC" || echo "$LINE_EBS" >> "$BASHRC"
 {% if enable_efs == 'true' %}
 
 # efs-pkgdir
-LINE_EFS_PKGDIR="alias epkgdir='cd {{ efs_pkg_dir }}'"
+LINE_EFS_PKGDIR="alias epkgdir='cd \"{{ efs_pkg_dir }}\"'"
 grep -qF -- "$LINE_EFS_PKGDIR" "$BASHRC" || echo "$LINE_EFS_PKGDIR" >> "$BASHRC"
 {% endif %}
 {% if enable_efs == 'true' and enable_hpc_performance_tests == 'true' %}
 
 # efs-pdir
-LINE_EFS_PDIR="alias edir='cd {{ efs_hpc_performance_dir }}'"
+LINE_EFS_PDIR="alias edir='cd \"{{ efs_hpc_performance_dir }}\"'"
 grep -qF -- "$LINE_EFS_PDIR" "$BASHRC" || echo "$LINE_EFS_PDIR" >> "$BASHRC"
 {% endif %}
 {% if enable_fsx == 'true' %}
 
 # fsx-pkgdir
-LINE_FSX_PKGDIR="alias fpkgdir='cd {{ fsx_pkg_dir }}'"
+LINE_FSX_PKGDIR="alias fpkgdir='cd \"{{ fsx_pkg_dir }}\"'"
 grep -qF -- "$LINE_FSX_PKGDIR" "$BASHRC" || echo "$LINE_FSX_PKGDIR" >> "$BASHRC"
 {% endif %}
 {% if enable_fsx == 'true' and enable_hpc_performance_tests == 'true' %}
 
 # fsx-pdir
-LINE_FSX_PDIR="alias fdir='cd {{ fsx_hpc_performance_dir }}'"
+LINE_FSX_PDIR="alias fdir='cd \"{{ fsx_hpc_performance_dir }}\"'"
 grep -qF -- "$LINE_FSX_PDIR" "$BASHRC" || echo "$LINE_FSX_PDIR" >> "$BASHRC"
 {% endif %}
 {% if enable_external_nfs == 'true' %}
 
 # nfs-pkgdir
-LINE_EXTERNAL_NFS_PKGDIR="alias npkgdir='cd {{ external_nfs_pkg_dir }}'"
+LINE_EXTERNAL_NFS_PKGDIR="alias npkgdir='cd \"{{ external_nfs_pkg_dir }}\"'"
 grep -qF -- "$LINE_EXTERNAL_NFS_PKGDIR" "$BASHRC" || echo "$LINE_EXTERNAL_NFS_PKGDIR" >> "$BASHRC"
 {% endif %}
 {% if enable_external_nfs == 'true' and enable_hpc_performance_tests == 'true' %}
 
 # nfs-pdir
-LINE_EXTERNAL_NFS_PDIR="alias ndir='cd {{ external_nfs_hpc_performance_dir }}'" 
+LINE_EXTERNAL_NFS_PDIR="alias ndir='cd \"{{ external_nfs_hpc_performance_dir }}\"'"
 grep -qF -- "$LINE_EXTERNAL_NFS_PDIR" "$BASHRC" || echo "$LINE_EXTERNAL_NFS_PDIR" >> "$BASHRC"
 {% endif %}
 

@@ -55,6 +55,7 @@
       register: cluster_delete_status
       until: >-
         "DELETE_COMPLETE" in cluster_delete_status.stdout or
+        "DELETE_FAILED" in cluster_delete_status.stdout or
         (cluster_delete_status.rc != 0 and "ClusterNotFound" in cluster_delete_status.stderr)
       retries: "{{ pcluster_delete_timeout }}"
       delay: 30
@@ -62,7 +63,8 @@
       failed_when: >-
         cluster_delete_status.rc != 0 and
         "ClusterNotFound" not in cluster_delete_status.stderr and
-        "DELETE_COMPLETE" not in cluster_delete_status.stdout
+        "DELETE_COMPLETE" not in cluster_delete_status.stdout and
+        "DELETE_FAILED" not in cluster_delete_status.stdout
 
     - name: Warn if delete wait timed out without confirmation
       debug:
@@ -76,7 +78,20 @@
         cluster_delete_status.attempts is defined and
         cluster_delete_status.attempts >= (pcluster_delete_timeout | int) and
         "DELETE_COMPLETE" not in cluster_delete_status.stdout and
+        "DELETE_FAILED" not in cluster_delete_status.stdout and
         "ClusterNotFound" not in (cluster_delete_status.stderr | default(''))
+
+    - name: Abort with actionable error if CloudFormation reached DELETE_FAILED
+      fail:
+        msg:
+          - "ERROR: CloudFormation stack deletion reached DELETE_FAILED for cluster '{{ cluster_name }}'."
+          - "This usually means a resource (ENI, security group, EFA interface) still has dependencies."
+          - "Check the CloudFormation console for the failed resource:"
+          - "  aws cloudformation describe-stack-events --stack-name parallelcluster-{{ cluster_name }} --region {{ region }}"
+          - "Resolve the dependency, then re-run kill_pcluster.py to complete cleanup."
+      when: >-
+        cluster_delete_status is defined and
+        "DELETE_FAILED" in (cluster_delete_status.stdout | default(''))
 
     - name: Delete the EC2 keypair associated with this cluster
       amazon.aws.ec2_key:
