@@ -8,6 +8,7 @@ the fixture raises UndefinedError and fails the test immediately.
 Filters used only by Ansible at playbook runtime (bool, upper, lookup) are
 stubbed out so plain Python Jinja2 can render them without crashing.
 """
+
 import os
 import pytest
 from jinja2 import Environment, FileSystemLoader, StrictUndefined, Undefined
@@ -15,15 +16,15 @@ from jinja2 import Environment, FileSystemLoader, StrictUndefined, Undefined
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 TEMPLATE_DIRS = [
-    os.path.join(REPO_ROOT, 'templates'),
-    os.path.join(REPO_ROOT, 'performance', 'jinja2'),
+    os.path.join(REPO_ROOT, "templates"),
+    os.path.join(REPO_ROOT, "performance", "jinja2"),
 ]
 
 # Templates that are not rendered by Python at all — skip them.
 # (JSON policy templates are not Jinja2 text, they're shell-substituted separately.)
 SKIP_TEMPLATES = {
-    'LustreS3HydrationPolicy.json_src',
-    'ParallelClusterInstancePolicy.json_src',
+    "LustreS3HydrationPolicy.json_src",
+    "ParallelClusterInstancePolicy.json_src",
 }
 
 
@@ -34,10 +35,10 @@ def _make_env(template_dir):
         keep_trailing_newline=True,
     )
     # Stub Ansible-only filters so they pass through without error.
-    env.filters['bool'] = lambda v: str(v).lower() in ('true', '1', 'yes')
-    env.filters['upper'] = lambda v: str(v).upper()
+    env.filters["bool"] = lambda v: str(v).lower() in ("true", "1", "yes")
+    env.filters["upper"] = lambda v: str(v).upper()
     # Stub lookup() global — returns a placeholder string.
-    env.globals['lookup'] = lambda *args, **kwargs: '<lookup-stub>'
+    env.globals["lookup"] = lambda *args, **kwargs: "<lookup-stub>"
     return env
 
 
@@ -49,8 +50,9 @@ def _collect_templates():
         for fname in sorted(os.listdir(tdir)):
             if fname in SKIP_TEMPLATES:
                 continue
-            if fname.endswith(('.j2', '.jinja2', '.jinja')):
+            if fname.endswith((".j2", ".jinja2", ".jinja")):
                 cases.append((tdir, fname))
+    assert len(cases) > 0, "No templates discovered — check TEMPLATE_DIRS"
     return cases
 
 
@@ -72,4 +74,6 @@ def test_template_renders_custom_ami_variant(tdir, fname, cluster_params_custom_
     template = env.get_template(fname)
     rendered = template.render(**cluster_params_custom_ami)
     assert isinstance(rendered, str)
-    assert len(rendered) > 0, f"{fname} rendered to an empty string (custom_ami variant)"
+    assert (
+        len(rendered) > 0
+    ), f"{fname} rendered to an empty string (custom_ami variant)"

@@ -64,7 +64,7 @@ done
 
 pushd "$RAW_SUMMARY_DIR" >/dev/null
 shopt -s nullglob
-_csv_files=(summary.$CLUSTER_NAME.$JOBID.*csv)
+_csv_files=("summary.$CLUSTER_NAME.$JOBID."*csv)
 shopt -u nullglob
 for _f in "${_csv_files[@]}"; do
 	cluster_job_ID=$(echo "$_f" | awk -F. '{print $4}')
@@ -72,7 +72,7 @@ for _f in "${_csv_files[@]}"; do
 	then
 		summary_data_file=summary.$CLUSTER_NAME.$cluster_job_ID.csv
 		shopt -s nullglob
-		for cluster_job_files in summary.$CLUSTER_NAME.$JOBID.$cluster_job_ID*.csv
+		for cluster_job_files in "summary.$CLUSTER_NAME.$JOBID.$cluster_job_ID"*.csv
 		do
 			awk 'FNR > 1' "$cluster_job_files" | awk -F, '{printf"%s,%s,%s,%s\n", $2, $3, $4, $5}' | sed -e "s|${JOBID}\\.||g" | awk -F. '{printf"%s,%s.%s\n", $1, $2, $3}' >> "$SCRATCH_FILE.data"
 		done
@@ -81,11 +81,10 @@ for _f in "${_csv_files[@]}"; do
 		sort -k1,1 -k2,2n -k3,3n -t, "$SCRATCH_FILE.data" > "$SCRATCH_FILE.sorted"
 	else
 		summary_data_file=summary.$CLUSTER_NAME.$JOBID.csv
-		for cluster_job_files in summary.$CLUSTER_NAME.$JOBID.csv
-		do
-			[[ -f "$cluster_job_files" ]] || continue
+		cluster_job_files="summary.$CLUSTER_NAME.$JOBID.csv"
+		if [[ -f "$cluster_job_files" ]]; then
 			awk 'FNR > 1' "$cluster_job_files" | awk -F, '{printf"%s,%s,%s,%s,%s,%s,%s\n", $2, $3, $4, $5, $6, $7, $8}' >> "$SCRATCH_FILE.data"
-		done
+		fi
 		echo "cluster_jobID,matrix_size,compute_time,cluster_name,raw_log_size_bytes,gzip_log_size_bytes,fileproc_time" > "$SCRATCH_FILE.header"
 		sort -k1,1n -k2,2n -t, "$SCRATCH_FILE.data" > "$SCRATCH_FILE.sorted"
 	fi

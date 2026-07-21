@@ -75,13 +75,14 @@ echo "exec_node,cluster_jobID,matrix_size,compute_time,note,raw_log_size_bytes,c
 
 # ---------- main loop --------------------------------------------------------
 echo ""
-for N in $MATRIX_SIZES; do
-    $PYTHON3 "$SCRIPT_DIR/Axb_random.py" \
+read -ra _MATRIX_SIZES_ARR <<< "$MATRIX_SIZES"
+for N in "${_MATRIX_SIZES_ARR[@]}"; do
+    "$PYTHON3" "$SCRIPT_DIR/Axb_random.py" \
         --jobid "$JOBID" --matrix-size "$N" \
         --console-dump "$CONSOLE_DUMP" --create-csv "$CREATE_CSV" \
         --create-logs "$CREATE_LOGS" --note "$CLUSTER_NAME"
 
-    $PYTHON3 "$SCRIPT_DIR/compress_logfiles.py" \
+    "$PYTHON3" "$SCRIPT_DIR/compress_logfiles.py" \
         --jobid "$JOBID" --matrix-size "$N" \
         --compression_type "$compression_type"
 
