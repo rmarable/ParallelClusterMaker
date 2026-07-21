@@ -1,0 +1,39 @@
+
+================================================================================
+                       Cluster Build Summary Report
+================================================================================
+
+Launched the environment: {{ start_overall_timer.stdout }}
+Initiated stack creation: {{ start_stack_creation_timer.stdout }}
+Completed stack creation: {{ stop_stack_creation_timer.stdout }}
+Finished the environment: {{ stop_overall_timer.stdout }}
+Lifetime (days:hr:min):   {{ cluster_lifetime }}
+
+Cluster Stack Name:    {{ cluster_name }}
+AWS Availability Zone: {{ az }}
+HPC Scheduler Type:    {{ scheduler }}
+Head Node Instance Type: {{ headnode_instance_type }}
+Compute Instance Type: {{ compute_instance_type }}
+
+EFS Enabled:  {{ enable_efs | bool | upper }}
+FSxL Enabled: {{ enable_fsx | bool | upper }}
+External NFS: {{ enable_external_nfs | bool | upper }}
+
+Choose an option to access the cluster's head node:
+
+(1) ParallelClusterMaker access script:
+    ./access_cluster.py -N {{ cluster_name }}
+
+(2) ParallelCluster ssh alias:
+    pcluster ssh --cluster-name {{ cluster_name }} -i {{ ssh_keypair }}
+
+(3) Vanilla ssh with the cluster's private SSH key:
+    ssh -i {{ ssh_keypair }} {{ ec2_user }}@{{ HeadNodePublicIP }}
+
+To destroy this cluster, run the following command:
+
+$ ./kill_pcluster.py -N {{ cluster_name }} -O {{ cluster_owner }} -A {{ az }}
+
+{% if enable_ganglia == 'true' %}CloudWatch monitoring is enabled. View metrics in the AWS Console:
+https://console.aws.amazon.com/cloudwatch/home?region={{ region }}
+{% endif %}

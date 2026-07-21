@@ -1,0 +1,241 @@
+#!/bin/bash
+set -euo pipefail
+################################################################################
+# Name:		postinstall.{{ cluster_name }}.sh
+# Author:	Rodney Marable <rodney.marable@gmail.com>
+# Created On:	April 20, 2019
+# Last Changed:	June 26, 2019
+# Deployed On:	{{ lookup('pipe','date \"+%B %e, %Y\" | tr -s \" \"') }}
+# Purpose:	Perform postinstall tasks on cluster {{ cluster_name }}
+################################################################################
+#
+# Source the local profile to ensure PATH works as expected.
+
+source /etc/profile
+
+# Set values for some important variables. 
+
+EC2_HOME="{{ ec2_user_home }}"
+SRC="{{ ec2_user_src }}"
+
+# Configure a local_scratch directory and set the sticky bit if instance
+# store volumes are not being used: https://en.wikipedia.org/wiki/Sticky_bit
+
+if [ ! -d /scratch ]
+then
+	sudo mkdir -p /local_scratch
+	sudo chmod 1777 /local_scratch
+	ln -sfn /local_scratch /scratch
+else
+	ln -sfn /scratch /local_scratch
+fi
+
+# Configure Spack:
+# https://spack.io/
+
+SPACK_DIR="{{ spack_root }}"
+if [ ! -d "$SPACK_DIR" ]
+then
+	sudo mkdir -p "$SPACK_DIR"
+fi
+sudo chown -R {{ ec2_user }}:{{ ec2_user }} "$SPACK_DIR"
+sudo chmod -R 755 "$SPACK_DIR"
+
+{% if 'ubuntu' in base_os %}
+# Install critical packages via apt-get.
+
+sudo apt-get -y update
+sudo apt-get -y install gcc git lua5.4 liblua5.4-dev lua-filesystem nfs-common parallel pigz tcl tcsh zsh lua-posix tcllib binutils
+{% else %}
+# Install critical packages via dnf.
+
+sudo dnf -y update
+sudo dnf -y install epel-release
+sudo dnf install -y gcc git lua lua-devel lua-filesystem nfs-utils parallel pigz rpm-build tcl tcsh zsh lua-posix tcllib
+{% endif %}
+
+# Create a local source directory for the {{ ec2_user }} user account.
+
+if [ ! -d "$SRC" ]
+then
+	sudo mkdir -p "$SRC"
+	sudo chown -R {{ ec2_user }}:{{ ec2_user }} "$SRC"
+	sudo chmod -R 755 "$SRC"
+fi
+{% if enable_external_nfs == 'true' %}
+
+# Create directories and persistently mount all external NFS file systems 
+# listed in the external_nfs_mount_list configuration file.
+
+external_nfs_server="{{ external_nfs_server }}"
+NFS_MOUNT_LIST=$(mktemp)
+aws s3 cp "s3://{{ s3_bucketname }}/{{ s3_script_path }}/{{ external_nfs_mount_list_template_dest }}" "$NFS_MOUNT_LIST"
+while IFS= read -r dir; do
+	[[ -z "$dir" || "$dir" == \#* ]] && continue
+	sudo mkdir -p "{{ external_nfs_server_root }}/$dir"
+	sudo chown root:root "{{ external_nfs_server_root }}/$dir"
+	sudo chmod -R 755 "{{ external_nfs_server_root }}/$dir"
+	echo "${external_nfs_server}:${dir} {{ external_nfs_server_root }}/${dir} nfs defaults 0 0" | sudo tee -a /etc/fstab > /dev/null
+	sudo mount "{{ external_nfs_server_root }}/$dir"
+done < "$NFS_MOUNT_LIST"
+rm -f "$NFS_MOUNT_LIST"
+{% endif %}
+
+# Create the Spack software package directory on the master instance.
+# Spack package installation location is controlled by the selected shared
+# storage option.  Only one package location per cluster is supported.
+# Precedence: FSX > EFS > external NFS > EBS
+
+if [ "${PARALLELCLUSTER_NODE_TYPE}" == "HeadNode" ]
+then
+	if [ ! -d "{{ pkg_dir }}" ]
+	then
+		sudo mkdir -p "{{ pkg_dir }}"
+		sudo chown -R {{ ec2_user }}:{{ ec2_user }} "{{ pkg_dir }}"
+		sudo chmod -R 755 "{{ pkg_dir }}"
+	fi
+fi
+
+# Install luarocks and Lmod only on the head node — compute nodes mount /usr/local
+# from shared storage and inherit the installation.
+
+if [ "${PARALLELCLUSTER_NODE_TYPE}" == "HeadNode" ]; then
+
+{% if 'ubuntu' in base_os %}
+sudo apt-get install -y luarocks
+{% else %}
+sudo dnf install -y luarocks
+{% endif %}
+sudo luarocks install luaposix
+sudo luarocks install luafilesystem
+sudo luarocks install lua-term
+
+# Install and configure Lmod.
+
+cd "$SRC"
+git clone --depth=1 --branch 8.7.55 https://github.com/TACC/Lmod
+cd Lmod
+export PATH=/usr/local/bin:$PATH
+export LUAROCKS_PREFIX=/usr
+LUA_VER=$(lua -e 'print(_VERSION)' | awk '{print $2}')
+export LUA_CPATH="$LUAROCKS_PREFIX/lib/lua/${LUA_VER}/?.so;;"
+export LUA_PATH="$LUAROCKS_PREFIX/share/lua/${LUA_VER}/?.lua;$LUAROCKS_PREFIX/share/lua/${LUA_VER}/?/init.lua;;"
+./configure --prefix=/usr/local --with-module-root-path={{ pkg_dir }}/modulefiles --with-spiderCacheDir={{ pkg_dir }}/ModuleData/cachedir --with-updateSystemFn={{ pkg_dir }}/ModuleData/system.txt
+sudo -E make install
+ln -sf /usr/local/lmod/lmod/libexec/lmod /usr/local/bin/lmod
+
+# Copy the Lmod user login environment environment scripts to /etc/profile.d.
+# Add $SPACK_DIR/bin to $PATH, set $SPACK_ROOT, and enable Spack shell support.
+
+sudo cp /usr/local/lmod/lmod/init/sh /etc/profile.d/lmod.sh
+cat << 'ENVEOF' >> /etc/profile.d/lmod_spack.sh
+#!/bin/sh
+
+export PATH=$PATH:{{ spack_root }}/bin
+export SPACK_ROOT={{ spack_root }}
+source {{ spack_root }}/share/spack/setup-env.sh
+ENVEOF
+
+sudo cp /usr/local/lmod/lmod/init/csh /etc/profile.d/lmod.csh
+cat << 'ENVEOF' >> /etc/profile.d/lmod_spack.csh
+#!/bin/csh
+
+setenv PATH "$PATH:{{ spack_root }}/bin"
+setenv SPACK_ROOT "{{ spack_root }}"
+source {{ spack_root }}/share/spack/setup-env.csh
+ENVEOF
+
+fi  # end HeadNode-only Lmod/luarocks block
+
+# Install Spack on the cluster master instance.
+# Push an alert via SNS when new instances are spawned.
+# Other custom role-specific tasks should be added here.
+
+case "${PARALLELCLUSTER_NODE_TYPE}" in
+HeadNode)
+	echo "Customize the pcluster stack master instance here."
+	echo "Ready to finish joining the cluster!"
+	echo "Bootstrapping Spack..."
+	cd {{ pkg_dir }}
+	git clone --depth=1 --branch v0.23.0 https://github.com/spack/spack.git
+	chown -R {{ ec2_user }}:{{ ec2_user }} {{ pkg_dir }}
+{% if enable_fsx == 'true' and enable_fsx_hydration == 'true' %}
+
+	# Create scripts in /usr/local/bin that will:
+	# - import s3://{{ fsx_s3_import_bucket }}/{{ fsx_s3_import_path }} from Lustre
+	# - export s3://{{ fsx_s3_export_bucket }}/{{ fsx_s3_export_path }} to Lustre
+	# - check the status of an export-S3-to-Lustre process
+
+	sudo su -c "echo \"nohup find {{ fsx_root }} -type f -print0 | xargs -0 -n 1 sudo lfs hsm_restore &\" > /usr/local/bin/import-s3-to-lustre.sh"
+	sudo su -c "echo \"nohup find {{ fsx_root }} -type f -print0 | xargs -0 -n 1 sudo lfs hsm_archive &\" > /usr/local/bin/export-lustre-to-s3.sh"
+	sudo su -c "echo \"find {{ fsx_root }} -type f -print0 | xargs -0 -n 1 -P 8 sudo lfs hsm_action | grep \\\"ARCHIVE\\\" | wc -l\" > /usr/local/bin/check-lustre-export-progress.sh"
+
+	for script in /usr/local/bin/import-s3-to-lustre.sh /usr/local/bin/export-lustre-to-s3.sh /usr/local/bin/check-lustre-export-progress.sh
+	do
+		sudo chmod 0755 "$script"
+		sudo chown root:root "$script"
+	done
+{% endif %}
+	;;
+ComputeFleet)
+	echo "Customize the pcluster stack compute instances here."
+	echo "Ready to finish joining the cluster!"
+	;;
+esac
+
+# Create some local aliases for HPC operator convenience.  Prevent multiple
+# copies of each alias from proliferating in the ec2-user bash profile.
+
+# src
+BASHRC={{ ec2_user_home }}/.bashrc
+LINE_SRC="alias src='cd ~/src'"
+grep -qF -- "$LINE_SRC" "$BASHRC" || echo "$LINE_SRC" >> "$BASHRC"
+
+# ebs-pdir
+LINE_EBS="alias ebsdir='cd {{ ebs_performance_dir }}'" 
+grep -qF -- "$LINE_EBS" "$BASHRC" || echo "$LINE_EBS" >> "$BASHRC"
+{% if enable_efs == 'true' %}
+
+# efs-pkgdir
+LINE_EFS_PKGDIR="alias epkgdir='cd {{ efs_pkg_dir }}'"
+grep -qF -- "$LINE_EFS_PKGDIR" "$BASHRC" || echo "$LINE_EFS_PKGDIR" >> "$BASHRC"
+{% endif %}
+{% if enable_efs == 'true' and enable_hpc_performance_tests == 'true' %}
+
+# efs-pdir
+LINE_EFS_PDIR="alias edir='cd {{ efs_hpc_performance_dir }}'"
+grep -qF -- "$LINE_EFS_PDIR" "$BASHRC" || echo "$LINE_EFS_PDIR" >> "$BASHRC"
+{% endif %}
+{% if enable_fsx == 'true' %}
+
+# fsx-pkgdir
+LINE_FSX_PKGDIR="alias fpkgdir='cd {{ fsx_pkg_dir }}'"
+grep -qF -- "$LINE_FSX_PKGDIR" "$BASHRC" || echo "$LINE_FSX_PKGDIR" >> "$BASHRC"
+{% endif %}
+{% if enable_fsx == 'true' and enable_hpc_performance_tests == 'true' %}
+
+# fsx-pdir
+LINE_FSX_PDIR="alias fdir='cd {{ fsx_hpc_performance_dir }}'"
+grep -qF -- "$LINE_FSX_PDIR" "$BASHRC" || echo "$LINE_FSX_PDIR" >> "$BASHRC"
+{% endif %}
+{% if enable_external_nfs == 'true' %}
+
+# nfs-pkgdir
+LINE_EXTERNAL_NFS_PKGDIR="alias npkgdir='cd {{ external_nfs_pkg_dir }}'"
+grep -qF -- "$LINE_EXTERNAL_NFS_PKGDIR" "$BASHRC" || echo "$LINE_EXTERNAL_NFS_PKGDIR" >> "$BASHRC"
+{% endif %}
+{% if enable_external_nfs == 'true' and enable_hpc_performance_tests == 'true' %}
+
+# nfs-pdir
+LINE_EXTERNAL_NFS_PDIR="alias ndir='cd {{ external_nfs_hpc_performance_dir }}'" 
+grep -qF -- "$LINE_EXTERNAL_NFS_PDIR" "$BASHRC" || echo "$LINE_EXTERNAL_NFS_PDIR" >> "$BASHRC"
+{% endif %}
+
+# Cleanup and exit.
+
+cd "$SRC"
+for dir in Lmod luarocks-*
+do
+	rm -rf "$dir"
+done
+exit 0
