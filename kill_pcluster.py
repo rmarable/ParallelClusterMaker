@@ -27,8 +27,13 @@ if not os.path.realpath(sys.executable).startswith(
 import argparse
 import boto3
 import botocore
-import botocore.exceptions
 import contextlib
+from botocore.exceptions import (
+    BotoCoreError,
+    ClientError,
+    EndpointConnectionError,
+    NoCredentialsError,
+)
 import json
 import subprocess
 
@@ -170,10 +175,10 @@ def main():
         _az_info = ec2client.describe_availability_zones(ZoneNames=[az])
     except (
         ValueError,
-        botocore.exceptions.EndpointConnectionError,
-        botocore.exceptions.NoCredentialsError,
-        botocore.exceptions.BotoCoreError,
-        botocore.exceptions.ClientError,
+        EndpointConnectionError,
+        NoCredentialsError,
+        BotoCoreError,
+        ClientError,
     ) as _e:
         sys.exit(f"ERROR: Could not verify availability zone '{az}': {_e}")
 
