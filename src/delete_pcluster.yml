@@ -180,7 +180,7 @@
         policy_name: "{{ item.policy }}"
         state: absent
       with_items:
-        - { role: '{{ ec2_iam_role }}', policy: '{{ ec2_iam_policy }}' }
+        - {role: '{{ ec2_iam_role }}', policy: '{{ ec2_iam_policy }}'}
       ignore_errors: true
 
     - name: Delete the IAM roles associated with the cluster stack

@@ -94,7 +94,6 @@
                 "ec2:DeleteKeyPair",
                 "ec2:DescribeAccountAttributes",
                 "ec2:DescribeInstanceCreditSpecifications",
-                "ec2:DescribeKeyPairs",
                 "ec2:DescribeSpotPriceHistory",
                 "ec2:DescribeTags"
             ],
@@ -144,13 +143,23 @@
             ]
         },
         {
-            "Sid": "EC2LaunchTemplate",
+            "Sid": "EC2LaunchTemplateCreate",
             "Action": [
-                "ec2:CreateLaunchTemplate",
+                "ec2:CreateLaunchTemplate"
+            ],
+            "Effect": "Allow",
+            "Resource": "*",
+            "Condition": {
+                "StringEquals": {
+                    "aws:RequestTag/parallelcluster:cluster-name": "<CLUSTER_NAME>"
+                }
+            }
+        },
+        {
+            "Sid": "EC2LaunchTemplateModify",
+            "Action": [
                 "ec2:ModifyLaunchTemplate",
-                "ec2:DeleteLaunchTemplate",
-                "ec2:DescribeLaunchTemplates",
-                "ec2:DescribeLaunchTemplateVersions"
+                "ec2:DeleteLaunchTemplate"
             ],
             "Effect": "Allow",
             "Resource": [
@@ -161,6 +170,15 @@
                     "aws:ResourceTag/parallelcluster:cluster-name": "<CLUSTER_NAME>"
                 }
             }
+        },
+        {
+            "Sid": "EC2LaunchTemplateDescribe",
+            "Action": [
+                "ec2:DescribeLaunchTemplates",
+                "ec2:DescribeLaunchTemplateVersions"
+            ],
+            "Effect": "Allow",
+            "Resource": "*"
         },
         {
             "Sid": "STS",
@@ -382,12 +400,9 @@
             ]
         },
         {
-            "Sid": "IAMRole",
+            "Sid": "IAMCreateRole",
             "Action": [
-                "iam:ListInstanceProfilesForRole",
-                "iam:CreateRole",
-                "iam:DeleteRole",
-                "iam:GetRole"
+                "iam:CreateRole"
             ],
             "Effect": "Allow",
             "Resource": [
@@ -401,6 +416,21 @@
                     "iam:PermissionsBoundary": "arn:aws:iam::<AWS_ACCOUNT_ID>:policy/parallelcluster-<CLUSTER_OWNER>-boundary"
                 }
             }
+        },
+        {
+            "Sid": "IAMRoleRead",
+            "Action": [
+                "iam:GetRole",
+                "iam:DeleteRole",
+                "iam:ListInstanceProfilesForRole"
+            ],
+            "Effect": "Allow",
+            "Resource": [
+                "arn:aws:iam::<AWS_ACCOUNT_ID>:role/parallelcluster-<CLUSTER_NAME>-*",
+                "arn:aws:iam::<AWS_ACCOUNT_ID>:role/parallelcluster-<CLUSTER_OWNER>-*",
+                "arn:aws:iam::<AWS_ACCOUNT_ID>:role/pclustermaker-role-<CLUSTER_SERIAL_NUMBER>",
+                "arn:aws:iam::<AWS_ACCOUNT_ID>:role/kill-pcluster-role-<CLUSTER_SERIAL_NUMBER>"
+            ]
         },
         {
             "Sid": "IAMPassRole",
@@ -424,13 +454,29 @@
             }
         },
         {
+            "Sid": "IAMAttachDetachPolicy",
+            "Action": [
+                "iam:AttachRolePolicy",
+                "iam:DetachRolePolicy"
+            ],
+            "Effect": "Allow",
+            "Resource": [
+                "arn:aws:iam::<AWS_ACCOUNT_ID>:role/parallelcluster-<CLUSTER_NAME>-*",
+                "arn:aws:iam::<AWS_ACCOUNT_ID>:role/parallelcluster-<CLUSTER_OWNER>-*",
+                "arn:aws:iam::<AWS_ACCOUNT_ID>:role/pclustermaker-role-<CLUSTER_SERIAL_NUMBER>",
+                "arn:aws:iam::<AWS_ACCOUNT_ID>:role/kill-pcluster-role-<CLUSTER_SERIAL_NUMBER>"
+            ],
+            "Condition": {
+                "StringLike": {
+                    "iam:PolicyARN": "arn:aws:iam::<AWS_ACCOUNT_ID>:policy/parallelcluster-*"
+                }
+            }
+        },
+        {
             "Sid": "IAMRolePolicy",
             "Action": [
-                "iam:AddRoleToInstanceProfile",
-                "iam:RemoveRoleFromInstanceProfile",
+                "iam:PutRolePolicy",
                 "iam:GetRolePolicy",
-                "iam:AttachRolePolicy",
-                "iam:DetachRolePolicy",
                 "iam:DeleteRolePolicy",
                 "iam:ListRolePolicies",
                 "iam:SimulatePrincipalPolicy"
@@ -441,15 +487,7 @@
                 "arn:aws:iam::<AWS_ACCOUNT_ID>:role/parallelcluster-<CLUSTER_OWNER>-*",
                 "arn:aws:iam::<AWS_ACCOUNT_ID>:role/pclustermaker-role-<CLUSTER_SERIAL_NUMBER>",
                 "arn:aws:iam::<AWS_ACCOUNT_ID>:role/kill-pcluster-role-<CLUSTER_SERIAL_NUMBER>"
-            ],
-            "Condition": {
-                "StringEquals": {
-                    "iam:PermissionsBoundary": "arn:aws:iam::<AWS_ACCOUNT_ID>:policy/parallelcluster-<CLUSTER_OWNER>-boundary"
-                },
-                "StringLike": {
-                    "iam:PolicyARN": "arn:aws:iam::<AWS_ACCOUNT_ID>:policy/parallelcluster-*"
-                }
-            }
+            ]
         },
         {
             "Sid": "IAMInstanceProfile",
@@ -560,7 +598,7 @@
                 "ssmmessages:CreateControlChannel",
                 "ssmmessages:CreateDataChannel",
                 "ssmmessages:OpenControlChannel",
-                "ssmmessages:OpenDataChannel",
+                "ssmmessages:OpenDataChannel"
             ],
             "Effect": "Allow",
             "Resource": "*"

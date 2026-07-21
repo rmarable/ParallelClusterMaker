@@ -144,7 +144,7 @@ Required arguments:
 
 | Flag | Description |
 |---|---|
-| `-N` | Cluster name (lowercase letters, digits, hyphens; max 27 characters) |
+| `-N` | Cluster name (must start with a letter; lowercase letters, digits, hyphens only; no consecutive or trailing hyphens; max 27 characters) |
 | `-O` | Owner username |
 | `-E` | Owner email |
 | `-A` | Availability zone (e.g. `us-east-1a`) — pass an AZ, not a region |
@@ -234,7 +234,7 @@ Teardown takes 5–10 minutes.  By default, associated EFS, FSx, and S3 resource
 
 ```
 ./kill_pcluster.py -N pcluster-test-01 -O rmarable -A us-east-1a \
-    --delete_efs=false --delete_fsx=false --delete_s3_bucketname=false
+    --delete_fsx=false --delete_s3_bucketname=false
 ```
 
 After a stack is deleted, it is strong recommended to run `kill_pcluster.py` to remove local artifacts even if the cluster self-terminated via `cluster_lifetime`.
@@ -253,7 +253,7 @@ Enable with `--enable_efs=true`.  Mounted at `/efs` on all instances.  Adds ~5�
 
 ### FSx for Lustre
 
-Enable with `--enable_fsx=true`.  Mounted at `/fsx`.  Minimum size is 1200 GB; must be a multiple of 1200.  Maximum chunk size is 500 GB (512,000 MiB).  S3 hydration/dehydration supported via `--enable_fsx_hydration=true` and the `--fsx_s3_*` parameters.
+Enable with `--enable_fsx=true`.  Mounted at `/fsx`.  Minimum size is 1200 GB; must be a multiple of 1200.  Maximum chunk size is 500 GB (512,000 MB).  S3 hydration/dehydration supported via `--enable_fsx_hydration=true` and the `--fsx_s3_*` parameters.
 
 ### External NFS
 
@@ -354,7 +354,7 @@ Enable with `--enable_hpc_performance_tests=true`.  Deploys the full performance
 ./hpc-perftest.sh submit --start 10 --step 10 --total 10
 ```
 
-Edit `MATRIX_SIZES.conf` to control the test scope.  See `performance/README.performance_testing.md` for full documentation.
+Edit `MATRIX_SIZES.conf` to control the test scope.  See `performance/README-PERFORMANCE.md` for full documentation.
 
 ---
 
@@ -403,7 +403,7 @@ ParallelClusterMaker does **not** create or modify VPCs, subnets, gateways, rout
 ```
 make test       # pytest — template rendering + unit tests
 make lint       # ansible-lint on src/create_pcluster.yml and src/delete_pcluster.yml
-make shellcheck # shellcheck on performance/scripts/*.sh
+make shellcheck # shellcheck on performance/scripts/*.sh (hpc-benchmark.sh and hpc-perftest.sh pass but are not in this target)
 ```
 
 CI runs all three automatically on every push and pull request.
