@@ -945,7 +945,7 @@ def main():
         botocore.exceptions.EndpointConnectionError,
         botocore.exceptions.NoCredentialsError,
         botocore.exceptions.BotoCoreError,
-        botocore.exceptions.ClientError,
+        ClientError,
     ) as _e:
         sys.exit(f"ERROR: Could not verify availability zone '{az}': {_e}")
 
@@ -1336,7 +1336,7 @@ def main():
     if custom_ami != "NONE":
         try:
             ec2client.describe_images(ImageIds=[custom_ami])
-        except botocore.exceptions.ClientError:
+        except ClientError:
             error_msg = '"' + custom_ami + '" does not appear to be a valid AMI!'
             refer_to_docs_and_quit(error_msg)
         else:

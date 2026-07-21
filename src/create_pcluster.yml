@@ -149,8 +149,8 @@
         dest: "{{ item.dest }}"
         mode: "0755"
       with_items:
-        - { src: '{{ cluster_config_template_orig }}', dest: '{{ cluster_config_template }}' }
-        - { src: '{{ generate_cron_lifetime_string_src }}', dest: '{{ generate_cron_lifetime_string_dest }}' }
+        - {src: '{{ cluster_config_template_orig }}', dest: '{{ cluster_config_template }}'}
+        - {src: '{{ generate_cron_lifetime_string_src }}', dest: '{{ generate_cron_lifetime_string_dest }}'}
 
     - name: Copy the pre/post-deployment scripts to the cluster data directory
       copy:
@@ -158,8 +158,8 @@
         dest: "{{ item.dest }}"
         mode: "0755"
       with_items:
-        - { src: '{{ preinstall_src }}', dest: '{{ cluster_data_dir }}/{{ preinstall_s3_dest }}' }
-        - { src: '{{ postinstall_src }}', dest: '{{ cluster_data_dir }}/{{ postinstall_s3_dest }}' }
+        - {src: '{{ preinstall_src }}', dest: '{{ cluster_data_dir }}/{{ preinstall_s3_dest }}'}
+        - {src: '{{ postinstall_src }}', dest: '{{ cluster_data_dir }}/{{ postinstall_s3_dest }}'}
 
     - name: PUT the pre/post-deployment scripts and cluster config into s3_bucketname
       amazon.aws.s3_object:
@@ -171,9 +171,9 @@
         encrypt: true
         mode: put
       with_items:
-        - { src: '{{ cluster_config_template }}', dest: '{{ s3_script_path }}/{{ cluster_config_dest }}' }
-        - { src: '{{ cluster_data_dir }}/{{ preinstall_s3_dest }}', dest: '{{ s3_script_path }}/{{ preinstall_s3_dest }}' }
-        - { src: '{{ cluster_data_dir }}/{{ postinstall_s3_dest }}', dest: '{{ s3_script_path }}/{{ postinstall_s3_dest }}' }
+        - {src: '{{ cluster_config_template }}', dest: '{{ s3_script_path }}/{{ cluster_config_dest }}'}
+        - {src: '{{ cluster_data_dir }}/{{ preinstall_s3_dest }}', dest: '{{ s3_script_path }}/{{ preinstall_s3_dest }}'}
+        - {src: '{{ cluster_data_dir }}/{{ postinstall_s3_dest }}', dest: '{{ s3_script_path }}/{{ postinstall_s3_dest }}'}
 
     - name: Template the kill_pcluster and cron lifetime scripts to stage_dir
       template:
@@ -181,8 +181,8 @@
         dest: "{{ item.dest }}"
         mode: "0755"
       with_items:
-        - { src: '{{ cluster_template_dir }}/kill_pcluster.j2', dest: '{{ stage_dir }}/kill_pcluster.{{ cluster_name }}.sh' }
-        - { src: '{{ generate_cron_lifetime_string_src }}', dest: '{{ stage_dir }}/generate_cron_lifetime_string.{{ cluster_name }}.sh' }
+        - {src: '{{ cluster_template_dir }}/kill_pcluster.j2', dest: '{{ stage_dir }}/kill_pcluster.{{ cluster_name }}.sh'}
+        - {src: '{{ generate_cron_lifetime_string_src }}', dest: '{{ stage_dir }}/generate_cron_lifetime_string.{{ cluster_name }}.sh'}
 
     - name: Stage and upload external NFS mount list
       when: 'enable_external_nfs == "true"'

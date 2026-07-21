@@ -1,3 +1,4 @@
+---
 ################################################################################
 # pcluster_defaults.yml
 # Default values for make_pcluster.py, kill_pcluster.py, and access_cluster.py.

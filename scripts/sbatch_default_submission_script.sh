@@ -119,8 +119,8 @@
 ##########################################################################
 ##########################################################################
 
-echo "`hostname` ran this job on `date`."
+echo "$(hostname) ran this job on $(date)."
 
-echo "`hostname` is running `python3 --version`"
+echo "$(hostname) is running $(python3 --version)"
 
 exit 0

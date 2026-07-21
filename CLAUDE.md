@@ -20,7 +20,7 @@ src/create_pcluster.yml   # Ansible playbook — cluster build
 src/delete_pcluster.yml   # Ansible playbook — cluster teardown
 templates/                # Jinja2 templates (config, vars file, install scripts, IAM)
 performance/              # HPC benchmark suite and performance analysis scripts
-tests/                    # pytest suite (157 tests as of last run)
+tests/                    # pytest suite (158 tests as of last run)
 ```
 
 ## Constraints
@@ -34,7 +34,7 @@ tests/                    # pytest suite (157 tests as of last run)
 ## Test suite
 
 ```
-python -m pytest tests/ -q          # must stay green (157 tests)
+python -m pytest tests/ -q          # must stay green (158 tests)
 make lint                           # ansible-lint — exits 0, known warnings are documented in README
 make shellcheck                     # shellcheck on performance/scripts/*.sh
 ```
