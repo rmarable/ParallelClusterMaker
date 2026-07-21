@@ -10,7 +10,7 @@ cluster_lifetime: "0:24:0"          # days:hours:minutes
 cluster_owner_department: hpc
 cluster_type: spot                  # ondemand | spot
 prod_level: dev                     # dev | test | stage | prod
-project_id: UNDEFINED
+project_id: smoketester
 turbot_account: disabled            # https://turbot.com/
 
 # --- Instances ---
@@ -31,7 +31,7 @@ placement_group: NONE               # NONE | DYNAMIC
 
 # --- Autoscaling ---
 initial_queue_size: 2
-max_queue_size: 10
+max_queue_size: 8
 maintain_initial_size: "false"
 scaledown_idletime: 5               # minutes
 
@@ -74,10 +74,10 @@ external_nfs_server: ""
 # VPC, first subnet per AZ). This is non-deterministic when multiple subnets
 # exist in an AZ. For production clusters, explicitly set headnode_subnet_id,
 # compute_subnet_ids, and vpc_name rather than relying on auto-discovery.
-vpc_name: "vpc_default"
-headnode_subnet_id: ""            # leave empty to auto-discover
-compute_az: ""                    # comma-separated; defaults to --az if empty
-compute_subnet_ids: ""            # comma-separated; leave empty to auto-discover
+vpc_name: "ResearchVpc"
+headnode_subnet_id: "subnet-08a9c7be86a271297"  # leave empty to auto-discover
+compute_az: "us-east-2a"                        # comma-separated; defaults to --az if empty
+compute_subnet_ids: "subnet-08a9c7be86a271297"  # comma-separated; leave empty to auto-discover
 use_private_compute_subnet: "false"
 
 # --- Performance tests ---

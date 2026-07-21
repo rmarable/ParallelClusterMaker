@@ -52,13 +52,6 @@ On macOS, install system dependencies via Homebrew first:
 brew install ansible autoconf automake gcc jq libtool make readline
 ```
 
-To activate the environment:
-
-```
-cd ~/src/ParallelClusterMaker
-source .venv/bin/activate
-```
-
 To deactivate the environment when you are done:
 
 ```
@@ -118,7 +111,7 @@ All optional parameters have hardcoded defaults and can also be persisted in a Y
 | `initial_queue_size` | 2 |
 | `max_queue_size` | 10 |
 | `scaledown_idletime` | 5 min |
-| `cluster_lifetime` | 7:0:0 (days:hours:min) |
+| `cluster_lifetime` | 0:24:0 (days:hours:min) |
 | `ebs_shared_volume_size` | 250 GB |
 | `fsx_size` | 1200 GB |
 
@@ -126,13 +119,13 @@ Use `--use_defaults=FILE` to load values from your own defaults file; CLI argume
 
 ```
 # Copy the template and customize it for your cluster
-cp pcluster_defaults.yml my-cluster.yml
+cp pcluster_defaults.yml my-cluster_defaults.yml
 # Pass it at runtime
 ./make_pcluster.py -N my-cluster -O rmarable -E rmarable@example.com -A us-east-1a \
-    --use_defaults=my-cluster.yml
+    --use_defaults=my-cluster_defaults.yml
 ```
 
-Naming the file after the cluster (`<cluster_name>.yml`) is strongly recommended so cluster namespaces are clearly scoped.  Loading `pcluster_defaults.yml` directly is allowed but prints a warning.
+Naming the file `<cluster_name>_defaults.yml` is strongly recommended so cluster namespaces are clearly scoped.  Loading `pcluster_defaults.yml` directly is allowed but prints a warning.
 
 ---
 
@@ -442,6 +435,8 @@ Potential future improvements, roughly ordered by impact:
 - **`kill_pcluster.py` profile inheritance from vars file** — when `make_pcluster.py` is run with `--turbot_account`, the Turbot profile is recorded in the cluster's vars file.  `kill_pcluster.py` could auto-detect and apply it from there instead of requiring the operator to re-specify `--turbot_account` at teardown.
 
 - **Terraform / CDK parity** — the toolkit is Ansible-native.  A Terraform or AWS CDK implementation of the same lifecycle (`make` / `kill` / `access`) would fit more naturally into infrastructure-as-code pipelines that already use those tools.
+
+- **Monitoring integration** — integrate the AWS ParallelCluster monitoring solution to provide Grafana dashboards and CloudWatch metrics for cluster health and job telemetry: https://github.com/aws-samples/aws-parallelcluster-monitoring
 
 ---
 

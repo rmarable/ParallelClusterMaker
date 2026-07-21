@@ -147,7 +147,6 @@ Tags:
     Value: "{{ prod_level }}"
   - Key: DEPLOYMENT_DATE
     Value: "{{ DEPLOYMENT_DATE }}"
-{% if enable_ganglia == 'true' %}
 
 Monitoring:
   Dashboards:
@@ -156,4 +155,3 @@ Monitoring:
   Logs:
     CloudWatch:
       Enabled: true
-{% endif %}

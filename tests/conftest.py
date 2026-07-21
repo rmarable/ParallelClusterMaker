@@ -128,7 +128,6 @@ def cluster_params():
         "preinstall_s3_dest": "preinstall.test-cluster.sh",
         "postinstall_s3_dest": "postinstall.test-cluster.sh",
         # Features
-        "enable_ganglia": "false",
         "enable_hpc_performance_tests": "true",
         "matrix_sizes": "1000 2000 3000 4000 5000",
         "perftest_custom_start_number": 10,
@@ -155,14 +154,13 @@ def cluster_params():
 
 @pytest.fixture
 def cluster_params_custom_ami(cluster_params):
-    """cluster_params variant with custom_ami, placement_group, and ganglia enabled.
+    """cluster_params variant with custom_ami and placement_group set.
 
     Exercises conditional template branches that are skipped by the default fixture.
     """
     overrides = {
         "custom_ami": "ami-0abc1234567890def",
         "placement_group": "test-cluster-pg",
-        "enable_ganglia": "true",
         "use_private_compute_subnet": "true",
     }
     return {**cluster_params, **overrides}
