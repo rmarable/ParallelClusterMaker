@@ -1,0 +1,14 @@
+aws-parallelcluster>=3.15
+boto3
+botocore
+ansible
+Jinja2
+PyYAML
+pytest
+ansible-lint
+# performance/ script dependencies
+numpy
+scipy
+pandas
+matplotlib
+seaborn

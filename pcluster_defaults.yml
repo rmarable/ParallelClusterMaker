@@ -1,0 +1,103 @@
+################################################################################
+# pcluster_defaults.yml
+# Default values for make_pcluster.py, kill_pcluster.py, and access_cluster.py.
+# Pass --use_defaults to load these values; CLI arguments always take precedence.
+################################################################################
+
+# --- Cluster identity ---
+cluster_lifetime: "7:0:0"           # days:hours:minutes
+cluster_owner_department: hpc
+cluster_type: spot                  # ondemand | spot
+prod_level: dev                     # dev | test | stage | prod
+project_id: UNDEFINED
+turbot_account: disabled            # https://turbot.com/
+
+# --- Instances ---
+base_os: ubuntu2404                 # ubuntu2204 | ubuntu2404 | rhel8 | rhel9
+headnode_instance_type: c5.xlarge
+compute_instance_type: c5.2xlarge
+headnode_root_volume_size: 250        # GB
+headnode_root_volume_type: gp3        # gp2 | gp3 | io1 | io2 | st1
+headnode_root_volume_iops: 3000
+headnode_root_volume_throughput: 125  # MB/s
+compute_root_volume_size: 250         # GB
+compute_root_volume_type: gp3         # gp2 | gp3 | io1 | io2 | st1
+compute_root_volume_iops: 3000
+compute_root_volume_throughput: 125   # MB/s
+custom_ami: NONE
+hyperthreading: "true"
+placement_group: NONE               # NONE | DYNAMIC
+
+# --- Autoscaling ---
+initial_queue_size: 2
+max_queue_size: 10
+maintain_initial_size: "false"
+scaledown_idletime: 5               # minutes
+
+# --- Scheduler ---
+scheduler: slurm
+
+# --- EBS ---
+ebs_encryption: "false"
+ebs_shared_dir: /shared
+ebs_shared_volume_size: 250         # GB
+ebs_shared_volume_type: gp3         # gp2 | gp3 | io1 | io2 | st1
+ebs_shared_volume_iops: 3000
+ebs_shared_volume_throughput: 125   # MB/s
+
+# --- EFS ---
+enable_efs: "false"
+efs_encryption: "false"
+efs_performance_mode: generalPurpose  # generalPurpose | maxIO
+efs_throughput_mode: bursting         # bursting | provisioned | elastic
+
+# --- FSx for Lustre ---
+enable_fsx: "false"
+fsx_size: 1200                      # GB, must be a multiple of 1200
+fsx_chunk_size: 1024                # MB
+enable_fsx_hydration: "false"
+fsx_s3_import_bucket: UNDEFINED
+fsx_s3_import_path: import
+fsx_s3_export_bucket: UNDEFINED
+fsx_s3_export_path: export
+
+# --- EFA ---
+enable_efa: "false"
+
+# --- External NFS ---
+enable_external_nfs: "false"
+external_nfs_server: ""
+
+# --- Networking ---
+# WARNING: The toolkit auto-discovers VPCs and subnets by convention (default
+# VPC, first subnet per AZ). This is non-deterministic when multiple subnets
+# exist in an AZ. For production clusters, explicitly set headnode_subnet_id,
+# compute_subnet_ids, and vpc_name rather than relying on auto-discovery.
+vpc_name: vpc_default
+headnode_subnet_id: ""            # leave empty to auto-discover
+compute_az: ""                    # comma-separated; defaults to --az if empty
+compute_subnet_ids: ""            # comma-separated; leave empty to auto-discover
+use_private_compute_subnet: "false"
+
+# --- Performance tests ---
+enable_hpc_performance_tests: "false"
+matrix_sizes: "1000 2000 3000 4000 5000"  # space-separated matrix dimensions for Axb_random
+perftest_custom_start_number: 10
+perftest_custom_step_size: 10
+perftest_custom_total_tests: 5
+
+# --- Monitoring ---
+enable_ganglia: "false"
+
+# --- kill_pcluster.py ---
+delete_efs: "true"
+delete_fsx: "true"
+delete_s3_bucketname: "true"
+
+# --- Custom deployment scripts ---
+pre_install_script: scripts/pre-deployment.sh
+post_install_script: scripts/post-deployment.sh
+
+# --- Misc ---
+ansible_verbosity: ""
+debug_mode: "false"

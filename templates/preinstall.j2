@@ -1,0 +1,55 @@
+#!/bin/bash
+set -euo pipefail
+################################################################################
+# Name:		preinstall.{{ cluster_name }}.sh
+# Author:	Rodney Marable <rodney.marable@gmail.com>
+# Created On:	April 20, 2019
+# Last Changed:	May 30, 2019
+# Deployed On:	{{ lookup('pipe','date \"+%B %e, %Y\" | tr -s \" \"') }}
+# Purpose:	Perform preinstall tasks on cluster {{ cluster_name }}
+################################################################################
+
+{% if 'ubuntu' in base_os %}
+# Install Python3 and required libraries on Ubuntu.
+
+sudo apt-get -y update
+sudo DEBIAN_FRONTEND=noninteractive apt-get -y dist-upgrade
+sudo apt-get -y install python3 python3-pip python3-dev unzip
+sudo pip3 install --upgrade pip --break-system-packages
+sudo pip3 install --break-system-packages \
+    'ansible>=9,<10' 'boto3>=1.34,<2' 'matplotlib>=3.8,<4' \
+    'numpy>=1.26,<2' 'pandas>=2.2,<3' 'requests>=2.31,<3' \
+    'seaborn>=0.13,<1' 'scipy>=1.12,<2' 'tailhead>=1.0'
+{% else %}
+# Install Python3 and required libraries on RHEL.
+
+sudo dnf -y update
+sudo dnf -y install python3 python3-pip unzip
+sudo pip3 install --upgrade pip
+sudo pip3 install \
+    'ansible>=9,<10' 'boto3>=1.34,<2' 'matplotlib>=3.8,<4' \
+    'numpy>=1.26,<2' 'pandas>=2.2,<3' 'requests>=2.31,<3' \
+    'seaborn>=0.13,<1' 'scipy>=1.12,<2' 'tailhead>=1.0'
+{% endif %}
+
+# Upgrade awscli to the most current version (arch-aware).
+
+ARCH=$(uname -m)
+if [[ "$ARCH" == "aarch64" ]]; then
+    AWSCLI_URL="https://awscli.amazonaws.com/awscli-exe-linux-aarch64.zip"
+else
+    AWSCLI_URL="https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip"
+fi
+curl "$AWSCLI_URL" -o /tmp/awscliv2.zip
+unzip /tmp/awscliv2.zip -d /tmp
+sudo /tmp/aws/install --update
+rm -rf /tmp/awscliv2.zip /tmp/aws
+
+{% if hyperthreading == 'false' %}
+# Disable Intel HyperThreading.
+
+for cpunum in $(cat /sys/devices/system/cpu/cpu*/topology/thread_siblings_list | cut -s -d, -f2- | tr ',' '\n' | sort -un)
+do
+	echo 0 | sudo tee /sys/devices/system/cpu/cpu$cpunum/online > /dev/null
+done
+{% endif %}
