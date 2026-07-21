@@ -8,7 +8,7 @@ This codebase was co-written with [Claude Code](https://claude.ai/code) (Anthrop
 
 ## Prerequisites
 
-* Python 3.10 or later
+* **Python 3.12** (required — see note below)
 * AWS CLI v2, configured with credentials that have sufficient IAM permissions
 * `git`
 * `ansible` (installed via pip below)
@@ -21,6 +21,8 @@ Apply a Name tag to any VPC in regions where you plan to deploy cluster stacks
   * "dublin" for eu-west-1
 
 **Important:** some environments may require assistance from your company or organizational IT/DevOps team to complete the VPC tagging step.
+
+**Python version note:** `aws-parallelcluster` does not support Python 3.13 or 3.14. Python 3.14 changed `asyncio.get_event_loop()` to raise `RuntimeError` when no event loop is running; this causes `pcluster create-cluster` to fail with `"There is no current event loop in thread 'MainThread'"` even though `pip install` succeeds without warning. The fix (upstream PR [#7149](https://github.com/aws/aws-parallelcluster/pull/7149)) is unmerged as of v3.15.1. Use Python 3.12, which is the last officially supported version. A `.python-version` file in the repository root pins the venv to 3.12.
 
 It runs from a Python virtual environment (`.venv/`) inside the repository.
 The venv is excluded from git via `.gitignore`; its state is captured by
@@ -38,7 +40,7 @@ Clone the repository and create the virtual environment:
 cd ~/src
 git clone https://github.com/rmarable/ParallelClusterMaker.git
 cd ParallelClusterMaker
-python3 -m venv .venv
+python3.12 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 ansible-galaxy collection install -r requirements.ansible.yml
@@ -414,7 +416,6 @@ CI runs all three automatically on every push and pull request.
 
 | Warning | Reason |
 |---|---|
-| `var-naming` — `HeadNodePublicIP` | ParallelCluster's own register name convention; renaming would cascade across templates |
 | `yaml[line-length]` — ssh/chown/cp commands | One-liners that are 162 chars (2 over limit); splitting would harm readability |
 | `no-changed-when` | `pcluster` CLI commands are inherently stateful; `changed_when` on every poll would be misleading |
 | `ignore-errors` | Intentional on cleanup tasks (S3 bucket, SNS topic, IAM role) that may not exist at delete time |

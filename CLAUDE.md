@@ -30,6 +30,7 @@ tests/                    # pytest suite (158 tests as of last run)
 - All Python logic must live in `src/pcluster_core.py` or `src/pcluster_aux_data.py` so it is testable without AWS credentials.
 - `templates/vars_file.j2` is rendered with `StrictUndefined` — `| default()` filters do not rescue from UndefinedError; every variable must be defined upstream.
 - The `.venv/` virtual environment is excluded from git.  All dependencies are in `requirements.txt`.
+- **Python 3.12 only.** `aws-parallelcluster` ≤ 3.15.1 does not support Python 3.13 or 3.14 — Python 3.14 breaks `asyncio.get_event_loop()` at runtime and the upstream fix (PR #7149) is unmerged. The repo is pinned via `.python-version`. Always create `.venv` with `python3.12 -m venv .venv`.
 
 ## Test suite
 
