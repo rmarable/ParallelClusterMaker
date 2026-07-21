@@ -15,7 +15,6 @@
   vars:
     local_homedir: "{{ lookup('env','HOME') }}"
     local_workingdir: "{{ playbook_dir | dirname }}"
-    local_os: "{{ lookup('pipe','uname') }}"
 
   tasks:
     - name: Start a timer for the cluster environment build process
@@ -330,32 +329,32 @@
 
     - name: Get the head node IP address
       set_fact:
-        HeadNodePublicIP: "{{ (cluster_status.stdout | from_json).get('headNode', {}).get('publicIpAddress', '') }}"
+        head_node_public_ip: "{{ (cluster_status.stdout | from_json).get('headNode', {}).get('publicIpAddress', '') }}"
 
     - name: Template the cluster SSH access script to stage_dir
       template:
         src: "{{ cluster_template_dir }}/access_cluster.j2"
         dest: "{{ stage_dir }}/access_cluster.{{ cluster_name }}.sh"
         mode: "0755"
-      when: HeadNodePublicIP != ''
+      when: head_node_public_ip != ''
 
     - name: Wait for SSH port to be reachable on the head node
       wait_for:
-        host: "{{ HeadNodePublicIP }}"
+        host: "{{ head_node_public_ip }}"
         port: 22
         delay: 5
         timeout: 300
         state: started
-      when: HeadNodePublicIP != ''
+      when: head_node_public_ip != ''
 
     - name: Remove any stale known_hosts entry for the head node
-      shell: ssh-keygen -R "{{ HeadNodePublicIP }}" -f "{{ ssh_known_hosts }}" 2>/dev/null || true
-      when: HeadNodePublicIP != ''
+      shell: ssh-keygen -R "{{ head_node_public_ip }}" -f "{{ ssh_known_hosts }}" 2>/dev/null || true
+      when: head_node_public_ip != ''
 
     - name: Accept the SSH fingerprint of the head node
       shell: |
         _tmpfile=$(mktemp)
-        ssh-keyscan -T 30 -H "{{ HeadNodePublicIP }}" 2>/dev/null > "$_tmpfile"
+        ssh-keyscan -T 30 -H "{{ head_node_public_ip }}" 2>/dev/null > "$_tmpfile"
         _added=0
         while IFS= read -r line; do
           grep -qxF "$line" "{{ ssh_known_hosts }}" 2>/dev/null || { echo "$line" >> "{{ ssh_known_hosts }}"; _added=1; }
@@ -363,21 +362,21 @@
         rm -f "$_tmpfile"
         exit $_added
       register: _keyscan_result
-      when: HeadNodePublicIP != ''
+      when: head_node_public_ip != ''
       changed_when: _keyscan_result.rc == 1
       failed_when: _keyscan_result.rc > 1
 
     - name: Create performance directory on the head node
-      command: ssh -o BatchMode=yes -o ConnectTimeout=30 -i "{{ ssh_keypair }}" "{{ ec2_user }}@{{ HeadNodePublicIP }}" mkdir -p "{{ headnode_performance_dir_dest }}"
-      when: HeadNodePublicIP != ''
+      command: ssh -o BatchMode=yes -o ConnectTimeout=30 -o StrictHostKeyChecking=accept-new -i "{{ ssh_keypair }}" "{{ ec2_user }}@{{ head_node_public_ip }}" mkdir -p "{{ headnode_performance_dir_dest }}"
+      when: head_node_public_ip != ''
 
     - name: Transfer the local staging directory to the head node
       shell: >
-        ssh -o BatchMode=yes -o ConnectTimeout=30 -i "{{ ssh_keypair }}" "{{ ec2_user }}@{{ HeadNodePublicIP }}"
+        ssh -o BatchMode=yes -o ConnectTimeout=30 -o StrictHostKeyChecking=accept-new -i "{{ ssh_keypair }}" "{{ ec2_user }}@{{ head_node_public_ip }}"
         "mkdir -p $(dirname '{{ stage_dir }}')" &&
-        scp -o BatchMode=yes -o ConnectTimeout=30 -i "{{ ssh_keypair }}" -r "{{ stage_dir }}"
-        "{{ ec2_user }}@{{ HeadNodePublicIP }}:$(dirname '{{ stage_dir }}')"/
-      when: HeadNodePublicIP != ''
+        scp -o BatchMode=yes -o ConnectTimeout=30 -o StrictHostKeyChecking=accept-new -i "{{ ssh_keypair }}" -r "{{ stage_dir }}"
+        "{{ ec2_user }}@{{ head_node_public_ip }}:$(dirname '{{ stage_dir }}')"/
+      when: head_node_public_ip != ''
 
     - name: Render the default Slurm submission script template
       template:
@@ -386,22 +385,25 @@
         mode: "0755"
 
     - name: Transfer the default Slurm submission script to the head node
-      command: scp -o BatchMode=yes -o ConnectTimeout=30 -i "{{ ssh_keypair }}" "{{ stage_dir }}/sbatch_default_submission_script.sh" "{{ ec2_user }}@{{ HeadNodePublicIP }}:{{ ec2_user_home }}"
-      when: HeadNodePublicIP != ''
+      shell: >
+        scp -o BatchMode=yes -o ConnectTimeout=30 -o StrictHostKeyChecking=accept-new -i "{{ ssh_keypair }}"
+        "{{ stage_dir }}/sbatch_default_submission_script.sh"
+        "{{ ec2_user }}@{{ head_node_public_ip }}:{{ ec2_user_home }}"
+      when: head_node_public_ip != ''
 
     - name: Deploy performance tree to head node
       when:
         - enable_hpc_performance_tests == "true"
-        - HeadNodePublicIP != ''
+        - head_node_public_ip != ''
       block:
         - name: Copy the performance source tree to its final destination on the head node
           shell: >
-            scp -o BatchMode=yes -o ConnectTimeout=30 -i "{{ ssh_keypair }}"
+            scp -o BatchMode=yes -o ConnectTimeout=30 -o StrictHostKeyChecking=accept-new -i "{{ ssh_keypair }}"
             "{{ performance_stage_dir }}"/*
-            "{{ ec2_user }}@{{ HeadNodePublicIP }}:{{ headnode_performance_dir_dest }}"
+            "{{ ec2_user }}@{{ head_node_public_ip }}:{{ headnode_performance_dir_dest }}"
         - name: Symlink the cluster-specific shell scripts on the head node
           command: >
-            ssh -o BatchMode=yes -o ConnectTimeout=30 -i "{{ ssh_keypair }}" "{{ ec2_user }}@{{ HeadNodePublicIP }}"
+            ssh -o BatchMode=yes -o ConnectTimeout=30 -o StrictHostKeyChecking=accept-new -i "{{ ssh_keypair }}" "{{ ec2_user }}@{{ head_node_public_ip }}"
             bash -c "cd '{{ headnode_performance_dir_dest }}' &&
             ln -sf '{{ item }}.{{ cluster_name }}.sh' '{{ item }}.sh'"
           with_items:
@@ -412,40 +414,67 @@
     - name: Set up EBS HPC performance test directory on head node
       when:
         - enable_hpc_performance_tests == "true"
-        - HeadNodePublicIP != ''
+        - head_node_public_ip != ''
       block:
         - name: Create EBS HPC performance test directory on the head node
-          command: ssh -o BatchMode=yes -o ConnectTimeout=30 -i "{{ ssh_keypair }}" "{{ ec2_user }}@{{ HeadNodePublicIP }}" sudo mkdir -p "{{ ebs_hpc_performance_dir }}"
+          shell: >
+            ssh -o BatchMode=yes -o ConnectTimeout=30 -o StrictHostKeyChecking=accept-new
+            -i "{{ ssh_keypair }}" "{{ ec2_user }}@{{ head_node_public_ip }}"
+            sudo mkdir -p "{{ ebs_hpc_performance_dir }}"
         - name: Set ownership of the EBS HPC performance test directory
-          command: ssh -o BatchMode=yes -o ConnectTimeout=30 -i "{{ ssh_keypair }}" "{{ ec2_user }}@{{ HeadNodePublicIP }}" sudo chown -R "{{ ec2_user }}:{{ ec2_user }}" "{{ ebs_hpc_performance_dir }}"
+          shell: >
+            ssh -o BatchMode=yes -o ConnectTimeout=30 -o StrictHostKeyChecking=accept-new
+            -i "{{ ssh_keypair }}" "{{ ec2_user }}@{{ head_node_public_ip }}"
+            sudo chown -R "{{ ec2_user }}:{{ ec2_user }}" "{{ ebs_hpc_performance_dir }}"
         - name: Copy performance source tree to the EBS HPC performance test directory
-          command: ssh -o BatchMode=yes -o ConnectTimeout=30 -i "{{ ssh_keypair }}" "{{ ec2_user }}@{{ HeadNodePublicIP }}" cp -a "{{ headnode_performance_dir_dest }}"/* "{{ ebs_hpc_performance_dir }}"
+          shell: >
+            ssh -o BatchMode=yes -o ConnectTimeout=30 -o StrictHostKeyChecking=accept-new
+            -i "{{ ssh_keypair }}" "{{ ec2_user }}@{{ head_node_public_ip }}"
+            cp -a "{{ headnode_performance_dir_dest }}"/* "{{ ebs_hpc_performance_dir }}"
 
     - name: Set up EFS HPC performance test directory on head node
       when:
         - enable_hpc_performance_tests == "true"
         - enable_efs == "true"
-        - HeadNodePublicIP != ''
+        - head_node_public_ip != ''
       block:
         - name: Create EFS HPC performance test directory on the head node
-          command: ssh -o BatchMode=yes -o ConnectTimeout=30 -i "{{ ssh_keypair }}" "{{ ec2_user }}@{{ HeadNodePublicIP }}" sudo mkdir -p "{{ efs_hpc_performance_dir }}"
+          shell: >
+            ssh -o BatchMode=yes -o ConnectTimeout=30 -o StrictHostKeyChecking=accept-new
+            -i "{{ ssh_keypair }}" "{{ ec2_user }}@{{ head_node_public_ip }}"
+            sudo mkdir -p "{{ efs_hpc_performance_dir }}"
         - name: Set ownership of the EFS HPC performance test directory
-          command: ssh -o BatchMode=yes -o ConnectTimeout=30 -i "{{ ssh_keypair }}" "{{ ec2_user }}@{{ HeadNodePublicIP }}" sudo chown -R "{{ ec2_user }}:{{ ec2_user }}" "{{ efs_hpc_performance_dir }}"
+          shell: >
+            ssh -o BatchMode=yes -o ConnectTimeout=30 -o StrictHostKeyChecking=accept-new
+            -i "{{ ssh_keypair }}" "{{ ec2_user }}@{{ head_node_public_ip }}"
+            sudo chown -R "{{ ec2_user }}:{{ ec2_user }}" "{{ efs_hpc_performance_dir }}"
         - name: Copy performance source tree to the EFS HPC performance test directory
-          command: ssh -o BatchMode=yes -o ConnectTimeout=30 -i "{{ ssh_keypair }}" "{{ ec2_user }}@{{ HeadNodePublicIP }}" cp -a "{{ headnode_performance_dir_dest }}"/* "{{ efs_hpc_performance_dir }}"
+          shell: >
+            ssh -o BatchMode=yes -o ConnectTimeout=30 -o StrictHostKeyChecking=accept-new
+            -i "{{ ssh_keypair }}" "{{ ec2_user }}@{{ head_node_public_ip }}"
+            cp -a "{{ headnode_performance_dir_dest }}"/* "{{ efs_hpc_performance_dir }}"
 
     - name: Set up FSxL HPC performance test directory on head node
       when:
         - enable_hpc_performance_tests == "true"
         - enable_fsx == "true"
-        - HeadNodePublicIP != ''
+        - head_node_public_ip != ''
       block:
         - name: Create FSxL HPC performance test directory on the head node
-          command: ssh -o BatchMode=yes -o ConnectTimeout=30 -i "{{ ssh_keypair }}" "{{ ec2_user }}@{{ HeadNodePublicIP }}" sudo mkdir -p "{{ fsx_hpc_performance_dir }}"
+          shell: >
+            ssh -o BatchMode=yes -o ConnectTimeout=30 -o StrictHostKeyChecking=accept-new
+            -i "{{ ssh_keypair }}" "{{ ec2_user }}@{{ head_node_public_ip }}"
+            sudo mkdir -p "{{ fsx_hpc_performance_dir }}"
         - name: Set ownership of the FSxL HPC performance test directory
-          command: ssh -o BatchMode=yes -o ConnectTimeout=30 -i "{{ ssh_keypair }}" "{{ ec2_user }}@{{ HeadNodePublicIP }}" sudo chown -R "{{ ec2_user }}:{{ ec2_user }}" "{{ fsx_hpc_performance_dir }}"
+          shell: >
+            ssh -o BatchMode=yes -o ConnectTimeout=30 -o StrictHostKeyChecking=accept-new
+            -i "{{ ssh_keypair }}" "{{ ec2_user }}@{{ head_node_public_ip }}"
+            sudo chown -R "{{ ec2_user }}:{{ ec2_user }}" "{{ fsx_hpc_performance_dir }}"
         - name: Copy performance source tree to the FSxL HPC performance test directory
-          command: ssh -o BatchMode=yes -o ConnectTimeout=30 -i "{{ ssh_keypair }}" "{{ ec2_user }}@{{ HeadNodePublicIP }}" cp -a "{{ headnode_performance_dir_dest }}"/* "{{ fsx_hpc_performance_dir }}"
+          shell: >
+            ssh -o BatchMode=yes -o ConnectTimeout=30 -o StrictHostKeyChecking=accept-new
+            -i "{{ ssh_keypair }}" "{{ ec2_user }}@{{ head_node_public_ip }}"
+            cp -a "{{ headnode_performance_dir_dest }}"/* "{{ fsx_hpc_performance_dir }}"
 
     - name: Schedule cluster self-termination (runs locally, kill_pcluster.py lives here)
       command: bash "{{ generate_cron_lifetime_string_dest }}"
@@ -454,9 +483,9 @@
         - cluster_lifetime != "0:0:0"
 
     - name: Remove the staging directory on the head node
-      command: ssh -o BatchMode=yes -o ConnectTimeout=30 -i "{{ ssh_keypair }}" "{{ ec2_user }}@{{ HeadNodePublicIP }}" rm -rf "{{ stage_dir }}"
+      command: ssh -o BatchMode=yes -o ConnectTimeout=30 -o StrictHostKeyChecking=accept-new -i "{{ ssh_keypair }}" "{{ ec2_user }}@{{ head_node_public_ip }}" rm -rf "{{ stage_dir }}"
       when:
-        - HeadNodePublicIP != ''
+        - head_node_public_ip != ''
 
     - name: Copy the custom scripts from stage_dir to the cluster_data directory
       shell: cp -a "{{ stage_dir }}"/* "{{ cluster_data_dir }}"
@@ -532,7 +561,7 @@
           - "Access the head node:"
           - "  ./access_cluster.py -N {{ cluster_name }}"
           - "  pcluster ssh --cluster-name {{ cluster_name }} -i {{ ssh_keypair }}"
-          - "  ssh -i {{ ssh_keypair }} {{ ec2_user }}@{{ HeadNodePublicIP }}"
+          - "  ssh -i {{ ssh_keypair }} {{ ec2_user }}@{{ head_node_public_ip }}"
           - ""
           - "Delete this cluster:"
           - "  ./kill_pcluster.py -N {{ cluster_name }} -O {{ cluster_owner }} -A {{ az }}"
