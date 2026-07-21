@@ -33,7 +33,12 @@ import re
 import subprocess
 import tempfile
 from concurrent.futures import ThreadPoolExecutor
-from botocore.exceptions import ClientError
+from botocore.exceptions import (
+    BotoCoreError,
+    ClientError,
+    EndpointConnectionError,
+    NoCredentialsError,
+)
 from datetime import datetime as DateTime
 from jinja2 import Environment, FileSystemLoader as _FSLoader, StrictUndefined
 
@@ -942,9 +947,9 @@ def main():
         _az_info = ec2client.describe_availability_zones(ZoneNames=[az])
     except (
         ValueError,
-        botocore.exceptions.EndpointConnectionError,
-        botocore.exceptions.NoCredentialsError,
-        botocore.exceptions.BotoCoreError,
+        EndpointConnectionError,
+        NoCredentialsError,
+        BotoCoreError,
         ClientError,
     ) as _e:
         sys.exit(f"ERROR: Could not verify availability zone '{az}': {_e}")

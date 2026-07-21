@@ -140,7 +140,7 @@ def cluster_params():
         # Performance
         "sid": "slurm-test-cluster",
         # Ansible registered vars (used by sns/access templates)
-        "HeadNodePublicIP": "1.2.3.4",
+        "head_node_public_ip": "1.2.3.4",
         "start_overall_timer": type("R", (), {"stdout": "2026-07-20 10:00:00"})(),
         "start_stack_creation_timer": type(
             "R", (), {"stdout": "2026-07-20 10:01:00"}
