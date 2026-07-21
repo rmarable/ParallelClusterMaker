@@ -35,7 +35,7 @@ tests/                    # pytest suite (158 tests as of last run)
 
 ```
 python -m pytest tests/ -q          # must stay green (158 tests)
-make lint                           # ansible-lint — exits 0, passes production profile, no warnings
+make lint                           # ansible-lint — exits 0, profile: basic (production raises fqcn/ignore-errors warnings on legacy tasks)
 make shellcheck                     # shellcheck on performance/scripts/*.sh
 ```
 

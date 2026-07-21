@@ -28,7 +28,7 @@ Choose an option to access the cluster's head node:
     pcluster ssh --cluster-name {{ cluster_name }} -i {{ ssh_keypair }}
 
 (3) Vanilla ssh with the cluster's private SSH key:
-    ssh -i {{ ssh_keypair }} {{ ec2_user }}@{{ HeadNodePublicIP }}
+    ssh -i {{ ssh_keypair }} {{ ec2_user }}@{{ head_node_public_ip }}
 
 To destroy this cluster, run the following command:
 

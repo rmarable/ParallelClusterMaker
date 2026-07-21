@@ -411,70 +411,45 @@
             - perf-sbatch
           ignore_errors: true
 
-    - name: Set up EBS HPC performance test directory on head node
+    - name: Build list of active HPC performance test directories
+      set_fact:
+        _perf_dirs: >-
+          {{ [ebs_hpc_performance_dir] +
+             ([efs_hpc_performance_dir] if enable_efs == 'true' else []) +
+             ([fsx_hpc_performance_dir] if enable_fsx == 'true' else []) }}
       when:
         - enable_hpc_performance_tests == "true"
         - head_node_public_ip != ''
-      block:
-        - name: Create EBS HPC performance test directory on the head node
-          shell: >
-            ssh -o BatchMode=yes -o ConnectTimeout=30 -o StrictHostKeyChecking=accept-new
-            -i "{{ ssh_keypair }}" "{{ ec2_user }}@{{ head_node_public_ip }}"
-            sudo mkdir -p "{{ ebs_hpc_performance_dir }}"
-        - name: Set ownership of the EBS HPC performance test directory
-          shell: >
-            ssh -o BatchMode=yes -o ConnectTimeout=30 -o StrictHostKeyChecking=accept-new
-            -i "{{ ssh_keypair }}" "{{ ec2_user }}@{{ head_node_public_ip }}"
-            sudo chown -R "{{ ec2_user }}:{{ ec2_user }}" "{{ ebs_hpc_performance_dir }}"
-        - name: Copy performance source tree to the EBS HPC performance test directory
-          shell: >
-            ssh -o BatchMode=yes -o ConnectTimeout=30 -o StrictHostKeyChecking=accept-new
-            -i "{{ ssh_keypair }}" "{{ ec2_user }}@{{ head_node_public_ip }}"
-            cp -a "{{ headnode_performance_dir_dest }}"/* "{{ ebs_hpc_performance_dir }}"
 
-    - name: Set up EFS HPC performance test directory on head node
+    - name: Create HPC performance test directories on the head node
+      shell: >
+        ssh -o BatchMode=yes -o ConnectTimeout=30 -o StrictHostKeyChecking=accept-new
+        -i "{{ ssh_keypair }}" "{{ ec2_user }}@{{ head_node_public_ip }}"
+        sudo mkdir -p "{{ item }}"
+      loop: "{{ _perf_dirs }}"
       when:
         - enable_hpc_performance_tests == "true"
-        - enable_efs == "true"
         - head_node_public_ip != ''
-      block:
-        - name: Create EFS HPC performance test directory on the head node
-          shell: >
-            ssh -o BatchMode=yes -o ConnectTimeout=30 -o StrictHostKeyChecking=accept-new
-            -i "{{ ssh_keypair }}" "{{ ec2_user }}@{{ head_node_public_ip }}"
-            sudo mkdir -p "{{ efs_hpc_performance_dir }}"
-        - name: Set ownership of the EFS HPC performance test directory
-          shell: >
-            ssh -o BatchMode=yes -o ConnectTimeout=30 -o StrictHostKeyChecking=accept-new
-            -i "{{ ssh_keypair }}" "{{ ec2_user }}@{{ head_node_public_ip }}"
-            sudo chown -R "{{ ec2_user }}:{{ ec2_user }}" "{{ efs_hpc_performance_dir }}"
-        - name: Copy performance source tree to the EFS HPC performance test directory
-          shell: >
-            ssh -o BatchMode=yes -o ConnectTimeout=30 -o StrictHostKeyChecking=accept-new
-            -i "{{ ssh_keypair }}" "{{ ec2_user }}@{{ head_node_public_ip }}"
-            cp -a "{{ headnode_performance_dir_dest }}"/* "{{ efs_hpc_performance_dir }}"
 
-    - name: Set up FSxL HPC performance test directory on head node
+    - name: Set ownership of HPC performance test directories on the head node
+      shell: >
+        ssh -o BatchMode=yes -o ConnectTimeout=30 -o StrictHostKeyChecking=accept-new
+        -i "{{ ssh_keypair }}" "{{ ec2_user }}@{{ head_node_public_ip }}"
+        sudo chown -R "{{ ec2_user }}:{{ ec2_user }}" "{{ item }}"
+      loop: "{{ _perf_dirs }}"
       when:
         - enable_hpc_performance_tests == "true"
-        - enable_fsx == "true"
         - head_node_public_ip != ''
-      block:
-        - name: Create FSxL HPC performance test directory on the head node
-          shell: >
-            ssh -o BatchMode=yes -o ConnectTimeout=30 -o StrictHostKeyChecking=accept-new
-            -i "{{ ssh_keypair }}" "{{ ec2_user }}@{{ head_node_public_ip }}"
-            sudo mkdir -p "{{ fsx_hpc_performance_dir }}"
-        - name: Set ownership of the FSxL HPC performance test directory
-          shell: >
-            ssh -o BatchMode=yes -o ConnectTimeout=30 -o StrictHostKeyChecking=accept-new
-            -i "{{ ssh_keypair }}" "{{ ec2_user }}@{{ head_node_public_ip }}"
-            sudo chown -R "{{ ec2_user }}:{{ ec2_user }}" "{{ fsx_hpc_performance_dir }}"
-        - name: Copy performance source tree to the FSxL HPC performance test directory
-          shell: >
-            ssh -o BatchMode=yes -o ConnectTimeout=30 -o StrictHostKeyChecking=accept-new
-            -i "{{ ssh_keypair }}" "{{ ec2_user }}@{{ head_node_public_ip }}"
-            cp -a "{{ headnode_performance_dir_dest }}"/* "{{ fsx_hpc_performance_dir }}"
+
+    - name: Copy performance source tree to HPC performance test directories on the head node
+      shell: >
+        ssh -o BatchMode=yes -o ConnectTimeout=30 -o StrictHostKeyChecking=accept-new
+        -i "{{ ssh_keypair }}" "{{ ec2_user }}@{{ head_node_public_ip }}"
+        cp -a "{{ headnode_performance_dir_dest }}"/* "{{ item }}"
+      loop: "{{ _perf_dirs }}"
+      when:
+        - enable_hpc_performance_tests == "true"
+        - head_node_public_ip != ''
 
     - name: Schedule cluster self-termination (runs locally, kill_pcluster.py lives here)
       command: bash "{{ generate_cron_lifetime_string_dest }}"
