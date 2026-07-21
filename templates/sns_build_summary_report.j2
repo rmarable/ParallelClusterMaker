@@ -34,6 +34,5 @@ To destroy this cluster, run the following command:
 
 $ ./kill_pcluster.py -N {{ cluster_name }} -O {{ cluster_owner }} -A {{ az }}
 
-{% if enable_ganglia == 'true' %}CloudWatch monitoring is enabled. View metrics in the AWS Console:
+CloudWatch monitoring is enabled. View metrics in the AWS Console:
 https://console.aws.amazon.com/cloudwatch/home?region={{ region }}
-{% endif %}

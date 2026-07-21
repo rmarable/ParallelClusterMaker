@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python
 #
 ################################################################################
 # Name:		make_pcluster.py
@@ -13,9 +13,7 @@ import sys
 
 _repo_root = os.path.dirname(os.path.abspath(__file__))
 _src_dir = os.path.join(_repo_root, "src")
-if not os.path.realpath(sys.executable).startswith(
-    os.path.realpath(os.path.join(_repo_root, ".venv")) + os.sep
-):
+if os.path.realpath(sys.prefix) != os.path.realpath(os.path.join(_repo_root, ".venv")):
     sys.exit(
         f"ERROR: Run this script inside the repo virtual environment.\n"
         f"  $ source {os.path.join(_repo_root, '.venv', 'bin', 'activate')}\n"
@@ -122,8 +120,9 @@ def _validate_network(
             )
         if len(subnets) > 1:
             print(
-                f"  WARNING: {len(subnets)} subnets found in {target_az}; using {subnets[0]['SubnetId']}."
-                f" Use --headnode_subnet_id / --compute_subnet_ids to select explicitly."
+                f"*** WARNING ***\n"
+                f"  {len(subnets)} subnets found in {target_az}; using {subnets[0]['SubnetId']}.\n"
+                f"  Use --headnode_subnet_id / --compute_subnet_ids to select explicitly."
             )
         return subnets[0]["SubnetId"]
 
@@ -153,6 +152,24 @@ def _validate_network(
     return vpc_id, headnode_subnet_id, compute_subnet_ids, vpc_cidr
 
 
+def _render_policy(src_path, aws_account_id, region, vpc_id, prod_level,
+                   cluster_serial_number, cluster_name, cluster_owner,
+                   cluster_serial_datestamp):
+    with open(src_path) as fh:
+        raw = (
+            fh.read()
+            .replace("<AWS_ACCOUNT_ID>", aws_account_id)
+            .replace("<AWS_REGION>", region)
+            .replace("<VPC_ID>", vpc_id)
+            .replace("<PROD_LEVEL>", prod_level)
+            .replace("<CLUSTER_SERIAL_NUMBER>", cluster_serial_number)
+            .replace("<CLUSTER_NAME>", cluster_name)
+            .replace("<CLUSTER_OWNER>", cluster_owner)
+            .replace("<CLUSTER_SERIAL_DATESTAMP>", cluster_serial_datestamp)
+        )
+    return json.dumps(json.loads(raw), separators=(",", ":"))
+
+
 def _setup_iam(
     iam,
     ec2_iam_role,
@@ -168,7 +185,7 @@ def _setup_iam(
     region="",
     vpc_id="",
 ):
-    """Create ec2_iam_role and attach its policy. Idempotent."""
+    """Create ec2_iam_role and attach its two inline policies. Idempotent."""
     try:
         iam.get_role(RoleName=ec2_iam_role)
         print(f"  Found ec2_iam_role: {ec2_iam_role}")
@@ -176,33 +193,36 @@ def _setup_iam(
     except ClientError as e:
         if e.response["Error"]["Code"] != "NoSuchEntity":
             raise
-    with open(ec2_json_policy_src) as fh:
-        policy = (
-            fh.read()
-            .replace("<AWS_ACCOUNT_ID>", aws_account_id)
-            .replace("<AWS_REGION>", region)
-            .replace("<VPC_ID>", vpc_id)
-            .replace("<PROD_LEVEL>", prod_level)
-            .replace("<CLUSTER_SERIAL_NUMBER>", cluster_serial_number)
-            .replace("<CLUSTER_NAME>", cluster_name)
-            .replace("<CLUSTER_OWNER>", cluster_owner)
-            .replace("<CLUSTER_SERIAL_DATESTAMP>", cluster_serial_datestamp)
-        )
+
+    render_args = (aws_account_id, region, vpc_id, prod_level,
+                   cluster_serial_number, cluster_name, cluster_owner,
+                   cluster_serial_datestamp)
+
+    src_a = ec2_json_policy_src.replace(".json_src", "-A.json_src")
+    src_b = ec2_json_policy_src.replace(".json_src", "-B.json_src")
+    policy_a = _render_policy(src_a, *render_args)
+    policy_b = _render_policy(src_b, *render_args)
+
     with open(
         os.open(ec2_json_policy_template, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600),
         "w",
     ) as fh:
-        fh.write(policy)
+        fh.write(policy_a)
+
     iam.create_role(
         RoleName=ec2_iam_role,
         AssumeRolePolicyDocument='{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Service":["ec2.amazonaws.com"]},"Action":"sts:AssumeRole"}]}',
         Description="ParallelClusterMaker EC2 IAM instance role",
     )
     iam.put_role_policy(
-        RoleName=ec2_iam_role, PolicyName=ec2_iam_policy, PolicyDocument=policy
+        RoleName=ec2_iam_role, PolicyName=ec2_iam_policy + "-A", PolicyDocument=policy_a
     )
-    print(f"  Created ec2_iam_role:   {ec2_iam_role}")
-    print(f"  Created ec2_iam_policy: {ec2_iam_policy}")
+    iam.put_role_policy(
+        RoleName=ec2_iam_role, PolicyName=ec2_iam_policy + "-B", PolicyDocument=policy_b
+    )
+    print(f"  Created ec2_iam_role:     {ec2_iam_role}")
+    print(f"  Created ec2_iam_policy-A: {ec2_iam_policy}-A")
+    print(f"  Created ec2_iam_policy-B: {ec2_iam_policy}-B")
 
 
 def _setup_fsx_hydration_iam(
@@ -474,13 +494,6 @@ def main():
         default=None,
     )
     parser.add_argument(
-        "--enable_ganglia",
-        choices=["true", "false"],
-        help="enable Ganglia monitoring (default = false)",
-        required=False,
-        default=None,
-    )
-    parser.add_argument(
         "--enable_hpc_performance_tests",
         choices=["true", "false"],
         help="deploy HPC performance test suite (default = false)",
@@ -739,7 +752,7 @@ def main():
     _HARDCODED_DEFAULTS = {
         "ansible_verbosity": "",
         "base_os": "ubuntu2404",
-        "cluster_lifetime": "7:0:0",
+        "cluster_lifetime": "0:24:0",
         "cluster_owner_department": "hpc",
         "cluster_type": "spot",
         "compute_instance_type": "c5.2xlarge",
@@ -763,7 +776,6 @@ def main():
         "enable_external_nfs": "false",
         "enable_fsx": "false",
         "enable_fsx_hydration": "false",
-        "enable_ganglia": "false",
         "enable_hpc_performance_tests": "false",
         "external_nfs_server": "",
         "fsx_chunk_size": 1024,
@@ -808,6 +820,14 @@ def main():
             os.path.abspath(args.use_defaults), _toolkit_defaults, args.cluster_name
         )
         print(f"Defaults: loaded from {args.use_defaults}")
+    else:
+        _candidate = os.path.join(_repo_root, f"{args.cluster_name}_defaults.yml")
+        if os.path.exists(_candidate):
+            print(
+                f"*** WARNING ***\n"
+                f"  '{args.cluster_name}_defaults.yml' exists but was not loaded.\n"
+                f"  If you meant to use it, re-run with: --use_defaults={args.cluster_name}_defaults.yml"
+            )
 
     def _resolve(name, cast=None):
         return _pcore_resolve(name, args, _file_defaults, _HARDCODED_DEFAULTS, cast)
@@ -846,7 +866,6 @@ def main():
     enable_external_nfs = _resolve_bool("enable_external_nfs")
     enable_fsx = _resolve_bool("enable_fsx")
     enable_fsx_hydration = _resolve_bool("enable_fsx_hydration")
-    enable_ganglia = _resolve_bool("enable_ganglia")
     enable_hpc_performance_tests = _resolve_bool("enable_hpc_performance_tests")
     external_nfs_server = _resolve("external_nfs_server")
     fsx_chunk_size = _resolve("fsx_chunk_size", int)
@@ -978,8 +997,7 @@ def main():
 
     # Check for an existing vars_file before making any API calls.
     if os.path.isfile(vars_file_path):
-        print("")
-        print("*** WARNING ***")
+        print(f"\n*** WARNING ***")
         print('An existing vars_file for cluster "' + cluster_name + '" was found!')
         print("")
         print("Please delete this cluster properly and retry the build:")
@@ -1167,7 +1185,8 @@ def main():
     if enable_efa:
         if compute_instance_type not in ec2_instances_efa:
             print(
-                f"WARNING: {compute_instance_type} is not in the known EFA-capable instance list."
+                f"*** WARNING ***\n"
+                f"  {compute_instance_type} is not in the known EFA-capable instance list."
             )
             print("  If this is a recently-released instance type, EFA may still work.")
             print(
@@ -1483,12 +1502,14 @@ def main():
             fsx_hydration_iam_policy = "UNDEFINED"
     except Exception as _iam_e:
         print(
-            f"\nERROR: Exception during IAM/template setup after role creation: {_iam_e}"
+            f"\n*** ERROR ***\n"
+            f"  Exception during IAM/template setup after role creation: {_iam_e}"
         )
         print("Cleaning up IAM role to prevent orphan:")
-        with contextlib.suppress(Exception):
-            iam.delete_role_policy(RoleName=ec2_iam_role, PolicyName=ec2_iam_policy)
-            print(f"  Deleted inline policy: {ec2_iam_policy}")
+        for _sfx in ("-A", "-B"):
+            with contextlib.suppress(Exception):
+                iam.delete_role_policy(RoleName=ec2_iam_role, PolicyName=ec2_iam_policy + _sfx)
+                print(f"  Deleted inline policy: {ec2_iam_policy}{_sfx}")
         with contextlib.suppress(Exception):
             iam.delete_role(RoleName=ec2_iam_role)
             print(f"  Deleted IAM role: {ec2_iam_role}")
@@ -1558,7 +1579,6 @@ def main():
         "enable_external_nfs": _b(enable_external_nfs),
         "enable_fsx": _b(enable_fsx),
         "enable_fsx_hydration": _b(enable_fsx_hydration),
-        "enable_ganglia": _b(enable_ganglia),
         "enable_hpc_performance_tests": _b(enable_hpc_performance_tests),
         "external_nfs_server": external_nfs_server,
         "fsx_chunk_size": fsx_chunk_size,
@@ -1670,8 +1690,6 @@ def main():
                 print("fsx_s3_export_path = " + fsx_s3_export_path)
                 print("fsx_s3_import_bucket = " + fsx_s3_import_bucket)
                 print("fsx_s3_import_path = " + fsx_s3_import_path)
-        if enable_ganglia:
-            print(f"enable_ganglia = {enable_ganglia}")
         print(f"enable_hpc_performance_tests = {enable_hpc_performance_tests}")
         if enable_hpc_performance_tests:
             print("perftest_custom_start_number = " + str(perftest_custom_start_number))
@@ -1721,11 +1739,15 @@ def main():
         ) as _vf:
             _vf.write(_jtemplate.render(**cluster_parameters))
     except Exception as _render_e:
-        print(f"\nERROR: vars_file render failed: {_render_e}")
+        print(
+            f"\n*** ERROR ***\n"
+            f"  vars_file render failed: {_render_e}"
+        )
         print("Cleaning up IAM role to prevent orphan:")
-        with contextlib.suppress(Exception):
-            iam.delete_role_policy(RoleName=ec2_iam_role, PolicyName=ec2_iam_policy)
-            print(f"  Deleted inline policy: {ec2_iam_policy}")
+        for _sfx in ("-A", "-B"):
+            with contextlib.suppress(Exception):
+                iam.delete_role_policy(RoleName=ec2_iam_role, PolicyName=ec2_iam_policy + _sfx)
+                print(f"  Deleted inline policy: {ec2_iam_policy}{_sfx}")
         if enable_fsx_hydration and fsx_hydration_iam_policy != "UNDEFINED":
             with contextlib.suppress(Exception):
                 iam.delete_role_policy(
@@ -1830,11 +1852,12 @@ def main():
         print(f"Ansible playbook exited with code {_build_result.returncode}.")
         print(f'Cluster "{cluster_name}" may not have been created successfully.')
         print("Cleaning up IAM resources to allow a clean retry:")
-        try:
-            iam.delete_role_policy(RoleName=ec2_iam_role, PolicyName=ec2_iam_policy)
-            print(f"  Deleted inline policy: {ec2_iam_policy}")
-        except Exception as _e:
-            print(f"  Warning: could not delete policy {ec2_iam_policy}: {_e}")
+        for _sfx in ("-A", "-B"):
+            try:
+                iam.delete_role_policy(RoleName=ec2_iam_role, PolicyName=ec2_iam_policy + _sfx)
+                print(f"  Deleted inline policy: {ec2_iam_policy}{_sfx}")
+            except Exception as _e:
+                print(f"  Warning: could not delete policy {ec2_iam_policy}{_sfx}: {_e}")
         if enable_fsx_hydration:
             try:
                 iam.delete_role_policy(

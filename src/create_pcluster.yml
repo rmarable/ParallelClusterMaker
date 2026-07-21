@@ -542,14 +542,6 @@
           - "  ./kill_pcluster.py -N {{ cluster_name }} -O {{ cluster_owner }} -A {{ az }}"
           - ""
 
-    - name: Print CloudWatch monitoring note
-      debug:
-        msg:
-          - "Ganglia has been replaced by CloudWatch in ParallelCluster v3."
-          - "View metrics: AWS Console → CloudWatch → Dashboards"
-          - ""
-      when: 'enable_ganglia == "true"'
-
     - name: Print FSx hydration helper script locations
       debug:
         msg:

@@ -69,7 +69,7 @@ def test_template_renders_without_undefined(tdir, fname, cluster_params):
 
 @pytest.mark.parametrize("tdir,fname", _collect_templates())
 def test_template_renders_custom_ami_variant(tdir, fname, cluster_params_custom_ami):
-    """Templates must also render when custom_ami, placement_group, and ganglia are set."""
+    """Templates must also render when custom_ami and placement_group are set."""
     env = _make_env(tdir)
     template = env.get_template(fname)
     rendered = template.render(**cluster_params_custom_ami)

@@ -64,7 +64,9 @@
         },
         {
             "Sid": "EC2RunInstances",
-            "Action": [ "ec2:RunInstances" ],
+            "Action": [
+                "ec2:RunInstances"
+            ],
             "Effect": "Allow",
             "Resource": "*",
             "Condition": {
@@ -78,7 +80,9 @@
         },
         {
             "Sid": "EC2TerminateTagged",
-            "Action": [ "ec2:TerminateInstances" ],
+            "Action": [
+                "ec2:TerminateInstances"
+            ],
             "Effect": "Allow",
             "Resource": "*",
             "Condition": {
@@ -118,7 +122,6 @@
             "Action": [
                 "autoscaling:DescribeAutoScalingGroups",
                 "autoscaling:DescribeTags",
-    
                 "autoscaling:DescribeAutoScalingInstances"
             ],
             "Effect": "Allow",
@@ -182,7 +185,9 @@
         },
         {
             "Sid": "STS",
-            "Action": [ "sts:GetCallerIdentity" ],
+            "Action": [
+                "sts:GetCallerIdentity"
+            ],
             "Effect": "Allow",
             "Resource": "*"
         },
@@ -488,120 +493,6 @@
                 "arn:aws:iam::<AWS_ACCOUNT_ID>:role/pclustermaker-role-<CLUSTER_SERIAL_NUMBER>",
                 "arn:aws:iam::<AWS_ACCOUNT_ID>:role/kill-pcluster-role-<CLUSTER_SERIAL_NUMBER>"
             ]
-        },
-        {
-            "Sid": "IAMInstanceProfile",
-            "Action": [
-                "iam:CreateInstanceProfile",
-                "iam:DeleteInstanceProfile",
-                "iam:GetInstanceProfile",
-                "iam:AddRoleToInstanceProfile",
-                "iam:RemoveRoleFromInstanceProfile",
-                "iam:ListInstanceProfiles"
-            ],
-            "Effect": "Allow",
-            "Resource": [
-                "arn:aws:iam::<AWS_ACCOUNT_ID>:instance-profile/parallelcluster-<CLUSTER_NAME>-*",
-                "arn:aws:iam::<AWS_ACCOUNT_ID>:instance-profile/parallelcluster-<CLUSTER_OWNER>-*",
-                "arn:aws:iam::<AWS_ACCOUNT_ID>:instance-profile/pclustermaker-*"
-            ]
-        },
-        {
-            "Sid": "IAMPassRoleInstanceProfile",
-            "Action": [
-                "iam:PassRole"
-            ],
-            "Effect": "Allow",
-            "Resource": [
-                "arn:aws:iam::<AWS_ACCOUNT_ID>:instance-profile/parallelcluster-<CLUSTER_NAME>-*",
-                "arn:aws:iam::<AWS_ACCOUNT_ID>:instance-profile/parallelcluster-<CLUSTER_OWNER>-*",
-                "arn:aws:iam::<AWS_ACCOUNT_ID>:instance-profile/pclustermaker-*"
-            ],
-            "Condition": {
-                "StringEquals": {
-                    "iam:PassedToService": "ec2.amazonaws.com"
-                }
-            }
-        },
-        {
-            "Sid": "EFS",
-            "Action": [
-                "elasticfilesystem:CreateFileSystem",
-                "elasticfilesystem:CreateMountTarget",
-                "elasticfilesystem:CreateTags",
-                "elasticfilesystem:DeleteTags",
-                "elasticfilesystem:DescribeFileSystems",
-                "elasticfilesystem:DescribeMountTargets",
-                "elasticfilesystem:DescribeTags",
-                "elasticfilesystem:DescribeMountTargetSecurityGroups"
-            ],
-            "Effect": "Allow",
-            "Resource": "*"
-        },
-        {
-            "Sid": "EFSDelete",
-            "Action": [
-                "elasticfilesystem:DeleteFileSystem",
-                "elasticfilesystem:DeleteMountTarget",
-                "elasticfilesystem:ModifyMountTargetSecurityGroups",
-                "elasticfilesystem:UpdateFileSystem"
-            ],
-            "Effect": "Allow",
-            "Resource": "*",
-            "Condition": {
-                "StringEquals": {
-                    "aws:ResourceTag/parallelcluster:cluster-name": "<CLUSTER_NAME>"
-                }
-            }
-        },
-        {
-            "Sid": "FSx",
-            "Action": [
-                "fsx:CreateFileSystem",
-                "fsx:DescribeFileSystems",
-                "fsx:ListTagsForResource",
-                "fsx:TagResource"
-            ],
-            "Effect": "Allow",
-            "Resource": "*"
-        },
-        {
-            "Sid": "FSxDelete",
-            "Action": [
-                "fsx:DeleteFileSystem",
-                "fsx:UpdateFileSystem",
-                "fsx:UntagResource"
-            ],
-            "Effect": "Allow",
-            "Resource": "*",
-            "Condition": {
-                "StringEquals": {
-                    "aws:ResourceTag/parallelcluster:cluster-name": "<CLUSTER_NAME>"
-                }
-            }
-        },
-        {
-            "Sid": "AllowAccessToSSM",
-            "Action": [
-                "ssm:DescribeAssociation",
-                "ssm:ListAssociations",
-                "ssm:GetDocument",
-                "ssm:ListInstanceAssociations",
-                "ssm:UpdateAssociationStatus",
-                "ssm:UpdateInstanceInformation",
-                "ec2messages:AcknowledgeMessage",
-                "ec2messages:DeleteMessage",
-                "ec2messages:FailMessage",
-                "ec2messages:GetEndpoint",
-                "ec2messages:GetMessages",
-                "ec2messages:SendReply",
-                "ssmmessages:CreateControlChannel",
-                "ssmmessages:CreateDataChannel",
-                "ssmmessages:OpenControlChannel",
-                "ssmmessages:OpenDataChannel"
-            ],
-            "Effect": "Allow",
-            "Resource": "*"
         }
     ]
 }

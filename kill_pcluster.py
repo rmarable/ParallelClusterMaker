@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python
 #
 ################################################################################
 # Name:		kill_pcluster.py
@@ -13,9 +13,7 @@ import sys
 
 _repo_root = os.path.dirname(os.path.abspath(__file__))
 _src_dir = os.path.join(_repo_root, "src")
-if not os.path.realpath(sys.executable).startswith(
-    os.path.realpath(os.path.join(_repo_root, ".venv")) + os.sep
-):
+if os.path.realpath(sys.prefix) != os.path.realpath(os.path.join(_repo_root, ".venv")):
     sys.exit(
         f"ERROR: Run this script inside the repo virtual environment.\n"
         f"  $ source {os.path.join(_repo_root, '.venv', 'bin', 'activate')}\n"
