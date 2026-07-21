@@ -8,6 +8,7 @@ import sys
 import types
 
 import pytest
+from botocore.exceptions import ClientError
 
 sys.path.insert(
     0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src")
@@ -308,9 +309,9 @@ class TestNormalizeFsxBuckets:
 # ---------------------------------------------------------------------------
 
 
-class _FakeClientError(Exception):
+class _FakeClientError(ClientError):
     def __init__(self, code="404"):
-        self.response = {"Error": {"Code": code, "Message": "Error"}}
+        super().__init__({"Error": {"Code": code, "Message": "Error"}}, "HeadBucket")
 
 
 def _make_s3_client(head_ok=True, key_count=1, head_error_code="404"):
