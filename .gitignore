@@ -1,6 +1,7 @@
 *~
 *#
 .DS_Store
+.venv/
 *.class
 *.egg-info/
 .idea/
@@ -15,11 +16,10 @@ __pycache__/
 deprecated/
 tools/
 vars_files/
-ClusterMaker/active_clusters
-ClusterMaker/cluster_data/
-ClusterMaker/performance/csv/
-ClusterMaker/performance/logs/
-ClusterMaker/performance/summary/
-JumphostMaker/pcluster_jumphost_data/
-JumphostMaker/active_pcluster_jumphosts/
-JumphostMaker/kill-pcluster-jumphost.*.sh
+active_clusters/
+cluster_data/
+performance/csv/
+performance/logs/
+performance/summary/
+CLAUDE-STATE.md
+tests/integration/itest_defaults.yml

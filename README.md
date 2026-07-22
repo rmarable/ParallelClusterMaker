@@ -1,774 +1,581 @@
-# ParallelClusterMaker - HPC Cloud Automation
+# ParallelClusterMaker
 
-## License Information
+Open Source CLI toolkit for automating the creation and destruction of AWS ParallelCluster v3 stacks.  Designed to let scientists and engineers run HPC in the cloud without deep infrastructure knowledge, and to reduce the administrative burden on DevOps teams supporting HPC users.
 
-Please refer to the LICENSE document included with this Open Source software for the specific terms and conditions that govern its use.
+This codebase was co-written with [Claude Code](https://claude.ai/code) (Anthropic).
 
-## Disclaimer
+---
 
-By using this Open Source software:
+## Prerequisites
 
-* You accept all potential risks involved with your use of this Open Source software.
+* **Python 3.12** (required — see note below)
+* AWS CLI v2, configured with credentials that have sufficient IAM permissions
+* `git`
+* `ansible` (installed via pip below)
+* On macOS: Homebrew is recommended for system dependencies (`brew install ansible autoconf automake gcc jq libtool make readline`)
 
-* You agree that the author shall have no responsibility or liability for any losses or damages incurred in conjunction with your use of this Open Source Software.
+Apply a Name tag to any VPC in regions where you plan to deploy cluster stacks
+(Console → VPC → Your VPCs → edit the Name field).  Some examples:
+  * "nova" for us-east-1
+  * "cleveland" for us-east-2
+  * "dublin" for eu-west-1
 
-* You acknowledge that bugs may still be present, unexpected behavior might be observed, and some features may not be completely documented.
+**Important:** some environments may require assistance from your company or organizational IT/DevOps team to complete the VPC tagging step.
 
-**This Open Source software is authored by Rodney Marable in his individual capacity and is neither endorsed nor supported by Amazon Web Services.**
+**Python version note:** `aws-parallelcluster` does not support Python 3.13 or 3.14. Python 3.14 changed `asyncio.get_event_loop()` to raise `RuntimeError` when no event loop is running; this causes `pcluster create-cluster` to fail with `"There is no current event loop in thread 'MainThread'"` even though `pip install` succeeds without warning. The fix (upstream PR [#7149](https://github.com/aws/aws-parallelcluster/pull/7149)) is unmerged as of v3.15.1. Use Python 3.12, which is the last officially supported version. A `.python-version` file in the repository root pins the venv to 3.12.
 
-You cannot create cases with AWS Technical Support or engage AWS support engineers in public forums if you have any questions, problems, or issues using this Open Source software.
+It runs from a Python virtual environment (`.venv/`) inside the repository.
+The venv is excluded from git via `.gitignore`; its state is captured by
+`requirements.txt`, which is committed and versioned.
+
+In theory this toolkit can also be used on Windows, but that method has not been tested and will **not** be supported.
+
+---
+
+## Installation
+
+Clone the repository and create the virtual environment:
 
 ```
-"Play at your own risk!"
- -- Planet Patrol
+cd ~/src
+git clone https://github.com/rmarable/ParallelClusterMaker.git
+cd ParallelClusterMaker
+python3.12 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+ansible-galaxy collection install -r requirements.ansible.yml
 ```
 
-## About ParallelClusterMaker
+On macOS, install system dependencies via Homebrew first:
 
-ParallelClusterMaker is an Open Source command line wrapper toolkit that makes it easier to automate the creation and destruction of AWS ParallelCluster stacks. It is designed to enable scientists and engineers to leverage HPC in the cloud without requiring deep infrastructure knowledge, is a useful teaching tool for those looking to deepen their knowledge about the AWS environment, and is also intended to reduce the administrative burden required for DevOps teams to support HPC stakeholders.
- 
-You can find more information about AWS ParallelCluster by visiting:
+```
+brew install ansible autoconf automake gcc jq libtool make readline
+```
 
-* Documentation: https://docs.aws.amazon.com/parallelcluster/latest/ug/
-* Github Repository: https://github.com/aws/aws-parallelcluster
+To deactivate the environment when you are done:
 
-The ParallelClusterMaker Github repository contains two project subdirectories:
+```
+deactivate
+```
 
-* **JumphostMaker** creates a dedicated free tier EC2 instance that can be
-used to build and maintain AWS ParallelCluster stacks.
+To reactivate in a future session:
 
-Our recommended best practice is to use JumphostMaker to create a standalone EC2
-instance for launching new stacks with ClusterMaker.  
+```
+cd ~/src/ParallelClusterMaker
+source .venv/bin/activate
+```
 
-* **ClusterMaker** builds and destroys AWS ParallelCluster stacks.
+To view all available options for `make_pcluster.py`:
 
-ClusterMaker can be run from a local OSX or Linux environment ut the operator is strongly urged to use JumphostMaker to first stand up a standalone EC2 instance or to use a Docker container for building and administering ParallelCluster environments.
+```
+./make_pcluster.py --help
+```
 
-Please consult the EXAMPLES.md file for some suggestions on how to use ParallelClusterMaker's command line arguments to satisfy a variety of HPC use cases.
+---
+
+## Features
+
+- Slurm job scheduling
+- Separate instance types and EBS configurations for head node and compute fleet
+- Spot instances by default with configurable pricing buffer
+- Cluster lifetime management — stacks self-terminate after `--cluster_lifetime`
+- dev / test / stage / prod operating levels
+- Custom AMI support (`pcluster build-image` workflow)
+- EFA support for HPC-optimized instance types
+- Dynamic EC2 placement groups
+- Selective Intel HyperThreading disable
+- Multiple shared storage options
+  - EFS with encryption support
+  - FSx for Lustre with optional S3 hydration/dehydration
+  - EBS (up to 16 TB)
+- External NFS automount (Vast, NetApp, WekaIO, Qumulo, etc.)
+- Spack + Lmod for HPC software module management
+- SNS notifications on stack create/destroy
+- Turbot environment support
+- Resource tagging by owner, department, project, and operating level
+- Optional HPC benchmark suite: STREAM, OSU MPI, IOR, and HPCG (`enable_hpc_benchmarks`)
+- Optional Grafana/Prometheus monitoring stack via `aws-parallelcluster-monitoring` (Grafana dashboards, Prometheus, Slurm exporter, CloudWatch exporter)
+- SSH private key stored in AWS Secrets Manager at cluster creation; recoverable via `retrieve_ssh_key.<cluster>.sh`; rotatable without cluster rebuild via `rotate_cluster_key.py`
+- Dynamic EFA instance type lookup — `describe-instance-types` at launch time with static fallback; no manual allowlist maintenance
+
+---
+
+## Defaults
+
+All optional parameters have hardcoded defaults and can also be persisted in a YAML defaults file.  `pcluster_defaults.yml` is the template — **copy it to your own file before use**; do not pass the toolkit's copy directly as it is shared and may be overwritten by updates.  The most commonly referenced defaults:
+
+| Parameter | Default |
+|---|---|
+| `base_os` | ubuntu2404arm |
+| `scheduler` | slurm |
+| `headnode_instance_type` | c8g.xlarge |
+| `compute_instance_type` | c8g.2xlarge |
+| `cluster_type` | spot |
+| `initial_queue_size` | 2 |
+| `max_queue_size` | 8 |
+| `scaledown_idletime` | 5 min |
+| `cluster_lifetime` | 0:8:0 (days:hours:min) |
+| `headnode_root_volume_size` | 250 GB (gp3) |
+| `compute_root_volume_size` | 250 GB (gp3) |
+| `ebs_shared_volume_size` | 250 GB (gp3) |
+| `fsx_size` | 1200 GB |
+| `placement_group` | NONE |
+| `hyperthreading` | true |
+| `enable_monitoring` | false |
+| `enable_hpc_benchmarks` | false |
+| `enable_efa` | false |
+
+Use `--use_defaults=FILE` to load values from your own defaults file; CLI arguments always take precedence.
+
+```
+# Copy the template and customize it for your cluster
+cp pcluster_defaults.yml my-cluster_defaults.yml
+# Pass it at runtime
+./make_pcluster.py -N my-cluster -O rmarable -E rmarable@example.com -A us-east-1a \
+    --use_defaults=my-cluster_defaults.yml
+```
+
+Naming the file `<cluster_name>_defaults.yml` is strongly recommended so cluster namespaces are clearly scoped.  Loading `pcluster_defaults.yml` directly is allowed but prints a warning.
+
+---
+
+## Building a Cluster
+
+```
+./make_pcluster.py -N CLUSTER_NAME -O OWNER -E EMAIL -A AZ [options]
+```
+
+Required arguments:
+
+| Flag | Description |
+|---|---|
+| `-N` | Cluster name (must start with a letter; lowercase letters, digits, hyphens only; no consecutive or trailing hyphens; max 27 characters) |
+| `-O` | Owner username |
+| `-E` | Owner email |
+| `-A` | Availability zone (e.g. `us-east-1a`) — pass an AZ, not a region |
+
+### Examples
+
+Basic cluster in us-east-1a using all defaults:
+```
+./make_pcluster.py -N pcluster-test-01 -O rmarable -E rodney.marable@gmail.com -A us-east-1a
+```
+
+EFS with encryption:
+```
+./make_pcluster.py -A us-east-1a -O rmarable -E rodney.marable@gmail.com -N morpheus \
+    --enable_efs=true --efs_encryption=true
+```
+
+Fixed-size autoscaling pool, with tags for a specific and internal compbio department:
+```
+./make_pcluster.py -A eu-central-1a -O rmarable -E rodney.marable@gmail.com -N koolkeith \
+    --initial_queue_size=4 --max_queue_size=125 --maintain_initial_size=true \
+    --scaledown_idletime=30 --cluster_owner_department=compbio --project_id=polaroid \
+    --compute_instance_type=c5d.2xlarge
+```
+
+Self-terminating cluster (12 hours):
+```
+./make_pcluster.py -N pcluster-test-01 -O rmarable -E rodney.marable@gmail.com -A us-east-1a \
+    --cluster_lifetime="0:12:0"
+```
+
+EFA-enabled single-node cluster with performance tests:
+```
+./make_pcluster.py -A us-east-1a -N rimshot -O rmarable -E rmarable@amazon.com \
+    --compute_instance_type=c5n.18xlarge --initial_queue_size=1 \
+    --maintain_initial_size=true --enable_efa=true --enable_hpc_benchmarks=true
+```
+
+FSx for Lustre with S3 hydration (7.2 TB, 5 GB chunk size):
+```
+./make_pcluster.py -A us-west-2b -O rmarable -E rodney.marable@gmail.com -N louievega \
+    --enable_fsx=true --fsx_size=7200 --enable_fsx_hydration=true \
+    --fsx_s3_import_bucket=s3DataImportBucket --fsx_s3_export_bucket=s3DataExportBucket \
+    --fsx_chunk_size=5000
+```
+
+Large GPU cluster with 3.6 PB Lustre, tagged for production:
+```
+./make_pcluster.py -A us-east-1a -O rmarable -E rodney.marable@gmail.com -N gilgamesh \
+    --base_os=ubuntu2204 --headnode_instance_type=r4.xlarge \
+    --compute_instance_type=p3.16xlarge --enable_fsx=true --fsx_size=3600000 \
+    --enable_fsx_hydration=true --fsx_s3_import_bucket=GilgameshSrcBucket \
+    --fsx_s3_export_bucket=GilgameshOutputBucket --prod_level=prod --max_queue_size=256
+```
+
+Building from a custom AMI (must match base_os):
+```
+./make_pcluster.py -N starscream -O rmarable -E rodney.marable@gmail.com -A us-west-2a \
+    --enable_fsx=true --custom_ami=ami-123456789abc --base_os=ubuntu2204
+```
+
+A new stack typically takes 30–45 minutes to build.
+
+---
+
+## Accessing a Cluster
+
+```
+./access_cluster.py -N CLUSTER_NAME
+```
+
+Example:
+```
+./access_cluster.py -N pcluster-test-01
+Connecting to head node of pcluster-test-01...
+```
+
+---
+
+## Deleting a Cluster
+
+```
+./kill_pcluster.py -N CLUSTER_NAME -O OWNER -A AZ
+```
+
+Teardown takes 5–10 minutes.  By default, associated EFS, FSx, and S3 resources are also deleted.  To preserve them:
+
+```
+./kill_pcluster.py -N pcluster-test-01 -O rmarable -A us-east-1a \
+    --delete_fsx=false --delete_s3_bucketname=false
+```
+
+After a stack is deleted, it is strong recommended to run `kill_pcluster.py` to remove local artifacts even if the cluster self-terminated via `cluster_lifetime`.
+
+---
+
+## Storage
+
+### EBS
+
+All instances get `/local_scratch` backed by the root EBS volume.  Shared EBS is mounted at `/shared` (default).  Configure with `--ebs_shared_volume_size`, `--ebs_shared_volume_type`, `--ebs_encryption`.
+
+### EFS
+
+Enable with `--enable_efs=true`.  Mounted at `/efs` on all instances.  Adds ~5–7 minutes to build time.  Supports encryption (`--efs_encryption=true`) and performance mode (`--efs_performance_mode`).
+
+### FSx for Lustre
+
+Enable with `--enable_fsx=true`.  Mounted at `/fsx`.  Minimum size is 1200 GB; must be a multiple of 1200.  Maximum chunk size is 500 GB (512,000 MB).  S3 hydration/dehydration supported via `--enable_fsx_hydration=true` and the `--fsx_s3_*` parameters.
+
+### External NFS
+
+Enable with `--enable_external_nfs=true --external_nfs_server=storage.domain.com`.  Mount points are configured in `templates/external_nfs_mount_list.j2`.
+
+---
+
+## Networking and Compute
+
+### VPC and Subnet Selection
+
+> **Important:** The toolkit auto-discovers VPCs and subnets by convention when explicit values are not provided. Auto-discovery picks the AWS default VPC and the *first* subnet returned by EC2 in each AZ. EC2 does not guarantee subnet ordering, so results are non-deterministic in accounts with multiple subnets per AZ. **Do not rely on auto-discovery for production clusters.** Always specify networking resources explicitly.
+
+| Parameter | Description |
+|---|---|
+| `--vpc_name` | VPC `Name` tag to use (default: `vpc_default` — the account's default VPC) |
+| `--headnode_subnet_id` | Explicit subnet ID for the head node; overrides auto-discovery |
+| `--compute_subnet_ids` | Comma-separated subnet IDs for the compute fleet; overrides auto-discovery |
+| `--compute_az` | Comma-separated AZs for the compute fleet (default: same as `--az`) |
+| `--use_private_compute_subnet` | Place compute nodes in private subnets (`true`/`false`, default: `false`) |
+
+Subnets and security groups are generated as part of the CloudFormation stack — the toolkit does not manage them independently outside of the stack lifecycle.
+
+**Single-AZ cluster (explicit subnets — recommended):**
+```
+./make_pcluster.py -N prod01 -O rmarable -E rmarable@example.com -A us-east-1a \
+    --vpc_name=my-hpc-vpc \
+    --headnode_subnet_id=subnet-0abc123 \
+    --compute_subnet_ids=subnet-0abc123
+```
+
+**Multi-AZ compute fleet spanning three AZs:**
+```
+./make_pcluster.py -N bigcluster -O rmarable -E rmarable@example.com -A us-east-1a \
+    --vpc_name=my-hpc-vpc \
+    --headnode_subnet_id=subnet-0abc123 \
+    --compute_az=us-east-1a,us-east-1b,us-east-1c \
+    --compute_subnet_ids=subnet-0abc123,subnet-0def456,subnet-0ghi789
+```
+
+**Private compute subnet (head node public, compute private):**
+```
+./make_pcluster.py -N private01 -O rmarable -E rmarable@example.com -A us-east-1a \
+    --vpc_name=my-hpc-vpc \
+    --headnode_subnet_id=subnet-0abc123 \
+    --compute_subnet_ids=subnet-0private1 \
+    --use_private_compute_subnet=true
+```
+
+### EFA
+
+Enable with `--enable_efa=true`.  Supported on `ubuntu2204`, `ubuntu2404`, `ubuntu2204arm`, `ubuntu2404arm`, `rhel8`, `rhel8arm`, `rhel9`, `rhel9arm`.  Requires a supported instance type (c5n.18xlarge, hpc6a.48xlarge, hpc7a.96xlarge, hpc7g.16xlarge, etc.).  A dynamic placement group is created automatically.
+
+### Placement Groups
+
+Enable with `--placement_group=DYNAMIC`.  If head node and compute instance types match, both are placed in the group; otherwise only compute instances are.
+
+### HyperThreading
+
+Disable with `--hyperthreading=false`.
+
+---
+
+## Software Environment
+
+### Spack + Lmod
+
+Every stack includes [Spack](https://spack.io/) and [Lmod](https://github.com/TACC/Lmod) for HPC software module management.
+
+### Job Submission
+
+A default Slurm submission script (`scripts/sbatch_default_submission_script.sh`) is copied from the toolkit's `scripts/` directory to the ec2-user home directory during cluster creation.  Copy it to any shared storage and customize as needed:
+
+```
+cp ~/sbatch_default_submission_script.sh /fsx/scratch/my_project/
+sbatch /fsx/scratch/my_project/sbatch_default_submission_script.sh
+```
+
+### HPC Benchmarks
+
+Enable with `--enable_hpc_benchmarks=true`.  Deploys the benchmark suite to the cluster head node at `~/performance/` and installs Python plotting dependencies (`matplotlib`, `numpy`, `pandas`, `scipy`, `seaborn`) automatically via postinstall.
+
+**These commands run on the cluster head node** (SSH in via `./access_cluster.py` first):
+
+```bash
+cd ~/performance
+module load openmpi
+./hpc-benchmark.sh install                              # build STREAM, OSU, IOR, HPCG (~5 min)
+./hpc-benchmark.sh run --tests stream,osu,ior,hpcg
+./hpc-benchmark.sh report
+```
+
+**Results are preserved on teardown.** When `kill_pcluster.py` runs, benchmark results are automatically synced from the head node to `s3://<cluster-bucket>/performance-results/<cluster_name>/<cluster_serial_number>/` before the cluster is deleted.  Results from multiple runs of the same cluster name are kept in separate serial-number subdirectories.
+
+See `performance/README-PERFORMANCE.md` for full documentation.
+
+---
+
+### Monitoring
+
+Enable with `--enable_monitoring=true` (default: `false`).  Deploys the [aws-parallelcluster-monitoring](https://github.com/aws-samples/aws-parallelcluster-monitoring) Grafana/Prometheus stack to the cluster head node.  Compute nodes run a lightweight monitoring agent (node_exporter, Slurm pushgateway).
+
+**What gets deployed:**
+
+- Grafana on the head node (port 443, self-signed TLS)
+- Prometheus, pushgateway, cloudwatch-exporter, node_exporter (Docker Compose)
+- prometheus-slurm-exporter (systemd, scrapes Slurm metrics every 30 s)
+- DCGM exporter on GPU instances
+
+**Access Grafana:**
+
+A per-cluster tunnel script is generated into `active_clusters/<cluster_name>/` at build time:
+
+```bash
+# Open the tunnel (runs in background, prints URL and password command)
+./active_clusters/<cluster_name>/grafana_tunnel.<cluster_name>.sh
+
+# Close the tunnel when done
+./active_clusters/<cluster_name>/grafana_tunnel.<cluster_name>.sh 8443 stop
+```
+
+Then open `https://localhost:8443/grafana/` in your browser and accept the self-signed certificate warning.  Pass a different local port as the first argument if 8443 is in use.
+
+If the head node has a public IP you can also open `https://<head-node-public-ip>/grafana/` directly (requires port 443 open in the security group).
+
+**Retrieve the Grafana admin password:**
+```bash
+aws ssm get-parameter \
+  --name "/parallelcluster/<cluster_name>/grafana/admin-password" \
+  --with-decryption \
+  --query "Parameter.Value" --output text
+```
+
+**Note:** PCluster Ubuntu head nodes ship with `apache2` running on port 80.  The monitoring installer stops and disables it automatically so the nginx container can bind ports 80 and 443.
+
+**IAM:** Monitoring permissions are granted via a separate managed policy `<ec2_iam_policy>-M` (7 statements, ~1,400 bytes).  It is created and attached during `make_pcluster.py` and deleted during `kill_pcluster.py`.
+
+**Supply chain:** The `aws-parallelcluster-monitoring` tarball is downloaded from GitHub at cluster-build time and staged in the cluster's S3 bucket.  Head nodes pull from S3, not GitHub, so private-subnet nodes and air-gapped environments work without internet access.
+
+**Version:** Pin a specific release tag with `--monitoring_version=v2.6` (default).
+
+**Custom AMI recommendation:** The Docker Compose installation adds several minutes to head node boot time.  For production clusters or fast iteration, build a custom AMI with the monitoring stack pre-installed.
+
+---
+
+## SSH Key Management
+
+At cluster creation, the SSH private key is stored in AWS Secrets Manager at:
+
+```
+parallelcluster/<cluster_name>/<cluster_serial_number>/ssh-private-key
+```
+
+The secret is deleted automatically when `kill_pcluster.py` runs.
+
+**If your local `.pem` file is lost**, retrieve it from Secrets Manager:
+
+```bash
+active_clusters/<cluster_name>/retrieve_ssh_key.<cluster_name>.sh
+# optionally specify a destination:
+active_clusters/<cluster_name>/retrieve_ssh_key.<cluster_name>.sh --out /tmp/mykey.pem
+```
+
+`access_cluster.py` calls the retrieve script automatically if the local key is missing.
+
+**Rotating the SSH keypair** without rebuilding the cluster:
+
+```bash
+./rotate_cluster_key.py -N <cluster_name> -A <az>
+# preview what will change:
+./rotate_cluster_key.py -N <cluster_name> -A <az> --dry_run
+```
+
+Rotation: generates a new ED25519 keypair locally, appends the public key to `~/.ssh/authorized_keys` on the head node, imports it as the new EC2 keypair, updates the Secrets Manager secret, overwrites the local `.pem`, and deletes the old EC2 keypair.
+
+**IAM requirements** (operator's user/role — not the cluster head node role):
+
+| Permission | Purpose |
+|---|---|
+| `secretsmanager:CreateSecret` | Store key at cluster creation |
+| `secretsmanager:PutSecretValue` | Update key on rotation |
+| `secretsmanager:GetSecretValue` | Retrieve key via retrieve script |
+| `secretsmanager:DeleteSecret` | Remove key on teardown |
+| `ec2:ImportKeyPair` | Register new public key during rotation |
+
+---
+
+## Tagging
+
+All resources are tagged automatically:
+
+| Tag | Source |
+|---|---|
+| `ClusterID` | `--cluster_name` |
+| `ClusterOwner` | `--cluster_owner` |
+| `ClusterOwnerEmail` | `--cluster_owner_email` |
+| `ClusterOwnerDepartment` | `--cluster_owner_department` |
+| `ClusterStackType` | ParallelCluster |
+| `ClusterSerialNumber` | generated |
+| `ProdLevel` | `--prod_level` |
+| `ProjectID` | `--project_id` (if set) |
+| `DEPLOYMENT_DATE` | generated |
+
+Supported departments: `analytics`, `clinical`, `commercial`, `compbio`, `compchem`, `datasci`, `design`, `development`, `hpc`, `imaging`, `manufacturing`, `medical`, `modeling`, `operations`, `proteomics`, `qa`, `research`, `robotics`, `scicomp`.
+
+---
 
 ## Note to DevOps Teams
 
-As noted above, ParallelClusterMaker is intended to reduce the administrative
-burden required for DevOps teams to support HPC stakeholders.  This empowers
-scientists, engineers, and analysts by letting them conduct HPC operations at
-massive scale without needing assistance from their Devops team.
+ParallelClusterMaker does **not** create or modify VPCs, subnets, gateways, routes, or Transit Gateways.  It creates IAM roles, policies, and instance profiles scoped to each individual cluster stack.  Templates are in `templates/` and can be customized.  If you hit permissions errors, the IAM policy template is the right starting point for working with your security team.
 
-* **JumphostMaker and ParallelClusterMaker do not make any changes to the existing networking environment already present in the operator's AWS account**.
-  * These tools do not create new VPCs, subnets, Internet or NAT gateways, routes, or Transit Gateways.
-  * They do not modify Route53 configurations, change default routes, or otherwise impact or deploy any infrastructure that is not explicitly documented or easily inferred from a review of the source code.
+---
 
-* **JumphostMaker and ParallelClusterMaker do create IAM roles, policies, and instance templates that are individualized for each jumphost and cluster stack.** 
-  * These JSON templates are located in the templates/ subdirectory and contain all required IAM permissions for both tools.  They can be easily customized to fit any HPC use case.
-  * If you run into permissions problems building stacks, it's usually because of an IAM issue.  When speaking with your DevOps professionals, it is suggested that you share this template which outlines all of the necessary permisisons to build a cluster or jumphost and work with them to craft an appropriate solution for your environment.
+## Troubleshooting
 
-## ParallelClusterMaker Features
+**IAM permissions:** Check `templates/ParallelClusterInstancePolicy-A.json_src`, `-B.json_src`, and `-C.json_src`.  The instance policy is split into three managed policies (≤6,144 bytes each) to stay under the IAM managed policy size limit.  Most build failures trace back to missing IAM permissions.
 
-ParallelClusterMaker supports the following features through its command line interface:
+**Spot capacity:** If compute nodes fail to launch you'll see a `ComputeFleet - CREATE_FAILED` CloudFormation error.  Retry the build or switch to `--cluster_type=ondemand`.
 
-* Building new ParallelCluster stacks using a Docker container or a dedicated
-EC2 jumphost.
+**EBS root volume tagging:** May fail on macOS due to IAM tag permission restrictions.  Build from an EC2 instance to avoid this.
 
-* User-configurable time-based cron-style cluster life cycle management that
-causes stacks to self-terminate when `--cluster_lifetime` has been exceeded.
-The default is 14 days.
+**Interrupted build recovery:** If `make_pcluster.py` is interrupted mid-run, re-run the same command with the same flags.  The tool detects the existing serial file under `active_clusters/<cluster_name>/` and resumes from that identity — all AWS resource names (S3 bucket, IAM role, IAM policy) are re-derived from the same serial number, so no orphaned resources are left behind.
 
-* Command line designation of dev, test, stage, and prod operating levels.
+---
 
-* Administrative control over the allowed EC2 instance types for the admin and compute node roles.
+## Development
 
-* Job scheduling with AWS Batch, Grid Engine, Torque, or Slurm.
-
-* Separate selectable instance types for the master and compute instances.
-
-* User selection of "optimal" instances when AWS Batch is selected as a scheduler.  Additionally, the user is free to select any of the EC2 instances that Batch supports for building computational environments.
-
-* Identification of the cluster's owner, email address, and department using
-an easily extendable tagging framework.  The cluster can also be associated
-with a specific project identification tag.
-
-* Deployment into any VPC with valid subnets and a Name tag.
-
-* Custom AMIs.
-
-* Adjustable EC2 autoscaling configuration.
-
-* Elastic Fabric Adapter (EFA) enablement for supported EC2 instance types.
-
-* Dynamic EC2 placement groups.
-
-* Selective disabling of Intel HyperThreading (note: this feature is currently available only on Amazon Linux).
-
-* Default selection of EC2 Spot instances with a pricing buffer to help prevent
-instance termination due to spot price market fluctuations.
-
-* Customization of Grid Engine parallel environments.
-
-* Optional inclusion of a customizable HPC performance script repository to
-enable immediate "quick and dirty" comparative testing of traditional HPC schedulers (Grid Engine, Slurm, and Torque).  Support for AWS Batch will be provided in a future release.
-
-* Variable EBS volume sizes (up to 16 TB).
-
-* Variable-sized shared EBS scratch mounted as /local_scratch on all cluster instances.
-
-* Creation of cluster-specific Amazon Elastic File System (EFS). 
-
-* Encryption of EFS in transit and at rest.
-
-* Creation of cluster-specific, custom-sized Amazon FSX for Lustre (FSxL)
-file systems.  Caveat: the file size of any Lustre file system must be divisible by 3600.
-
-* Support for hydrating and dehydrating the Lustre file system from pre-existing S3 buckets.
-
-* Automounting of external NFS file systems from Vast, EMC, Netapp, Qumulo, WekaIO, Panzura, Nasuni, etc.
-
-* Email notifications via SNS whenever ParallelClusterMaker is executed.
-
-* Selective enablement of Ganglia for capturing cluster metrics.
-
-* Operability in Turbot (https://www.turbot.com) environments.
-
-* Inclusion of the Spack package manager (https://spack.readthedocs.io) for
-lmod-style Linux software module support.
-
-* Inclusion of a standard submission script for Grid Engine clusters that can
-be customized for your specific use case.  Support for other schedulers will
-be added in future releases.
-
-## Installation of ParallelClusterMaker for the Impatient
-
-Please read the INSTALL.md document for detailed guidance and instructions on how to install ParallelClusterMaker using an EC2 jumphost (the preferred method) or locally on OSX.
-
-These instructions are provided for the impatient and/or lazy.
-
-**It is strongly suggested that the reader carefully review the installation documentation (INSTALL.md) to avoid potentially costly and time-consuming mistakes.**
-
-### Building an Installation Environment on EC2
-
-To properly build a ParallelClusterMaker environment on EC2, please refer to the guidelines in the INSTALL.md file ("Building an installation environment on EC2").
+### Running the test suite
 
 ```
-Please note that this is the **recommended** way to leverage this toolkit.
+make test       # pytest — template rendering + unit tests
+make lint       # ansible-lint on src/create_pcluster.yml and src/delete_pcluster.yml
+make shellcheck # shellcheck on performance/hpc-benchmark.sh
 ```
 
-* Install and enable a virtual Python environment with either virtualenv or
-pyenv.
+CI runs all three automatically on every push and pull request.
 
-* Install the required Python libraries in ParallelClusterMaker/JumphostMaker.
+### Integration tests
 
-* Run ParallelClusterMaker/Jumphost/make-pcluster-jumphost.py with appropriate
-command line switches.
+A live end-to-end smoke test is available at `tests/integration/run_integration_test.sh`.
+It provisions a real cluster using your own defaults file, submits a Slurm job, verifies
+the output, and tears everything down.
 
-* Login to the jumphost.
+**Integration tests are NOT run by `make test`, `pytest`, or CI.** Invoke them manually:
 
-* cd into the ParallelClusterMaker/ClusterMaker directory and start creating
-new ParallelCluster stacks.  Please see the "Building New ParallelCluster
-Stacks" section below for additional guidance.
+```bash
+source .venv/bin/activate
 
-### Building an Installation Environment on OSX
-
-Please note that this is **not** the recommended method and may seriously 
-damage your local OSX environment.
-
-It is strongly recommended that you refer to the guidelines outlined in
-"Building an Installation Environment on OSX" in the INSTALL.md file  to
-build a ParallelClusterMaker environment on OSX.
-
-"Play at your own risk!" 
-  -- Planet Patrol
-
-* Install Homebrew.
-
-* Install the following tools:
-   * python-3.7 (with pip)
-   * Docker
-   * ansible
-   * autoconf
-   * automake
-   * gcc
-   * jq
-   * libtool
-   * make
-   * nvm
-   * node
-   * readline
-   * serverless
-
-* Configure the AWS CLI.
-
-* Ensure that the IAM account or role you are using to build ParallelCluster
-stacks has permission to run the required API calls by either assigning it
-admin rights or creating a custom role using this template as a source:
-
-```ParallelClusterMaker/JumphostMaker/templates/ParallelClusterInstancePolicy.json_src```
-
-* Install and activate a virtual Python environment using virtualenv or pyenv.
-
-* Install all required Python libraries into the virtual environment using
-the included requirements.txt file in each toolkit subdirectory once the
-virtual Python environment is available.
-
-* Install the Serverless Toolkit and its dependencies.
-
-* Apply a name Tag to the VPC(s) within any region you wish to deploy cluster
-stacks using the Management Console or the AWS CLI.
-
-* cd into the ParallelClusterMaker/ClusterMaker directory and start building
-new ParallelCluster stacks.  Please see below for additional guidance.
-
-## Building New ParallelCluster Stacks
-
-After satisfying the installation and system requirements outlined above, use
-"make_cluster.py" to build new ParallelCluster stacks.  If building from a
-local OSX environment, please remember to change into the proper
-subdirectory beforehand (~/src/ParallelClusterMaker/ClusterMaker).  This
-example will create a new cluster named rmarable-test01 in us-east-1a using
-the toolkit defaults:
-
-`$ ./make_cluster.py -N test01 -O rmarable -E rodney.marable@gmail.com -A us-east-1a`
-
-A new deployment will typically take between 30-45 minutes to complete.  When
-the new cluster becomes available, make an SSH connection to the IP address
-of the master instance using the access_cluster.py command:
-
-```
-$ ./access_cluster.py -h
-usage: access_cluster.py [-h] --cluster_name CLUSTER_NAME
-                         [--prod_level PROD_LEVEL]
-
-access_cluster.py: Provide quick SSH access to CFNCluster head nodes
-
-optional arguments:
-  -h, --help            show this help message and exit
-  --cluster_name CLUSTER_NAME, -N CLUSTER_NAME
-                        full name of the cluster (example: rmarable-stage02)
-  --prod_level PROD_LEVEL, -P PROD_LEVEL
-                        production state of the cluster (default = dev)
+./tests/integration/run_integration_test.sh \
+    --az us-east-1a \
+    --owner test \
+    --email test@example.com \
+    --defaults /path/to/my-itest_defaults.yml \
+    [--profile my-aws-profile] \
+    [--keep]
 ```
 
-To access the cluster built above via SSH:
+`--defaults` is required — the script does not generate a defaults file. A
+known-good minimal template is at `tests/integration/itest_defaults.yml.example`;
+copy it to `tests/integration/itest_defaults.yml`, fill in your `vpc_name` (and
+optionally explicit subnet IDs), and pass it with `--defaults`. The file is
+gitignored so account-specific values are never committed.
 
-```
-$ ./access_cluster.py -N rmarable-test01
-Connecting to the head node of rmarable-test01 over ssh...
-Last login: Sat Jul 21 23:13:35 2018 from 64.192.133.129
-```
+Prerequisites: AWS credentials with EC2/CloudFormation/IAM/S3 permissions, `jq`
+installed, and a defaults file configured for your target account and AZ.
 
-## Using the HPC Performance Toolkit
+Estimated cost: varies by instance type and region (~25-40 minutes of cluster runtime).
 
-ParallelClusterMaker provides an optional suite of performance tests that 
-are included with new ParallelCluster stacks when the appropriate option
-(`--enable_hpc_performance_tests=true`) is invoked at installation.  These
-scripts live in ~/src/ParallelClusterMaker/ClusterMaker/performance but come
-with the following caveats that will be addressed in future releases:
+See [`tests/integration/README.md`](tests/integration/README.md) for full documentation.
 
-- AWS Batch is not currently supported.
+### Known ansible-lint warnings
 
-- Cluster submission scripts for Torque support are not provided.
+`make lint` exits 0 but emits a small number of warnings that are intentional and safe to ignore:
 
-Extensive documentation for these tests are included in the "performance"
-subdirectory as README files.
+| Warning | Reason |
+|---|---|
+| `yaml[line-length]` — ssh/chown/cp commands | One-liners that are 162 chars (2 over limit); splitting would harm readability |
+| `no-changed-when` | `pcluster` CLI commands are inherently stateful; `changed_when` on every poll would be misleading |
+| `ignore-errors` | Intentional on cleanup tasks (S3 bucket, SNS topic, IAM role) that may not exist at delete time |
+| `no-handler` | Deliberate pattern; notify/handler would require restructuring without benefit |
 
-This example submits 10 of the hashtest jobs to a Grid Engine cluster:
+These are all tracked in `.ansible-lint` under `warn_list` with the same rationale.
 
-```
-$ cd src/ParallelClusterMaker/ClusterMaker/performance/rmarable-test01
-$ qsub qsub-hashtest.10.sh
-```
+---
 
-## Ganglia #
+## Things to Do
 
-ParallelCluster uses Ganglia for monitoring cluster stacks.  You can find more
-information about thsi software by visiting: http://ganglia.sourceforge.net/
+Potential future improvements, roughly ordered by impact:
 
-Setting `--enable_ganglia=true` will install and enable Ganglia on the master
-instance.  This option currently permits traffic to port 80 from the Internet,
-so please consider this carefully if your clusters are operating in an
-environment where security is a priority.  A future release will provide more
-flexibility for controlling http access.
+### Modules / Software
 
-## Managing EC2 Key Pairs for Cluster Stacks
+- **EasyBuild easyconfig workflow** — accept a user-supplied list of EasyBuild module specs, download matching easyconfigs from the EasyBuild repository, build and install the modules on the head node, and run a smoke-test job for each one via Slurm.  Useful for validating that a new OS or instance type can successfully build a site's standard software stack.
 
-ParallelCluster creates a unique EC2 key pair for each cluster stack and EC2
-jumphost, storing the respective resulting PEM files in cluster_data_dir and
-instance_data_dir.  By using the provided "access_cluster.py" (for clusters)
-or "access_jumphost.py" scripts, HPC operators are abstracted from the need
-to interact directly with a PEM key.
+### Architecture
 
-Shared clusters will need a mechanism to either distribute the PEM file in a
-secure fashion.
+- **Terraform / CDK parity** — the toolkit is Ansible-native.  A Terraform or AWS CDK implementation of the same lifecycle (`make` / `kill` / `access`) would fit more naturally into infrastructure-as-code pipelines that already use those tools.
 
-The kill_cluster and kill_pcluster_jumphost scripts will delete the respective
-EC2 key pairs as part of the cluster or jumphost destruction process.
+---
 
-## Deleting ParallelClusterMaker Resources
+## Disclaimer
 
-There are three ways to delete a cluster stack:
+This software is licensed under the Apache License, Version 2.0 with the Commons Clause restriction.  You may use, modify, and distribute it freely, but you may not sell it or offer it as a commercial product or service without the explicit written consent of Rodney Marable.  See `LICENSE` for full terms.
 
-1. **Manual deletion**: Manually delete the Cloudformation template, EC2
-security groups, EFS file systems, FSxL file systems, and custom EC2 IAM
-roles associated with this ParallelCluster stack using the AWS Management
-Console or the appropriate API calls.
+By using this software:
 
-Please note that manual stack deletion requires many mouse clicks (if using 
-the AWS Management Console) or keystrokes (if using AWS API calls).  This
-method is error-prone, time consuming, and thus is **NOT** a recommended best
-practice.
+- You accept all potential risks involved with your use of this Open Source software.
+- You agree that the author shall have no responsibility or liability for any losses or damages incurred in conjunction with your use of this Open Source software.
+- You acknowledge that bugs may still be present, unexpected behavior might be observed, and some features may not be completely documented.
 
-2. **kill-pcluster.py**: Run the kill-pcluster.py script from your local
-environment.  This tool can also be used to clean up artifacts from previous
-builds or in situations where the the ParallelCluster stack has exceeded
-`cluster_lifetime` and self-terminates.  To delete the cluster that created
-in the example above:
+**This software is authored by Rodney Marable in his individual capacity and is neither endorsed nor supported by Amazon Web Services.**  You cannot create cases with AWS Technical Support or engage AWS support engineers in public forums if you have any questions, problems, or issues using this software.
 
-`$ ./kill-pcluster.py -N test01 -O rmarable -A us-east-1a`
+> "Play at your own risk!" — Planet Patrol
 
-Destroying a cluster will take between 5-10 minutes depending on the number
-and type of instances deployed, whether EFS file systems are associated with
-the cluster, etc.
+---
 
-3. **Wait for cluster_lifetime to take over**: Just hang out and wait.  All
-ParallelCluster stacks are built with a default 30-day lifetime but this can
-be changed by invoking `--cluster_lifetime=x:y:z` where x = days, y = hours,
-and z = minutes to dictate exactly how long this stack should live.  In the
-example below, rmarable-test01 will self-terminate in 12 hours without any
-additional user (or DevOps) intervention:
-
-```
-$ ./make-pcluster.py -N test01 -O rmarable -E rodney.marable@gmail.com -A us-east-1a --cluster_lifetime="0:12:0"
-```
-
-A notification will be sent to cluster_owner_email over SNS when a cluster
-stack termination event occurrs.  The user can then run kill-pcluster.py to
-remove artifacts associated with the deleted stack from the local environment.
-
-Any EFS or FSxL file systems associated with this cluster will also be terminated along with the cluster stack.
-
-If the Lambda script is used to destroy the cluster when cluster_lifetime has
-exceeded, the kill-cluster.py script should still be run to clean up any artifacts that still remain.
-
-After the ParallelCluster stack has been deleted, the pcluster jumphost can
-also be deleted by running the `kill-pcluster-jumphost.$INSTANCE_NAME.sh`
-script found in your local ParallelClusterMaker/Jumphost directory, i.e. the
-directory on your working computer from which the jumphost was originally
-spawned.
-
-```
-$ cd ~/src/ParallelClusterMaker/JumphostMaker
-$ ./kill-pcluster-jumphost.$INSTANCE_NAME.sh
-```
-
-## Cluster and Jumphost Serial Numbers
-
-ParallelClusterMaker generates unique "serial numbers" for every EC2 jumphost
-and ParallelCluster stack that are used for resource tagging and to associate
-IAM roles and policies, EC2 instance profiles, and SNS topic names with each
-individual entity.
-
-The kill-cluster and kill-pcluster-jumphost scripts also use these unique
-serial numbers to remove the aforementioned resources when a jumphost EC2
-instance ParallelClusterMaker stack is deleted.  This makes it easier for
-devops engineers to manage multiple HPC users in a single AWS account and
-to run detailed usage reports for individual cluster stacks.
-
-## SNS 
-
-A notification will be sent to the cluster_owner when a stack construction
-event has concluded via SNS.  If this is the first new stack you have created,
-please make sure to "confirm" membership to the SNS topic that is created to
-track major cluster events after it is emailed to cluster_owner_email.
-
-The SNS topic associated with the jumphost or cluster stack will be deleted
-by the kill-cluster or kill-pcluster-jumphost scripts.
-
-## Local Scratch Space
-
-By default, all instances will have a /local_scratch directory that allows
-the operator to leverage the local EBS volume as ephemeral scratch space.
-This provides maximum flexibility as the cluster can utilize local SSD,
-shared EBS, FSxL, EFS, or any storage combination thereof to support multiple
-use cases.
-
-The maximum available size of the /local_scratch disk is as follows:
-
-{{ local_scratch }} = {{ ebs_volume_size }} - {{ Linux_OS + system_tools }}
-
-Shared RAID EBS volumes are not currently supported by ParallelClusterMaker.
-This may be addressed in a future release.  If greater performance from the
-shared storage is required, the operator is encouraged to use EFS max_io or
-FSxL instead.
-
-## Elastic File System (EFS) Support
-
-EFS can be used as a shared storage option for ParallelCluster by setting
-`--enable_efs=true.`  Creating a new EFS file system and mount target will
-add an extra 5-7 minutes to the overall cluster stack creation process.
-
-/efs will be created and mounted by all instances in the new cluster stack.
-
-This toolkit will build only one EFS file system which will be deleted along 
-along with the cluster stack.  To override this behavior, set `--delete_efs`
-to `false` when invoking kill_cluster.py.  Support for multiple EFS file
-systems may be added in a future release.
-
-To find more information about ParallelCluster's implementation of EFS, please
-consult the official documentation:
-
-https://docs.aws.amazon.com/parallelcluster/latest/ug/efs-section.html
-
-Support for encryption and selecting between max_io and general_purpose modes can be enabled by setting the appropriate command line switches to `true`.
-
-As of 4/20/2019, provisioning a 1024 MiB/sec file system costs approximately
-$6,200/month.  For that reason, `efs_throughput_mode` has been completely
-disabled to prevent unexpected and unpleasant surprises with the AWS bill.
-This will be re-enabled as a future update.
-
-## FSx for Lustre (FSxL) Support
-
-FSx for Lustre (FSxL) can be leveraged for scratch space on a ParallelCluster
-stack by setting `--enable_fsx=true.`  All cluster instances will mount the resulting FSxL file system at /fsx. 
-
-The **minimum** permitted file system size is 3600 GB (or 3.6 TB).  This is
-the current default.  Larger file systems can be built by setting `--fsx_size`
-to the desired value in **increments of 3600 GB.**  The build process will abort
-if presented with an incorrect value for fsx_size.
-
-FSxL on Ubuntu is not currently supported by ParallelClusterMaker.
-
-ParallelClusterMaker also supports hydration and dehyration of Lustre file systems using pre-existing S3 buckets as outlined in the AWS public documentation:
-
-https://docs.aws.amazon.com/fsx/latest/LustreGuide/fsx-data-repositories.html
-
-To enable this functionality, set values for the following parameters:
-```
-* --fsx_s3_import_bucket
-* --fsx_s3_import_path
-* --fsx_s3_export_bucket
-* --fsx_s3_export_path
-```
-
-The script will fail is the import bucket and path cannot be located or if an
-export bucket and path are defined and cannot be found.  The Lustre file system
-will hydrate to and from the import bucket if the export bucket is undefined.
-The script also supports using the same bucket with separate import and export
-paths.
-
-Please note that automatic Lustre dehydration at the time of the cluster's deletion is not supported.  This feature may be provided in a future release.
-
-The FSx chunk size, import and export paths, and bucket names can all be configured through ParallelClusterMaker switches.  In the example below, a cluster called "louievega" will hydrate its 7.2 TB Lustre file system from s3://s3DataImportBucket and dehydrate to s3://s3DataExportBucket, using a chunk size of 5 GB:
-
-```
-$ ./make-pcluster.py -A us-west-2b -E rodney.marable@gmail.com -O rmarable -N louievega --enable_fsx=true --fsx_size=7200 --enable_fsx_hydration=true --fsx_s3_import_bucket=s3DataImportBucket --fsx_s3_export_bucket=s3DataExportBucket --fsx_chunk_size=5000
-```
-
-Please consult EXAMPLES.md for command line examples reflecting some other relevant use cases.
-
-## Mounting External NFS Servers
-
-Support for external NFS access is configured in the "create_pcluster.yml"
-and "delete_pcluster.yml" playbooks.  
-
-The cluster mount points are listed in a Jinja2 template file:
-
-```
-$ cat ClusterMaker/templates/external_nfs_mount_list.j2
-################################################################################
-# Name:		external_nfs_mount_list.{{ cluster_name }}.conf
-# Author:	Rodney Marable <rodney.marable@gmail.com>
-# Created On:	May 21, 2019
-# Last Changed:	May 21, 2019
-# Deployed On:	{{ lookup('pipe','date \"+%B %-d, %Y\"') }}
-# Purpose:	List NFS external file systems to be mounted by postinstall.sh
-# Notes:	Comment out lines that don't contain a file system mount point
-################################################################################
-#
-#home
-#departments
-performance
-pkg
-#projects
-scratch
-#tools
-```
-
-This example would mount the file systems described in the aforementioned template from an external NFS file system called "storage.domain.com" onto all instances of a ParallelClusterMaker-spawned stack:
-
-`--enable_external_nfs=true` and `--external_nfs_server=storage.domain.com`
-
-The template can easily by customized for your environment by uncommenting any of the existing file systems or by adding others as needed.  Please do **NOT** enable this feature without having a working external NFS file system that is properly configured to share these file systems with cluster instances in the cloud.
-
-## Intel HyperThreading
-
-Seeting `--hyperthreading=false` will disable Intel HyperThreading on Amazon
-Linux following the guidance provided in this AWS blog posting:
-
-http://tiny.amazon.com/1avqrokh6/awsamazblogdisa
-
-**This flag currently has no effect with Ubuntu or CentOS.**
-
-This feature will be extended to these operating systems in a future release.
-
-## Custom AMIs
-
-ParallelClusterMaker supports custom AMIs through the `--custom_ami` switch,
-provided the base_os is supported by ParallelCluster (currently CentOS 6/7,
-Amazon Linux, and Ubuntu 14.04/16.04 LTS).  The base_os of the custom_ami must
-be supplied with the initial make-cluster invocation, and of course, the custom
-AMI must exist or the build will fail.
-
-The recommended way to incorporate custom AMIs into a ParallelCluster stack
-is to build a custom AMI with "pcluster createami" and use this subsequent 
-image ID with the `custom_ami` switch. 
-
-For example, Lustre support for Ubuntu can be enabled by building a AMI with
-the required Debian kernel packages, Lustre client, and Grub configuration per
-the public AWS documentation available at:
-
-https://docs.aws.amazon.com/fsx/latest/LustreGuide/install-lustre-client.html
-
-Assuming an AMI ID of "ami-123456789abc," a Lustre-enabled Ubuntu stack could
-then be built with ParallelClusterMaker using this command:
-
-```
-$ ./make-cluster.py -N starscream -O rmarable -E rodney.marable@gmail.com -A us-west-2a --enable_fsx=true --custom_ami=ami-123456789abc --base_os=ubuntu1604
-```
-Similar use cases like encrypted EBS root volumes, custom Linux kernels, or
-complex local application installations can be supported with this approach.
-
-## EC2 Placement Groups
-
-EC2 placement groups can be enabled by setting `--placement_group=DYNAMIC`.
-ParallelCluster provides a mechanism for using an already-existing placement
-group, but this feature is not currently supported by ParallelClusterMaker.
-This may change in a subsequent release.
-
-ParallelClusterMaker will place the master and compute instances into the
-same placement group **if** the master and compute instance types are
-identical.  If not, only the compute instances will be included within the
-placement group.
-
-More information regarding EC2 placement groups can be found by visiting:
-
-http://docs.aws.amazon.com/AWSEC2/latest/UserGuide/placement-groups.html
-
-Per the AWS public documentation, please use this option with caution.
-
-## Elastic Fabric Adapter (EFA)
-
-Support for the new Elastic Fabric Adapter (EFA) capability can be enabled by setting `--enable_efa=true` and selecting a both a supported compute instance type (c5n.18xlarge, i3en.24xlarge, and p3dn.24xlarge) and operating system (Amazon Linux, CentOS 7, Ubuntu 16.04 LTS, and Ubuntu 18.04 LTS).
-
-EFA requires the compute instances to be spawned into an EC2 placement group.  ParallelClusterMaker will create a "dynamic" placement group and handle these configurations transparently.  The kill-pcluster script will also destroy the placement group when the cluster is terminated.
-
-Please refer to the AWS public documentation for more information about EFA and EC2 placement groups:
-
-https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/efa.html
-https://docs.aws.amazon.com/parallelcluster/latest/ug/efa.html
-https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/placement-groups.html
-
-If the operator attempts to enable EFA support with either a non-supported instance type or operating system, the script will fail:
-
-```
-$ ./make-pcluster.py -A us-east-1a -N dev01 -O rmarable -E rmarable@amazon.com --master_instance_type=c5.8xlarge --compute_instance_type=r5.metal --enable_efa=true
-
-Performing parameter validation...
-
-** ERROR **
-The selected compute instance type (r5.metal) does not support EFA!
-
-Please refer to the ParallelCluster documentation for more information:
-https://aws-parallelcluster.readthedocs.io/en/latest/index.html
-
-Aborting...
-```
-
-As noted earlier, ParallelClusterMaker does not currently support pre-existing placement groups.  This may be revisited in a future release.
-
-## HPC Software Packages and Application Support
-
-ParallelClusterMaker automatically includes support for Spack, a package
-manager that makes it easier to build and maintain multiple versions and
-configurations of complex HPC software.
-
-More information about Spack can be found by exploring these links:
-
-* Spack project home page: https://spack.io/
-* "The Spack Package Manager: Bringing Order to HPC Software Chaos" (Gamblin,
-Legendre, Collette, et. al.): https://tgamblin.github.io/pubs/spack-sc15.pdfk
-
-The version of Spack that is provided with these cluster stacks natively
-supports Lmod, a package manager that for managing environment modules which 
-most HPC engineers will be familiar with if they have ever worked extensivly
-with onprem environments.
-
-More information about Lmod can be found by exploring these links:
-
-* https://github.com/TACC/Lmod
-* https://sea.ucar.edu/sites/default/files/talk.pdf
-* https://www.tacc.utexas.edu/research-development/tacc-projects/lmod
-
-## Standard Job Submission Scripts
-
-ParallelClusterMaker includes a standard submission script for Grid Engine 
-clusters in the ec2-user's home directory on the master instance that can
-be easily customized for many other use cases includuing serial, MPI, and
-task array jobs.
-
-To submit jobs from EFS, FSxL, or external NFS file systems, simply copy 
-`qsub_default_submission_script.sh` to the desired submission location and
-edit as needed:
-
-```
-$ mkdir -p /fsx/scratch/scicomp/my_projects
-$ vi /home/ec2-user/qsub_default_submission_script.sh
-$ cp /home/ec2-user/qsub_default_submission_script.sh /fsx/scratch/scicomp/my_projects
-$ qsub qsub_default_submission_script.sh
-```
-
-Subsequent releases will provide standard submission scripts for the other
-schedulers supported by AWS ParallelCluster.
-
-# .gitignore
-
-The included .gitignore excludes the directories containing the vars_files
-and state data for the jumphost instances and ParallelCluster stacks created
-by this toolkit.
-
-If you wish to preserve these files within your own private or internal Git
-repositories, please modify ParallelClusterMaker/.gitignore accordingly.
-
-# Tagging
-
-All resources associated with traditional schedulers are automatically tagged
-with the following keys:
-
-ClusterID
-ClusterSerialNumber
-ClusterOwner
-ClusterStackType
-ClusterOwnerEmail
-ClusterOwnerDepartment
-Encryption
-ProdLevel
-ProjectID (if defined)
-DEPLOYMENT_DATE
-
-This includes EC2 instances, EFS and FSxL file systems, Cloudformation stacks,
-EBS root volumes, SQS queues, etc.
-
-Please note that since the default ParallelCluster IAM rule does not permit
-EC2CreateTags, EC2DescribeTags, or EC2DeleteTags, EBS root volume tagging
-may fail when building cluster stacks on OSX.  Build ParallelCluster stacks
-with an EC2 jumphost to avoid this potential issue.
-
-AWS Batch does not currently support post-creation tagging of managed compute
-environments, so the default tags outlined above will not be visible with
-this scheduler.  However, it is still possible to identify Batch environments
-using the "Application" tag, which uses "parallelcluster-$CLUSTER_NAME" for
-its naming $CLUSTER_NAME parameter.
-
-```
-$ aws batch describe-compute-environments | jq '. | select(.computeEnvironment[].computeResources.tags.Application == "parallelcluster-rmarable-batch01")'
-```
-
-In terms of cost tracking, per the AWS Batch public documentation:
-
-```
-Q. What is the pricing for AWS Batch?
-There is no additional charge for AWS Batch.  You only pay for the AWS
-Resources (e.g. EC2 Instances) you create to store and run your batch jobs.
-```
-
-## Identifying Cluster Resources by Department
-
-ParallelClusterMaker currently supports the following "departments" by using
-the `--cluster_owner_department` switch:
-
-* research (default)
-* hpc
-* analytics
-* compchem
-* compbio
-* datasci
-* design
-* clinical
-* commercial
-* development
-* finance
-* infrastructure
-* manufacturing
-* operations
-* proteomics
-* qa
-* robotics
-* scicomp
-
-## Identifying Clusters with a Project ID
-
-Operators can use the "--project_id" (or "-P") command line argument to to
-tag all resources with belonging to a cluster stack or an EC2 jumphost with
-this value.  Please refer to the examples below for adding "projectMayhem"
-as a tag for which additional cost or consumption data could be generated:
-
-JumphostMaker example:
-
-```
-$ ./make-pcluster-jumphost.py -N jumphost03 -O rmarable -E rodney.marable@gmail.com -A us-west-2b --project_id=projectMayhem --cluster_owner_department=compchem --scheduler=sge --ansible_verbosity=-vv
-```
-
-ClusterMaker example:
-
-```
-$ ./make-cluster.py --cluster_name batch019 --cluster_owner rmarable --cluster_owner_email=rodney.marable@gmail.com --cluster_owner_department=compbio --az=eu-west-1a --project_id=projectMayhem --scheduler awsbatch --desired_vcpus=50
-```
-
-# Shared Jumphosts
-
-As of May 2019, permissions to build ParallelCluster stacks when using an EC2
-jumphost are provided through a custom IAM EC2 instance profile that restricts
-certain API calls to resources including `instance_owner` in their name.
-
-This means multiple users cannot share a jumphost to launch clusters, i.e.
-"--instance_owner" and "--cluster_owner" must match.
-
-Shared jumphosts between multiple team members will be addressed in a future
-release.  For now, operators are advised to maintain a single jumphost per
-cluster_owner.
-
-# Troubleshooting
-
-ParallelClusterMaker and JumphostMaker will return errors that are clear and
-obvious where possible.  If you run into issues building jumphosts or cluster
-stacks, please try the following:
-
-* **Check IAM permissions.**  Ensure that you are allowed to invoke all of the
-IAM permissions outlined in these JSON policy documents:
-  * ClusterMaker/templates/ParallelClusterInstancePolicy.json_src
-  * JumphostMaker/templates/JumphostInstancePolicy.json_src
-
-If IAM is controlled by your organization's DevOps team, please provide them
-with these templates and request that you be allowed to assume a role that
-allows these permissions.  
-
-* **Spot Market issues.** If your cluster fails to build execute nodes due to
-an inability to acquire spot instances, you will see Ansible errors that look
-like this:
-
-Status: ComputeFleet - CREATE_IN_PROGRESS
-Status: parallelcluster-rmarable-rimshot - CREATE_FAILED
-Cluster creation failed.
-Failed events - AWS::CloudFormation::Stack parallelcluster-rmarable-rimshot
-The following resource(s) failed to create: [ComputeFleet].
-- AWS::AutoScaling::AutoScalingGroup ComputeFleet Received 0 SUCCESS signal(s) out of 1.  Unable to satisfy 100% MinSuccessfulInstancesPercent requirement
-
-Additional control of Spot market pricing will be provided in future releases.
-For now, it is suggested to retry the build or use ondemand instances.
-
-# Reporting Bugs & Requesting New Features
-
-Please report any bugs, issues, or otherwise unexpected behavior to Rodney
-Marable <rodney.marable@gmail.com> through the normal Github issue reporting channel for this repository:
+## Reporting Bugs & Requesting Features
 
 https://github.com/rmarable/ParallelClusterMaker/issues
 
-Pull requests providing additional functionality or bug fixes are always welcome:
-
-https://github.com/rmarable/ParallelClusterMaker/pulls
+Pull requests welcome: https://github.com/rmarable/ParallelClusterMaker/pulls

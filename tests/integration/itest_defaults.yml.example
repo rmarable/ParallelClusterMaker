@@ -1,0 +1,49 @@
+---
+################################################################################
+# itest_defaults.yml.example
+# Minimal defaults for the integration smoke test.
+# Copy to itest_defaults.yml, fill in your vpc_name and subnets, then pass
+# with --defaults to run_integration_test.sh.
+#
+# DO NOT commit your copy — it contains account-specific network values.
+################################################################################
+
+# --- Cluster identity ---
+cluster_lifetime: "0:2:0"          # 2 hours — enough for the smoke test
+cluster_owner_department: hpc
+cluster_type: ondemand             # ondemand avoids spot-capacity failures
+prod_level: dev
+
+# --- Instances ---
+base_os: ubuntu2404
+headnode_instance_type: c5.xlarge
+compute_instance_type: c5.xlarge
+headnode_root_volume_size: 50
+compute_root_volume_size: 50
+
+# --- Autoscaling ---
+initial_queue_size: 2
+max_queue_size: 2
+maintain_initial_size: "true"
+scaledown_idletime: 5
+
+# --- Networking ---
+# Fill these in for your account and target AZ.
+# vpc_name must match the Name tag on your VPC.
+# Leave headnode_subnet_id and compute_subnet_ids empty to auto-discover,
+# or set them explicitly for deterministic results.
+vpc_name: "FILL_IN_YOUR_VPC_NAME"
+headnode_subnet_id: ""
+compute_subnet_ids: ""
+use_private_compute_subnet: "false"
+
+# --- Storage (all disabled for smoke test) ---
+ebs_shared_volume_size: 50
+enable_efs: "false"
+enable_fsx: "false"
+
+# --- Optional features (all disabled for smoke test) ---
+enable_efa: "false"
+enable_external_nfs: "false"
+enable_hpc_benchmarks: "false"
+enable_monitoring: "false"
