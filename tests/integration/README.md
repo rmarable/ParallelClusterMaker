@@ -90,8 +90,8 @@ source .venv/bin/activate
 
 ## Cost estimate
 
-Varies by instance type and region. As a reference: 3 x c5.xlarge on-demand
-in us-east-1 for ~25-40 minutes costs approximately $0.50, plus negligible EBS
+Varies by instance type and region. As a reference: 3 x c8g.xlarge on-demand
+in us-east-1 for ~25-40 minutes costs approximately $0.40, plus negligible EBS
 and data transfer charges.
 
 ## Logs
