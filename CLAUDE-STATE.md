@@ -1,6 +1,6 @@
 # Claude State — ParallelClusterMaker
 
-Last updated: 2026-07-22 (session 12)
+Last updated: 2026-07-22 (session 13)
 
 ## Branch
 
@@ -38,6 +38,8 @@ Last updated: 2026-07-22 (session 12)
 - `c153570` Add rhel8arm/rhel9arm support and update docs
 - `297ea9a` Add Grafana SSH tunnel script, fix Apache port conflict, and add private IP fallback
 - `cd91460` Document Apache2 port conflict fix in monitoring section
+- `86c7957` Update CLAUDE-STATE.md, CLAUDE.md, and README for session 12
+- `5c6321e` Sync README defaults table with pcluster_defaults.yml; set cluster_lifetime to 0:8:0
 
 ## What was fixed across all sessions
 
@@ -390,6 +392,14 @@ No regressions: 182/182 tests passing. ansible-lint 0 failures, production profi
 #### Security group
 
 - Port 443 inbound from `10.2.0.0/16` added to osiris head node SG (`sg-053903a56957e82a6`) — required for direct browser access when on VPN; tunnel script is the preferred access method for private-subnet clusters
+
+### Session 13 fixes (committed)
+
+#### Defaults alignment
+
+- `pcluster_defaults.yml`: `cluster_lifetime` changed from `0:7:0` → `0:8:0`
+- `make_pcluster.py`: hardcoded fallback `cluster_lifetime` updated to `0:8:0`
+- `README.md`: defaults table synced with `pcluster_defaults.yml` — fixed `max_queue_size` (10 → 8), `cluster_lifetime` (0:24:0 → 0:8:0); added `headnode_root_volume_size`, `compute_root_volume_size`, `placement_group`, `hyperthreading`, `enable_monitoring`, `enable_hpc_benchmarks`, `enable_efa` rows
 
 ## TODO
 
