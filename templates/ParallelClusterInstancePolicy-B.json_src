@@ -176,7 +176,12 @@
                 "arn:aws:iam::<AWS_ACCOUNT_ID>:role/parallelcluster-<CLUSTER_NAME>-*",
                 "arn:aws:iam::<AWS_ACCOUNT_ID>:role/parallelcluster-<CLUSTER_OWNER>-*",
                 "arn:aws:iam::<AWS_ACCOUNT_ID>:role/kill-pcluster-role-<CLUSTER_SERIAL_NUMBER>"
-            ]
+            ],
+            "Condition": {
+                "StringEquals": {
+                    "iam:PermissionsBoundary": "arn:aws:iam::<AWS_ACCOUNT_ID>:policy/parallelcluster-<CLUSTER_OWNER>-boundary"
+                }
+            }
         },
         {
             "Sid": "IAMInstanceProfile",
@@ -213,9 +218,8 @@
             }
         },
         {
-            "Sid": "EFS",
+            "Sid": "EFSDescribe",
             "Action": [
-                "elasticfilesystem:CreateFileSystem",
                 "elasticfilesystem:CreateMountTarget",
                 "elasticfilesystem:CreateTags",
                 "elasticfilesystem:DeleteTags",
@@ -244,15 +248,28 @@
             }
         },
         {
-            "Sid": "FSx",
+            "Sid": "FSxDescribe",
             "Action": [
-                "fsx:CreateFileSystem",
                 "fsx:DescribeFileSystems",
                 "fsx:ListTagsForResource",
                 "fsx:TagResource"
             ],
             "Effect": "Allow",
             "Resource": "*"
+        },
+        {
+            "Sid": "EFSFSxCreate",
+            "Action": [
+                "elasticfilesystem:CreateFileSystem",
+                "fsx:CreateFileSystem"
+            ],
+            "Effect": "Allow",
+            "Resource": "*",
+            "Condition": {
+                "StringEquals": {
+                    "aws:RequestTag/parallelcluster:cluster-name": "<CLUSTER_NAME>"
+                }
+            }
         },
         {
             "Sid": "FSxDelete",

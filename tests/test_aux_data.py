@@ -408,8 +408,16 @@ def test_ctrlC_abort_no_interrupt_returns(monkeypatch):
 
 class _FakeIAM:
     def __init__(self):
+        self.detached_policies = []
+        self.deleted_policies = []
         self.deleted_role_policies = []
         self.deleted_roles = []
+
+    def detach_role_policy(self, RoleName, PolicyArn):
+        self.detached_policies.append((RoleName, PolicyArn))
+
+    def delete_policy(self, PolicyArn):
+        self.deleted_policies.append(PolicyArn)
 
     def delete_role_policy(self, RoleName, PolicyName):
         self.deleted_role_policies.append((RoleName, PolicyName))
@@ -425,7 +433,7 @@ def _make_boto3_with_iam(iam_client, monkeypatch):
 
 
 def test_ctrlC_abort_iam_cleanup_no_fsx(monkeypatch):
-    """With a serial number and no FSx, role and ec2 policy are deleted."""
+    """With a serial number and no FSx, managed policies -A/-B/-C and role are deleted."""
     import time
 
     iam = _FakeIAM()
@@ -446,16 +454,16 @@ def test_ctrlC_abort_iam_cleanup_no_fsx(monkeypatch):
             enable_fsx_hydration="false",
         )
 
-    assert (
-        "pclustermaker-role-abc123",
-        "pclustermaker-policy-abc123",
-    ) in iam.deleted_role_policies
+    deleted_arns = iam.deleted_policies
+    assert any("pclustermaker-policy-abc123-A" in a for a in deleted_arns)
+    assert any("pclustermaker-policy-abc123-B" in a for a in deleted_arns)
+    assert any("pclustermaker-policy-abc123-C" in a for a in deleted_arns)
     assert "pclustermaker-role-abc123" in iam.deleted_roles
     assert not any("fsx" in p for _, p in iam.deleted_role_policies)
 
 
 def test_ctrlC_abort_iam_cleanup_with_fsx(monkeypatch):
-    """With FSx hydration enabled, the FSx policy is deleted first."""
+    """With FSx hydration enabled, the FSx inline policy and managed -A/-B/-C are deleted."""
     import time
 
     iam = _FakeIAM()
@@ -476,9 +484,12 @@ def test_ctrlC_abort_iam_cleanup_with_fsx(monkeypatch):
             enable_fsx_hydration="true",
         )
 
-    policy_names = [p for _, p in iam.deleted_role_policies]
-    assert "pclustermaker-fsx-s3-policy-abc123" in policy_names
-    assert "pclustermaker-policy-abc123" in policy_names
+    deleted_arns = iam.deleted_policies
+    assert any("pclustermaker-policy-abc123-A" in a for a in deleted_arns)
+    assert any("pclustermaker-policy-abc123-B" in a for a in deleted_arns)
+    assert any("pclustermaker-policy-abc123-C" in a for a in deleted_arns)
+    fsx_policy_names = [p for _, p in iam.deleted_role_policies]
+    assert "pclustermaker-fsx-s3-policy-abc123" in fsx_policy_names
     assert "pclustermaker-role-abc123" in iam.deleted_roles
 
 
@@ -487,6 +498,12 @@ def test_ctrlC_abort_iam_no_such_entity_is_graceful(monkeypatch, capsys):
     import time
 
     class _BrokenIAM:
+        def detach_role_policy(self, **kw):
+            raise Exception("NoSuchEntityException: NoSuchEntity")
+
+        def delete_policy(self, **kw):
+            raise Exception("NoSuchEntityException: NoSuchEntity")
+
         def delete_role_policy(self, **kw):
             raise Exception("NoSuchEntityException: NoSuchEntity")
 

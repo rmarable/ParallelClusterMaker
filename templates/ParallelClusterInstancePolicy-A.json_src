@@ -38,7 +38,12 @@
                 "ec2:CreatePlacementGroup"
             ],
             "Effect": "Allow",
-            "Resource": "*"
+            "Resource": "*",
+            "Condition": {
+                "StringEquals": {
+                    "aws:RequestedRegion": "<AWS_REGION>"
+                }
+            }
         },
         {
             "Sid": "EC2ModifyTagged",
@@ -121,10 +126,16 @@
             "Action": [
                 "autoscaling:DescribeAutoScalingGroups",
                 "autoscaling:DescribeTags",
-                "autoscaling:DescribeAutoScalingInstances"
+                "autoscaling:DescribeAutoScalingInstances",
+                "autoscaling:DescribeScalingActivities"
             ],
             "Effect": "Allow",
-            "Resource": "*"
+            "Resource": "*",
+            "Condition": {
+                "StringEquals": {
+                    "aws:RequestedRegion": "<AWS_REGION>"
+                }
+            }
         },
         {
             "Sid": "AutoScalingModify",
@@ -135,7 +146,6 @@
                 "autoscaling:CreateAutoScalingGroup",
                 "autoscaling:PutNotificationConfiguration",
                 "autoscaling:PutScalingPolicy",
-                "autoscaling:DescribeScalingActivities",
                 "autoscaling:DeleteAutoScalingGroup",
                 "autoscaling:DeletePolicy"
             ],

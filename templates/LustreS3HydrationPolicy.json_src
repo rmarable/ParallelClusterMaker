@@ -17,8 +17,7 @@
         {
             "Sid": "S3Bucket",
             "Action": [
-                "s3:ListBucket",
-                "s3:PutBucketTagging"
+                "s3:ListBucket"
             ],
             "Effect": "Allow",
             "Resource": [

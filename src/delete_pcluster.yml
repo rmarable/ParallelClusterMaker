@@ -13,7 +13,7 @@
   vars:
     local_homedir: "{{ lookup('env','HOME') }}"
     local_workingdir: "{{ playbook_dir | dirname }}"
-    pcluster_delete_timeout: 30
+    pcluster_delete_timeout: 80
   vars_files:
     - vars_files/{{ cluster_name }}.yml
 
@@ -128,17 +128,22 @@
         "DELETE_FAILED" not in cluster_delete_status.stdout and
         "ClusterNotFound" not in (cluster_delete_status.stderr | default(''))
 
-    - name: Abort with actionable error if CloudFormation reached DELETE_FAILED
-      fail:
+    - name: Record DELETE_FAILED state without aborting
+      set_fact:
+        _cf_delete_failed: >-
+          {{ cluster_delete_status is defined and
+             "DELETE_FAILED" in (cluster_delete_status.stdout | default('')) }}
+
+    - name: Warn operator about DELETE_FAILED — cleanup will still run
+      debug:
         msg:
-          - "ERROR: CloudFormation stack deletion reached DELETE_FAILED for cluster '{{ cluster_name }}'."
+          - "WARNING: CloudFormation stack deletion reached DELETE_FAILED for cluster '{{ cluster_name }}'."
           - "This usually means a resource (ENI, security group, EFA interface) still has dependencies."
+          - "IAM roles, keypair, SSM parameters, and S3 resources will still be cleaned up below."
           - "Check the CloudFormation console for the failed resource:"
           - "  aws cloudformation describe-stack-events --stack-name parallelcluster-{{ cluster_name }} --region {{ region }}"
-          - "Resolve the dependency, then re-run kill_pcluster.py to complete cleanup."
-      when: >-
-        cluster_delete_status is defined and
-        "DELETE_FAILED" in (cluster_delete_status.stdout | default(''))
+          - "Resolve the CloudFormation dependency and re-run kill_pcluster.py if needed."
+      when: _cf_delete_failed | bool
 
     - name: Delete the EC2 keypair associated with this cluster
       amazon.aws.ec2_key:
@@ -280,3 +285,11 @@
           - ""
           - "Cluster {{ cluster_name }} has been deleted."
           - "================================================================="
+
+    - name: Fail with actionable message after cleanup when CloudFormation reached DELETE_FAILED
+      fail:
+        msg:
+          - "ERROR: CloudFormation stack deletion reached DELETE_FAILED for cluster '{{ cluster_name }}'."
+          - "All IAM, keypair, SSM, and S3 resources have been cleaned up."
+          - "Resolve the remaining CloudFormation dependency and re-run kill_pcluster.py if needed."
+      when: _cf_delete_failed | bool

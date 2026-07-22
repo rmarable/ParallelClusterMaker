@@ -50,89 +50,119 @@
         region: "{{ region }}"
       delegate_to: localhost
 
-    - name: Create s3_bucketname to support this cluster stack
-      amazon.aws.s3_bucket:
-        name: "{{ s3_bucketname }}"
-        region: "{{ region }}"
-        tags:
-          ClusterID: "{{ cluster_name }}"
-          ClusterStackType: ParallelCluster
-          ClusterOSType: "{{ base_os }}"
-          ClusterScheduler: "{{ scheduler }}"
-          ClusterSerialNumber: "{{ cluster_serial_number }}"
-          ClusterOwner: "{{ cluster_owner }}"
-          ClusterOwnerEmail: "{{ cluster_owner_email }}"
-          ClusterOwnerDepartment: "{{ cluster_owner_department }}"
-          ProdLevel: "{{ prod_level }}"
-          DEPLOYMENT_DATE: "{{ DEPLOYMENT_DATE }}"
-      when: 'project_id == "UNDEFINED"'
+    - name: Create S3 bucket and EC2 keypair, clean up on failure
+      block:
+        - name: Create s3_bucketname to support this cluster stack
+          amazon.aws.s3_bucket:
+            name: "{{ s3_bucketname }}"
+            region: "{{ region }}"
+            tags:
+              ClusterID: "{{ cluster_name }}"
+              ClusterStackType: ParallelCluster
+              ClusterOSType: "{{ base_os }}"
+              ClusterScheduler: "{{ scheduler }}"
+              ClusterSerialNumber: "{{ cluster_serial_number }}"
+              ClusterOwner: "{{ cluster_owner }}"
+              ClusterOwnerEmail: "{{ cluster_owner_email }}"
+              ClusterOwnerDepartment: "{{ cluster_owner_department }}"
+              ProdLevel: "{{ prod_level }}"
+              DEPLOYMENT_DATE: "{{ DEPLOYMENT_DATE }}"
+          when: 'project_id == "UNDEFINED"'
 
-    - name: Create s3_bucketname and append the ProjectID tag
-      amazon.aws.s3_bucket:
-        name: "{{ s3_bucketname }}"
-        region: "{{ region }}"
-        tags:
-          ClusterID: "{{ cluster_name }}"
-          ClusterStackType: ParallelCluster
-          ClusterOSType: "{{ base_os }}"
-          ClusterScheduler: "{{ scheduler }}"
-          ClusterSerialNumber: "{{ cluster_serial_number }}"
-          ClusterOwner: "{{ cluster_owner }}"
-          ClusterOwnerEmail: "{{ cluster_owner_email }}"
-          ClusterOwnerDepartment: "{{ cluster_owner_department }}"
-          ProjectID: "{{ project_id }}"
-          ProdLevel: "{{ prod_level }}"
-          DEPLOYMENT_DATE: "{{ DEPLOYMENT_DATE }}"
-      when: 'project_id != "UNDEFINED"'
+        - name: Create s3_bucketname and append the ProjectID tag
+          amazon.aws.s3_bucket:
+            name: "{{ s3_bucketname }}"
+            region: "{{ region }}"
+            tags:
+              ClusterID: "{{ cluster_name }}"
+              ClusterStackType: ParallelCluster
+              ClusterOSType: "{{ base_os }}"
+              ClusterScheduler: "{{ scheduler }}"
+              ClusterSerialNumber: "{{ cluster_serial_number }}"
+              ClusterOwner: "{{ cluster_owner }}"
+              ClusterOwnerEmail: "{{ cluster_owner_email }}"
+              ClusterOwnerDepartment: "{{ cluster_owner_department }}"
+              ProjectID: "{{ project_id }}"
+              ProdLevel: "{{ prod_level }}"
+              DEPLOYMENT_DATE: "{{ DEPLOYMENT_DATE }}"
+          when: 'project_id != "UNDEFINED"'
 
-    - name: Create a new security group for mounting external NFS file systems
-      amazon.aws.ec2_security_group:
-        name: pcluster-{{ cluster_name }}-externalNfs
-        description: Permit NFS traffic to/from external NFS file systems
-        vpc_id: "{{ vpc_id }}"
-        region: "{{ region }}"
-        rules:
-          - proto: tcp
-            ports: [111, 2049, 4045, 4046, 4047]
-            cidr_ip: "{{ vpc_cidr | default('10.0.0.0/8') }}"
-          - proto: udp
-            ports: [111, 2049, 4045, 4046, 4047]
-            cidr_ip: "{{ vpc_cidr | default('10.0.0.0/8') }}"
-      register: external_nfs_sg
-      when: 'enable_external_nfs == "true"'
+        - name: Create a new security group for mounting external NFS file systems
+          amazon.aws.ec2_security_group:
+            name: pcluster-{{ cluster_name }}-externalNfs
+            description: Permit NFS traffic to/from external NFS file systems
+            vpc_id: "{{ vpc_id }}"
+            region: "{{ region }}"
+            rules:
+              - proto: tcp
+                ports: [111, 2049, 4045, 4046, 4047]
+                cidr_ip: "{{ vpc_cidr | default('10.0.0.0/8') }}"
+              - proto: udp
+                ports: [111, 2049, 4045, 4046, 4047]
+                cidr_ip: "{{ vpc_cidr | default('10.0.0.0/8') }}"
+          register: external_nfs_sg
+          when: 'enable_external_nfs == "true"'
 
-    - name: Generate a new EC2 keypair for this cluster
-      amazon.aws.ec2_key:
-        name: "{{ ec2_keypair }}"
-        region: "{{ region }}"
-        key_type: ed25519
-      no_log: true
-      register: ec2_private_key
+        - name: Generate a new EC2 keypair for this cluster
+          amazon.aws.ec2_key:
+            name: "{{ ec2_keypair }}"
+            region: "{{ region }}"
+            key_type: ed25519
+          no_log: true
+          register: ec2_private_key
 
-    - name: Check whether the local private key file already exists
-      stat:
-        path: "{{ ssh_keypair }}"
-      register: local_pem_stat
+        - name: Check whether the local private key file already exists
+          stat:
+            path: "{{ ssh_keypair }}"
+          register: local_pem_stat
 
-    - name: Abort if keypair exists in AWS but local key file is missing
-      fail:
-        msg:
-          - "ERROR: EC2 keypair '{{ ec2_keypair }}' already exists in AWS but the"
-          - "local private key file '{{ ssh_keypair }}' is absent."
-          - "AWS never returns key material for an existing keypair."
-          - "Delete the keypair from EC2 and re-run, or restore the .pem file:"
-          - "  aws ec2 delete-key-pair --key-name {{ ec2_keypair }} --region {{ region }}"
-      when:
-        - not ec2_private_key.changed
-        - not local_pem_stat.stat.exists
+        - name: Abort if keypair exists in AWS but local key file is missing
+          fail:
+            msg:
+              - "ERROR: EC2 keypair '{{ ec2_keypair }}' already exists in AWS but the"
+              - "local private key file '{{ ssh_keypair }}' is absent."
+              - "AWS never returns key material for an existing keypair."
+              - "Delete the keypair from EC2 and re-run, or restore the .pem file:"
+              - "  aws ec2 delete-key-pair --key-name {{ ec2_keypair }} --region {{ region }}"
+          when:
+            - not ec2_private_key.changed
+            - not local_pem_stat.stat.exists
 
-    - name: Save the private key
-      copy:
-        content: "{{ ec2_private_key.key.private_key }}"
-        dest: "{{ ssh_keypair }}"
-        mode: "0600"
-      no_log: true
-      when: ec2_private_key.changed
+        - name: Save the private key
+          copy:
+            content: "{{ ec2_private_key.key.private_key }}"
+            dest: "{{ ssh_keypair }}"
+            mode: "0600"
+          no_log: true
+          when: ec2_private_key.changed
+
+      rescue:
+        - name: Clean up S3 bucket on early-setup failure
+          amazon.aws.s3_bucket:
+            name: "{{ s3_bucketname }}"
+            region: "{{ region }}"
+            state: absent
+            force: true
+          ignore_errors: true
+
+        - name: Clean up EC2 keypair on early-setup failure
+          amazon.aws.ec2_key:
+            name: "{{ ec2_keypair }}"
+            region: "{{ region }}"
+            state: absent
+          ignore_errors: true
+
+        - name: Clean up external NFS security group on early-setup failure
+          amazon.aws.ec2_security_group:
+            name: pcluster-{{ cluster_name }}-externalNfs
+            region: "{{ region }}"
+            state: absent
+          ignore_errors: true
+          when: 'enable_external_nfs == "true"'
+
+        - name: Re-raise the failure after cleanup
+          fail:
+            msg: "Cluster setup failed during S3/keypair provisioning. Resources cleaned up. See error above."
 
     - name: Create local staging directories
       file:
@@ -349,6 +379,7 @@
           --region {{ region }}
       register: cluster_status
       until: >-
+        cluster_status.rc == 0 and
         "clusterStatus" in cluster_status.stdout and
         ("CREATE_COMPLETE" in cluster_status.stdout or
          "CREATE_FAILED" in cluster_status.stdout or
@@ -357,6 +388,7 @@
       retries: "{{ pcluster_create_timeout | default(60) }}"
       delay: 60
       changed_when: false
+      failed_when: false
 
     - name: Stop the stack timer
       command: date +%Y-%m-%d\ \@\ %H:%M:%S
@@ -463,6 +495,10 @@
             msg: "WARNING: Failed to create symlink for {{ item.item }}.sh on head node — use {{ item.item }}.{{ cluster_name }}.sh instead."
           loop: "{{ _symlink_result.results }}"
           when: item.rc != 0
+
+    - name: Initialize HPC performance test directory list
+      set_fact:
+        _perf_dirs: []
 
     - name: Build list of active HPC performance test directories
       set_fact:
