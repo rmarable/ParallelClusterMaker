@@ -75,9 +75,9 @@ external_nfs_server: ""
 # exist in an AZ. For production clusters, explicitly set headnode_subnet_id,
 # compute_subnet_ids, and vpc_name rather than relying on auto-discovery.
 vpc_name: "vpc_default"
-headnode_subnet_id: ""            # leave empty to auto-discover
-compute_az: ""                    # comma-separated; defaults to --az if empty
-compute_subnet_ids: ""            # comma-separated; leave empty to auto-discover
+headnode_subnet_id: ""    # leave empty to auto-discover
+compute_subnet_ids: ""    # comma-separated; leave empty to auto-discover
+compute_az: ""            # comma-separated; defaults to --az if empty
 use_private_compute_subnet: "false"
 
 # --- Performance tests ---
