@@ -6,7 +6,7 @@
 ################################################################################
 
 # --- Cluster identity ---
-cluster_lifetime: "0:24:0"          # days:hours:minutes
+cluster_lifetime: "0:8:0"          # days:hours:minutes
 cluster_owner_department: hpc
 cluster_type: spot                  # ondemand | spot
 prod_level: dev                     # dev | test | stage | prod
@@ -31,7 +31,7 @@ placement_group: NONE               # NONE | DYNAMIC
 
 # --- Autoscaling ---
 initial_queue_size: 2
-max_queue_size: 10
+max_queue_size: 8
 maintain_initial_size: "false"
 scaledown_idletime: 5               # minutes
 
@@ -54,8 +54,8 @@ efs_throughput_mode: bursting         # bursting | provisioned | elastic
 
 # --- FSx for Lustre ---
 enable_fsx: "false"
-fsx_size: 1200                      # GB, must be a multiple of 1200
-fsx_chunk_size: 1024                # MB
+fsx_size: 1200                        # GB, must be a multiple of 1200
+fsx_chunk_size: 1024                  # MB
 enable_fsx_hydration: "false"
 fsx_s3_import_bucket: UNDEFINED
 fsx_s3_import_path: import

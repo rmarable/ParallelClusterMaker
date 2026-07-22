@@ -568,7 +568,7 @@ def main():
     _HARDCODED_DEFAULTS = {
         "ansible_verbosity": "",
         "base_os": "ubuntu2404",
-        "cluster_lifetime": "0:24:0",
+        "cluster_lifetime": "0:8:0",
         "cluster_owner_department": "hpc",
         "cluster_type": "spot",
         "compute_instance_type": "c8g.2xlarge",
