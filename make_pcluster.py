@@ -67,7 +67,7 @@ from pcluster_core import (
     _get_efa_instance_types,
     _ssh_secret_name,
 )
-from pcluster_aux_data import base_os_efa
+from pcluster_aux_data import base_os_efa, is_gpu_instance, needs_efa_gdr
 from pcluster_aux_data import base_os_instance_check
 from pcluster_aux_data import ctrlC_Abort
 from pcluster_aux_data import default_instance_types
@@ -332,6 +332,13 @@ def main():
         default=None,
     )
     parser.add_argument(
+        "--enable_gpu",
+        choices=["true", "false"],
+        help="enable GPU support: mounts NVMe instance store at /local_scratch, installs nvtop/htop (auto-enabled for GPU instance families)",
+        required=False,
+        default=None,
+    )
+    parser.add_argument(
         "--monitoring_version",
         help="aws-parallelcluster-monitoring release tag (default = v2.6)",
         required=False,
@@ -589,6 +596,7 @@ def main():
         "efs_throughput_mode": "bursting",
         "enable_efa": "false",
         "enable_efs": "false",
+        "enable_gpu": "false",
         "enable_external_nfs": "false",
         "enable_fsx": "false",
         "enable_fsx_hydration": "false",
@@ -678,6 +686,7 @@ def main():
     efs_throughput_mode = _resolve("efs_throughput_mode")
     enable_efa = _resolve_bool("enable_efa")
     enable_efs = _resolve_bool("enable_efs")
+    enable_gpu = _resolve_bool("enable_gpu")
     enable_external_nfs = _resolve_bool("enable_external_nfs")
     enable_fsx = _resolve_bool("enable_fsx")
     enable_fsx_hydration = _resolve_bool("enable_fsx_hydration")
@@ -1006,6 +1015,15 @@ def main():
         if placement_group == "NONE":
             placement_group = "DYNAMIC"
         p_val("placement_group", debug_mode)
+
+    # Auto-enable GPU support when a GPU instance family is selected.
+    if is_gpu_instance(compute_instance_type) and not enable_gpu:
+        print(
+            f"*** NOTE ***\n"
+            f"  {compute_instance_type} is a GPU instance — enabling GPU support automatically.\n"
+            f"  Pass --enable_gpu=false to override."
+        )
+        enable_gpu = True
 
     # Perform error checking on headnode_instance_type and compute_instance_type to
     # ensure the selections are valid EC2 instance types and are supported by the
@@ -1387,6 +1405,8 @@ def main():
         "efs_throughput_mode": efs_throughput_mode,
         "enable_efa": _b(enable_efa),
         "enable_efs": _b(enable_efs),
+        "enable_gpu": _b(enable_gpu),
+        "enable_efa_gdr": _b(enable_efa and needs_efa_gdr(compute_instance_type)),
         "enable_external_nfs": _b(enable_external_nfs),
         "enable_fsx": _b(enable_fsx),
         "enable_fsx_hydration": _b(enable_fsx_hydration),
@@ -1590,6 +1610,7 @@ def main():
         "enable_monitoring": _b(enable_monitoring),
         "enable_efa": _b(enable_efa),
         "enable_efs": _b(enable_efs),
+        "enable_gpu": _b(enable_gpu),
         "enable_fsx": _b(enable_fsx),
         "enable_fsx_hydration": _b(enable_fsx_hydration),
         "vpc_name": vpc_name,
@@ -1729,6 +1750,7 @@ def main():
             ("EFS", enable_efs),
             ("FSx/Lustre", enable_fsx),
             ("External NFS", enable_external_nfs),
+            ("GPU", enable_gpu),
             ("Monitoring", enable_monitoring),
         ]
         if str(flag).lower() == "true"

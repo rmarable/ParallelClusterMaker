@@ -124,6 +124,7 @@ All optional parameters have hardcoded defaults and can also be persisted in a Y
 | `enable_monitoring` | false |
 | `enable_hpc_benchmarks` | false |
 | `enable_efa` | false |
+| `enable_gpu` | false (auto-enabled for GPU instances) |
 
 Use `--use_defaults=FILE` to load values from your own defaults file; CLI arguments always take precedence.
 
@@ -307,6 +308,22 @@ Subnets and security groups are generated as part of the CloudFormation stack �
     --compute_subnet_ids=subnet-0private1 \
     --use_private_compute_subnet=true
 ```
+
+### GPU
+
+GPU support is auto-enabled when `compute_instance_type` belongs to a GPU family (`g4dn`, `g4ad`, `g5`, `g5g`, `g6`, `p3`, `p4d`, `p4de`, `p5`).  Pass `--enable_gpu=false` to override.
+
+**What gets configured at node boot (head and compute):**
+
+- NVMe instance store detection — scans `/sys/block/nvme*` and identifies instance store devices by model string (`Amazon EC2 NVMe Instance Storage`)
+- Single device: formatted XFS, mounted at `/local_scratch` with `noatime,nodiratime,nofail`
+- Multiple devices (p4d has 8×1 TB, p5 has 8×3.84 TB): RAID0 via `mdadm`, mounted at `/local_scratch`
+- Instances without instance store (e.g. `p3.2xlarge`): `/local_scratch` remains a sticky-bit directory on the root EBS volume
+- `nvtop` and `htop` installed on all nodes
+
+**EFA GPUDirect RDMA (GDR):**  When `--enable_efa=true` and the compute instance is `p4d.24xlarge`, `p4de.24xlarge`, or `p5.48xlarge`, `GdrSupport: true` is added to the PCluster EFA config automatically.
+
+**CUDA / drivers:**  PCluster's official deep learning AMIs include NVIDIA drivers.  Pass `--custom_ami=<ami-id>` to use a pre-built DLAMI or a custom AMI with pinned driver versions.
 
 ### EFA
 

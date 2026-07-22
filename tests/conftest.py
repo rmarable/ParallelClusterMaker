@@ -66,6 +66,8 @@ def cluster_params():
         "compute_root_volume_throughput": 125,
         "placement_group": "NONE",
         "enable_efa": "false",
+        "enable_efa_gdr": "false",
+        "enable_gpu": "false",
         # Scheduling
         "scheduler": "slurm",
         "cluster_type": "spot",
@@ -186,5 +188,36 @@ def cluster_params_monitoring_enabled(cluster_params):
     """
     overrides = {
         "enable_monitoring": "true",
+    }
+    return {**cluster_params, **overrides}
+
+
+@pytest.fixture
+def cluster_params_gpu_enabled(cluster_params):
+    """cluster_params variant with enable_gpu=true.
+
+    Uses a p3.2xlarge compute instance (no NVMe instance store — exercises
+    the fallback path) and enables EFA-GDR for p4d/p5 coverage via a
+    separate override in test_templates.py.
+    """
+    overrides = {
+        "enable_gpu": "true",
+        "compute_instance_type": "p3.2xlarge",
+        "base_os": "ubuntu2404",
+        "pcluster_os": "ubuntu2404",
+    }
+    return {**cluster_params, **overrides}
+
+
+@pytest.fixture
+def cluster_params_gpu_gdr_enabled(cluster_params):
+    """cluster_params variant with enable_gpu=true and EFA-GDR (p4d)."""
+    overrides = {
+        "enable_gpu": "true",
+        "enable_efa": "true",
+        "enable_efa_gdr": "true",
+        "compute_instance_type": "p4d.24xlarge",
+        "base_os": "ubuntu2404",
+        "pcluster_os": "ubuntu2404",
     }
     return {**cluster_params, **overrides}

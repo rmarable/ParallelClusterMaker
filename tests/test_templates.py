@@ -106,6 +106,31 @@ def test_template_renders_monitoring_enabled_variant(
         assert "monitoring" in rendered.lower(), "monitoring block absent from config"
 
 
+@pytest.mark.parametrize("tdir,fname", _collect_templates())
+def test_template_renders_gpu_enabled_variant(tdir, fname, cluster_params_gpu_enabled):
+    """Templates must render when enable_gpu=true (p3.2xlarge, no NVMe store)."""
+    env = _make_env(tdir)
+    rendered = env.get_template(fname).render(**cluster_params_gpu_enabled)
+    assert isinstance(rendered, str)
+    assert len(rendered) > 0, f"{fname} rendered empty (gpu_enabled variant)"
+    if fname == "vars_file.j2":
+        assert 'enable_gpu: "true"' in rendered
+    if fname == "postinstall.j2":
+        assert "nvtop" in rendered
+        assert "_NVME_DEVS" in rendered
+
+
+@pytest.mark.parametrize("tdir,fname", _collect_templates())
+def test_template_renders_gpu_gdr_enabled_variant(tdir, fname, cluster_params_gpu_gdr_enabled):
+    """Templates must render when enable_gpu=true with EFA-GDR (p4d.24xlarge)."""
+    env = _make_env(tdir)
+    rendered = env.get_template(fname).render(**cluster_params_gpu_gdr_enabled)
+    assert isinstance(rendered, str)
+    assert len(rendered) > 0, f"{fname} rendered empty (gpu_gdr_enabled variant)"
+    if fname == "config.pcluster.j2":
+        assert "GdrSupport: true" in rendered
+
+
 # ---------------------------------------------------------------------------
 # Template directory integrity
 # ---------------------------------------------------------------------------

@@ -30,6 +30,43 @@ else
 	ln -sfn /scratch /local_scratch
 fi
 
+{% if enable_gpu == 'true' %}
+# Mount NVMe instance store at /local_scratch if present; fall back to the
+# sticky-bit directory already created above for instances without instance store.
+
+_GPU_SCRATCH=/local_scratch
+mapfile -t _NVME_DEVS < <(
+    find /sys/block -maxdepth 1 -name 'nvme*' | while read -r _b; do
+        _model=$(cat "$_b/device/model" 2>/dev/null | tr -d ' ')
+        [[ "$_model" == "AmazonEC2NVMeInstanceStorage" ]] && basename "$_b"
+    done | sort
+)
+_NVME_COUNT=$(echo "${_NVME_DEVS[*]}" | wc -w | tr -d ' ')
+
+if [[ $_NVME_COUNT -eq 1 ]]; then
+    _DEV="/dev/${_NVME_DEVS[0]}"
+    sudo mkfs.xfs -f "$_DEV"
+    sudo mount -o noatime,nodiratime "$_DEV" "$_GPU_SCRATCH"
+    echo "$_DEV $_GPU_SCRATCH xfs noatime,nodiratime,nofail 0 0" | sudo tee -a /etc/fstab > /dev/null
+    sudo chmod 1777 "$_GPU_SCRATCH"
+elif [[ $_NVME_COUNT -gt 1 ]]; then
+    _RAID_DEVS=("${_NVME_DEVS[@]/#//dev/}")
+    sudo mdadm --create /dev/md0 --level=0 --raid-devices="$_NVME_COUNT" "${_RAID_DEVS[@]}" --force
+    sudo mkfs.xfs -f /dev/md0
+    sudo mount -o noatime,nodiratime /dev/md0 "$_GPU_SCRATCH"
+    echo "/dev/md0 $_GPU_SCRATCH xfs noatime,nodiratime,nofail 0 0" | sudo tee -a /etc/fstab > /dev/null
+    sudo chmod 1777 "$_GPU_SCRATCH"
+fi
+
+# Install GPU monitoring tools on head and compute nodes.
+
+{% if 'ubuntu' in base_os %}
+sudo apt-get -y install nvtop htop
+{% else %}
+sudo dnf install -y nvtop htop
+{% endif %}
+{% endif %}
+
 # Configure Spack:
 # https://spack.io/
 
