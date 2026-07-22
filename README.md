@@ -385,6 +385,8 @@ aws ssm get-parameter \
   --query "Parameter.Value" --output text
 ```
 
+**Note:** PCluster Ubuntu head nodes ship with `apache2` running on port 80.  The monitoring installer stops and disables it automatically so the nginx container can bind ports 80 and 443.
+
 **IAM:** Monitoring permissions are granted via a separate managed policy `<ec2_iam_policy>-M` (7 statements, ~1,400 bytes).  It is created and attached during `make_pcluster.py` and deleted during `kill_pcluster.py`.
 
 **Supply chain:** The `aws-parallelcluster-monitoring` tarball is downloaded from GitHub at cluster-build time and staged in the cluster's S3 bucket.  Head nodes pull from S3, not GitHub, so private-subnet nodes and air-gapped environments work without internet access.
