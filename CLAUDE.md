@@ -27,7 +27,7 @@ tests/                    # pytest suite (320 tests as of last run)
 ## Constraints
 
 - **No commits or pushes** unless the user explicitly asks.  Do not ask about committing during work.
-- Target branch is `claude-init`; main branch is `master`.
+- Target branch is `claude-init`; main branch is `main`.
 - All Python logic must live in `src/pcluster_core.py` or `src/pcluster_aux_data.py` so it is testable without AWS credentials.
 - `templates/vars_file.j2` is rendered with `StrictUndefined` — `| default()` filters do not rescue from UndefinedError; every variable must be defined upstream.
 - **`pcluster_os` is derived from `base_os`.** PCluster's `Os:` field does not accept the `arm` suffix (e.g. `ubuntu2404arm` → `ubuntu2404`, `rhel9arm` → `rhel9`). `pcluster_os = base_os.removesuffix("arm")` is set in `make_pcluster.py`, written to `vars_file.j2`, and used in `config.pcluster.j2`. Supported ARM OS values: `ubuntu2204arm`, `ubuntu2404arm`, `rhel8arm`, `rhel9arm`, `alinux2arm` (future). Any new template variable must be traced through the full pipeline: Python vars dict → `vars_file.j2` → template — and added to `tests/conftest.py` so the test suite catches it.
