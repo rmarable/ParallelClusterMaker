@@ -64,6 +64,7 @@ fsx_s3_export_path: export
 
 # --- EFA ---
 enable_efa: "false"
+enable_gpu: "false"              # auto-enabled for GPU instance families (g4dn, g5, p3, p4d, p4de, p5, g6)
 
 # --- External NFS ---
 enable_external_nfs: "false"

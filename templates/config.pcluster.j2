@@ -92,6 +92,9 @@ Scheduling:
 {% if enable_efa == 'true' %}
           Efa:
             Enabled: true
+{% if enable_efa_gdr == 'true' %}
+            GdrSupport: true
+{% endif %}
 {% endif %}
 
 SharedStorage:

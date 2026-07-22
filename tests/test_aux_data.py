@@ -3,6 +3,7 @@ Unit tests for src/pcluster_aux_data.py pure data and logic.
 
 Covers:
   - ARM instance detection (including the trn1/inf2 x86_64 edge case)
+  - GPU instance detection and EFA-GDR detection
   - cluster_name regex boundary (27-char max, lowercase+digits+hyphens)
   - ctrlC_Abort: file cleanup, IAM cleanup, no-interrupt path, both-None path
   - illegal_az_msg, p_val, p_fail, print_TextHeader, refer_to_docs_and_quit
@@ -19,7 +20,7 @@ sys.path.insert(
     0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src")
 )
 
-from pcluster_aux_data import base_os_efa  # noqa: F401 — import check
+from pcluster_aux_data import base_os_efa, is_gpu_instance, needs_efa_gdr  # noqa: F401
 from pcluster_core import _validate_cluster_name
 
 # ---------------------------------------------------------------------------
@@ -530,3 +531,45 @@ def test_ctrlC_abort_iam_no_such_entity_is_graceful(monkeypatch, capsys):
         )
     out = capsys.readouterr().out
     assert "not found" in out or "skipping" in out
+
+
+# ---------------------------------------------------------------------------
+# GPU instance detection
+# ---------------------------------------------------------------------------
+
+
+class TestIsGpuInstance:
+    @pytest.mark.parametrize("itype", [
+        "g4dn.xlarge", "g4dn.12xlarge", "g4dn.metal",
+        "g4ad.xlarge", "g4ad.16xlarge",
+        "g5.xlarge", "g5.48xlarge",
+        "g5g.xlarge", "g5g.metal",
+        "g6.xlarge", "g6.48xlarge",
+        "p3.2xlarge", "p3.16xlarge", "p3dn.24xlarge",
+        "p4d.24xlarge", "p4de.24xlarge",
+        "p5.48xlarge",
+    ])
+    def test_gpu_instances_detected(self, itype):
+        assert is_gpu_instance(itype)
+
+    @pytest.mark.parametrize("itype", [
+        "c8g.xlarge", "m7i.large", "r6i.2xlarge",
+        "trn1.32xlarge", "inf2.48xlarge",
+        "hpc7g.16xlarge", "i4i.32xlarge",
+    ])
+    def test_non_gpu_instances_not_detected(self, itype):
+        assert not is_gpu_instance(itype)
+
+
+class TestNeedsEfaGdr:
+    @pytest.mark.parametrize("itype", [
+        "p4d.24xlarge", "p4de.24xlarge", "p5.48xlarge",
+    ])
+    def test_gdr_instances_detected(self, itype):
+        assert needs_efa_gdr(itype)
+
+    @pytest.mark.parametrize("itype", [
+        "g4dn.12xlarge", "g5.48xlarge", "p3.16xlarge", "c8g.xlarge",
+    ])
+    def test_non_gdr_instances_not_detected(self, itype):
+        assert not needs_efa_gdr(itype)

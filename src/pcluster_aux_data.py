@@ -782,3 +782,26 @@ ec2_instances_efa = [
 ]
 
 base_os_efa = ["ubuntu2204", "ubuntu2404", "ubuntu2204arm", "ubuntu2404arm", "rhel8", "rhel8arm", "rhel9", "rhel9arm"]
+
+# GPU instance family prefixes — used for auto-detection.
+# Trainium (trn1) and Inferentia (inf1/inf2) are not included: they use
+# custom neuron runtimes, not CUDA, and have no NVMe instance store.
+_GPU_PREFIXES = (
+    "g4dn.", "g4ad.",
+    "g5.", "g5g.",
+    "g6.",
+    "p3.", "p3dn.",
+    "p4d.", "p4de.",
+    "p5.",
+)
+
+# Subset that supports EFA GPUDirect RDMA (GDR).
+_EFA_GDR_PREFIXES = ("p4d.", "p4de.", "p5.")
+
+
+def is_gpu_instance(instance_type):
+    return any(instance_type.startswith(p) for p in _GPU_PREFIXES)
+
+
+def needs_efa_gdr(instance_type):
+    return any(instance_type.startswith(p) for p in _EFA_GDR_PREFIXES)
