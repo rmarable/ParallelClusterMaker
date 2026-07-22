@@ -259,6 +259,15 @@
             remote_src: true
           with_fileglob:
             - "{{ performance_rootdir }}/README*.*"
+        - name: Upload performance source tree to S3 for head node self-repair
+          command: >
+            aws s3 sync "{{ performance_rootdir }}/" "s3://{{ s3_bucketname }}/performance/"
+            --exclude "*.pyc"
+            --exclude "__pycache__/*"
+            --exclude "summary/*"
+            --exclude "summary_final/*"
+            --exclude "plots/*"
+            --region "{{ region }}"
 
     - name: Start the stack creation timer
       command: date +%Y-%m-%d\ \@\ %H:%M:%S
@@ -330,14 +339,17 @@
 
     - name: Get the head node IP address
       set_fact:
-        head_node_public_ip: "{{ (cluster_status.stdout | from_json).get('headNode', {}).get('publicIpAddress', '') }}"
+        head_node_public_ip: >-
+          {{
+            (cluster_status.stdout | from_json).get('headNode', {}).get('publicIpAddress')
+            or (cluster_status.stdout | from_json).get('headNode', {}).get('privateIpAddress', '')
+          }}
 
     - name: Template the cluster SSH access script to stage_dir
       template:
         src: "{{ cluster_template_dir }}/access_cluster.j2"
         dest: "{{ stage_dir }}/access_cluster.{{ cluster_name }}.sh"
         mode: "0755"
-      when: head_node_public_ip != ''
 
     - name: Wait for SSH port to be reachable on the head node
       wait_for:
@@ -507,41 +519,51 @@
         region: "{{ region }}"
       delegate_to: localhost
 
+    - name: Build cluster build summary message
+      set_fact:
+        _build_summary: >-
+          {{
+            [
+              "==================================================================",
+              "                   Cluster Build Summary",
+              "==================================================================",
+              "",
+              "Launched the environment: " + start_overall_timer.stdout,
+              "Initiated stack creation: " + start_stack_creation_timer.stdout,
+              "Completed stack creation: " + stop_stack_creation_timer.stdout,
+              "Finished the environment: " + stop_overall_timer.stdout,
+              "Lifetime (days:hr:min):   " + (cluster_lifetime | default('not set')),
+              "",
+              "Cluster Name:      " + cluster_name,
+              "Cluster Type:      " + cluster_type,
+              "Serial Datestamp:  " + cluster_serial_datestamp,
+              "Availability Zone: " + az,
+              "VPC:               " + vpc_name,
+              "Head Node:         " + headnode_instance_type,
+              "Compute:           " + compute_instance_type,
+              "OS:                " + base_os,
+              "Scheduler:         " + scheduler,
+            ]
+            + (["EFA:               enabled"] if enable_efa | bool else [])
+            + (["EFS:               enabled"] if enable_efs | bool else [])
+            + (["FSx/Lustre:        enabled"] if enable_fsx | bool else [])
+            + (["External NFS:      enabled"] if enable_external_nfs | bool else [])
+            + [
+              "",
+              "Access the head node:",
+              "  ./access_cluster.py -N " + cluster_name,
+              "  pcluster ssh --cluster-name " + cluster_name + " -i " + ssh_keypair,
+              "  ssh -i " + ssh_keypair + " " + ec2_user + "@" + head_node_public_ip,
+              "",
+              "Delete this cluster:",
+              "  ./kill_pcluster.py -N " + cluster_name + " -O " + cluster_owner + " -A " + az,
+              "",
+            ]
+          }}
+
     - name: Print cluster build summary
       debug:
-        msg:
-          - "=================================================================="
-          - "                   Cluster Build Summary"
-          - "=================================================================="
-          - ""
-          - "Launched the environment: {{ start_overall_timer.stdout }}"
-          - "Initiated stack creation: {{ start_stack_creation_timer.stdout }}"
-          - "Completed stack creation: {{ stop_stack_creation_timer.stdout }}"
-          - "Finished the environment: {{ stop_overall_timer.stdout }}"
-          - "Lifetime (days:hr:min):   {{ cluster_lifetime | default('not set') }}"
-          - ""
-          - "Cluster Name:         {{ cluster_name }}"
-          - "SerialDateStamp:      {{ cluster_serial_datestamp }}"
-          - "Availability Zone:    {{ az }}"
-          - "VPC:                  {{ vpc_name }}"
-          - "Head Node:            {{ headnode_instance_type }}"
-          - "Compute:              {{ compute_instance_type }}"
-          - "OS:                   {{ base_os }}"
-          - "Scheduler:            {{ scheduler }}"
-          - ""
-          - "EFA:          {{ enable_efa | bool | upper }}"
-          - "EFS:          {{ enable_efs | bool | upper }}"
-          - "FSx/Lustre:   {{ enable_fsx | bool | upper }}"
-          - "External NFS: {{ enable_external_nfs | bool | upper }}"
-          - ""
-          - "Access the head node:"
-          - "  ./access_cluster.py -N {{ cluster_name }}"
-          - "  pcluster ssh --cluster-name {{ cluster_name }} -i {{ ssh_keypair }}"
-          - "  ssh -i {{ ssh_keypair }} {{ ec2_user }}@{{ head_node_public_ip }}"
-          - ""
-          - "Delete this cluster:"
-          - "  ./kill_pcluster.py -N {{ cluster_name }} -O {{ cluster_owner }} -A {{ az }}"
-          - ""
+        msg: "{{ _build_summary }}"
 
     - name: Print FSx hydration helper script locations
       debug:

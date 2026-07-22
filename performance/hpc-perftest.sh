@@ -242,7 +242,7 @@ cmd_plot() {
     esac
 
     echo "Generating $plot_type plot..."
-    (cd "$SCRIPT_DIR" && "$PYTHON3" "$SCRIPTS_DIR/make_standalone_plots.py" --plot "$plot_type" "${cluster_arg[@]}")
+    (cd "$SCRIPT_DIR" && "$PYTHON3" "$SCRIPTS_DIR/make_standalone_plots.py" --plot "$plot_type" "${cluster_arg[@]+"${cluster_arg[@]}"}")
 }
 
 # ============================================================================

@@ -1446,6 +1446,7 @@ def main():
             )
             refer_to_docs_and_quit(error_msg)
         spot_price = round(raw_spot_price + (spot_buffer * raw_spot_price), 8)
+        print(f"  => ${raw_spot_price:.6f}/hr (bid: ${spot_price:.6f}/hr)")
         p_val("spot_price", debug_mode)
     else:
         p_fail(cluster_type, "cluster_type", ["ondemand", "spot"])
@@ -1893,13 +1894,8 @@ def main():
             print(f"  Deleted IAM role: {ec2_iam_role}")
         except Exception as _e:
             print(f"  Warning: could not delete role {ec2_iam_role}: {_e}")
-        print("Removing local state files to allow a clean retry:")
-        with contextlib.suppress(FileNotFoundError):
-            os.remove(cluster_serial_number_file)
-            print(f"  Removed {cluster_serial_number_file}")
-        with contextlib.suppress(FileNotFoundError):
-            os.remove(vars_file_path)
-            print(f"  Removed {vars_file_path}")
+        print(f'Run kill_pcluster.py to tear down any partial stack before retrying:')
+        print(f"  ./kill_pcluster.py -N {cluster_name} -O {cluster_owner} -A {az}")
         sys.exit(_build_result.returncode)
 
     # Append make_pcluster.py command line and the Ansible playbook command used
@@ -1913,8 +1909,55 @@ def main():
     with open(cluster_serial_number_file, "rb") as _snf:
         s3.Object(s3_bucketname, cluster_serial_number_object).put(Body=_snf)
 
-    # Cleanup and exit.
+    # Fetch head node IP for the summary.
+    _head_ip = ""
+    try:
+        import subprocess as _sp
+        _desc = _sp.run(
+            [".venv/bin/pcluster", "describe-cluster",
+             "--cluster-name", cluster_name, "--region", region],
+            capture_output=True, text=True, cwd=_repo_root,
+        )
+        if _desc.returncode == 0:
+            _info = json.loads(_desc.stdout)
+            _head_ip = _info.get("headNode", {}).get("publicIpAddress") or \
+                       _info.get("headNode", {}).get("privateIpAddress", "")
+    except Exception:
+        pass
 
+    # Print a human-friendly cluster build summary.
+    _enabled = [
+        lbl for lbl, flag in [
+            ("EFA", enable_efa), ("EFS", enable_efs),
+            ("FSx/Lustre", enable_fsx), ("External NFS", enable_external_nfs),
+        ] if str(flag).lower() == "true"
+    ]
+    print("")
+    print("=" * 66)
+    print("                   Cluster Build Summary")
+    print("=" * 66)
+    print(f"  Cluster Name:      {cluster_name}")
+    print(f"  Cluster Type:      {cluster_type}")
+    print(f"  Serial Datestamp:  {cluster_serial_datestamp}")
+    print(f"  Availability Zone: {az}")
+    print(f"  VPC:               {vpc_name}")
+    print(f"  Head Node:         {headnode_instance_type}")
+    print(f"  Compute:           {compute_instance_type}")
+    print(f"  OS:                {base_os}")
+    print(f"  Scheduler:         {scheduler}")
+    print(f"  Lifetime:          {cluster_lifetime}")
+    if _enabled:
+        print(f"  Options:           {', '.join(_enabled)}")
+    if _head_ip:
+        print("")
+        print("  Access the head node:")
+        print(f"    ./access_cluster.py -N {cluster_name}")
+        print(f"    ssh -i active_clusters/{cluster_name}/{ec2_keypair}.pem {ec2_user}@{_head_ip}")
+    print("")
+    print("  Delete this cluster:")
+    print(f"    ./kill_pcluster.py -N {cluster_name} -O {cluster_owner} -A {az}")
+    print("=" * 66)
+    print("")
     print("Finished creating ParallelCluster stack " + cluster_name + "!")
     print("Exiting...")
     sys.exit(0)

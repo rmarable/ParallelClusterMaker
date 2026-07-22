@@ -5,16 +5,32 @@ cluster head node by `create_pcluster.yml` when `enable_hpc_performance_tests=tr
 
 ---
 
+## Deployment
+
+When `enable_hpc_performance_tests=true`, `create_pcluster.yml`:
+
+1. Stages and SCP-deploys the performance tree to `~/performance/` on the head node
+2. Uploads the source tree to `s3://<cluster-bucket>/performance/` so rebuilt head nodes can self-repair via postinstall
+3. Postinstall installs `matplotlib numpy pandas scipy seaborn` via `pip3` on every head node bootstrap
+
+On teardown, `delete_pcluster.yml` syncs results from `~/performance/<cluster_name>/` to `s3://<cluster-bucket>/performance-results/<cluster_name>/<cluster_serial_number>/` before destroying the cluster.  Each serial number gets its own subdirectory so rebuilds of the same cluster name accumulate rather than overwrite.
+
+---
+
 ## Quick start
+
+SSH into the head node first (`./access_cluster.py -N <cluster_name>`), then:
 
 **Tier 1 — Axb_random smoke test** (no MPI required):
 ```bash
+cd ~/performance
 ./hpc-perftest.sh run -n 3 -C my-cluster
 ./hpc-perftest.sh plot --type unified
 ```
 
-**Tier 2 — Standards-based benchmarks** (MPI required):
+**Tier 2 — Standards-based benchmarks** (MPI required, run on head node):
 ```bash
+cd ~/performance
 module load openmpi    # or intelmpi — already available on ParallelCluster
 ./hpc-benchmark.sh install
 ./hpc-benchmark.sh run --tests stream,osu,ior,hpcg
@@ -38,7 +54,7 @@ Use `hpc-perftest.sh run` to drive jobs — you should rarely need to call
 ### Prerequisites
 
 ```bash
-pip install numpy scipy matplotlib pandas seaborn
+pip install matplotlib numpy pandas scipy seaborn
 
 # Optional: faster log compression
 sudo apt-get install pigz        # Ubuntu/Debian

@@ -69,7 +69,7 @@ echo "--------------------------------------------------------------------------
 echo ""
 echo "To save and view the plots, please run this command (or just cut/paste):"
 echo ""
-echo "   ===>   ../hpc-perftest.sh plot --type unified"
+echo "   ===>   $(cd "$(dirname "$0")/.." && pwd)/hpc-perftest.sh plot --type unified"
 echo ""
 echo "Finished!"
 echo "Exiting..."
