@@ -78,6 +78,9 @@ def test_template_renders_custom_ami_variant(tdir, fname, cluster_params_custom_
     assert (
         len(rendered) > 0
     ), f"{fname} rendered to an empty string (custom_ami variant)"
+    if fname == "config.pcluster.j2":
+        assert "ami-0abc1234567890def" in rendered, "custom_ami value not in config"
+        assert "PlacementGroup:" in rendered, "PlacementGroup block absent from config"
 
 
 @pytest.mark.parametrize("tdir,fname", _collect_templates())
@@ -96,6 +99,27 @@ def test_template_renders_monitoring_enabled_variant(
     assert (
         len(rendered) > 0
     ), f"{fname} rendered to an empty string (monitoring_enabled variant)"
+    if fname == "vars_file.j2":
+        assert 'enable_monitoring: "true"' in rendered
+        assert "monitoring_version:" in rendered
+        assert "monitoring_version_checksum:" in rendered
+    if fname == "config.pcluster.j2":
+        assert "monitoring" in rendered.lower(), "monitoring block absent from config"
+
+
+# ---------------------------------------------------------------------------
+# Template directory integrity
+# ---------------------------------------------------------------------------
+
+
+def test_template_dirs_all_exist():
+    """Every directory in TEMPLATE_DIRS must exist and contain at least one template."""
+    for tdir in TEMPLATE_DIRS:
+        assert os.path.isdir(tdir), f"Template directory missing: {tdir}"
+        templates = [
+            f for f in os.listdir(tdir) if f.endswith((".j2", ".jinja2", ".jinja"))
+        ]
+        assert len(templates) > 0, f"No templates found in {tdir}"
 
 
 # ---------------------------------------------------------------------------

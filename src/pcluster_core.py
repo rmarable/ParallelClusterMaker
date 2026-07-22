@@ -6,6 +6,8 @@ All functions are importable without AWS credentials and without the
 venv guard that the main scripts enforce at import time.
 """
 
+import contextlib
+import json
 import os
 import re
 import sys
@@ -269,3 +271,369 @@ def _resolve_access_script_path(cluster_data_root, cluster_name):
             f"  cluster_name must not contain path traversal sequences."
         )
     return path
+
+
+# ---------------------------------------------------------------------------
+# Validation guards (extracted from make_pcluster.py main())
+# ---------------------------------------------------------------------------
+
+
+def _validate_cluster_lifetime(lifetime):
+    """Raise SystemExit if lifetime is not D:HH:MM format."""
+    if not re.fullmatch(r"^\d+:\d+:\d+$", lifetime):
+        sys.exit(
+            f"ERROR: cluster_lifetime must be in D:HH:MM format (e.g. 7:0:0). Got: {lifetime!r}"
+        )
+
+
+def _validate_fsx_size(fsx_size, enable_fsx):
+    """Raise SystemExit if fsx_size is invalid when FSx is enabled."""
+    if not enable_fsx:
+        return
+    if fsx_size <= 0 or fsx_size % 1200 != 0:
+        sys.exit("*** ERROR ***\nfsx_size must be a positive multiple of 1200!")
+
+
+def _validate_ebs_config(
+    headnode_size, compute_size, shared_size, shared_type, shared_iops, shared_throughput
+):
+    """Raise SystemExit if any EBS volume parameter is out of range."""
+    for label, val in (
+        ("headnode_root_volume_size", headnode_size),
+        ("compute_root_volume_size", compute_size),
+        ("ebs_shared_volume_size", shared_size),
+    ):
+        if int(val) < 1:
+            sys.exit(
+                f"*** ERROR ***\nEBS volume size must be >= 1 GiB!\n  {label} = {val} GB"
+            )
+        if int(val) > 16384:
+            sys.exit(
+                f"*** ERROR ***\nMaximum allowed EBS volume size is 16,384 GiB!\n  {label} = {val} GB"
+            )
+    if shared_type in ("gp3", "io1", "io2") and int(shared_iops) < 100:
+        sys.exit(
+            f"*** ERROR ***\nebs_shared_volume_iops must be >= 100 (got {shared_iops})."
+        )
+    if shared_type == "gp3" and int(shared_throughput) < 125:
+        sys.exit(
+            f"*** ERROR ***\nebs_shared_volume_throughput must be >= 125 MiB/s for gp3 (got {shared_throughput})."
+        )
+
+
+def _validate_ebs_shared_dir(path):
+    """Raise SystemExit if path is not a safe absolute Unix path."""
+    if not path.startswith("/"):
+        sys.exit(
+            f'*** ERROR ***\n"{path}" does not appear to be a Unix file path! Try "/{path}" instead.'
+        )
+    if not re.fullmatch(r"/[^\x00-\x1f\"\'\\;|&`$<>]*", path):
+        sys.exit(
+            f"*** ERROR ***\nebs_shared_dir contains invalid characters: {path!r}\n"
+            f"  Only printable characters excluding quotes, backslash, and shell metacharacters are permitted."
+        )
+
+
+def _validate_queue_sizes(initial_queue_size, max_queue_size, scaledown_idletime):
+    """Raise SystemExit if queue-size parameters are out of range."""
+    if scaledown_idletime < 1:
+        sys.exit(
+            f"ERROR: scaledown_idletime must be >= 1 minute (got {scaledown_idletime})."
+        )
+    if initial_queue_size < 0:
+        sys.exit(
+            f"ERROR: initial_queue_size must be >= 0 (got {initial_queue_size})."
+        )
+    if initial_queue_size > max_queue_size:
+        sys.exit(
+            f"ERROR: initial_queue_size ({initial_queue_size}) must not exceed "
+            f"max_queue_size ({max_queue_size})."
+        )
+
+
+# ---------------------------------------------------------------------------
+# IAM / policy functions (moved from make_pcluster.py)
+# ---------------------------------------------------------------------------
+
+
+def _render_policy(
+    src_path,
+    aws_account_id,
+    region,
+    vpc_id,
+    prod_level,
+    cluster_serial_number,
+    cluster_name,
+    cluster_owner,
+    cluster_serial_datestamp,
+):
+    """Render an IAM policy template, minify, and enforce the 6,144-byte limit."""
+    _IAM_POLICY_LIMIT = 6144
+    with open(src_path) as fh:
+        raw = (
+            fh.read()
+            .replace("<AWS_ACCOUNT_ID>", aws_account_id)
+            .replace("<AWS_REGION>", region)
+            .replace("<VPC_ID>", vpc_id)
+            .replace("<PROD_LEVEL>", prod_level)
+            .replace("<CLUSTER_SERIAL_NUMBER>", cluster_serial_number)
+            .replace("<CLUSTER_NAME>", cluster_name)
+            .replace("<CLUSTER_OWNER>", cluster_owner)
+            .replace("<CLUSTER_SERIAL_DATESTAMP>", cluster_serial_datestamp)
+        )
+    minified = json.dumps(json.loads(raw), separators=(",", ":"))
+    size = len(minified.encode("utf-8"))
+    if size > _IAM_POLICY_LIMIT:
+        sys.exit(
+            f"*** ERROR ***\n"
+            f"  Rendered IAM policy from {os.path.basename(src_path)} is {size} bytes "
+            f"(limit: {_IAM_POLICY_LIMIT}).\n"
+            f"  This usually happens when cluster_owner or cluster_serial_number is very long.\n"
+            f"  cluster_owner='{cluster_owner}' ({len(cluster_owner)} chars), "
+            f"cluster_serial_number='{cluster_serial_number}' ({len(cluster_serial_number)} chars)."
+        )
+    return minified
+
+
+def _setup_iam(
+    iam,
+    ec2_iam_role,
+    ec2_iam_policy,
+    ec2_json_policy_template,
+    aws_account_id,
+    prod_level,
+    cluster_serial_number,
+    cluster_name,
+    cluster_owner,
+    cluster_serial_datestamp,
+    ec2_json_policy_src,
+    region="",
+    vpc_id="",
+    enable_monitoring=False,
+):
+    """Create ec2_iam_role and attach managed policies (-A/-B/-C, optionally -M). Idempotent."""
+    try:
+        iam.get_role(RoleName=ec2_iam_role)
+        attached = {
+            p["PolicyName"]
+            for p in iam.list_attached_role_policies(RoleName=ec2_iam_role)[
+                "AttachedPolicies"
+            ]
+        }
+        expected = {ec2_iam_policy + s for s in ["-A", "-B", "-C"]}
+        if enable_monitoring:
+            expected.add(ec2_iam_policy + "-M")
+        if expected.issubset(attached):
+            print(f"  Found ec2_iam_role with all policies attached: {ec2_iam_role}")
+            return
+        print(
+            f"  Found ec2_iam_role {ec2_iam_role} but missing policies "
+            f"{expected - attached} — recreating policies."
+        )
+    except _ClientError as e:
+        if e.response["Error"]["Code"] != "NoSuchEntity":
+            raise
+
+    render_args = (
+        aws_account_id,
+        region,
+        vpc_id,
+        prod_level,
+        cluster_serial_number,
+        cluster_name,
+        cluster_owner,
+        cluster_serial_datestamp,
+    )
+
+    src_a = ec2_json_policy_src.replace(".json_src", "-A.json_src")
+    src_b = ec2_json_policy_src.replace(".json_src", "-B.json_src")
+    src_c = ec2_json_policy_src.replace(".json_src", "-C.json_src")
+    policy_a = _render_policy(src_a, *render_args)
+    policy_b = _render_policy(src_b, *render_args)
+    policy_c = _render_policy(src_c, *render_args)
+
+    with open(
+        os.open(ec2_json_policy_template, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600),
+        "w",
+    ) as fh:
+        fh.write(policy_a)
+
+    iam.create_role(
+        RoleName=ec2_iam_role,
+        AssumeRolePolicyDocument='{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Service":["ec2.amazonaws.com"]},"Action":"sts:AssumeRole"}]}',
+        Description="ParallelClusterMaker EC2 IAM instance role",
+    )
+    resp_a = iam.create_policy(PolicyName=ec2_iam_policy + "-A", PolicyDocument=policy_a)
+    resp_b = iam.create_policy(PolicyName=ec2_iam_policy + "-B", PolicyDocument=policy_b)
+    resp_c = iam.create_policy(PolicyName=ec2_iam_policy + "-C", PolicyDocument=policy_c)
+    iam.attach_role_policy(RoleName=ec2_iam_role, PolicyArn=resp_a["Policy"]["Arn"])
+    iam.attach_role_policy(RoleName=ec2_iam_role, PolicyArn=resp_b["Policy"]["Arn"])
+    iam.attach_role_policy(RoleName=ec2_iam_role, PolicyArn=resp_c["Policy"]["Arn"])
+    print(f"  Created ec2_iam_role:     {ec2_iam_role}")
+    print(f"  Created ec2_iam_policy-A: {ec2_iam_policy}-A")
+    print(f"  Created ec2_iam_policy-B: {ec2_iam_policy}-B")
+    print(f"  Created ec2_iam_policy-C: {ec2_iam_policy}-C")
+
+    if enable_monitoring:
+        src_m = ec2_json_policy_src.replace(".json_src", "-M.json_src")
+        policy_m = _render_policy(src_m, *render_args)
+        resp_m = iam.create_policy(PolicyName=ec2_iam_policy + "-M", PolicyDocument=policy_m)
+        iam.attach_role_policy(RoleName=ec2_iam_role, PolicyArn=resp_m["Policy"]["Arn"])
+        print(f"  Created ec2_iam_policy-M: {ec2_iam_policy}-M")
+
+
+def _delete_managed_policies(
+    iam,
+    ec2_iam_role,
+    ec2_iam_policy,
+    aws_account_id,
+    suppress=True,
+    fsx_policy=None,
+    enable_monitoring=False,
+):
+    """Detach and delete managed cluster policies (and optional FSx inline policy)."""
+    suffixes = ["-A", "-B", "-C"]
+    if enable_monitoring:
+        suffixes.append("-M")
+    for sfx in suffixes:
+        name = ec2_iam_policy + sfx
+        arn = f"arn:aws:iam::{aws_account_id}:policy/{name}"
+        if suppress:
+            with contextlib.suppress(Exception):
+                iam.detach_role_policy(RoleName=ec2_iam_role, PolicyArn=arn)
+            with contextlib.suppress(Exception):
+                iam.delete_policy(PolicyArn=arn)
+                print(f"  Deleted managed policy: {name}")
+        else:
+            try:
+                iam.detach_role_policy(RoleName=ec2_iam_role, PolicyArn=arn)
+                iam.delete_policy(PolicyArn=arn)
+                print(f"  Deleted managed policy: {name}")
+            except Exception as _e:
+                print(f"  Warning: could not delete policy {name}: {_e}")
+    if fsx_policy:
+        if suppress:
+            with contextlib.suppress(Exception):
+                iam.delete_role_policy(RoleName=ec2_iam_role, PolicyName=fsx_policy)
+                print(f"  Deleted FSx hydration policy: {fsx_policy}")
+        else:
+            try:
+                iam.delete_role_policy(RoleName=ec2_iam_role, PolicyName=fsx_policy)
+                print(f"  Deleted FSx hydration policy: {fsx_policy}")
+            except Exception as _e:
+                print(f"  Warning: could not delete FSx policy {fsx_policy}: {_e}")
+
+
+def _setup_fsx_hydration_iam(
+    iam,
+    ec2_iam_role,
+    fsx_hydration_iam_policy,
+    fsx_hydration_json_policy_src,
+    fsx_hydration_policy_template,
+    fsx_s3_export_bucket,
+    fsx_s3_import_bucket,
+):
+    """Create FSx-S3 hydration inline policy and attach to the cluster IAM role."""
+    with open(fsx_hydration_json_policy_src) as fh:
+        policy = (
+            fh.read()
+            .replace("<FSX_S3_EXPORT_BUCKET>", fsx_s3_export_bucket)
+            .replace("<FSX_S3_IMPORT_BUCKET>", fsx_s3_import_bucket)
+        )
+    with open(
+        os.open(
+            fsx_hydration_policy_template, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600
+        ),
+        "w",
+    ) as fh:
+        fh.write(policy)
+    iam.put_role_policy(
+        RoleName=ec2_iam_role,
+        PolicyName=fsx_hydration_iam_policy,
+        PolicyDocument=policy,
+    )
+    print(f"  Created fsx_hydration_iam_policy: {fsx_hydration_iam_policy}")
+    print(f"  Attached to: {ec2_iam_role}")
+
+
+def _validate_network(
+    ec2client,
+    az,
+    vpc_name,
+    headnode_subnet_id,
+    compute_az_list,
+    compute_subnet_ids_override,
+    use_private_compute_subnet,
+):
+    """Return (vpc_id, headnode_subnet_id, compute_subnet_ids, vpc_cidr).
+
+    Auto-discovery picks the *first* subnet returned by EC2 in each AZ.
+    EC2 does not guarantee ordering, so the result is non-deterministic when
+    multiple subnets exist in the same AZ. Always provide explicit subnet IDs
+    (--headnode_subnet_id, --compute_subnet_ids) for production clusters.
+    """
+    from pcluster_aux_data import refer_to_docs_and_quit
+
+    print(f"  Resolving VPC '{vpc_name}'...")
+    if vpc_name == "vpc_default":
+        vpc_info = ec2client.describe_vpcs(
+            Filters=[{"Name": "isDefault", "Values": ["true"]}]
+        )
+    else:
+        vpc_info = ec2client.describe_vpcs(
+            Filters=[{"Name": "tag:Name", "Values": [vpc_name]}]
+        )
+    vpc_ids = [v["VpcId"] for v in vpc_info["Vpcs"]]
+    if not vpc_ids:
+        refer_to_docs_and_quit(f'"{vpc_name}" is an undefined VPC!')
+    vpc_id = vpc_ids[0]
+    vpc_cidr = vpc_info["Vpcs"][0].get("CidrBlock", "10.0.0.0/8")
+
+    def _discover_subnet(target_az, private_only=False):
+        filters = [
+            {"Name": "availabilityZone", "Values": [target_az]},
+            {"Name": "vpc-id", "Values": [vpc_id]},
+        ]
+        if private_only:
+            filters.append({"Name": "map-public-ip-on-launch", "Values": ["false"]})
+        info = ec2client.describe_subnets(Filters=filters)
+        subnets = info["Subnets"]
+        if not subnets:
+            suffix = (
+                " (private subnets only — map-public-ip-on-launch=false)"
+                if private_only
+                else ""
+            )
+            refer_to_docs_and_quit(
+                f"No subnets found in AZ {target_az} within VPC {vpc_id}{suffix}."
+            )
+        if len(subnets) > 1:
+            print(
+                f"*** WARNING ***\n"
+                f"  {len(subnets)} subnets found in {target_az}; using {subnets[0]['SubnetId']}.\n"
+                f"  Use --headnode_subnet_id / --compute_subnet_ids to select explicitly."
+            )
+        return subnets[0]["SubnetId"]
+
+    if headnode_subnet_id:
+        print(f"  Using explicit head node subnet: {headnode_subnet_id}")
+    else:
+        print(f"  Auto-discovering head node subnet in {az}...")
+        headnode_subnet_id = _discover_subnet(az)
+
+    if compute_subnet_ids_override:
+        compute_subnet_ids = [
+            s.strip() for s in compute_subnet_ids_override.split(",") if s.strip()
+        ]
+        print(f"  Using explicit compute subnet(s): {', '.join(compute_subnet_ids)}")
+    else:
+        _private = use_private_compute_subnet == "true"
+        _label = "private compute" if _private else "compute"
+        print(
+            f"  Auto-discovering {_label} subnet(s) in: {', '.join(compute_az_list)}..."
+        )
+        compute_subnet_ids = [
+            _discover_subnet(caz, private_only=_private) for caz in compute_az_list
+        ]
+
+    return vpc_id, headnode_subnet_id, compute_subnet_ids, vpc_cidr

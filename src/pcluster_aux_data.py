@@ -52,6 +52,8 @@ def ctrlC_Abort(
     cluster_serial_number_file,
     cluster_serial_number,
     enable_fsx_hydration,
+    enable_monitoring=False,
+    aws_account_id=None,
 ):
     import os
     import sys
@@ -90,23 +92,39 @@ def ctrlC_Abort(
             iam = boto3.client("iam")
             ec2_iam_policy = "pclustermaker-policy-" + str(cluster_serial_number)
             ec2_iam_role = "pclustermaker-role-" + str(cluster_serial_number)
-            fsx_hydration_iam_policy = "pclustermaker-fsx-s3-policy-" + str(
-                cluster_serial_number
-            )
 
-            def _del_inline_policy(role, policy):
+            suffixes = ["-A", "-B", "-C"]
+            if enable_monitoring:
+                suffixes.append("-M")
+            for sfx in suffixes:
+                name = ec2_iam_policy + sfx
+                arn = (
+                    f"arn:aws:iam::{aws_account_id}:policy/{name}"
+                    if aws_account_id
+                    else None
+                )
                 try:
-                    iam.delete_role_policy(RoleName=role, PolicyName=policy)
-                    print("Deleted: " + policy)
+                    if arn:
+                        iam.detach_role_policy(RoleName=ec2_iam_role, PolicyArn=arn)
+                    iam.delete_policy(PolicyArn=arn or name)
+                    print(f"Deleted managed policy: {name}")
                 except Exception as _e:
                     if "NoSuchEntity" in str(_e):
-                        print(f"IAM policy not found, skipping: {policy}")
+                        print(f"IAM managed policy not found, skipping: {name}")
                     else:
-                        print(f"WARNING: could not delete IAM policy {policy}: {_e}")
+                        print(f"WARNING: could not delete managed policy {name}: {_e}")
 
             if enable_fsx_hydration == "true":
-                _del_inline_policy(ec2_iam_role, fsx_hydration_iam_policy)
-            _del_inline_policy(ec2_iam_role, ec2_iam_policy)
+                fsx_policy = "pclustermaker-fsx-s3-policy-" + str(cluster_serial_number)
+                try:
+                    iam.delete_role_policy(RoleName=ec2_iam_role, PolicyName=fsx_policy)
+                    print(f"Deleted FSx hydration policy: {fsx_policy}")
+                except Exception as _e:
+                    if "NoSuchEntity" in str(_e):
+                        print(f"IAM policy not found, skipping: {fsx_policy}")
+                    else:
+                        print(f"WARNING: could not delete FSx policy {fsx_policy}: {_e}")
+
             try:
                 iam.delete_role(RoleName=ec2_iam_role)
                 print("Deleted: " + ec2_iam_role)

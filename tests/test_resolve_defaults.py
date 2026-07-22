@@ -103,6 +103,16 @@ class TestResolve:
         result = resolve("max_queue_size", args, file_d, HARDCODED)
         assert result == 0
 
+    def test_cast_valueerror_raises_systemexit(self):
+        args = _args(max_queue_size=None)
+        with pytest.raises(SystemExit):
+            resolve("max_queue_size", args, {"max_queue_size": "not-a-number"}, {}, cast=int)
+
+    def test_cast_typeerror_raises_systemexit(self):
+        args = _args(max_queue_size=None)
+        with pytest.raises(SystemExit):
+            resolve("max_queue_size", args, {"max_queue_size": ["a", "b"]}, {}, cast=int)
+
 
 # ---------------------------------------------------------------------------
 # resolve_bool() — string normalisation
@@ -157,6 +167,11 @@ class TestResolveBool:
         file_d = {"debug_mode": False}
         assert resolve_bool("debug_mode", args, file_d, HARDCODED) is False
 
+    def test_absent_everywhere_raises_systemexit(self):
+        args = _args(unknown_flag=None)
+        with pytest.raises(SystemExit):
+            resolve_bool("unknown_flag", args, {}, {})
+
 
 # ---------------------------------------------------------------------------
 # _load_defaults_file()
@@ -204,3 +219,11 @@ class TestLoadDefaultsFile:
         with pytest.raises(SystemExit) as exc_info:
             _load_defaults_file(str(tmp_path / "missing.yml"), toolkit, "my-cluster")
         assert "my-cluster" in str(exc_info.value)
+
+    def test_invalid_yaml_raises_systemexit(self, tmp_path):
+        bad = tmp_path / "bad.yml"
+        bad.write_text("key: [unclosed\n")
+        toolkit = str(tmp_path / "pcluster_defaults.yml")
+        with pytest.raises(SystemExit) as exc_info:
+            _load_defaults_file(str(bad), toolkit, "my-cluster")
+        assert "not valid YAML" in str(exc_info.value)

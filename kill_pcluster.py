@@ -95,6 +95,7 @@ def main():
     parser.add_argument(
         "--ansible_verbosity",
         "-V",
+        choices=["-v", "-vv", "-vvv", "-vvvv", ""],
         help="Ansible verbosity level (default = none)",
         required=False,
         default=None,

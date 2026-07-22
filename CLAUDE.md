@@ -20,7 +20,7 @@ src/create_pcluster.yml   # Ansible playbook — cluster build
 src/delete_pcluster.yml   # Ansible playbook — cluster teardown
 templates/                # Jinja2 templates (config, vars file, install scripts, IAM)
 performance/              # HPC benchmark suite and performance analysis scripts
-tests/                    # pytest suite (182 tests as of last run)
+tests/                    # pytest suite (190 tests as of last run)
 ```
 
 ## Constraints
@@ -31,7 +31,8 @@ tests/                    # pytest suite (182 tests as of last run)
 - `templates/vars_file.j2` is rendered with `StrictUndefined` — `| default()` filters do not rescue from UndefinedError; every variable must be defined upstream.
 - The `.venv/` virtual environment is excluded from git.  All dependencies are in `requirements.txt`.
 - **Python 3.12 only.** `aws-parallelcluster` ≤ 3.15.1 does not support Python 3.13 or 3.14 — Python 3.14 breaks `asyncio.get_event_loop()` at runtime and the upstream fix (PR #7149) is unmerged. The repo is pinned via `.python-version`. Always create `.venv` with `python3.12 -m venv .venv`.
-- **IAM policy is split into three managed policies.** `ParallelClusterInstancePolicy.json_src` no longer exists. The policy is stored as `-A.json_src` (22 statements, ≤5,660 bytes minified), `-B.json_src` (17 statements, ≤5,691 bytes minified), and `-C.json_src` (1 statement, ≤561 bytes minified) to stay under IAM's 6,144-byte managed policy limit. All three policies are named `<ec2_iam_policy>-A`, `-B`, and `-C` and must be deleted together on teardown. The `S3Objects` resource covers `arn:aws:s3:::parallelcluster-*/*` (not just `parallelcluster-<CLUSTER_NAME>-*/*`) so the head node can fetch configs from PCluster's internal system bucket.
+- **IAM policy is split into three managed policies.** `ParallelClusterInstancePolicy.json_src` no longer exists. The policy is stored as `-A.json_src` (22 statements, ≤6,015 bytes minified), `-B.json_src` (18 statements, ≤6,064 bytes minified), and `-C.json_src` (1 statement, ≤561 bytes minified) to stay under IAM's 6,144-byte managed policy limit. All three policies are named `<ec2_iam_policy>-A`, `-B`, and `-C` and must be deleted together on teardown. The `S3Objects` resource covers `arn:aws:s3:::parallelcluster-*/*` (not just `parallelcluster-<CLUSTER_NAME>-*/*`) so the head node can fetch configs from PCluster's internal system bucket.
+- **`IAMListGlobal` in Policy-B is intentional.** The `iam:ListGroups`, `iam:ListRoles`, and `iam:ListUsers` actions (Sid `IAMListGlobal`) are scoped to the account but use wildcard resource paths. The PCluster head node daemon calls `iam:ListRoles` at startup to locate its own role; narrowing the resource prefix to `parallelcluster-*` breaks the daemon. This is a known PCluster requirement — do not remove or restrict it further.
 - **Defaults file auto-detection.** If `<cluster_name>_defaults.yml` exists in the repo root but `--use_defaults` was not passed, `make_pcluster.py` prints a `*** WARNING ***` and suggests the flag. This is intentional — never suppress it.
 - **Venv guard uses `sys.prefix`.** The three entry-point scripts check `os.path.realpath(sys.prefix)` against the repo's `.venv/` directory, not `sys.executable`. Homebrew Python symlinks resolve outside `.venv/`, so `sys.executable` was incorrect.
 - **Shebangs use `#!/usr/bin/env python`.** Not `python3` — `env python3` on macOS resolves to the system Python, bypassing the active venv.
@@ -45,7 +46,7 @@ tests/                    # pytest suite (182 tests as of last run)
 ## Test suite
 
 ```
-python -m pytest tests/ -q          # must stay green (182 tests)
+python -m pytest tests/ -q          # must stay green (250 tests)
 make lint                           # ansible-lint — exits 0, passes production profile
 make shellcheck                     # shellcheck on performance/scripts/*.sh
 ```

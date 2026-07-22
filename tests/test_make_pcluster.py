@@ -168,6 +168,14 @@ class TestValidateClusterOwner:
         with pytest.raises(SystemExit):
             _validate_cluster_owner("a" * 64)
 
+    def test_trailing_hyphen_raises(self):
+        with pytest.raises(SystemExit):
+            _validate_cluster_owner("rodney-")
+
+    def test_consecutive_hyphens_raises(self):
+        with pytest.raises(SystemExit):
+            _validate_cluster_owner("rod--ney")
+
 
 # ---------------------------------------------------------------------------
 # _resolve_ec2_user
@@ -256,6 +264,13 @@ class TestLoadOrCreateSerial:
 
         with open(serial_file_path) as fh:
             assert fh.read().strip() == original
+
+    def test_empty_serial_file_raises_systemexit(self, tmp_path):
+        serial_file_path = tmp_path / "mycluster.serial"
+        serial_file_path.write_text("")
+        with pytest.raises(SystemExit) as exc_info:
+            _load_or_create_serial(str(tmp_path), "mycluster")
+        assert "empty or corrupted" in str(exc_info.value)
 
 
 # ---------------------------------------------------------------------------
