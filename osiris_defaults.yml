@@ -14,7 +14,7 @@ project_id: smoketester
 turbot_account: disabled            # https://turbot.com/
 
 # --- Instances ---
-base_os: ubuntu2404arm              # ubuntu2204 | ubuntu2404 | ubuntu2204arm | ubuntu2404arm | rhel8 | rhel9
+base_os: ubuntu2404arm              # ubuntu2204 | ubuntu2404 | ubuntu2204arm | ubuntu2404arm | rhel8 | rhel8arm | rhel9 | rhel9arm
 headnode_instance_type: c8g.xlarge
 compute_instance_type: c8g.2xlarge
 headnode_root_volume_size: 250        # GB

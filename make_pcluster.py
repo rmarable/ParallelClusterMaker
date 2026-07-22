@@ -134,7 +134,7 @@ def main():
     )
     parser.add_argument(
         "--base_os",
-        choices=["ubuntu2204", "ubuntu2404", "ubuntu2204arm", "ubuntu2404arm", "rhel8", "rhel9"],
+        choices=["ubuntu2204", "ubuntu2404", "ubuntu2204arm", "ubuntu2404arm", "rhel8", "rhel8arm", "rhel9", "rhel9arm"],
         help="cluster base operating system (default = ubuntu2404)",
         required=False,
         default=None,

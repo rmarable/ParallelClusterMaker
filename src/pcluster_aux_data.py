@@ -167,7 +167,7 @@ def base_os_instance_check(base_os, instance_type, debug_mode):
     )
     # trn1 (Trainium 1, Intel Xeon) and inf2 (Inferentia 2, Intel Sapphire Rapids)
     # are x86_64 despite the accelerator branding — do not include in ARM families.
-    _arm_oses = ("alinux2arm", "ubuntu2204arm", "ubuntu2404arm")
+    _arm_oses = ("alinux2arm", "ubuntu2204arm", "ubuntu2404arm", "rhel8arm", "rhel9arm")
     _x86_oses = ("alinux2", "ubuntu2204", "ubuntu2404", "rhel8", "rhel9", "centos7")
     _is_arm = any(instance_type.startswith(f) for f in _arm_families)
     if _is_arm and base_os in _x86_oses:
@@ -781,4 +781,4 @@ ec2_instances_efa = [
     "inf2.48xlarge",
 ]
 
-base_os_efa = ["ubuntu2204", "ubuntu2404", "ubuntu2204arm", "ubuntu2404arm", "rhel8", "rhel9"]
+base_os_efa = ["ubuntu2204", "ubuntu2404", "ubuntu2204arm", "ubuntu2404arm", "rhel8", "rhel8arm", "rhel9", "rhel9arm"]

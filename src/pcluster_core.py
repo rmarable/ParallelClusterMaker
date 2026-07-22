@@ -74,7 +74,7 @@ def _resolve_ec2_user(base_os):
     else:
         sys.exit(
             f"ERROR: '{base_os}' is not a supported base OS. "
-            f"Choose from: ubuntu2204, ubuntu2404, ubuntu2204arm, ubuntu2404arm, rhel8, rhel9"
+            f"Choose from: ubuntu2204, ubuntu2404, ubuntu2204arm, ubuntu2404arm, rhel8, rhel8arm, rhel9, rhel9arm"
         )
     return ec2_user, "/home/" + ec2_user
 
