@@ -136,6 +136,21 @@
           no_log: true
           when: ec2_private_key.changed
 
+        - name: Store SSH private key in Secrets Manager
+          command: >
+            aws secretsmanager create-secret
+            --name "{{ ssh_secret_name }}"
+            --description "SSH private key for ParallelCluster {{ cluster_name }}"
+            --secret-string "file://{{ ssh_keypair }}"
+            --tags Key=parallelcluster:cluster-name,Value={{ cluster_name }}
+            --region "{{ region }}"
+          no_log: true
+          when: ec2_private_key.changed
+          register: _secret_create
+          failed_when: >
+            _secret_create.rc != 0 and
+            'ResourceExistsException' not in (_secret_create.stderr | default(''))
+
       rescue:
         - name: Clean up S3 bucket on early-setup failure
           amazon.aws.s3_bucket:
@@ -150,6 +165,14 @@
             name: "{{ ec2_keypair }}"
             region: "{{ region }}"
             state: absent
+          ignore_errors: true
+
+        - name: Clean up SSH Secrets Manager secret on early-setup failure
+          command: >
+            aws secretsmanager delete-secret
+            --secret-id "{{ ssh_secret_name }}"
+            --force-delete-without-recovery
+            --region "{{ region }}"
           ignore_errors: true
 
         - name: Clean up external NFS security group on early-setup failure
@@ -415,6 +438,12 @@
       template:
         src: "{{ cluster_template_dir }}/access_cluster.j2"
         dest: "{{ stage_dir }}/access_cluster.{{ cluster_name }}.sh"
+        mode: "0755"
+
+    - name: Template the SSH key retrieval script to stage_dir
+      template:
+        src: "{{ cluster_template_dir }}/retrieve_ssh_key.j2"
+        dest: "{{ stage_dir }}/retrieve_ssh_key.{{ cluster_name }}.sh"
         mode: "0755"
 
     - name: Wait for SSH port to be reachable on the head node

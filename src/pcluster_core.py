@@ -576,6 +576,46 @@ def _setup_fsx_hydration_iam(
     print(f"  Attached to: {ec2_iam_role}")
 
 
+def _ssh_secret_name(cluster_name, cluster_serial_number):
+    """Return the Secrets Manager secret name for a cluster's SSH private key."""
+    return f"parallelcluster/{cluster_name}/{cluster_serial_number}/ssh-private-key"
+
+
+def _read_turbot_from_vars_file(vars_file_path):
+    """Return turbot_account from a rendered vars file, or 'disabled' if absent/unreadable."""
+    try:
+        with open(vars_file_path) as _f:
+            data = yaml.safe_load(_f) or {}
+        value = data.get("turbot_account", "disabled")
+        return value if value else "disabled"
+    except Exception:
+        return "disabled"
+
+
+def _get_efa_instance_types(ec2client, fallback):
+    """Return the set of EFA-capable instance type strings from EC2.
+
+    Pages through describe_instance_types with the efa-supported filter.
+    Falls back to the provided static list on any error so the caller always
+    gets a usable set even in restricted or offline environments.
+    """
+    try:
+        types = []
+        paginator = ec2client.get_paginator("describe_instance_types")
+        for page in paginator.paginate(
+            Filters=[{"Name": "network-info.efa-supported", "Values": ["true"]}]
+        ):
+            for it in page["InstanceTypes"]:
+                types.append(it["InstanceType"])
+        if types:
+            return set(types)
+        # Empty result is unexpected; fall through to fallback.
+        print("  Note: describe_instance_types returned no EFA instances; using built-in list.")
+    except Exception as _e:
+        print(f"  Note: could not query EFA instance types ({_e}); using built-in list.")
+    return set(fallback)
+
+
 def _validate_network(
     ec2client,
     az,

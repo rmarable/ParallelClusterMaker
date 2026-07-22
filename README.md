@@ -95,6 +95,8 @@ To view all available options for `make_pcluster.py`:
 - Resource tagging by owner, department, project, and operating level
 - Optional HPC performance test suite: `Axb_random` smoke tests + standards-based STREAM, OSU MPI, IOR, and HPCG benchmarks
 - Optional Grafana/Prometheus monitoring stack via `aws-parallelcluster-monitoring` (Grafana dashboards, Prometheus, Slurm exporter, CloudWatch exporter)
+- SSH private key stored in AWS Secrets Manager at cluster creation; recoverable via `retrieve_ssh_key.<cluster>.sh`; rotatable without cluster rebuild via `rotate_cluster_key.py`
+- Dynamic EFA instance type lookup — `describe-instance-types` at launch time with static fallback; no manual allowlist maintenance
 
 ---
 
@@ -395,6 +397,48 @@ aws ssm get-parameter \
 
 ---
 
+## SSH Key Management
+
+At cluster creation, the SSH private key is stored in AWS Secrets Manager at:
+
+```
+parallelcluster/<cluster_name>/<cluster_serial_number>/ssh-private-key
+```
+
+The secret is deleted automatically when `kill_pcluster.py` runs.
+
+**If your local `.pem` file is lost**, retrieve it from Secrets Manager:
+
+```bash
+active_clusters/<cluster_name>/retrieve_ssh_key.<cluster_name>.sh
+# optionally specify a destination:
+active_clusters/<cluster_name>/retrieve_ssh_key.<cluster_name>.sh --out /tmp/mykey.pem
+```
+
+`access_cluster.py` calls the retrieve script automatically if the local key is missing.
+
+**Rotating the SSH keypair** without rebuilding the cluster:
+
+```bash
+./rotate_cluster_key.py -N <cluster_name> -A <az>
+# preview what will change:
+./rotate_cluster_key.py -N <cluster_name> -A <az> --dry_run
+```
+
+Rotation: generates a new ED25519 keypair locally, appends the public key to `~/.ssh/authorized_keys` on the head node, imports it as the new EC2 keypair, updates the Secrets Manager secret, overwrites the local `.pem`, and deletes the old EC2 keypair.
+
+**IAM requirements** (operator's user/role — not the cluster head node role):
+
+| Permission | Purpose |
+|---|---|
+| `secretsmanager:CreateSecret` | Store key at cluster creation |
+| `secretsmanager:PutSecretValue` | Update key on rotation |
+| `secretsmanager:GetSecretValue` | Retrieve key via retrieve script |
+| `secretsmanager:DeleteSecret` | Remove key on teardown |
+| `ec2:ImportKeyPair` | Register new public key during rotation |
+
+---
+
 ## Tagging
 
 All resources are tagged automatically:
@@ -491,14 +535,6 @@ These are all tracked in `.ansible-lint` under `warn_list` with the same rationa
 Potential future improvements, roughly ordered by impact:
 
 ### Architecture
-
-- **Secrets manager integration** — SSH private keys are currently written to disk under `active_clusters/` with `0600` permissions.  Storing them in AWS Secrets Manager or SSM Parameter Store would eliminate the on-disk PEM file entirely and enable key rotation without cluster rebuild.
-
-- **Ansible Molecule test suite** — Molecule would allow the `create_pcluster.yml` and `delete_pcluster.yml` playbooks to be tested against a mock EC2 environment (e.g. Localstack or a dedicated sandbox account) without requiring a full cluster build.
-
-- **Dynamic EFA instance lookup** — `ec2_instances_efa` in `src/pcluster_aux_data.py` is a manually maintained allowlist that lags AWS releases.  Replacing it with a live `describe-instance-types --filters Name=network-info.efa-supported,Values=true` call at launch time would keep it perpetually accurate without maintenance.
-
-- **`kill_pcluster.py` profile inheritance from vars file** — when `make_pcluster.py` is run with `--turbot_account`, the Turbot profile is recorded in the cluster's vars file.  `kill_pcluster.py` could auto-detect and apply it from there instead of requiring the operator to re-specify `--turbot_account` at teardown.
 
 - **Terraform / CDK parity** — the toolkit is Ansible-native.  A Terraform or AWS CDK implementation of the same lifecycle (`make` / `kill` / `access`) would fit more naturally into infrastructure-as-code pipelines that already use those tools.
 

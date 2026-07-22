@@ -16,6 +16,7 @@ from pcluster_core import (
     _read_serial_first_line,
     _extract_rebuild_command,
     _resolve_access_script_path,
+    _read_turbot_from_vars_file,
 )
 
 # ---------------------------------------------------------------------------
@@ -138,3 +139,33 @@ class TestResolveAccessScriptPath:
         root = str(tmp_path / "active_clusters")
         path = _resolve_access_script_path(root, "hpc-cluster-2a")
         assert path.endswith("access_cluster.hpc-cluster-2a.sh")
+
+
+# ---------------------------------------------------------------------------
+# _read_turbot_from_vars_file
+# ---------------------------------------------------------------------------
+
+
+class TestReadTurbotFromVarsFile:
+    def test_returns_turbot_account_when_present(self, tmp_path):
+        f = tmp_path / "mycluster.yml"
+        f.write_text("cluster_name: mycluster\nturbot_account: acme-prod\n")
+        assert _read_turbot_from_vars_file(str(f)) == "acme-prod"
+
+    def test_returns_disabled_when_key_is_disabled(self, tmp_path):
+        f = tmp_path / "mycluster.yml"
+        f.write_text("cluster_name: mycluster\nturbot_account: disabled\n")
+        assert _read_turbot_from_vars_file(str(f)) == "disabled"
+
+    def test_returns_disabled_when_key_absent(self, tmp_path):
+        f = tmp_path / "mycluster.yml"
+        f.write_text("cluster_name: mycluster\n")
+        assert _read_turbot_from_vars_file(str(f)) == "disabled"
+
+    def test_returns_disabled_for_missing_file(self, tmp_path):
+        assert _read_turbot_from_vars_file(str(tmp_path / "nonexistent.yml")) == "disabled"
+
+    def test_returns_disabled_for_empty_file(self, tmp_path):
+        f = tmp_path / "mycluster.yml"
+        f.write_text("")
+        assert _read_turbot_from_vars_file(str(f)) == "disabled"

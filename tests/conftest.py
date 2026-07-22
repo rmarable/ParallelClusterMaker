@@ -21,6 +21,8 @@ def cluster_params():
         # Identity
         "cluster_name": "test-cluster",
         "cluster_owner": "testuser",
+        "turbot_account": "disabled",
+        "ssh_secret_name": "parallelcluster/test-cluster/test-cluster-00001220260720/ssh-private-key",
         "cluster_owner_email": "testuser@example.com",
         "cluster_owner_department": "hpc",
         "cluster_serial_number": "test-cluster-00001220260720",
