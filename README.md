@@ -108,8 +108,8 @@ All optional parameters have hardcoded defaults and can also be persisted in a Y
 |---|---|
 | `base_os` | ubuntu2404 |
 | `scheduler` | slurm |
-| `headnode_instance_type` | c5.xlarge |
-| `compute_instance_type` | c5.2xlarge |
+| `headnode_instance_type` | c8g.xlarge |
+| `compute_instance_type` | c8g.2xlarge |
 | `cluster_type` | spot |
 | `initial_queue_size` | 2 |
 | `max_queue_size` | 10 |

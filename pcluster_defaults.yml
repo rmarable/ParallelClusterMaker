@@ -14,9 +14,9 @@ project_id: UNDEFINED
 turbot_account: disabled            # https://turbot.com/
 
 # --- Instances ---
-base_os: ubuntu2404                 # ubuntu2204 | ubuntu2404 | ubuntu2204arm | ubuntu2404arm | rhel8 | rhel9
-headnode_instance_type: c5.xlarge
-compute_instance_type: c5.2xlarge
+base_os: ubuntu2404arm              # ubuntu2204 | ubuntu2404 | ubuntu2204arm | ubuntu2404arm | rhel8 | rhel9
+headnode_instance_type: c8g.xlarge
+compute_instance_type: c8g.2xlarge
 headnode_root_volume_size: 250        # GB
 headnode_root_volume_type: gp3        # gp2 | gp3 | io1 | io2 | st1
 headnode_root_volume_iops: 3000

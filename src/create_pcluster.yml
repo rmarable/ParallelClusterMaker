@@ -334,30 +334,36 @@
 
     - name: Print cluster launch summary
       debug:
-        msg:
-          - ""
-          - "=================================================================="
-          - "                   Cluster Launch Summary"
-          - "=================================================================="
-          - ""
-          - "Cluster Name:      {{ cluster_name }}"
-          - "SerialDateStamp:   {{ cluster_serial_datestamp }}"
-          - "Launch Timestamp:  {{ start_stack_creation_timer.stdout }}"
-          - "Operating System:  {{ base_os }}"
-          - "HPC Scheduler:     {{ scheduler }}"
-          - "Head Node:         {{ headnode_instance_type }}"
-          - "Compute Nodes:     {{ compute_instance_type }}  (min: {{ initial_queue_size }}  max: {{ max_queue_size }})"
-          - "VPC Name:          {{ vpc_name }}"
-          - "Availability Zone: {{ az }}"
-          - "EFA Enabled:       {{ enable_efa | bool | upper }}"
-          - "EFS Enabled:       {{ enable_efs | bool | upper }}"
-          - "FSxL Enabled:      {{ enable_fsx | bool | upper }}"
-          - "External NFS:      {{ enable_external_nfs | bool | upper }}"
-          - "Monitoring:        {{ enable_monitoring | bool | upper }}"
-          - ""
-          - "Stack build takes 30-45 minutes. Monitor progress with:"
-          - "  pcluster describe-cluster --cluster-name {{ cluster_name }} --region {{ region }}"
-          - ""
+        msg: >-
+          {{
+            [
+              "",
+              "==================================================================",
+              "                   Cluster Launch Summary",
+              "==================================================================",
+              "",
+              "Cluster Name:      " + cluster_name,
+              "SerialDateStamp:   " + cluster_serial_datestamp,
+              "Launch Timestamp:  " + start_stack_creation_timer.stdout,
+              "Operating System:  " + base_os,
+              "HPC Scheduler:     " + scheduler,
+              "Head Node:         " + headnode_instance_type,
+              "Compute Nodes:     " + compute_instance_type + "  (min: " + initial_queue_size | string + "  max: " + max_queue_size | string + ")",
+              "VPC Name:          " + vpc_name,
+              "Availability Zone: " + az,
+            ]
+            + (["EFA Enabled:       TRUE"] if enable_efa | bool else [])
+            + (["EFS Enabled:       TRUE"] if enable_efs | bool else [])
+            + (["FSxL Enabled:      TRUE"] if enable_fsx | bool else [])
+            + (["External NFS:      TRUE"] if enable_external_nfs | bool else [])
+            + (["Monitoring:        TRUE"] if enable_monitoring | bool else [])
+            + [
+              "",
+              "Stack build takes 30-45 minutes. Monitor progress with:",
+              "  pcluster describe-cluster --cluster-name " + cluster_name + " --region " + region,
+              "",
+            ]
+          }}
 
     - name: Launch the new ParallelCluster v3 stack
       command: >
@@ -480,7 +486,7 @@
       block:
         - name: Copy the performance source tree to its final destination on the head node
           shell: >
-            scp -o BatchMode=yes -o ConnectTimeout=30 -o StrictHostKeyChecking=accept-new -i "{{ ssh_keypair }}"
+            scp -r -o BatchMode=yes -o ConnectTimeout=30 -o StrictHostKeyChecking=accept-new -i "{{ ssh_keypair }}"
             "{{ performance_stage_dir }}"/*
             "{{ ec2_user }}@{{ head_node_public_ip }}:{{ headnode_performance_dir_dest }}"
     - name: Initialize HPC performance test directory list

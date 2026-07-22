@@ -63,13 +63,21 @@
             --exclude "*.pyc" --exclude "__pycache__/*"
             --region "{{ region }}"
           when: _head_node_ip is defined and _head_node_ip != ''
-      rescue:
-        - name: Warn that performance results sync failed
+          register: _perf_sync
+          failed_when: false
+        - name: Warn if performance results sync failed
           debug:
             msg:
-              - "WARNING: Could not sync performance results to S3."
-              - "Head node may be unreachable or already terminated."
+              - "WARNING: Could not sync performance results to S3 (rc={{ _perf_sync.rc | default(-1) }})."
+              - "Head node may be unreachable, IAM policies may be missing, or S3 bucket may not exist."
               - "Results under {{ ec2_user_home }}/performance/{{ cluster_name }}/ on the head node may be lost."
+              - "Proceeding with cluster deletion."
+          when: _perf_sync is defined and (_perf_sync.rc is not defined or _perf_sync.rc != 0)
+      rescue:
+        - name: Warn that performance results sync failed unexpectedly
+          debug:
+            msg:
+              - "WARNING: Unexpected error during performance results sync."
               - "Proceeding with cluster deletion."
 
     - name: Delete the ParallelCluster v3 stack
