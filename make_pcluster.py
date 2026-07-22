@@ -181,7 +181,7 @@ def main():
     )
     parser.add_argument(
         "--compute_instance_type",
-        help="compute EC2 instance type (default = c5.2xlarge)",
+        help="compute EC2 instance type (default = c8g.2xlarge)",
         required=False,
         default=None,
     )
@@ -417,7 +417,7 @@ def main():
     )
     parser.add_argument(
         "--headnode_instance_type",
-        help="head node EC2 instance type (default = c5.xlarge)",
+        help="head node EC2 instance type (default = c8g.xlarge)",
         required=False,
         default=None,
     )
@@ -571,7 +571,7 @@ def main():
         "cluster_lifetime": "0:24:0",
         "cluster_owner_department": "hpc",
         "cluster_type": "spot",
-        "compute_instance_type": "c5.2xlarge",
+        "compute_instance_type": "c8g.2xlarge",
         "compute_root_volume_size": 250,
         "compute_root_volume_type": "gp3",
         "compute_root_volume_iops": 3000,
@@ -606,7 +606,7 @@ def main():
         "hyperthreading": "true",
         "initial_queue_size": 2,
         "maintain_initial_size": "false",
-        "headnode_instance_type": "c5.xlarge",
+        "headnode_instance_type": "c8g.xlarge",
         "headnode_root_volume_size": 250,
         "headnode_root_volume_type": "gp3",
         "headnode_root_volume_iops": 3000,
@@ -1355,6 +1355,7 @@ def main():
         "compute_subnet_ids": compute_subnet_ids,
         "use_private_compute_subnet": use_private_compute_subnet,
         "base_os": base_os,
+        "pcluster_os": base_os.removesuffix("arm"),
         "cluster_lifetime": cluster_lifetime,
         "cluster_name": cluster_name,
         "cluster_owner": cluster_owner,

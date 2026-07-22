@@ -152,6 +152,7 @@ def base_os_instance_check(base_os, instance_type, debug_mode):
         "a1.",
         "c6g",
         "c7g",
+        "c8g",
         "m6g",
         "m7g",
         "r6g",
@@ -202,8 +203,8 @@ def refer_to_docs_and_quit(error_msg):
 ############################
 
 default_instance_types = {
-    "default_head_node_instance_type": "c5.xlarge",
-    "default_compute_instance_type": "c5.xlarge",
+    "default_head_node_instance_type": "c8g.xlarge",
+    "default_compute_instance_type": "c8g.xlarge",
 }
 
 # General Purpose
@@ -432,6 +433,19 @@ ec2_instances_compute_optimized = [
     "c7g.12xlarge",
     "c7g.16xlarge",
     "c7g.metal",
+    # c8g (Graviton4)
+    "c8g.medium",
+    "c8g.large",
+    "c8g.xlarge",
+    "c8g.2xlarge",
+    "c8g.4xlarge",
+    "c8g.8xlarge",
+    "c8g.12xlarge",
+    "c8g.16xlarge",
+    "c8g.24xlarge",
+    "c8g.48xlarge",
+    "c8g.metal-24xl",
+    "c8g.metal-48xl",
 ]
 
 # Memory Optimized
