@@ -129,11 +129,7 @@ def cluster_params():
         "preinstall_s3_dest": "preinstall.test-cluster.sh",
         "postinstall_s3_dest": "postinstall.test-cluster.sh",
         # Features
-        "enable_hpc_performance_tests": "true",
-        "matrix_sizes": "1000 2000 3000 4000 5000",
-        "perftest_custom_start_number": 10,
-        "perftest_custom_step_size": 10,
-        "perftest_custom_total_tests": 10,
+        "enable_hpc_benchmarks": "true",
         # Spack
         "spack_root": "/fsx/pkg/spack",
         "pkg_dir": "/fsx/pkg",

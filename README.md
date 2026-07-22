@@ -93,7 +93,7 @@ To view all available options for `make_pcluster.py`:
 - SNS notifications on stack create/destroy
 - Turbot environment support
 - Resource tagging by owner, department, project, and operating level
-- Optional HPC performance test suite: `Axb_random` smoke tests + standards-based STREAM, OSU MPI, IOR, and HPCG benchmarks
+- Optional HPC benchmark suite: STREAM, OSU MPI, IOR, and HPCG (`enable_hpc_benchmarks`)
 - Optional Grafana/Prometheus monitoring stack via `aws-parallelcluster-monitoring` (Grafana dashboards, Prometheus, Slurm exporter, CloudWatch exporter)
 - SSH private key stored in AWS Secrets Manager at cluster creation; recoverable via `retrieve_ssh_key.<cluster>.sh`; rotatable without cluster rebuild via `rotate_cluster_key.py`
 - Dynamic EFA instance type lookup — `describe-instance-types` at launch time with static fallback; no manual allowlist maintenance
@@ -178,7 +178,7 @@ EFA-enabled single-node cluster with performance tests:
 ```
 ./make_pcluster.py -A us-east-1a -N rimshot -O rmarable -E rmarable@amazon.com \
     --compute_instance_type=c5n.18xlarge --initial_queue_size=1 \
-    --maintain_initial_size=true --enable_efa=true --enable_hpc_performance_tests=true
+    --maintain_initial_size=true --enable_efa=true --enable_hpc_benchmarks=true
 ```
 
 FSx for Lustre with S3 hydration (7.2 TB, 5 GB chunk size):
@@ -330,35 +330,23 @@ cp ~/sbatch_default_submission_script.sh /fsx/scratch/my_project/
 sbatch /fsx/scratch/my_project/sbatch_default_submission_script.sh
 ```
 
-### HPC Performance Tests
+### HPC Benchmarks
 
-Enable with `--enable_hpc_performance_tests=true`.  Deploys the full performance toolkit to the cluster head node at `~/performance/` and installs Python plotting dependencies (`matplotlib`, `numpy`, `pandas`, `scipy`, `seaborn`) automatically via postinstall.
+Enable with `--enable_hpc_benchmarks=true`.  Deploys the benchmark suite to the cluster head node at `~/performance/` and installs Python plotting dependencies (`matplotlib`, `numpy`, `pandas`, `scipy`, `seaborn`) automatically via postinstall.
 
 **These commands run on the cluster head node** (SSH in via `./access_cluster.py` first):
 
-**Tier 1 — Axb_random smoke test** (no MPI required):
 ```bash
 cd ~/performance
-./hpc-perftest.sh run -n 5 -C pcluster-test-01
-./hpc-perftest.sh plot --type unified
-```
-
-**Tier 2 — standards-based benchmarks** (MPI required, run on head node):
-```bash
-cd ~/performance
+module load openmpi
 ./hpc-benchmark.sh install                              # build STREAM, OSU, IOR, HPCG (~5 min)
 ./hpc-benchmark.sh run --tests stream,osu,ior,hpcg
 ./hpc-benchmark.sh report
 ```
 
-**Slurm job array submission:**
-```bash
-./hpc-perftest.sh submit --start 10 --step 10 --total 10
-```
+**Results are preserved on teardown.** When `kill_pcluster.py` runs, benchmark results are automatically synced from the head node to `s3://<cluster-bucket>/performance-results/<cluster_name>/<cluster_serial_number>/` before the cluster is deleted.  Results from multiple runs of the same cluster name are kept in separate serial-number subdirectories.
 
-**Results are preserved on teardown.** When `kill_pcluster.py` runs, performance results are automatically synced from the head node to `s3://<cluster-bucket>/performance-results/<cluster_name>/<cluster_serial_number>/` before the cluster is deleted.  Results from multiple runs of the same cluster name are kept in separate serial-number subdirectories.
-
-Edit `MATRIX_SIZES.conf` to control the test scope.  See `performance/README-PERFORMANCE.md` for full documentation.
+See `performance/README-PERFORMANCE.md` for full documentation.
 
 ---
 
@@ -484,7 +472,7 @@ ParallelClusterMaker does **not** create or modify VPCs, subnets, gateways, rout
 ```
 make test       # pytest — template rendering + unit tests
 make lint       # ansible-lint on src/create_pcluster.yml and src/delete_pcluster.yml
-make shellcheck # shellcheck on performance/scripts/*.sh (hpc-benchmark.sh and hpc-perftest.sh pass but are not in this target)
+make shellcheck # shellcheck on performance/hpc-benchmark.sh
 ```
 
 CI runs all three automatically on every push and pull request.

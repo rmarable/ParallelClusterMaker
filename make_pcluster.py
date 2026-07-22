@@ -318,7 +318,7 @@ def main():
         default=None,
     )
     parser.add_argument(
-        "--enable_hpc_performance_tests",
+        "--enable_hpc_benchmarks",
         choices=["true", "false"],
         help="deploy HPC performance test suite (default = false)",
         required=False,
@@ -452,33 +452,6 @@ def main():
     parser.add_argument(
         "--max_queue_size",
         help="maximum compute node count (default = 10)",
-        required=False,
-        type=int,
-        default=None,
-    )
-    parser.add_argument(
-        "--matrix_sizes",
-        help='space-separated Axb_random matrix dimensions (default = "1000 2000 3000 4000 5000")',
-        required=False,
-        default=None,
-    )
-    parser.add_argument(
-        "--perftest_custom_start_number",
-        help="first custom perf job count (default = 10)",
-        required=False,
-        type=int,
-        default=None,
-    )
-    parser.add_argument(
-        "--perftest_custom_step_size",
-        help="custom perf job step size (default = 10)",
-        required=False,
-        type=int,
-        default=None,
-    )
-    parser.add_argument(
-        "--perftest_custom_total_tests",
-        help="number of custom perf tests (default = 5)",
         required=False,
         type=int,
         default=None,
@@ -619,7 +592,7 @@ def main():
         "enable_external_nfs": "false",
         "enable_fsx": "false",
         "enable_fsx_hydration": "false",
-        "enable_hpc_performance_tests": "false",
+        "enable_hpc_benchmarks": "false",
         "enable_monitoring": "false",
         "monitoring_version": "v2.6",
         "monitoring_version_checksum": "sha256:REPLACE_WITH_ACTUAL_SHA256",
@@ -639,10 +612,6 @@ def main():
         "headnode_root_volume_iops": 3000,
         "headnode_root_volume_throughput": 125,
         "max_queue_size": 10,
-        "matrix_sizes": "1000 2000 3000 4000 5000",
-        "perftest_custom_start_number": 10,
-        "perftest_custom_step_size": 10,
-        "perftest_custom_total_tests": 5,
         "placement_group": "NONE",
         "pre_install_script": "scripts/pre-deployment.sh",
         "post_install_script": "scripts/post-deployment.sh",
@@ -712,7 +681,7 @@ def main():
     enable_external_nfs = _resolve_bool("enable_external_nfs")
     enable_fsx = _resolve_bool("enable_fsx")
     enable_fsx_hydration = _resolve_bool("enable_fsx_hydration")
-    enable_hpc_performance_tests = _resolve_bool("enable_hpc_performance_tests")
+    enable_hpc_benchmarks = _resolve_bool("enable_hpc_benchmarks")
     enable_monitoring = _resolve_bool("enable_monitoring")
     monitoring_version = _resolve("monitoring_version")
     if not re.fullmatch(r"v[0-9]+\.[0-9]+(\.[0-9]+)?", monitoring_version):
@@ -738,10 +707,6 @@ def main():
     headnode_root_volume_iops = _resolve("headnode_root_volume_iops", int)
     headnode_root_volume_throughput = _resolve("headnode_root_volume_throughput", int)
     max_queue_size = _resolve("max_queue_size", int)
-    matrix_sizes = _resolve("matrix_sizes")
-    perftest_custom_start_number = _resolve("perftest_custom_start_number", int)
-    perftest_custom_step_size = _resolve("perftest_custom_step_size", int)
-    perftest_custom_total_tests = _resolve("perftest_custom_total_tests", int)
     placement_group = _resolve("placement_group")
     pre_install_script = _resolve("pre_install_script")
     post_install_script = _resolve("post_install_script")
@@ -1424,7 +1389,7 @@ def main():
         "enable_external_nfs": _b(enable_external_nfs),
         "enable_fsx": _b(enable_fsx),
         "enable_fsx_hydration": _b(enable_fsx_hydration),
-        "enable_hpc_performance_tests": _b(enable_hpc_performance_tests),
+        "enable_hpc_benchmarks": _b(enable_hpc_benchmarks),
         "enable_monitoring": _b(enable_monitoring),
         "monitoring_version": monitoring_version,
         "monitoring_version_checksum": monitoring_version_checksum,
@@ -1446,10 +1411,6 @@ def main():
         "headnode_root_volume_type": headnode_root_volume_type,
         "headnode_root_volume_iops": headnode_root_volume_iops,
         "headnode_root_volume_throughput": headnode_root_volume_throughput,
-        "matrix_sizes": matrix_sizes,
-        "perftest_custom_start_number": perftest_custom_start_number,
-        "perftest_custom_step_size": perftest_custom_step_size,
-        "perftest_custom_total_tests": perftest_custom_total_tests,
         "placement_group": placement_group,
         "pre_install_script": pre_install_script,
         "post_install_script": post_install_script,
@@ -1540,11 +1501,7 @@ def main():
                 print("fsx_s3_export_path = " + fsx_s3_export_path)
                 print("fsx_s3_import_bucket = " + fsx_s3_import_bucket)
                 print("fsx_s3_import_path = " + fsx_s3_import_path)
-        print(f"enable_hpc_performance_tests = {enable_hpc_performance_tests}")
-        if enable_hpc_performance_tests:
-            print("perftest_custom_start_number = " + str(perftest_custom_start_number))
-            print("perftest_custom_step_size = " + str(perftest_custom_step_size))
-            print("perftest_custom_total_tests = " + str(perftest_custom_total_tests))
+        print(f"enable_hpc_benchmarks = {enable_hpc_benchmarks}")
         print(f"hyperthreading = {hyperthreading}")
         print("headnode_instance_type = " + headnode_instance_type)
         print("headnode_root_volume_size = " + str(headnode_root_volume_size) + " GB")
@@ -1628,9 +1585,8 @@ def main():
     _extra_vars_dict = {
         "cluster_name": cluster_name,
         "cluster_serial_number": cluster_serial_number,
-        "enable_hpc_performance_tests": _b(enable_hpc_performance_tests),
+        "enable_hpc_benchmarks": _b(enable_hpc_benchmarks),
         "enable_monitoring": _b(enable_monitoring),
-        "matrix_sizes": matrix_sizes,
         "enable_efa": _b(enable_efa),
         "enable_efs": _b(enable_efs),
         "enable_fsx": _b(enable_fsx),

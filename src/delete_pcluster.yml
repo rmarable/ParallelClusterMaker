@@ -36,7 +36,7 @@
           - ""
 
     - name: Sync performance results to S3 before cluster deletion
-      when: enable_hpc_performance_tests == "true"
+      when: enable_hpc_benchmarks == "true"
       block:
         - name: Get head node IP for performance results sync
           command: >

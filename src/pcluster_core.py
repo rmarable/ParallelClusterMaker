@@ -645,7 +645,14 @@ def _validate_network(
         )
     vpc_ids = [v["VpcId"] for v in vpc_info["Vpcs"]]
     if not vpc_ids:
-        refer_to_docs_and_quit(f'"{vpc_name}" is an undefined VPC!')
+        import sys
+        print("")
+        print("*** ERROR: VPC not found ***")
+        print(f'  No VPC named "{vpc_name}" exists in this account and region.')
+        print(f"  Fix: set vpc_name in your defaults file to the Name tag of")
+        print(f"       an existing VPC, then re-run.")
+        print("")
+        sys.exit(1)
     vpc_id = vpc_ids[0]
     vpc_cidr = vpc_info["Vpcs"][0].get("CidrBlock", "10.0.0.0/8")
 
