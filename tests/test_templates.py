@@ -9,9 +9,10 @@ Filters used only by Ansible at playbook runtime (bool, upper, lookup) are
 stubbed out so plain Python Jinja2 can render them without crashing.
 """
 
+import json
 import os
 import pytest
-from jinja2 import Environment, FileSystemLoader, StrictUndefined, Undefined
+from jinja2 import Environment, FileSystemLoader, StrictUndefined
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -77,3 +78,69 @@ def test_template_renders_custom_ami_variant(tdir, fname, cluster_params_custom_
     assert (
         len(rendered) > 0
     ), f"{fname} rendered to an empty string (custom_ami variant)"
+
+
+@pytest.mark.parametrize("tdir,fname", _collect_templates())
+def test_template_renders_monitoring_enabled_variant(
+    tdir, fname, cluster_params_monitoring_enabled
+):
+    """Templates must render when enable_monitoring=true.
+
+    Exercises the Sequence CustomActions block in config.pcluster.j2, the
+    compute queue monitoring hook, and the vars_file monitoring section.
+    """
+    env = _make_env(tdir)
+    template = env.get_template(fname)
+    rendered = template.render(**cluster_params_monitoring_enabled)
+    assert isinstance(rendered, str)
+    assert (
+        len(rendered) > 0
+    ), f"{fname} rendered to an empty string (monitoring_enabled variant)"
+
+
+# ---------------------------------------------------------------------------
+# IAM managed policy JSON validity and size tests
+# ---------------------------------------------------------------------------
+
+_IAM_POLICY_LIMIT = 6144
+_PLACEHOLDER_SUB = {
+    "<AWS_REGION>": "us-east-1",
+    "<AWS_ACCOUNT_ID>": "123456789012",
+    "<CLUSTER_NAME>": "test-cluster",
+}
+_POLICY_FILES = [
+    "ParallelClusterInstancePolicy-A.json_src",
+    "ParallelClusterInstancePolicy-B.json_src",
+    "ParallelClusterInstancePolicy-C.json_src",
+    "ParallelClusterInstancePolicy-M.json_src",
+]
+
+
+def _load_policy(fname):
+    path = os.path.join(REPO_ROOT, "templates", fname)
+    with open(path) as f:
+        raw = f.read()
+    for placeholder, value in _PLACEHOLDER_SUB.items():
+        raw = raw.replace(placeholder, value)
+    return json.loads(raw)
+
+
+@pytest.mark.parametrize("fname", _POLICY_FILES)
+def test_iam_policy_valid_json(fname):
+    """Each IAM policy template must parse as valid JSON after placeholder substitution."""
+    data = _load_policy(fname)
+    assert isinstance(data, dict), f"{fname}: top-level must be a JSON object"
+    assert "Statement" in data, f"{fname}: missing Statement key"
+    assert isinstance(data["Statement"], list), f"{fname}: Statement must be a list"
+    assert len(data["Statement"]) > 0, f"{fname}: Statement list is empty"
+
+
+@pytest.mark.parametrize("fname", _POLICY_FILES)
+def test_iam_policy_under_size_limit(fname):
+    """Each IAM managed policy must stay under the 6,144-byte IAM limit when minified."""
+    data = _load_policy(fname)
+    minified = json.dumps(data, separators=(",", ":"))
+    size = len(minified.encode("utf-8"))
+    assert (
+        size <= _IAM_POLICY_LIMIT
+    ), f"{fname}: minified size {size} bytes exceeds IAM limit of {_IAM_POLICY_LIMIT}"

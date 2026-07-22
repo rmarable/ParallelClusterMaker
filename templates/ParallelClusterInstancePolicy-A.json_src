@@ -45,6 +45,7 @@
             "Action": [
                 "ec2:AttachVolume",
                 "ec2:AuthorizeSecurityGroupEgress",
+                "ec2:RevokeSecurityGroupEgress",
                 "ec2:AuthorizeSecurityGroupIngress",
                 "ec2:RevokeSecurityGroupIngress",
                 "ec2:DeleteNetworkInterface",
@@ -94,8 +95,6 @@
         {
             "Sid": "EC2Extras",
             "Action": [
-                "ec2:CreateKeyPair",
-                "ec2:DeleteKeyPair",
                 "ec2:DescribeAccountAttributes",
                 "ec2:DescribeInstanceCreditSpecifications",
                 "ec2:DescribeSpotPriceHistory",
@@ -200,7 +199,8 @@
                 "dynamodb:PutItem",
                 "dynamodb:Query",
                 "dynamodb:GetItem",
-                "dynamodb:DeleteItem"
+                "dynamodb:DeleteItem",
+                "dynamodb:TagResource"
             ],
             "Effect": "Allow",
             "Resource": [
@@ -213,8 +213,7 @@
             "Sid": "DynamoDBGlobal",
             "Action": [
                 "dynamodb:ListTables",
-                "dynamodb:ListTagsOfResource",
-                "dynamodb:TagResource"
+                "dynamodb:ListTagsOfResource"
             ],
             "Effect": "Allow",
             "Resource": "*"

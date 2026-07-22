@@ -94,6 +94,7 @@ To view all available options for `make_pcluster.py`:
 - Turbot environment support
 - Resource tagging by owner, department, project, and operating level
 - Optional HPC performance test suite: `Axb_random` smoke tests + standards-based STREAM, OSU MPI, IOR, and HPCG benchmarks
+- Optional Grafana/Prometheus monitoring stack via `aws-parallelcluster-monitoring` (Grafana dashboards, Prometheus, Slurm exporter, CloudWatch exporter)
 
 ---
 
@@ -188,7 +189,7 @@ FSx for Lustre with S3 hydration (7.2 TB, 5 GB chunk size):
 
 Large GPU cluster with 3.6 PB Lustre, tagged for production:
 ```
-./make_pcluster.py -A us-east-1 -O rmarable -E rodney.marable@gmail.com -N gilgamesh \
+./make_pcluster.py -A us-east-1a -O rmarable -E rodney.marable@gmail.com -N gilgamesh \
     --base_os=ubuntu2204 --headnode_instance_type=r4.xlarge \
     --compute_instance_type=p3.16xlarge --enable_fsx=true --fsx_size=3600000 \
     --enable_fsx_hydration=true --fsx_s3_import_bucket=GilgameshSrcBucket \
@@ -359,6 +360,41 @@ Edit `MATRIX_SIZES.conf` to control the test scope.  See `performance/README-PER
 
 ---
 
+### Monitoring
+
+Enable with `--enable_monitoring=true` (default: `false`).  Deploys the [aws-parallelcluster-monitoring](https://github.com/aws-samples/aws-parallelcluster-monitoring) Grafana/Prometheus stack to the cluster head node.  Compute nodes run a lightweight monitoring agent (node_exporter, Slurm pushgateway).
+
+**What gets deployed:**
+
+- Grafana on the head node (port 443, self-signed TLS)
+- Prometheus, pushgateway, cloudwatch-exporter, node_exporter (Docker Compose)
+- prometheus-slurm-exporter (systemd, scrapes Slurm metrics every 30 s)
+- DCGM exporter on GPU instances
+
+**Access Grafana:**
+```
+https://<head-node-public-ip>/grafana/
+```
+Accept the self-signed certificate warning (or bring your own cert / use a custom AMI).
+
+**Retrieve the Grafana admin password:**
+```bash
+aws ssm get-parameter \
+  --name "/parallelcluster/<cluster_name>/grafana/admin-password" \
+  --with-decryption \
+  --query "Parameter.Value" --output text
+```
+
+**IAM:** Monitoring permissions are granted via a separate managed policy `<ec2_iam_policy>-M` (7 statements, ~1,400 bytes).  It is created and attached during `make_pcluster.py` and deleted during `kill_pcluster.py`.
+
+**Supply chain:** The `aws-parallelcluster-monitoring` tarball is downloaded from GitHub at cluster-build time and staged in the cluster's S3 bucket.  Head nodes pull from S3, not GitHub, so private-subnet nodes and air-gapped environments work without internet access.
+
+**Version:** Pin a specific release tag with `--monitoring_version=v2.6` (default).
+
+**Custom AMI recommendation:** The Docker Compose installation adds several minutes to head node boot time.  For production clusters or fast iteration, build a custom AMI with the monitoring stack pre-installed.
+
+---
+
 ## Tagging
 
 All resources are tagged automatically:
@@ -441,8 +477,6 @@ Potential future improvements, roughly ordered by impact:
 - **`kill_pcluster.py` profile inheritance from vars file** — when `make_pcluster.py` is run with `--turbot_account`, the Turbot profile is recorded in the cluster's vars file.  `kill_pcluster.py` could auto-detect and apply it from there instead of requiring the operator to re-specify `--turbot_account` at teardown.
 
 - **Terraform / CDK parity** — the toolkit is Ansible-native.  A Terraform or AWS CDK implementation of the same lifecycle (`make` / `kill` / `access`) would fit more naturally into infrastructure-as-code pipelines that already use those tools.
-
-- **Monitoring integration** — integrate the AWS ParallelCluster monitoring solution to provide Grafana dashboards and CloudWatch metrics for cluster health and job telemetry: https://github.com/aws-samples/aws-parallelcluster-monitoring
 
 ---
 

@@ -81,7 +81,6 @@
             "Action": [
                 "iam:ListGroups",
                 "iam:ListRoles",
-                "iam:ListRolePolicies",
                 "iam:ListUsers"
             ],
             "Effect": "Allow",
@@ -170,14 +169,12 @@
                 "iam:PutRolePolicy",
                 "iam:GetRolePolicy",
                 "iam:DeleteRolePolicy",
-                "iam:ListRolePolicies",
-                "iam:SimulatePrincipalPolicy"
+                "iam:ListRolePolicies"
             ],
             "Effect": "Allow",
             "Resource": [
                 "arn:aws:iam::<AWS_ACCOUNT_ID>:role/parallelcluster-<CLUSTER_NAME>-*",
                 "arn:aws:iam::<AWS_ACCOUNT_ID>:role/parallelcluster-<CLUSTER_OWNER>-*",
-                "arn:aws:iam::<AWS_ACCOUNT_ID>:role/pclustermaker-role-<CLUSTER_SERIAL_NUMBER>",
                 "arn:aws:iam::<AWS_ACCOUNT_ID>:role/kill-pcluster-role-<CLUSTER_SERIAL_NUMBER>"
             ]
         },

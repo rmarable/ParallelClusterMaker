@@ -135,6 +135,17 @@ preinstall_s3_dest: "{{ pre_install_script.split('/')[-1] }}"
 postinstall_src: "{{ cluster_rootdir }}/{{ post_install_script }}"
 postinstall_s3_dest: "{{ post_install_script.split('/')[-1] }}"
 
+# Monitoring configuration
+
+enable_monitoring: "{{ enable_monitoring }}"
+{% if enable_monitoring == 'true' %}
+monitoring_version: "{{ monitoring_version }}"
+monitoring_version_checksum: "{{ monitoring_version_checksum }}"
+monitoring_s3_dest: "{{ monitoring_s3_dest }}"
+monitoring_wrapper_src: "{{ cluster_template_dir }}/monitoring-post-install-wrapper.j2"
+monitoring_wrapper_dest: "{{ cluster_data_dir }}/monitoring-post-install-wrapper.{{ cluster_name }}.sh"
+{% endif %}
+
 # HPC performance test configuration
 
 enable_hpc_performance_tests: "{{ enable_hpc_performance_tests }}"

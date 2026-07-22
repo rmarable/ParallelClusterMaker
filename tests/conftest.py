@@ -135,6 +135,13 @@ def cluster_params():
         # Spack
         "spack_root": "/fsx/pkg/spack",
         "pkg_dir": "/fsx/pkg",
+        # Monitoring
+        "enable_monitoring": "false",
+        "monitoring_version": "v2.6",
+        "monitoring_version_checksum": "sha256:REPLACE_WITH_ACTUAL_SHA256",
+        "monitoring_s3_dest": "monitoring-post-install-wrapper.test-cluster.sh",
+        "monitoring_wrapper_src": "/home/testuser/ParallelClusterMaker/templates/monitoring-post-install-wrapper.j2",
+        "monitoring_wrapper_dest": "/home/testuser/ParallelClusterMaker/active_clusters/test-cluster/monitoring-post-install-wrapper.test-cluster.sh",
         # Performance paths
         "performance_rootdir": "/home/testuser/ParallelClusterMaker/performance",
         "performance_stage_dir": "/tmp/_ParallelClusterMaker_stage/test-cluster-00001220260720/performance/slurm",
@@ -165,5 +172,18 @@ def cluster_params_custom_ami(cluster_params):
         "custom_ami": "ami-0abc1234567890def",
         "placement_group": "test-cluster-pg",
         "use_private_compute_subnet": "true",
+    }
+    return {**cluster_params, **overrides}
+
+
+@pytest.fixture
+def cluster_params_monitoring_enabled(cluster_params):
+    """cluster_params variant with enable_monitoring=true.
+
+    Exercises the Sequence CustomActions block in config.pcluster.j2,
+    the compute queue monitoring hook, and the vars_file monitoring section.
+    """
+    overrides = {
+        "enable_monitoring": "true",
     }
     return {**cluster_params, **overrides}

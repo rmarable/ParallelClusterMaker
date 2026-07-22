@@ -87,6 +87,13 @@ perftest_custom_start_number: 10
 perftest_custom_step_size: 10
 perftest_custom_total_tests: 5
 
+# --- Monitoring (aws-parallelcluster-monitoring Grafana/Prometheus stack) ---
+enable_monitoring: "false"
+monitoring_version: "v2.6"  # pin to a specific release tag from aws-samples/aws-parallelcluster-monitoring
+# SHA-256 of the release tarball for supply-chain integrity.
+# Obtain with: curl -sL https://github.com/aws-samples/aws-parallelcluster-monitoring/archive/refs/tags/v2.6.tar.gz | sha256sum
+monitoring_version_checksum: "sha256:REPLACE_WITH_ACTUAL_SHA256"
+
 # --- kill_pcluster.py ---
 delete_efs: "true"
 delete_fsx: "true"

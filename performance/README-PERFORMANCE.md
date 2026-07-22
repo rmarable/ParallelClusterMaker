@@ -9,8 +9,8 @@ cluster head node by `create_pcluster.yml` when `enable_hpc_performance_tests=tr
 
 When `enable_hpc_performance_tests=true`, `create_pcluster.yml`:
 
-1. Stages and SCP-deploys the performance tree to `~/performance/` on the head node
-2. Uploads the source tree to `s3://<cluster-bucket>/performance/` so rebuilt head nodes can self-repair via postinstall
+1. Stages cluster-specific scripts (rendered Jinja2 templates, MATRIX_SIZES.conf) to a local `stage_dir/` tree, then SCP-deploys to `~/performance/<cluster_name>/<cluster_owner>/slurm/` on the head node
+2. Uploads the full performance source tree to `s3://<cluster-bucket>/performance/` so postinstall can self-repair on head node rebuild (S3 → `~/performance/` via `aws s3 sync`)
 3. Postinstall installs `matplotlib numpy pandas scipy seaborn` via `pip3` on every head node bootstrap
 
 On teardown, `delete_pcluster.yml` syncs results from `~/performance/<cluster_name>/` to `s3://<cluster-bucket>/performance-results/<cluster_name>/<cluster_serial_number>/` before destroying the cluster.  Each serial number gets its own subdirectory so rebuilds of the same cluster name accumulate rather than overwrite.
