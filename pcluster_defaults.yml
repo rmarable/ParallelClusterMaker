@@ -92,7 +92,7 @@ enable_monitoring: "false"
 monitoring_version: "v2.6"  # pin to a specific release tag from aws-samples/aws-parallelcluster-monitoring
 # SHA-256 of the release tarball for supply-chain integrity.
 # Obtain with: curl -sL https://github.com/aws-samples/aws-parallelcluster-monitoring/archive/refs/tags/v2.6.tar.gz | sha256sum
-monitoring_version_checksum: "sha256:REPLACE_WITH_ACTUAL_SHA256"
+monitoring_version_checksum: "sha256:4afa56a59228c1d8f4e405d07a2291f31853842128e6f7a0e52e1e2c1e262d55"
 
 # --- kill_pcluster.py ---
 delete_efs: "true"

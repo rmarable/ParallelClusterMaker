@@ -60,6 +60,7 @@ from pcluster_core import (
     _resolve_bool as _pcore_resolve_bool,
     _render_policy,
     _setup_iam,
+    _cleanup_iam_on_failure,
     _delete_managed_policies,
     _setup_fsx_hydration_iam,
     _validate_network,
@@ -735,7 +736,6 @@ def main():
     headnode_root_volume_iops = _resolve("headnode_root_volume_iops", int)
     headnode_root_volume_throughput = _resolve("headnode_root_volume_throughput", int)
     max_queue_size = _resolve("max_queue_size", int)
-    _validate_queue_sizes(initial_queue_size, max_queue_size, scaledown_idletime)
     matrix_sizes = _resolve("matrix_sizes")
     perftest_custom_start_number = _resolve("perftest_custom_start_number", int)
     perftest_custom_step_size = _resolve("perftest_custom_step_size", int)
@@ -758,6 +758,7 @@ def main():
     region = az[:-1]  # bootstrap only; overwritten below from API
     pcluster_create_timeout = _resolve("pcluster_create_timeout", int)
     scaledown_idletime = _resolve("scaledown_idletime", int)
+    _validate_queue_sizes(initial_queue_size, max_queue_size, scaledown_idletime)
     scheduler = _resolve("scheduler")
     turbot_account = _resolve("turbot_account")
     vpc_name = _resolve("vpc_name")
@@ -1312,12 +1313,8 @@ def main():
             f"  Exception during IAM role/policy setup: {_iam_e}"
         )
         print("Cleaning up any partially-created IAM resources:")
-        _delete_managed_policies(
-            iam,
-            ec2_iam_role,
-            ec2_iam_policy,
-            aws_account_id,
-            suppress=True,
+        _cleanup_iam_on_failure(
+            iam, ec2_iam_role, ec2_iam_policy, aws_account_id,
             enable_monitoring=enable_monitoring,
         )
         sys.exit(1)

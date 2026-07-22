@@ -327,7 +327,7 @@ def _validate_ebs_shared_dir(path):
         sys.exit(
             f'*** ERROR ***\n"{path}" does not appear to be a Unix file path! Try "/{path}" instead.'
         )
-    if not re.fullmatch(r"/[^\x00-\x1f\"\'\\;|&`$<>]*", path):
+    if not re.fullmatch(r"/[^\x00-\x1f\"\'\\;|&`$<>]+", path):
         sys.exit(
             f"*** ERROR ***\nebs_shared_dir contains invalid characters: {path!r}\n"
             f"  Only printable characters excluding quotes, backslash, and shell metacharacters are permitted."
@@ -384,7 +384,7 @@ def _render_policy(
     minified = json.dumps(json.loads(raw), separators=(",", ":"))
     size = len(minified.encode("utf-8"))
     if size > _IAM_POLICY_LIMIT:
-        sys.exit(
+        raise ValueError(
             f"*** ERROR ***\n"
             f"  Rendered IAM policy from {os.path.basename(src_path)} is {size} bytes "
             f"(limit: {_IAM_POLICY_LIMIT}).\n"
@@ -412,8 +412,10 @@ def _setup_iam(
     enable_monitoring=False,
 ):
     """Create ec2_iam_role and attach managed policies (-A/-B/-C, optionally -M). Idempotent."""
+    _role_existed = False
     try:
         iam.get_role(RoleName=ec2_iam_role)
+        _role_existed = True
         attached = {
             p["PolicyName"]
             for p in iam.list_attached_role_policies(RoleName=ec2_iam_role)[
@@ -428,7 +430,11 @@ def _setup_iam(
             return
         print(
             f"  Found ec2_iam_role {ec2_iam_role} but missing policies "
-            f"{expected - attached} — recreating policies."
+            f"{expected - attached} — cleaning up and recreating policies."
+        )
+        _delete_managed_policies(
+            iam, ec2_iam_role, ec2_iam_policy, aws_account_id,
+            suppress=True, enable_monitoring=enable_monitoring,
         )
     except _ClientError as e:
         if e.response["Error"]["Code"] != "NoSuchEntity":
@@ -458,11 +464,12 @@ def _setup_iam(
     ) as fh:
         fh.write(policy_a)
 
-    iam.create_role(
-        RoleName=ec2_iam_role,
-        AssumeRolePolicyDocument='{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Service":["ec2.amazonaws.com"]},"Action":"sts:AssumeRole"}]}',
-        Description="ParallelClusterMaker EC2 IAM instance role",
-    )
+    if not _role_existed:
+        iam.create_role(
+            RoleName=ec2_iam_role,
+            AssumeRolePolicyDocument='{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Service":["ec2.amazonaws.com"]},"Action":"sts:AssumeRole"}]}',
+            Description="ParallelClusterMaker EC2 IAM instance role",
+        )
     resp_a = iam.create_policy(PolicyName=ec2_iam_policy + "-A", PolicyDocument=policy_a)
     resp_b = iam.create_policy(PolicyName=ec2_iam_policy + "-B", PolicyDocument=policy_b)
     resp_c = iam.create_policy(PolicyName=ec2_iam_policy + "-C", PolicyDocument=policy_c)
@@ -480,6 +487,16 @@ def _setup_iam(
         resp_m = iam.create_policy(PolicyName=ec2_iam_policy + "-M", PolicyDocument=policy_m)
         iam.attach_role_policy(RoleName=ec2_iam_role, PolicyArn=resp_m["Policy"]["Arn"])
         print(f"  Created ec2_iam_policy-M: {ec2_iam_policy}-M")
+
+
+def _cleanup_iam_on_failure(iam, ec2_iam_role, ec2_iam_policy, aws_account_id, enable_monitoring=False):
+    """Delete all managed policies and the IAM role after a failed _setup_iam call."""
+    _delete_managed_policies(
+        iam, ec2_iam_role, ec2_iam_policy, aws_account_id,
+        suppress=True, enable_monitoring=enable_monitoring,
+    )
+    with contextlib.suppress(Exception):
+        iam.delete_role(RoleName=ec2_iam_role)
 
 
 def _delete_managed_policies(
@@ -507,6 +524,9 @@ def _delete_managed_policies(
         else:
             try:
                 iam.detach_role_policy(RoleName=ec2_iam_role, PolicyArn=arn)
+            except Exception as _e:
+                print(f"  Warning: could not detach policy {name}: {_e}")
+            try:
                 iam.delete_policy(PolicyArn=arn)
                 print(f"  Deleted managed policy: {name}")
             except Exception as _e:

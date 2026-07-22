@@ -98,15 +98,17 @@ def ctrlC_Abort(
                 suffixes.append("-M")
             for sfx in suffixes:
                 name = ec2_iam_policy + sfx
-                arn = (
-                    f"arn:aws:iam::{aws_account_id}:policy/{name}"
-                    if aws_account_id
-                    else None
-                )
+                if not aws_account_id:
+                    print(f"WARNING: aws_account_id not available — cannot clean up policy {name}")
+                    continue
+                arn = f"arn:aws:iam::{aws_account_id}:policy/{name}"
                 try:
-                    if arn:
-                        iam.detach_role_policy(RoleName=ec2_iam_role, PolicyArn=arn)
-                    iam.delete_policy(PolicyArn=arn or name)
+                    iam.detach_role_policy(RoleName=ec2_iam_role, PolicyArn=arn)
+                except Exception as _e:
+                    if "NoSuchEntity" not in str(_e):
+                        print(f"WARNING: could not detach policy {name}: {_e}")
+                try:
+                    iam.delete_policy(PolicyArn=arn)
                     print(f"Deleted managed policy: {name}")
                 except Exception as _e:
                     if "NoSuchEntity" in str(_e):
