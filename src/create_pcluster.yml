@@ -261,6 +261,12 @@
             encrypt: true
             mode: put
 
+        - name: Template the Grafana SSH tunnel script to stage_dir
+          template:
+            src: "{{ grafana_tunnel_src }}"
+            dest: "{{ grafana_tunnel_dest }}"
+            mode: "0755"
+
     - name: Template the kill_pcluster and cron lifetime scripts to stage_dir
       template:
         src: "{{ item.src }}"
@@ -621,6 +627,10 @@
               "  ./kill_pcluster.py -N " + cluster_name + " -O " + cluster_owner + " -A " + az,
               "",
             ]
+            + (["Grafana dashboard:  https://" + head_node_public_ip + "/grafana/",
+                "                    (Self-signed cert — it is OK to click through browser warnings)",
+                "Grafana password:   aws ssm get-parameter --name /parallelcluster/" + cluster_name + "/grafana/admin-password --with-decryption --query Parameter.Value --output text",
+                ""] if enable_monitoring | bool else [])
           }}
 
     - name: Print cluster build summary

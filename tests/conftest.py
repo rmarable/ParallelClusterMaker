@@ -141,6 +141,8 @@ def cluster_params():
         "monitoring_s3_dest": "monitoring-post-install-wrapper.test-cluster.sh",
         "monitoring_wrapper_src": "/home/testuser/ParallelClusterMaker/templates/monitoring-post-install-wrapper.j2",
         "monitoring_wrapper_dest": "/home/testuser/ParallelClusterMaker/active_clusters/test-cluster/monitoring-post-install-wrapper.test-cluster.sh",
+        "grafana_tunnel_src": "/home/testuser/ParallelClusterMaker/templates/grafana_tunnel.j2",
+        "grafana_tunnel_dest": "/tmp/_ParallelClusterMaker_stage/test-cluster-00001220260720/grafana_tunnel.test-cluster.sh",
         # Performance paths
         "performance_rootdir": "/home/testuser/ParallelClusterMaker/performance",
         "performance_stage_dir": "/tmp/_ParallelClusterMaker_stage/test-cluster-00001220260720/performance/slurm",

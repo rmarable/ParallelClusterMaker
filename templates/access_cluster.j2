@@ -15,6 +15,16 @@ HEAD_NODE_IP="$(aws ec2 describe-instances \
     --output text 2>/dev/null || true)"
 
 if [[ -z "$HEAD_NODE_IP" || "$HEAD_NODE_IP" == "None" ]]; then
+    HEAD_NODE_IP="$(aws ec2 describe-instances \
+        --region "{{ region }}" \
+        --filters "Name=tag:parallelcluster:cluster-name,Values={{ cluster_name }}" \
+                  "Name=tag:parallelcluster:node-type,Values=HeadNode" \
+                  "Name=instance-state-name,Values=running" \
+        --query 'Reservations[0].Instances[0].PrivateIpAddress' \
+        --output text 2>/dev/null || true)"
+fi
+
+if [[ -z "$HEAD_NODE_IP" || "$HEAD_NODE_IP" == "None" ]]; then
     echo "ERROR: Could not resolve head node IP for {{ cluster_name }}. Is the cluster running?"
     exit 1
 fi
