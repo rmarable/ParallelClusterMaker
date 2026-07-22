@@ -22,3 +22,4 @@ performance/csv/
 performance/logs/
 performance/summary/
 CLAUDE-STATE.md
+tests/integration/itest_defaults.yml

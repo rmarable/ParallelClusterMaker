@@ -492,8 +492,8 @@ CI runs all three automatically on every push and pull request.
 ### Integration tests
 
 A live end-to-end smoke test is available at `tests/integration/run_integration_test.sh`.
-It provisions a real cluster (c5.xlarge head node, 2 x c5.xlarge compute, ubuntu2404,
-on-demand), submits a Slurm job, verifies the output, and tears everything down.
+It provisions a real cluster using your own defaults file, submits a Slurm job, verifies
+the output, and tears everything down.
 
 **Integration tests are NOT run by `make test`, `pytest`, or CI.** Invoke them manually:
 
@@ -502,16 +502,23 @@ source .venv/bin/activate
 
 ./tests/integration/run_integration_test.sh \
     --az us-east-1a \
-    --owner yourusername \
-    --email you@example.com \
+    --owner test \
+    --email test@example.com \
+    --defaults /path/to/my-itest_defaults.yml \
     [--profile my-aws-profile] \
     [--keep]
 ```
 
-Prerequisites: AWS credentials with EC2/CloudFormation/IAM/S3 permissions, `jq`
-installed, and the target AZ must have a default VPC with a public subnet.
+`--defaults` is required — the script does not generate a defaults file. A
+known-good minimal template is at `tests/integration/itest_defaults.yml.example`;
+copy it to `tests/integration/itest_defaults.yml`, fill in your `vpc_name` (and
+optionally explicit subnet IDs), and pass it with `--defaults`. The file is
+gitignored so account-specific values are never committed.
 
-Estimated cost: **~$0.50 per run** (~25-40 minutes at us-east-1 on-demand pricing).
+Prerequisites: AWS credentials with EC2/CloudFormation/IAM/S3 permissions, `jq`
+installed, and a defaults file configured for your target account and AZ.
+
+Estimated cost: varies by instance type and region (~25-40 minutes of cluster runtime).
 
 See [`tests/integration/README.md`](tests/integration/README.md) for full documentation.
 

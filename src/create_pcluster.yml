@@ -373,6 +373,8 @@
           - "Launch Timestamp:  {{ start_stack_creation_timer.stdout }}"
           - "Operating System:  {{ base_os }}"
           - "HPC Scheduler:     {{ scheduler }}"
+          - "Head Node:         {{ headnode_instance_type }}"
+          - "Compute Nodes:     {{ compute_instance_type }}  (min: {{ initial_queue_size }}  max: {{ max_queue_size }})"
           - "VPC Name:          {{ vpc_name }}"
           - "Availability Zone: {{ az }}"
           - "EFA Enabled:       {{ enable_efa | bool | upper }}"
