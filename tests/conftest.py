@@ -29,7 +29,6 @@ def cluster_params():
         "project_id": "test-project",
         "prod_level": "dev",
         "DEPLOYMENT_DATE": "2026-07-20",
-        "Deployed_On": "July 20, 2026",
         "ANSIBLE_VERSION": "2.16.0",
         # Paths
         "local_workingdir": "/home/testuser/ParallelClusterMaker",
