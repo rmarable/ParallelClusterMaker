@@ -201,6 +201,14 @@
       ignore_errors: true
       when: enable_monitoring is defined and enable_monitoring == "true"
 
+    - name: Delete SSH private key from Secrets Manager
+      command: >
+        aws secretsmanager delete-secret
+        --secret-id "{{ ssh_secret_name }}"
+        --force-delete-without-recovery
+        --region "{{ region }}"
+      ignore_errors: true
+
     - name: Detach and delete managed IAM policies associated with the cluster stack
       amazon.aws.iam_managed_policy:
         policy_name: "{{ item }}"

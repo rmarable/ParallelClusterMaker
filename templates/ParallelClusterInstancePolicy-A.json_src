@@ -19,7 +19,8 @@
                 "ec2:DescribeVpcAttribute",
                 "ec2:DescribeAddresses",
                 "ec2:DescribeNetworkInterfaces",
-                "ec2:DescribeAvailabilityZones"
+                "ec2:DescribeAvailabilityZones",
+                "ec2:DescribeInstanceTypes"
             ],
             "Effect": "Allow",
             "Resource": "*"

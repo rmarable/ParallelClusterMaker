@@ -42,6 +42,7 @@ from pcluster_core import (
     _validate_cluster_name,
     _validate_cluster_owner,
     _load_defaults_file,
+    _read_turbot_from_vars_file,
     _resolve as _pcore_resolve,
     _resolve_bool as _pcore_resolve_bool,
 )
@@ -160,6 +161,17 @@ def main():
     delete_fsx = _resolve("delete_fsx")
     delete_s3_bucketname = _resolve("delete_s3_bucketname")
     turbot_account = _resolve("turbot_account")
+
+    # Auto-detect turbot_account from the cluster vars file when not supplied on
+    # the CLI or in a defaults file.  The vars file is written by make_pcluster.py
+    # and records the profile used at creation time, so teardown uses the same one
+    # without the operator having to remember it.
+    if turbot_account == "disabled":
+        _vars_file_probe = os.path.join(_src_dir, "vars_files", cluster_name + ".yml")
+        _saved_turbot = _read_turbot_from_vars_file(_vars_file_probe)
+        if _saved_turbot != "disabled":
+            turbot_account = _saved_turbot
+            print(f"  Note: turbot_account auto-detected from vars file: {turbot_account}")
 
     # Print a header for cluster variable validation.
 

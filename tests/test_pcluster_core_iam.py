@@ -38,6 +38,8 @@ from pcluster_core import (
     _delete_managed_policies,
     _setup_fsx_hydration_iam,
     _validate_network,
+    _get_efa_instance_types,
+    _ssh_secret_name,
 )
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -625,3 +627,72 @@ class TestValidateNetwork:
         )
         assert hn_subnet == "subnet-1"
         assert "WARNING" in capsys.readouterr().out
+
+
+# ---------------------------------------------------------------------------
+# _get_efa_instance_types
+# ---------------------------------------------------------------------------
+
+_STATIC_FALLBACK = ["c5n.18xlarge", "p4d.24xlarge"]
+
+
+class _FakeEC2ForEfa:
+    def __init__(self, pages=None, raises=None):
+        self._pages = pages if pages is not None else []
+        self._raises = raises
+
+    def get_paginator(self, operation):
+        assert operation == "describe_instance_types"
+        return self
+
+    def paginate(self, **kwargs):
+        if self._raises:
+            raise self._raises
+        return self._pages
+
+
+class TestGetEfaInstanceTypes:
+    def test_returns_live_types_when_api_succeeds(self):
+        pages = [
+            {"InstanceTypes": [{"InstanceType": "p5.48xlarge"}, {"InstanceType": "hpc7a.48xlarge"}]},
+            {"InstanceTypes": [{"InstanceType": "c6gn.16xlarge"}]},
+        ]
+        ec2 = _FakeEC2ForEfa(pages=pages)
+        result = _get_efa_instance_types(ec2, _STATIC_FALLBACK)
+        assert result == {"p5.48xlarge", "hpc7a.48xlarge", "c6gn.16xlarge"}
+
+    def test_falls_back_on_api_error(self, capsys):
+        ec2 = _FakeEC2ForEfa(raises=Exception("AccessDenied"))
+        result = _get_efa_instance_types(ec2, _STATIC_FALLBACK)
+        assert result == set(_STATIC_FALLBACK)
+        assert "built-in list" in capsys.readouterr().out
+
+    def test_falls_back_on_empty_response(self, capsys):
+        ec2 = _FakeEC2ForEfa(pages=[{"InstanceTypes": []}])
+        result = _get_efa_instance_types(ec2, _STATIC_FALLBACK)
+        assert result == set(_STATIC_FALLBACK)
+        assert "built-in list" in capsys.readouterr().out
+
+    def test_live_result_does_not_contain_fallback_types(self):
+        pages = [{"InstanceTypes": [{"InstanceType": "p5.48xlarge"}]}]
+        ec2 = _FakeEC2ForEfa(pages=pages)
+        result = _get_efa_instance_types(ec2, _STATIC_FALLBACK)
+        assert "c5n.18xlarge" not in result
+
+
+# ---------------------------------------------------------------------------
+# _ssh_secret_name
+# ---------------------------------------------------------------------------
+
+
+class TestSshSecretName:
+    def test_returns_expected_path(self):
+        result = _ssh_secret_name("mycluster", "mycluster-00305910072026")
+        assert result == "parallelcluster/mycluster/mycluster-00305910072026/ssh-private-key"
+
+    def test_cluster_name_and_serial_are_in_path(self):
+        result = _ssh_secret_name("hpc-cluster", "hpc-cluster-99999911072026")
+        assert "hpc-cluster" in result
+        assert "hpc-cluster-99999911072026" in result
+        assert result.startswith("parallelcluster/")
+        assert result.endswith("/ssh-private-key")

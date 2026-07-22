@@ -64,6 +64,8 @@ from pcluster_core import (
     _delete_managed_policies,
     _setup_fsx_hydration_iam,
     _validate_network,
+    _get_efa_instance_types,
+    _ssh_secret_name,
 )
 from pcluster_aux_data import base_os_efa
 from pcluster_aux_data import base_os_instance_check
@@ -1026,15 +1028,13 @@ def main():
     # EC2 placement group is defined in the ParallelCluster configuration.
 
     if enable_efa:
-        if compute_instance_type not in ec2_instances_efa:
+        _efa_types = _get_efa_instance_types(ec2client, ec2_instances_efa)
+        if compute_instance_type not in _efa_types:
             print(
                 f"*** WARNING ***\n"
-                f"  {compute_instance_type} is not in the known EFA-capable instance list."
+                f"  {compute_instance_type} is not in the EFA-capable instance list."
             )
-            print("  If this is a recently-released instance type, EFA may still work.")
-            print(
-                "  Verify EFA support at: https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/efa.html"
-            )
+            print("  Verify EFA support at: https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/efa.html")
         if base_os not in base_os_efa:
             error_msg = base_os + " does not support Elastic Fabric Adapter (EFA)!"
             refer_to_docs_and_quit(error_msg)
@@ -1377,6 +1377,7 @@ def main():
             tempfile.gettempdir(), "_ParallelClusterMaker_stage", cluster_serial_number
         ),
         "ec2_keypair": cluster_serial_number + "_" + region,
+        "ssh_secret_name": _ssh_secret_name(cluster_name, cluster_serial_number),
         "ebs_root": ebs_shared_dir,
         "efs_root": "/efs",
         "fsx_root": "/fsx",
@@ -1464,6 +1465,7 @@ def main():
         "subnet_id": subnet_id,
         "vpc_cidr": vpc_cidr,
         "vpc_id": vpc_id,
+        "turbot_account": turbot_account,
         "vpc_name": vpc_name,
         "Deployed_On": Deployed_On,
         "ANSIBLE_VERSION": ANSIBLE_VERSION,
@@ -1797,6 +1799,12 @@ def main():
         print(
             f"    ssh -i active_clusters/{cluster_name}/{cluster_serial_number}_{region}.pem {ec2_user}@{_head_ip}"
         )
+        print("")
+        print("  SSH key (Secrets Manager):")
+        _secret = _ssh_secret_name(cluster_name, cluster_serial_number)
+        print(f"    Secret: {_secret}")
+        print(f"    Retrieve: active_clusters/{cluster_name}/retrieve_ssh_key.{cluster_name}.sh")
+        print(f"    Rotate:   ./rotate_cluster_key.py -N {cluster_name}")
     if enable_monitoring and _head_ip:
         print("")
         print("  Grafana monitoring dashboard:")
