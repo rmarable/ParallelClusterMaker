@@ -24,7 +24,6 @@ if os.path.realpath(sys.prefix) != os.path.realpath(os.path.join(_repo_root, ".v
 
 import argparse
 import boto3
-import botocore
 import contextlib
 from botocore.exceptions import (
     BotoCoreError,

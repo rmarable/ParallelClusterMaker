@@ -36,8 +36,15 @@ HeadNode:
   CustomActions:
     OnNodeStart:
       Script: s3://{{ s3_bucketname }}/{{ s3_script_path }}/{{ preinstall_s3_dest }}
+{% if enable_monitoring == 'true' %}
+    OnNodeConfigured:
+      Sequence:
+        - Script: s3://{{ s3_bucketname }}/{{ s3_script_path }}/{{ postinstall_s3_dest }}
+        - Script: s3://{{ s3_bucketname }}/{{ s3_script_path }}/{{ monitoring_s3_dest }}
+{% else %}
     OnNodeConfigured:
       Script: s3://{{ s3_bucketname }}/{{ s3_script_path }}/{{ postinstall_s3_dest }}
+{% endif %}
 
 Scheduling:
   Scheduler: {{ scheduler }}
@@ -70,6 +77,11 @@ Scheduling:
 {% endif %}
 {% if compute_root_volume_type == 'gp3' %}
             Throughput: {{ compute_root_volume_throughput }}
+{% endif %}
+{% if enable_monitoring == 'true' %}
+      CustomActions:
+        OnNodeConfigured:
+          Script: s3://{{ s3_bucketname }}/{{ s3_script_path }}/{{ monitoring_s3_dest }}
 {% endif %}
       ComputeResources:
         - Name: compute-resource

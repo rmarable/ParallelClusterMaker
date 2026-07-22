@@ -1,0 +1,91 @@
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Sid": "MonitoringEC2Describe",
+            "Action": [
+                "ec2:DescribeInstances",
+                "ec2:DescribeVolumes"
+            ],
+            "Effect": "Allow",
+            "Resource": "*",
+            "Condition": {
+                "StringEquals": {
+                    "aws:RequestedRegion": "<AWS_REGION>"
+                }
+            }
+        },
+        {
+            "Sid": "MonitoringCloudFormation",
+            "Action": [
+                "cloudformation:DescribeStacks",
+                "cloudformation:DescribeStackResources"
+            ],
+            "Effect": "Allow",
+            "Resource": [
+                "arn:aws:cloudformation:<AWS_REGION>:<AWS_ACCOUNT_ID>:stack/parallelcluster-<CLUSTER_NAME>/*",
+                "arn:aws:cloudformation:<AWS_REGION>:<AWS_ACCOUNT_ID>:stack/parallelcluster-<CLUSTER_NAME>-*/*"
+            ]
+        },
+        {
+            "Sid": "MonitoringFSx",
+            "Action": [
+                "fsx:DescribeFileSystems"
+            ],
+            "Effect": "Allow",
+            "Resource": "*",
+            "Condition": {
+                "StringEquals": {
+                    "aws:RequestedRegion": "<AWS_REGION>"
+                }
+            }
+        },
+        {
+            "Sid": "MonitoringPricing",
+            "Action": [
+                "pricing:GetProducts",
+                "pricing:DescribeServices"
+            ],
+            "Effect": "Allow",
+            "Resource": "*"
+        },
+        {
+            "Sid": "MonitoringSSMGrafana",
+            "Action": [
+                "ssm:GetParameter",
+                "ssm:PutParameter",
+                "ssm:AddTagsToResource"
+            ],
+            "Effect": "Allow",
+            "Resource": [
+                "arn:aws:ssm:<AWS_REGION>:<AWS_ACCOUNT_ID>:parameter/parallelcluster/<CLUSTER_NAME>/grafana/*"
+            ]
+        },
+        {
+            "Sid": "MonitoringKMS",
+            "Action": [
+                "kms:Decrypt"
+            ],
+            "Effect": "Allow",
+            "Resource": "*",
+            "Condition": {
+                "StringEquals": {
+                    "kms:ViaService": "ssm.<AWS_REGION>.amazonaws.com"
+                }
+            }
+        },
+        {
+            "Sid": "MonitoringCloudWatchLogs",
+            "Action": [
+                "logs:DescribeLogGroups",
+                "logs:DescribeLogStreams",
+                "logs:FilterLogEvents",
+                "logs:GetLogEvents"
+            ],
+            "Effect": "Allow",
+            "Resource": [
+                "arn:aws:logs:<AWS_REGION>:<AWS_ACCOUNT_ID>:log-group:/aws/parallelcluster/<CLUSTER_NAME>*"
+            ]
+        }
+    ]
+}

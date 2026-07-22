@@ -128,8 +128,6 @@ def print_TextHeader(cluster_name, header, line_length):
 
 
 def base_os_instance_check(base_os, instance_type, debug_mode):
-    import sys
-
     _arm_families = (
         "a1.",
         "c6g",

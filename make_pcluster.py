@@ -24,7 +24,6 @@ if os.path.realpath(sys.prefix) != os.path.realpath(os.path.join(_repo_root, ".v
 
 import argparse
 import boto3
-import botocore
 import contextlib
 import json
 import re
@@ -152,9 +151,17 @@ def _validate_network(
     return vpc_id, headnode_subnet_id, compute_subnet_ids, vpc_cidr
 
 
-def _render_policy(src_path, aws_account_id, region, vpc_id, prod_level,
-                   cluster_serial_number, cluster_name, cluster_owner,
-                   cluster_serial_datestamp):
+def _render_policy(
+    src_path,
+    aws_account_id,
+    region,
+    vpc_id,
+    prod_level,
+    cluster_serial_number,
+    cluster_name,
+    cluster_owner,
+    cluster_serial_datestamp,
+):
     with open(src_path) as fh:
         raw = (
             fh.read()
@@ -184,8 +191,9 @@ def _setup_iam(
     ec2_json_policy_src,
     region="",
     vpc_id="",
+    enable_monitoring=False,
 ):
-    """Create ec2_iam_role and attach two managed policies. Idempotent."""
+    """Create ec2_iam_role and attach managed policies (-A/-B/-C, optionally -M). Idempotent."""
     try:
         iam.get_role(RoleName=ec2_iam_role)
         print(f"  Found ec2_iam_role: {ec2_iam_role}")
@@ -194,9 +202,16 @@ def _setup_iam(
         if e.response["Error"]["Code"] != "NoSuchEntity":
             raise
 
-    render_args = (aws_account_id, region, vpc_id, prod_level,
-                   cluster_serial_number, cluster_name, cluster_owner,
-                   cluster_serial_datestamp)
+    render_args = (
+        aws_account_id,
+        region,
+        vpc_id,
+        prod_level,
+        cluster_serial_number,
+        cluster_name,
+        cluster_owner,
+        cluster_serial_datestamp,
+    )
 
     src_a = ec2_json_policy_src.replace(".json_src", "-A.json_src")
     src_b = ec2_json_policy_src.replace(".json_src", "-B.json_src")
@@ -217,16 +232,13 @@ def _setup_iam(
         Description="ParallelClusterMaker EC2 IAM instance role",
     )
     resp_a = iam.create_policy(
-        PolicyName=ec2_iam_policy + "-A",
-        PolicyDocument=policy_a,
+        PolicyName=ec2_iam_policy + "-A", PolicyDocument=policy_a
     )
     resp_b = iam.create_policy(
-        PolicyName=ec2_iam_policy + "-B",
-        PolicyDocument=policy_b,
+        PolicyName=ec2_iam_policy + "-B", PolicyDocument=policy_b
     )
     resp_c = iam.create_policy(
-        PolicyName=ec2_iam_policy + "-C",
-        PolicyDocument=policy_c,
+        PolicyName=ec2_iam_policy + "-C", PolicyDocument=policy_c
     )
     iam.attach_role_policy(RoleName=ec2_iam_role, PolicyArn=resp_a["Policy"]["Arn"])
     iam.attach_role_policy(RoleName=ec2_iam_role, PolicyArn=resp_b["Policy"]["Arn"])
@@ -236,11 +248,30 @@ def _setup_iam(
     print(f"  Created ec2_iam_policy-B: {ec2_iam_policy}-B")
     print(f"  Created ec2_iam_policy-C: {ec2_iam_policy}-C")
 
+    if enable_monitoring:
+        src_m = ec2_json_policy_src.replace(".json_src", "-M.json_src")
+        policy_m = _render_policy(src_m, *render_args)
+        resp_m = iam.create_policy(
+            PolicyName=ec2_iam_policy + "-M", PolicyDocument=policy_m
+        )
+        iam.attach_role_policy(RoleName=ec2_iam_role, PolicyArn=resp_m["Policy"]["Arn"])
+        print(f"  Created ec2_iam_policy-M: {ec2_iam_policy}-M")
 
-def _delete_managed_policies(iam, ec2_iam_role, ec2_iam_policy, aws_account_id,
-                              suppress=True, fsx_policy=None):
-    """Detach and delete both managed cluster policies (and optional FSx policy)."""
-    for sfx in ("-A", "-B", "-C"):
+
+def _delete_managed_policies(
+    iam,
+    ec2_iam_role,
+    ec2_iam_policy,
+    aws_account_id,
+    suppress=True,
+    fsx_policy=None,
+    enable_monitoring=False,
+):
+    """Detach and delete managed cluster policies (and optional FSx policy)."""
+    suffixes = ["-A", "-B", "-C"]
+    if enable_monitoring:
+        suffixes.append("-M")
+    for sfx in suffixes:
         name = ec2_iam_policy + sfx
         arn = f"arn:aws:iam::{aws_account_id}:policy/{name}"
         if suppress:
@@ -545,6 +576,25 @@ def main():
         default=None,
     )
     parser.add_argument(
+        "--enable_monitoring",
+        choices=["true", "false"],
+        help="deploy Grafana/Prometheus monitoring dashboard (default = false)",
+        required=False,
+        default=None,
+    )
+    parser.add_argument(
+        "--monitoring_version",
+        help="aws-parallelcluster-monitoring release tag (default = v2.6)",
+        required=False,
+        default=None,
+    )
+    parser.add_argument(
+        "--monitoring_version_checksum",
+        help="SHA-256 checksum of the monitoring tarball (format: sha256:<hex>)",
+        required=False,
+        default=None,
+    )
+    parser.add_argument(
         "--external_nfs_server",
         help="external NFS server hostname (default = none)",
         required=False,
@@ -821,6 +871,9 @@ def main():
         "enable_fsx": "false",
         "enable_fsx_hydration": "false",
         "enable_hpc_performance_tests": "false",
+        "enable_monitoring": "false",
+        "monitoring_version": "v2.6",
+        "monitoring_version_checksum": "sha256:REPLACE_WITH_ACTUAL_SHA256",
         "external_nfs_server": "",
         "fsx_chunk_size": 1024,
         "fsx_s3_export_bucket": "UNDEFINED",
@@ -911,6 +964,9 @@ def main():
     enable_fsx = _resolve_bool("enable_fsx")
     enable_fsx_hydration = _resolve_bool("enable_fsx_hydration")
     enable_hpc_performance_tests = _resolve_bool("enable_hpc_performance_tests")
+    enable_monitoring = _resolve_bool("enable_monitoring")
+    monitoring_version = _resolve("monitoring_version")
+    monitoring_version_checksum = _resolve("monitoring_version_checksum")
     external_nfs_server = _resolve("external_nfs_server")
     fsx_chunk_size = _resolve("fsx_chunk_size", int)
     fsx_s3_export_bucket = _resolve("fsx_s3_export_bucket")
@@ -1041,7 +1097,7 @@ def main():
 
     # Check for an existing vars_file before making any API calls.
     if os.path.isfile(vars_file_path):
-        print(f"\n*** WARNING ***")
+        print("\n*** WARNING ***")
         print('An existing vars_file for cluster "' + cluster_name + '" was found!')
         print("")
         print("Please delete this cluster properly and retry the build:")
@@ -1064,7 +1120,7 @@ def main():
     #   - VPC/subnet discovery
     #   - AWS account ID from STS
     #   - Check whether this cluster already exists
-    print(f"  Resolving network, account ID, and cluster state...")
+    print("  Resolving network, account ID, and cluster state...")
     stsclient = boto3.client("sts", region_name=region)
 
     def _get_account_id():
@@ -1521,6 +1577,7 @@ def main():
         ec2_json_policy_src,
         region=region,
         vpc_id=vpc_id,
+        enable_monitoring=enable_monitoring,
     )
 
     try:
@@ -1551,7 +1608,13 @@ def main():
             f"  Exception during IAM/template setup after role creation: {_iam_e}"
         )
         print("Cleaning up IAM role to prevent orphan:")
-        _delete_managed_policies(iam, ec2_iam_role, ec2_iam_policy, aws_account_id)
+        _delete_managed_policies(
+            iam,
+            ec2_iam_role,
+            ec2_iam_policy,
+            aws_account_id,
+            enable_monitoring=enable_monitoring,
+        )
         with contextlib.suppress(Exception):
             iam.delete_role(RoleName=ec2_iam_role)
             print(f"  Deleted IAM role: {ec2_iam_role}")
@@ -1622,6 +1685,10 @@ def main():
         "enable_fsx": _b(enable_fsx),
         "enable_fsx_hydration": _b(enable_fsx_hydration),
         "enable_hpc_performance_tests": _b(enable_hpc_performance_tests),
+        "enable_monitoring": _b(enable_monitoring),
+        "monitoring_version": monitoring_version,
+        "monitoring_version_checksum": monitoring_version_checksum,
+        "monitoring_s3_dest": f"monitoring-post-install-wrapper.{cluster_name}.sh",
         "external_nfs_server": external_nfs_server,
         "fsx_chunk_size": fsx_chunk_size,
         "fsx_hydration_iam_policy": fsx_hydration_iam_policy,
@@ -1781,13 +1848,21 @@ def main():
         ) as _vf:
             _vf.write(_jtemplate.render(**cluster_parameters))
     except Exception as _render_e:
-        print(
-            f"\n*** ERROR ***\n"
-            f"  vars_file render failed: {_render_e}"
-        )
+        print(f"\n*** ERROR ***\n" f"  vars_file render failed: {_render_e}")
         print("Cleaning up IAM role to prevent orphan:")
-        _fsx = fsx_hydration_iam_policy if (enable_fsx_hydration and fsx_hydration_iam_policy != "UNDEFINED") else None
-        _delete_managed_policies(iam, ec2_iam_role, ec2_iam_policy, aws_account_id, fsx_policy=_fsx)
+        _fsx = (
+            fsx_hydration_iam_policy
+            if (enable_fsx_hydration and fsx_hydration_iam_policy != "UNDEFINED")
+            else None
+        )
+        _delete_managed_policies(
+            iam,
+            ec2_iam_role,
+            ec2_iam_policy,
+            aws_account_id,
+            fsx_policy=_fsx,
+            enable_monitoring=enable_monitoring,
+        )
         with contextlib.suppress(Exception):
             iam.delete_role(RoleName=ec2_iam_role)
             print(f"  Deleted IAM role: {ec2_iam_role}")
@@ -1813,6 +1888,7 @@ def main():
         "cluster_name": cluster_name,
         "cluster_serial_number": cluster_serial_number,
         "enable_hpc_performance_tests": _b(enable_hpc_performance_tests),
+        "enable_monitoring": _b(enable_monitoring),
         "matrix_sizes": matrix_sizes,
         "enable_efa": _b(enable_efa),
         "enable_efs": _b(enable_efs),
@@ -1887,14 +1963,21 @@ def main():
         print(f'Cluster "{cluster_name}" may not have been created successfully.')
         print("Cleaning up IAM resources to allow a clean retry:")
         _fsx = fsx_hydration_iam_policy if enable_fsx_hydration else None
-        _delete_managed_policies(iam, ec2_iam_role, ec2_iam_policy, aws_account_id,
-                                 suppress=False, fsx_policy=_fsx)
+        _delete_managed_policies(
+            iam,
+            ec2_iam_role,
+            ec2_iam_policy,
+            aws_account_id,
+            suppress=False,
+            fsx_policy=_fsx,
+            enable_monitoring=enable_monitoring,
+        )
         try:
             iam.delete_role(RoleName=ec2_iam_role)
             print(f"  Deleted IAM role: {ec2_iam_role}")
         except Exception as _e:
             print(f"  Warning: could not delete role {ec2_iam_role}: {_e}")
-        print(f'Run kill_pcluster.py to tear down any partial stack before retrying:')
+        print("Run kill_pcluster.py to tear down any partial stack before retrying:")
         print(f"  ./kill_pcluster.py -N {cluster_name} -O {cluster_owner} -A {az}")
         sys.exit(_build_result.returncode)
 
@@ -1913,24 +1996,39 @@ def main():
     _head_ip = ""
     try:
         import subprocess as _sp
+
         _desc = _sp.run(
-            [".venv/bin/pcluster", "describe-cluster",
-             "--cluster-name", cluster_name, "--region", region],
-            capture_output=True, text=True, cwd=_repo_root,
+            [
+                ".venv/bin/pcluster",
+                "describe-cluster",
+                "--cluster-name",
+                cluster_name,
+                "--region",
+                region,
+            ],
+            capture_output=True,
+            text=True,
+            cwd=_repo_root,
         )
         if _desc.returncode == 0:
             _info = json.loads(_desc.stdout)
-            _head_ip = _info.get("headNode", {}).get("publicIpAddress") or \
-                       _info.get("headNode", {}).get("privateIpAddress", "")
+            _head_ip = _info.get("headNode", {}).get("publicIpAddress") or _info.get(
+                "headNode", {}
+            ).get("privateIpAddress", "")
     except Exception:
         pass
 
     # Print a human-friendly cluster build summary.
     _enabled = [
-        lbl for lbl, flag in [
-            ("EFA", enable_efa), ("EFS", enable_efs),
-            ("FSx/Lustre", enable_fsx), ("External NFS", enable_external_nfs),
-        ] if str(flag).lower() == "true"
+        lbl
+        for lbl, flag in [
+            ("EFA", enable_efa),
+            ("EFS", enable_efs),
+            ("FSx/Lustre", enable_fsx),
+            ("External NFS", enable_external_nfs),
+            ("Monitoring", enable_monitoring),
+        ]
+        if str(flag).lower() == "true"
     ]
     print("")
     print("=" * 66)
@@ -1952,7 +2050,17 @@ def main():
         print("")
         print("  Access the head node:")
         print(f"    ./access_cluster.py -N {cluster_name}")
-        print(f"    ssh -i active_clusters/{cluster_name}/{ec2_keypair}.pem {ec2_user}@{_head_ip}")
+        print(
+            f"    ssh -i active_clusters/{cluster_name}/{cluster_serial_number}_{region}.pem {ec2_user}@{_head_ip}"
+        )
+    if enable_monitoring and _head_ip:
+        print("")
+        print("  Grafana monitoring dashboard:")
+        print(f"    https://{_head_ip}/grafana/")
+        print(f"    Password: aws ssm get-parameter --region {region} \\")
+        print(f"      --name /parallelcluster/{cluster_name}/grafana/admin-password \\")
+        print("      --with-decryption --query Parameter.Value --output text")
+        print("    (Self-signed cert — click through the browser warning)")
     print("")
     print("  Delete this cluster:")
     print(f"    ./kill_pcluster.py -N {cluster_name} -O {cluster_owner} -A {az}")

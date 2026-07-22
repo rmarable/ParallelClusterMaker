@@ -6,13 +6,13 @@
 # Created On:	December 20, 2017
 # Last Changed: July 19, 2026
 # Purpose:	Solve Ax=b when A and b are matrices populated with randomly
-#		generated floats calculated from the normal distribution,
-#		randomly generated standard deviations (sigma) between 0 and
-#		sqrt(10), and an origin (mu) equal to zero. Provide options
-#		for the user to generate a dump of the script's output to the
-#		console, a text file containing A, b, x, and all sigma values,
-#		and/or a CSV file for offline statistical analysis of the time
-#		needed to compute the solution matrix x.
+# 		generated floats calculated from the normal distribution,
+# 		randomly generated standard deviations (sigma) between 0 and
+# 		sqrt(10), and an origin (mu) equal to zero. Provide options
+# 		for the user to generate a dump of the script's output to the
+# 		console, a text file containing A, b, x, and all sigma values,
+# 		and/or a CSV file for offline statistical analysis of the time
+# 		needed to compute the solution matrix x.
 # Usage:	Axb_random.py [-h] --jobid JOBID --matrix-size MATRIX_SIZE
 #                     [--console-dump CONSOLE_DUMP] [--create-csv CREATE_CSV]
 #                     [--create-logs CREATE_LOGS]
@@ -20,6 +20,7 @@
 ###############################################################################
 
 import time
+
 start_time = time.time()
 
 import argparse
@@ -32,26 +33,61 @@ try:
     from scipy.linalg import solve
 except ImportError as _e:
     import sys
-    sys.exit(f"ERROR: Required package not found: {_e}\n  Install with: pip install numpy scipy")
+
+    sys.exit(
+        f"ERROR: Required package not found: {_e}\n  Install with: pip install numpy scipy"
+    )
 
 exec_node = platform.node()
 cwd = os.getcwd()
 
-parser = argparse.ArgumentParser(description='Measures system performance by solving Ax=b using matrices and standard deviations randomly generated from the normal distribution')
-parser.add_argument('--jobid', '-J', help='name of the job', required=True)
-parser.add_argument('--matrix-size', '-M', help='set dimensions of the square matrix A', required=True, type=int)
-parser.add_argument('--console-dump', '-D', help='print A, b, x, and all sigma values to stdout', required=False, default='yes')
-parser.add_argument('--create-csv', '-C', help='create a CSV data file for offline analysis', required=False, default='yes')
-parser.add_argument('--create-logs', '-L', help='print console_dump output to a text file', required=False, default='yes')
-parser.add_argument('--note', '-N', help='short description of the test (no commas)', required=False, default='standalone')
+parser = argparse.ArgumentParser(
+    description="Measures system performance by solving Ax=b using matrices and standard deviations randomly generated from the normal distribution"
+)
+parser.add_argument("--jobid", "-J", help="name of the job", required=True)
+parser.add_argument(
+    "--matrix-size",
+    "-M",
+    help="set dimensions of the square matrix A",
+    required=True,
+    type=int,
+)
+parser.add_argument(
+    "--console-dump",
+    "-D",
+    help="print A, b, x, and all sigma values to stdout",
+    required=False,
+    default="yes",
+)
+parser.add_argument(
+    "--create-csv",
+    "-C",
+    help="create a CSV data file for offline analysis",
+    required=False,
+    default="yes",
+)
+parser.add_argument(
+    "--create-logs",
+    "-L",
+    help="print console_dump output to a text file",
+    required=False,
+    default="yes",
+)
+parser.add_argument(
+    "--note",
+    "-N",
+    help="short description of the test (no commas)",
+    required=False,
+    default="standalone",
+)
 args = parser.parse_args()
 
-cluster_jobid  = args.jobid
-matrix_size    = args.matrix_size
-console_dump   = args.console_dump.lower() == 'yes'
-create_csv     = args.create_csv.lower() == 'yes'
-create_logs    = args.create_logs.lower() == 'yes'
-note           = args.note
+cluster_jobid = args.jobid
+matrix_size = args.matrix_size
+console_dump = args.console_dump.lower() == "yes"
+create_csv = args.create_csv.lower() == "yes"
+create_logs = args.create_logs.lower() == "yes"
+note = args.note
 
 if not console_dump and not create_logs and not create_csv:
     print("")
@@ -63,14 +99,18 @@ if not console_dump and not create_logs and not create_csv:
     print("Please rerun the script so it generates some form of output.")
     sys.exit(1)
 
-np.set_printoptions(threshold=sys.maxsize, suppress=True, precision=4,
-                    formatter={'float': '{: 0.4f}'.format})
-mu      = 0
+np.set_printoptions(
+    threshold=sys.maxsize,
+    suppress=True,
+    precision=4,
+    formatter={"float": "{: 0.4f}".format},
+)
+mu = 0
 sigma_A = np.random.uniform(0, np.sqrt(10), 1)
 sigma_b = np.random.uniform(0, np.sqrt(10), 1)
-A       = np.random.normal(mu, sigma_A, (matrix_size, matrix_size))
-b       = np.random.normal(mu, sigma_b, matrix_size)
-x       = solve(A, b)
+A = np.random.normal(mu, sigma_A, (matrix_size, matrix_size))
+b = np.random.normal(mu, sigma_b, matrix_size)
+x = solve(A, b)
 
 if console_dump:
     print("")
@@ -80,7 +120,7 @@ if console_dump:
     print("")
     print(A)
     print("")
-    print("Sigma value for matrix A =", format(*sigma_A, '.4f'))
+    print("Sigma value for matrix A =", format(*sigma_A, ".4f"))
     print("")
     print("                             --------------")
     print("                             -  Matrix b  -")
@@ -88,7 +128,7 @@ if console_dump:
     print("")
     print(b)
     print("")
-    print("Sigma value for matrix b =", format(*sigma_b, '.4f'))
+    print("Sigma value for matrix b =", format(*sigma_b, ".4f"))
     print("")
     print("                          -----------------------")
     print("                          -  Solution matrix x  -")
@@ -115,10 +155,11 @@ if create_logs:
         lf.write("                          -----------------------\n\n")
         lf.write(str(x) + "\n\n")
 
-end_time     = time.time()
+end_time = time.time()
 elapsed_time = round(end_time - start_time, 4)
 
 SEP = "--------------------------------------------------------------------------"
+
 
 def _print_summary(f=None):
     lines = [
@@ -147,6 +188,7 @@ def _print_summary(f=None):
         f.write(out)
     else:
         print(out)
+
 
 if console_dump or (not create_logs and create_csv):
     _print_summary()

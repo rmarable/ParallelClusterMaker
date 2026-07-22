@@ -175,6 +175,39 @@
         - {src: '{{ cluster_data_dir }}/{{ preinstall_s3_dest }}', dest: '{{ s3_script_path }}/{{ preinstall_s3_dest }}'}
         - {src: '{{ cluster_data_dir }}/{{ postinstall_s3_dest }}', dest: '{{ s3_script_path }}/{{ postinstall_s3_dest }}'}
 
+    - name: Stage and upload monitoring post-install wrapper
+      when: 'enable_monitoring == "true"'
+      block:
+        - name: Download aws-parallelcluster-monitoring tarball from GitHub
+          get_url:
+            url: "https://github.com/aws-samples/aws-parallelcluster-monitoring/archive/refs/tags/{{ monitoring_version }}.tar.gz"
+            dest: "{{ cluster_data_dir }}/aws-parallelcluster-monitoring-{{ monitoring_version }}.tar.gz"
+            checksum: "{{ monitoring_version_checksum }}"
+            mode: "0644"
+        - name: Upload monitoring tarball to S3
+          amazon.aws.s3_object:
+            bucket: "{{ s3_bucketname }}"
+            region: "{{ region }}"
+            src: "{{ cluster_data_dir }}/aws-parallelcluster-monitoring-{{ monitoring_version }}.tar.gz"
+            object: "{{ s3_script_path }}/aws-parallelcluster-monitoring-{{ monitoring_version }}.tar.gz"
+            permission: private
+            encrypt: true
+            mode: put
+        - name: Template the monitoring post-install wrapper script
+          template:
+            src: "{{ monitoring_wrapper_src }}"
+            dest: "{{ monitoring_wrapper_dest }}"
+            mode: "0755"
+        - name: Upload monitoring wrapper script to S3
+          amazon.aws.s3_object:
+            bucket: "{{ s3_bucketname }}"
+            region: "{{ region }}"
+            src: "{{ monitoring_wrapper_dest }}"
+            object: "{{ s3_script_path }}/{{ monitoring_s3_dest }}"
+            permission: private
+            encrypt: true
+            mode: put
+
     - name: Template the kill_pcluster and cron lifetime scripts to stage_dir
       template:
         src: "{{ item.src }}"
@@ -293,6 +326,7 @@
           - "EFS Enabled:       {{ enable_efs | bool | upper }}"
           - "FSxL Enabled:      {{ enable_fsx | bool | upper }}"
           - "External NFS:      {{ enable_external_nfs | bool | upper }}"
+          - "Monitoring:        {{ enable_monitoring | bool | upper }}"
           - ""
           - "Stack build takes 30-45 minutes. Monitor progress with:"
           - "  pcluster describe-cluster --cluster-name {{ cluster_name }} --region {{ region }}"
@@ -422,7 +456,13 @@
           with_items:
             - combine_csv_summary_files_for_plotting
             - perf-sbatch
+          register: _symlink_result
           ignore_errors: true
+        - name: Warn if performance script symlinks failed
+          debug:
+            msg: "WARNING: Failed to create symlink for {{ item.item }}.sh on head node — use {{ item.item }}.{{ cluster_name }}.sh instead."
+          loop: "{{ _symlink_result.results }}"
+          when: item.rc != 0
 
     - name: Build list of active HPC performance test directories
       set_fact:
