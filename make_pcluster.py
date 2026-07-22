@@ -1765,11 +1765,11 @@ def main():
     if enable_monitoring and _head_ip:
         print("")
         print("  Grafana monitoring dashboard:")
-        print(f"    https://{_head_ip}/grafana/")
+        print(f"    Tunnel: active_clusters/{cluster_name}/grafana_tunnel.{cluster_name}.sh")
+        print(f"    URL:    https://localhost:8443/grafana/  (after tunnel is open)")
         print(f"    Password: aws ssm get-parameter --region {region} \\")
         print(f"      --name /parallelcluster/{cluster_name}/grafana/admin-password \\")
         print("      --with-decryption --query Parameter.Value --output text")
-        print("    (Self-signed cert — click through the browser warning)")
     print("")
     print("  Delete this cluster:")
     print(f"    ./kill_pcluster.py -N {cluster_name} -O {cluster_owner} -A {az}")

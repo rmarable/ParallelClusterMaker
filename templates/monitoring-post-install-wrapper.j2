@@ -17,6 +17,13 @@ set +u
 source /etc/profile
 set -u
 
+# Apache2 ships on Ubuntu PCluster head nodes and holds port 80, blocking the
+# monitoring nginx container. Stop and disable it before the Docker stack starts.
+if systemctl is-active --quiet apache2 2>/dev/null; then
+    systemctl stop apache2
+    systemctl disable apache2
+fi
+
 MONITORING_VERSION="{{ monitoring_version }}"
 TARBALL="aws-parallelcluster-monitoring-${MONITORING_VERSION}.tar.gz"
 S3_URI="s3://{{ s3_bucketname }}/{{ s3_script_path }}/${TARBALL}"

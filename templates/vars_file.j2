@@ -147,6 +147,8 @@ monitoring_version_checksum: "{{ monitoring_version_checksum }}"
 monitoring_s3_dest: "{{ monitoring_s3_dest }}"
 monitoring_wrapper_src: "{{ cluster_template_dir }}/monitoring-post-install-wrapper.j2"
 monitoring_wrapper_dest: "{{ cluster_data_dir }}/monitoring-post-install-wrapper.{{ cluster_name }}.sh"
+grafana_tunnel_src: "{{ cluster_template_dir }}/grafana_tunnel.j2"
+grafana_tunnel_dest: "{{ stage_dir }}/grafana_tunnel.{{ cluster_name }}.sh"
 {% endif %}
 
 # HPC performance test configuration

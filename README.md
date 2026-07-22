@@ -362,10 +362,20 @@ Enable with `--enable_monitoring=true` (default: `false`).  Deploys the [aws-par
 - DCGM exporter on GPU instances
 
 **Access Grafana:**
+
+A per-cluster tunnel script is generated into `active_clusters/<cluster_name>/` at build time:
+
+```bash
+# Open the tunnel (runs in background, prints URL and password command)
+./active_clusters/<cluster_name>/grafana_tunnel.<cluster_name>.sh
+
+# Close the tunnel when done
+./active_clusters/<cluster_name>/grafana_tunnel.<cluster_name>.sh 8443 stop
 ```
-https://<head-node-public-ip>/grafana/
-```
-Accept the self-signed certificate warning (or bring your own cert / use a custom AMI).
+
+Then open `https://localhost:8443/grafana/` in your browser and accept the self-signed certificate warning.  Pass a different local port as the first argument if 8443 is in use.
+
+If the head node has a public IP you can also open `https://<head-node-public-ip>/grafana/` directly (requires port 443 open in the security group).
 
 **Retrieve the Grafana admin password:**
 ```bash
@@ -528,6 +538,10 @@ These are all tracked in `.ansible-lint` under `warn_list` with the same rationa
 ## Things to Do
 
 Potential future improvements, roughly ordered by impact:
+
+### Modules / Software
+
+- **EasyBuild easyconfig workflow** — accept a user-supplied list of EasyBuild module specs, download matching easyconfigs from the EasyBuild repository, build and install the modules on the head node, and run a smoke-test job for each one via Slurm.  Useful for validating that a new OS or instance type can successfully build a site's standard software stack.
 
 ### Architecture
 
