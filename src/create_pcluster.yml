@@ -295,35 +295,8 @@
 
     - name: Stage performance test scripts and templates
       when:
-        - enable_hpc_performance_tests == "true"
+        - enable_hpc_benchmarks == "true"
       block:
-        - name: Template cluster-specific performance shell scripts to stage_dir
-          template:
-            src: "{{ performance_template_dir }}/{{ item }}.j2"
-            dest: "{{ performance_stage_dir }}/{{ item }}.{{ cluster_name }}.sh"
-            mode: "0755"
-          with_items:
-            - combine_csv_summary_files_for_plotting
-            - perf-sbatch
-        - name: Generate custom Axb_random sbatch scripts
-          command: >
-            bash "{{ performance_rootdir }}/scripts/generate_sbatch_custom_templates.sh"
-            {{ perftest_custom_start_number }}
-            {{ perftest_custom_step_size }}
-            {{ perftest_custom_total_tests }}
-          args:
-            chdir: "{{ performance_rootdir }}"
-        - name: Template the custom Axb_random sbatch scripts to stage_dir
-          template:
-            src: "{{ item }}"
-            dest: "{{ performance_stage_dir }}/{{ item | basename | regex_replace('\\.j2$', '') }}.{{ cluster_name }}.sh"
-            mode: "0755"
-          with_fileglob:
-            - "{{ performance_template_dir }}/sbatch-*.j2"
-        - name: Generate MATRIX_SIZES.conf in stage_dir from cluster configuration
-          ansible.builtin.copy:
-            content: "MATRIX_SIZES=\"{{ matrix_sizes }}\"\n"
-            dest: "{{ performance_stage_dir }}/MATRIX_SIZES.conf"
         - name: Copy top-level performance dispatcher scripts to stage_dir
           ansible.builtin.copy:
             src: "{{ performance_rootdir }}/{{ item }}"
@@ -331,7 +304,6 @@
             remote_src: true
             mode: "0755"
           with_items:
-            - hpc-perftest.sh
             - hpc-benchmark.sh
         - name: Copy performance scripts/ directory to stage_dir
           ansible.builtin.copy:
@@ -503,7 +475,7 @@
 
     - name: Deploy performance tree to head node
       when:
-        - enable_hpc_performance_tests == "true"
+        - enable_hpc_benchmarks == "true"
         - head_node_public_ip != ''
       block:
         - name: Copy the performance source tree to its final destination on the head node
@@ -511,22 +483,6 @@
             scp -o BatchMode=yes -o ConnectTimeout=30 -o StrictHostKeyChecking=accept-new -i "{{ ssh_keypair }}"
             "{{ performance_stage_dir }}"/*
             "{{ ec2_user }}@{{ head_node_public_ip }}:{{ headnode_performance_dir_dest }}"
-        - name: Symlink the cluster-specific shell scripts on the head node
-          command: >
-            ssh -o BatchMode=yes -o ConnectTimeout=30 -o StrictHostKeyChecking=accept-new -i "{{ ssh_keypair }}" "{{ ec2_user }}@{{ head_node_public_ip }}"
-            bash -c "cd '{{ headnode_performance_dir_dest }}' &&
-            ln -sf '{{ item }}.{{ cluster_name }}.sh' '{{ item }}.sh'"
-          with_items:
-            - combine_csv_summary_files_for_plotting
-            - perf-sbatch
-          register: _symlink_result
-          ignore_errors: true
-        - name: Warn if performance script symlinks failed
-          debug:
-            msg: "WARNING: Failed to create symlink for {{ item.item }}.sh on head node — use {{ item.item }}.{{ cluster_name }}.sh instead."
-          loop: "{{ _symlink_result.results }}"
-          when: item.rc != 0
-
     - name: Initialize HPC performance test directory list
       set_fact:
         _perf_dirs: []
@@ -538,7 +494,7 @@
              ([efs_hpc_performance_dir] if enable_efs == 'true' else []) +
              ([fsx_hpc_performance_dir] if enable_fsx == 'true' else []) }}
       when:
-        - enable_hpc_performance_tests == "true"
+        - enable_hpc_benchmarks == "true"
         - head_node_public_ip != ''
 
     - name: Create HPC performance test directories on the head node
@@ -548,7 +504,7 @@
         sudo mkdir -p "{{ item }}"
       loop: "{{ _perf_dirs }}"
       when:
-        - enable_hpc_performance_tests == "true"
+        - enable_hpc_benchmarks == "true"
         - head_node_public_ip != ''
 
     - name: Set ownership of HPC performance test directories on the head node
@@ -558,7 +514,7 @@
         sudo chown -R "{{ ec2_user }}:{{ ec2_user }}" "{{ item }}"
       loop: "{{ _perf_dirs }}"
       when:
-        - enable_hpc_performance_tests == "true"
+        - enable_hpc_benchmarks == "true"
         - head_node_public_ip != ''
 
     - name: Copy performance source tree to HPC performance test directories on the head node
@@ -568,7 +524,7 @@
         cp -a "{{ headnode_performance_dir_dest }}"/* "{{ item }}"
       loop: "{{ _perf_dirs }}"
       when:
-        - enable_hpc_performance_tests == "true"
+        - enable_hpc_benchmarks == "true"
         - head_node_public_ip != ''
 
     - name: Schedule cluster self-termination (runs locally, kill_pcluster.py lives here)
@@ -594,19 +550,12 @@
 
     - name: Clean up staging directory and generated sbatch templates
       when:
-        - enable_hpc_performance_tests == "true"
+        - enable_hpc_benchmarks == "true"
       block:
         - name: Remove the local staging directory
           file:
             path: "{{ stage_dir }}"
             state: absent
-        - name: Remove custom sbatch performance templates from the src tree
-          file:
-            path: "{{ item }}"
-            state: absent
-          with_fileglob:
-            - "{{ performance_template_dir }}/sbatch-*.j2"
-
     - name: Stop the overall stack timer
       command: date +%Y-%m-%d\ \@\ %H:%M:%S
       changed_when: false

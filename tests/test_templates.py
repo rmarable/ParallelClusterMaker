@@ -18,7 +18,6 @@ REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 TEMPLATE_DIRS = [
     os.path.join(REPO_ROOT, "templates"),
-    os.path.join(REPO_ROOT, "performance", "jinja2"),
 ]
 
 # Templates that are not rendered by Python at all — skip them.

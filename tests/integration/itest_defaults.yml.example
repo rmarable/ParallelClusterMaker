@@ -45,5 +45,5 @@ enable_fsx: "false"
 # --- Optional features (all disabled for smoke test) ---
 enable_efa: "false"
 enable_external_nfs: "false"
-enable_hpc_performance_tests: "false"
+enable_hpc_benchmarks: "false"
 enable_monitoring: "false"

@@ -81,11 +81,7 @@ compute_az: ""            # comma-separated; defaults to --az if empty
 use_private_compute_subnet: "false"
 
 # --- Performance tests ---
-enable_hpc_performance_tests: "false"
-matrix_sizes: "1000 2000 3000 4000 5000"  # space-separated matrix dimensions for Axb_random
-perftest_custom_start_number: 10
-perftest_custom_step_size: 10
-perftest_custom_total_tests: 5
+enable_hpc_benchmarks: "false"
 
 # --- Monitoring (aws-parallelcluster-monitoring Grafana/Prometheus stack) ---
 enable_monitoring: "false"
