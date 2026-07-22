@@ -12,7 +12,10 @@ set -euo pipefail
 # contained once the source tree is present on disk.
 ################################################################################
 
+# /etc/profile on RHEL references unset variables; source it with -u suspended.
+set +u
 source /etc/profile
+set -u
 
 MONITORING_VERSION="{{ monitoring_version }}"
 TARBALL="aws-parallelcluster-monitoring-${MONITORING_VERSION}.tar.gz"

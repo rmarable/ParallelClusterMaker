@@ -767,4 +767,4 @@ ec2_instances_efa = [
     "inf2.48xlarge",
 ]
 
-base_os_efa = ["ubuntu2204", "ubuntu2404", "rhel8", "rhel9"]
+base_os_efa = ["ubuntu2204", "ubuntu2404", "ubuntu2204arm", "ubuntu2404arm", "rhel8", "rhel9"]
