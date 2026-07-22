@@ -445,6 +445,32 @@ make shellcheck # shellcheck on performance/scripts/*.sh (hpc-benchmark.sh and h
 
 CI runs all three automatically on every push and pull request.
 
+### Integration tests
+
+A live end-to-end smoke test is available at `tests/integration/run_integration_test.sh`.
+It provisions a real cluster (c5.xlarge head node, 2 x c5.xlarge compute, ubuntu2404,
+on-demand), submits a Slurm job, verifies the output, and tears everything down.
+
+**Integration tests are NOT run by `make test`, `pytest`, or CI.** Invoke them manually:
+
+```bash
+source .venv/bin/activate
+
+./tests/integration/run_integration_test.sh \
+    --az us-east-1a \
+    --owner yourusername \
+    --email you@example.com \
+    [--profile my-aws-profile] \
+    [--keep]
+```
+
+Prerequisites: AWS credentials with EC2/CloudFormation/IAM/S3 permissions, `jq`
+installed, and the target AZ must have a default VPC with a public subnet.
+
+Estimated cost: **~$0.50 per run** (~25-40 minutes at us-east-1 on-demand pricing).
+
+See [`tests/integration/README.md`](tests/integration/README.md) for full documentation.
+
 ### Known ansible-lint warnings
 
 `make lint` exits 0 but emits a small number of warnings that are intentional and safe to ignore:
@@ -467,8 +493,6 @@ Potential future improvements, roughly ordered by impact:
 ### Architecture
 
 - **Secrets manager integration** — SSH private keys are currently written to disk under `active_clusters/` with `0600` permissions.  Storing them in AWS Secrets Manager or SSM Parameter Store would eliminate the on-disk PEM file entirely and enable key rotation without cluster rebuild.
-
-- **Live AWS integration tests** — the current test suite covers pure Python logic and Jinja2 template rendering.  A second test tier that provisions a real (minimal) cluster in a dedicated test account and tears it down would catch IAM policy gaps, CloudFormation drift, and Ansible playbook regressions that unit tests cannot.
 
 - **Ansible Molecule test suite** — Molecule would allow the `create_pcluster.yml` and `delete_pcluster.yml` playbooks to be tested against a mock EC2 environment (e.g. Localstack or a dedicated sandbox account) without requiring a full cluster build.
 

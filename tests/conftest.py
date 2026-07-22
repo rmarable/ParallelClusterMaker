@@ -138,7 +138,7 @@ def cluster_params():
         # Monitoring
         "enable_monitoring": "false",
         "monitoring_version": "v2.6",
-        "monitoring_version_checksum": "sha256:REPLACE_WITH_ACTUAL_SHA256",
+        "monitoring_version_checksum": "sha256:4afa56a59228c1d8f4e405d07a2291f31853842128e6f7a0e52e1e2c1e262d55",
         "monitoring_s3_dest": "monitoring-post-install-wrapper.test-cluster.sh",
         "monitoring_wrapper_src": "/home/testuser/ParallelClusterMaker/templates/monitoring-post-install-wrapper.j2",
         "monitoring_wrapper_dest": "/home/testuser/ParallelClusterMaker/active_clusters/test-cluster/monitoring-post-install-wrapper.test-cluster.sh",

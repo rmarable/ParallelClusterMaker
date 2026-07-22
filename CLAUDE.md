@@ -20,7 +20,7 @@ src/create_pcluster.yml   # Ansible playbook — cluster build
 src/delete_pcluster.yml   # Ansible playbook — cluster teardown
 templates/                # Jinja2 templates (config, vars file, install scripts, IAM)
 performance/              # HPC benchmark suite and performance analysis scripts
-tests/                    # pytest suite (190 tests as of last run)
+tests/                    # pytest suite (255 tests as of last run)
 ```
 
 ## Constraints
@@ -40,15 +40,17 @@ tests/                    # pytest suite (190 tests as of last run)
 - **Performance results on S3 are keyed by serial number.** Results sync to `s3://<s3_bucketname>/performance-results/<cluster_name>/<cluster_serial_number>/` on teardown, so rebuilds of the same cluster name accumulate rather than overwrite. The source tree (scripts, templates) syncs to `s3://<s3_bucketname>/performance/` and is pulled back by postinstall on head node rebuild.
 - **Performance deployment is gated on `enable_hpc_performance_tests`.** All S3 sync tasks (create, delete, postinstall) are wrapped in `when: enable_hpc_performance_tests == "true"` / `{% if enable_hpc_performance_tests == 'true' %}`. Never add performance tasks outside that gate.
 - **Monitoring is gated on `enable_monitoring`.** All monitoring tasks in Ansible playbooks and all `{% if enable_monitoring == 'true' %}` template branches are gated on this flag. When `true`, a fourth managed policy `<ec2_iam_policy>-M` is created and attached alongside `-A/-B/-C`; it must be deleted on teardown. The SSM parameter `/parallelcluster/<cluster_name>/grafana/admin-password` is created by the monitoring installer and must also be deleted on teardown.
-- **Monitoring S3 staging.** The `aws-parallelcluster-monitoring` tarball is downloaded from GitHub at cluster-build time (`create_pcluster.yml`) and staged to S3. The wrapper script (`monitoring-post-install-wrapper.j2`) pulls from S3 at node boot — never from GitHub. This keeps private-subnet nodes and air-gapped environments working. The download is integrity-checked via `checksum: "{{ monitoring_version_checksum }}"` in the `get_url` task — the checksum is threaded from `pcluster_defaults.yml` → `make_pcluster.py` → `vars_file.j2` → playbook. The placeholder `sha256:REPLACE_WITH_ACTUAL_SHA256` must be replaced with the real SHA-256 before enabling monitoring in production (obtain with: `curl -sL <tarball-url> | sha256sum`).
+- **Monitoring S3 staging.** The `aws-parallelcluster-monitoring` tarball is downloaded from GitHub at cluster-build time (`create_pcluster.yml`) and staged to S3. The wrapper script (`monitoring-post-install-wrapper.j2`) pulls from S3 at node boot — never from GitHub. This keeps private-subnet nodes and air-gapped environments working. The download is integrity-checked via `checksum: "{{ monitoring_version_checksum }}"` in the `get_url` task — the checksum is threaded from `pcluster_defaults.yml` → `make_pcluster.py` → `vars_file.j2` → playbook. The checksum for v2.6 is set in `pcluster_defaults.yml`; if `monitoring_version` is bumped, update `monitoring_version_checksum` accordingly (obtain with: `curl -sL <tarball-url> | sha256sum`).
 - **`-M` policy naming convention.** Monitoring IAM permissions live in `templates/ParallelClusterInstancePolicy-M.json_src` (7 statements, ~1,400 bytes minified). Named `<ec2_iam_policy>-M` at runtime. `InstanceRole` and `AdditionalIamPolicies` are mutually exclusive in PCluster v3 — monitoring permissions must be attached directly to `ec2_iam_role`, not via `AdditionalIamPolicies`.
 
 ## Test suite
 
+**Always use the project venv.** Never invoke `python`, `pytest`, or any project tool with the system Python. Use `.venv/bin/python` explicitly, or activate the venv first (`source .venv/bin/activate`). The system Python on this machine is 3.14, which is incompatible with `aws-parallelcluster` and lacks `botocore`.
+
 ```
-python -m pytest tests/ -q          # must stay green (250 tests)
-make lint                           # ansible-lint — exits 0, passes production profile
-make shellcheck                     # shellcheck on performance/scripts/*.sh
+.venv/bin/python -m pytest tests/ -q   # must stay green (255 tests)
+make lint                               # ansible-lint — exits 0, passes production profile
+make shellcheck                         # shellcheck on performance/scripts/*.sh
 ```
 
 Run the test suite after any change to Python, Jinja2 templates, or conftest.py.

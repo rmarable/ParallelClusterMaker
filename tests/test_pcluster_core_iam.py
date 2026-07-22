@@ -34,6 +34,7 @@ from pcluster_core import (
     _validate_queue_sizes,
     _render_policy,
     _setup_iam,
+    _cleanup_iam_on_failure,
     _delete_managed_policies,
     _setup_fsx_hydration_iam,
     _validate_network,
@@ -273,7 +274,7 @@ class TestRenderPolicy:
         big = {"Version": "2012-10-17", "Statement": [{"Sid": "X", "Effect": "Allow", "Action": long_actions, "Resource": "*"}]}
         src = tmp_path / "big.json_src"
         src.write_text(json.dumps(big))
-        with pytest.raises(SystemExit) as exc:
+        with pytest.raises(ValueError) as exc:
             _render_policy(str(src), *_RENDER_ARGS)
         assert "bytes" in str(exc.value)
 
@@ -309,8 +310,17 @@ class _FakeIAM:
         return {"AttachedPolicies": [{"PolicyName": n} for n in self.attached_policies]}
 
     def create_role(self, RoleName, AssumeRolePolicyDocument, Description=""):
+        if self._role_exists:
+            from botocore.exceptions import ClientError
+            raise ClientError({"Error": {"Code": "EntityAlreadyExists", "Message": ""}}, "CreateRole")
         self.created_roles.append(RoleName)
+        self._role_exists = True
         return {"Role": {"RoleName": RoleName}}
+
+    def delete_role(self, RoleName):
+        self._role_exists = False
+        if RoleName in self.created_roles:
+            self.created_roles.remove(RoleName)
 
     def create_policy(self, PolicyName, PolicyDocument):
         arn = f"arn:aws:iam::123456789012:policy/{PolicyName}"
@@ -373,8 +383,39 @@ class TestSetupIam:
         iam = _FakeIAM(role_exists=True)
         iam.attached_policies = ["test-policy-A", "test-policy-B"]
         _setup_iam(iam, "test-role", "test-policy", **_SETUP_KWARGS)
-        assert "test-role" in iam.created_roles
-        assert "missing" in capsys.readouterr().out
+        # Role already existed so create_role is NOT called; policies are deleted and recreated.
+        assert "test-role" not in iam.created_roles
+        deleted_names = [a.split("/")[-1] for a in iam.deleted_policies]
+        assert "test-policy-A" in deleted_names
+        assert "test-policy-B" in deleted_names
+        out = capsys.readouterr().out
+        assert "missing" in out
+        assert "test-policy-A" in out
+
+    def test_resume_does_not_call_create_role(self, capsys):
+        # Simulates a retry where the role exists but one policy is missing.
+        # create_role must NOT be called — it would raise EntityAlreadyExists against real AWS.
+        iam = _FakeIAM(role_exists=True)
+        iam.attached_policies = ["test-policy-A"]
+        _setup_iam(iam, "test-role", "test-policy", **_SETUP_KWARGS)
+        assert "test-role" not in iam.created_roles
+        assert "test-policy-A" in iam.created_policies
+        assert "test-policy-B" in iam.created_policies
+        assert "test-policy-C" in iam.created_policies
+
+    def test_render_failure_propagates_to_caller(self, monkeypatch):
+        # _render_policy raises ValueError (policy too large); _setup_iam must
+        # propagate it so make_pcluster.py's except Exception handler can call
+        # _delete_managed_policies and iam.delete_role.
+        iam = _FakeIAM(role_exists=False)
+        monkeypatch.setattr(
+            "pcluster_core._render_policy",
+            lambda *a, **kw: (_ for _ in ()).throw(ValueError("policy too big")),
+        )
+        with pytest.raises(ValueError, match="policy too big"):
+            _setup_iam(iam, "test-role", "test-policy", **_SETUP_KWARGS)
+        # Role must not have been created — render failed before create_role was called.
+        assert "test-role" not in iam.created_roles
 
 
 class TestDeleteManagedPolicies:
@@ -415,6 +456,46 @@ class TestDeleteManagedPolicies:
 
 
 # ---------------------------------------------------------------------------
+# _cleanup_iam_on_failure
+# ---------------------------------------------------------------------------
+
+
+class TestCleanupIamOnFailure:
+    def test_deletes_policies_and_role(self):
+        iam = _FakeIAM(role_exists=True)
+        iam.attached_policies = ["test-policy-A", "test-policy-B", "test-policy-C"]
+        deleted_roles = []
+        iam.delete_role = lambda RoleName: deleted_roles.append(RoleName)
+        _cleanup_iam_on_failure(iam, "test-role", "test-policy", "123456789012")
+        deleted_names = [a.split("/")[-1] for a in iam.deleted_policies]
+        assert "test-policy-A" in deleted_names
+        assert "test-policy-B" in deleted_names
+        assert "test-policy-C" in deleted_names
+        assert "test-role" in deleted_roles
+
+    def test_includes_monitoring_policy_when_enabled(self):
+        iam = _FakeIAM(role_exists=True)
+        iam.attached_policies = [
+            "test-policy-A", "test-policy-B", "test-policy-C", "test-policy-M"
+        ]
+        deleted_roles = []
+        iam.delete_role = lambda RoleName: deleted_roles.append(RoleName)
+        _cleanup_iam_on_failure(
+            iam, "test-role", "test-policy", "123456789012", enable_monitoring=True
+        )
+        deleted_names = [a.split("/")[-1] for a in iam.deleted_policies]
+        assert "test-policy-M" in deleted_names
+        assert "test-role" in deleted_roles
+
+    def test_suppresses_errors_on_missing_role(self):
+        iam = _FakeIAM(role_exists=False)
+        deleted_roles = []
+        iam.delete_role = lambda RoleName: deleted_roles.append(RoleName)
+        # Should not raise even though role/policies do not exist.
+        _cleanup_iam_on_failure(iam, "test-role", "test-policy", "123456789012")
+        assert deleted_roles == ["test-role"]
+
+
 # _setup_fsx_hydration_iam
 # ---------------------------------------------------------------------------
 

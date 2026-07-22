@@ -452,6 +452,7 @@ def test_ctrlC_abort_iam_cleanup_no_fsx(monkeypatch):
             cluster_serial_number_file=None,
             cluster_serial_number="abc123",
             enable_fsx_hydration="false",
+            aws_account_id="123456789012",
         )
 
     deleted_arns = iam.deleted_policies
@@ -482,6 +483,7 @@ def test_ctrlC_abort_iam_cleanup_with_fsx(monkeypatch):
             cluster_serial_number_file=None,
             cluster_serial_number="abc123",
             enable_fsx_hydration="true",
+            aws_account_id="123456789012",
         )
 
     deleted_arns = iam.deleted_policies
