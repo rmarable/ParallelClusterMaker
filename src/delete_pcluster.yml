@@ -13,7 +13,7 @@
   vars:
     local_homedir: "{{ lookup('env','HOME') }}"
     local_workingdir: "{{ playbook_dir | dirname }}"
-    pcluster_delete_timeout: "{{ pcluster_delete_timeout | default(30) }}"
+    pcluster_delete_timeout: 30
   vars_files:
     - vars_files/{{ cluster_name }}.yml
 
@@ -44,8 +44,11 @@
       failed_when: >-
         pcluster_delete_result.rc != 0 and
         "does not exist" not in pcluster_delete_result.stderr and
+        "does not exist" not in pcluster_delete_result.stdout and
         "BadRequestException" not in pcluster_delete_result.stderr and
-        "ClusterNotFound" not in pcluster_delete_result.stderr
+        "BadRequestException" not in pcluster_delete_result.stdout and
+        "ClusterNotFound" not in pcluster_delete_result.stderr and
+        "ClusterNotFound" not in pcluster_delete_result.stdout
 
     - name: Wait for the cluster to finish deleting
       command: >
@@ -56,13 +59,20 @@
       until: >-
         "DELETE_COMPLETE" in cluster_delete_status.stdout or
         "DELETE_FAILED" in cluster_delete_status.stdout or
-        (cluster_delete_status.rc != 0 and "ClusterNotFound" in cluster_delete_status.stderr)
+        (cluster_delete_status.rc != 0 and (
+          "ClusterNotFound" in cluster_delete_status.stderr or
+          "ClusterNotFound" in cluster_delete_status.stdout or
+          "does not exist" in cluster_delete_status.stdout or
+          "does not exist" in cluster_delete_status.stderr))
       retries: "{{ pcluster_delete_timeout }}"
       delay: 30
       changed_when: false
       failed_when: >-
         cluster_delete_status.rc != 0 and
         "ClusterNotFound" not in cluster_delete_status.stderr and
+        "ClusterNotFound" not in cluster_delete_status.stdout and
+        "does not exist" not in cluster_delete_status.stdout and
+        "does not exist" not in cluster_delete_status.stderr and
         "DELETE_COMPLETE" not in cluster_delete_status.stdout and
         "DELETE_FAILED" not in cluster_delete_status.stdout
 
@@ -123,11 +133,6 @@
       ignore_errors: true
       when: 'delete_s3_bucketname == "true"'
 
-    - name: Stop the timer
-      command: date +%Y-%m-%d\ \@\ %H:%M:%S
-      changed_when: false
-      register: stop_delete_timer
-
     - name: Check for the existence of cluster_data_dir
       stat:
         path: "{{ cluster_data_dir }}"
@@ -173,15 +178,14 @@
             state: absent
           ignore_errors: true
 
-    - name: Delete the IAM policies associated with the cluster stack
-      amazon.aws.iam_policy:
-        iam_type: role
-        iam_name: "{{ item.role }}"
-        policy_name: "{{ item.policy }}"
+    - name: Detach and delete managed IAM policies associated with the cluster stack
+      amazon.aws.iam_managed_policy:
+        policy_name: "{{ item }}"
         state: absent
       with_items:
-        - {role: '{{ ec2_iam_role }}', policy: '{{ ec2_iam_policy }}-A'}
-        - {role: '{{ ec2_iam_role }}', policy: '{{ ec2_iam_policy }}-B'}
+        - "{{ ec2_iam_policy }}-A"
+        - "{{ ec2_iam_policy }}-B"
+        - "{{ ec2_iam_policy }}-C"
       ignore_errors: true
 
     - name: Delete the IAM roles associated with the cluster stack
@@ -207,6 +211,11 @@
         path: "{{ cluster_data_dir }}"
         state: absent
       when: isdir_cdd.stat.isdir is defined and isdir_cdd.stat.isdir
+
+    - name: Stop the timer
+      command: date +%Y-%m-%d\ \@\ %H:%M:%S
+      changed_when: false
+      register: stop_delete_timer
 
     - name: Print cluster deletion summary
       debug:

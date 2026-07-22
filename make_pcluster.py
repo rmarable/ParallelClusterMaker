@@ -185,7 +185,7 @@ def _setup_iam(
     region="",
     vpc_id="",
 ):
-    """Create ec2_iam_role and attach its two inline policies. Idempotent."""
+    """Create ec2_iam_role and attach two managed policies. Idempotent."""
     try:
         iam.get_role(RoleName=ec2_iam_role)
         print(f"  Found ec2_iam_role: {ec2_iam_role}")
@@ -200,8 +200,10 @@ def _setup_iam(
 
     src_a = ec2_json_policy_src.replace(".json_src", "-A.json_src")
     src_b = ec2_json_policy_src.replace(".json_src", "-B.json_src")
+    src_c = ec2_json_policy_src.replace(".json_src", "-C.json_src")
     policy_a = _render_policy(src_a, *render_args)
     policy_b = _render_policy(src_b, *render_args)
+    policy_c = _render_policy(src_c, *render_args)
 
     with open(
         os.open(ec2_json_policy_template, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600),
@@ -214,15 +216,57 @@ def _setup_iam(
         AssumeRolePolicyDocument='{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Service":["ec2.amazonaws.com"]},"Action":"sts:AssumeRole"}]}',
         Description="ParallelClusterMaker EC2 IAM instance role",
     )
-    iam.put_role_policy(
-        RoleName=ec2_iam_role, PolicyName=ec2_iam_policy + "-A", PolicyDocument=policy_a
+    resp_a = iam.create_policy(
+        PolicyName=ec2_iam_policy + "-A",
+        PolicyDocument=policy_a,
     )
-    iam.put_role_policy(
-        RoleName=ec2_iam_role, PolicyName=ec2_iam_policy + "-B", PolicyDocument=policy_b
+    resp_b = iam.create_policy(
+        PolicyName=ec2_iam_policy + "-B",
+        PolicyDocument=policy_b,
     )
+    resp_c = iam.create_policy(
+        PolicyName=ec2_iam_policy + "-C",
+        PolicyDocument=policy_c,
+    )
+    iam.attach_role_policy(RoleName=ec2_iam_role, PolicyArn=resp_a["Policy"]["Arn"])
+    iam.attach_role_policy(RoleName=ec2_iam_role, PolicyArn=resp_b["Policy"]["Arn"])
+    iam.attach_role_policy(RoleName=ec2_iam_role, PolicyArn=resp_c["Policy"]["Arn"])
     print(f"  Created ec2_iam_role:     {ec2_iam_role}")
     print(f"  Created ec2_iam_policy-A: {ec2_iam_policy}-A")
     print(f"  Created ec2_iam_policy-B: {ec2_iam_policy}-B")
+    print(f"  Created ec2_iam_policy-C: {ec2_iam_policy}-C")
+
+
+def _delete_managed_policies(iam, ec2_iam_role, ec2_iam_policy, aws_account_id,
+                              suppress=True, fsx_policy=None):
+    """Detach and delete both managed cluster policies (and optional FSx policy)."""
+    for sfx in ("-A", "-B", "-C"):
+        name = ec2_iam_policy + sfx
+        arn = f"arn:aws:iam::{aws_account_id}:policy/{name}"
+        if suppress:
+            with contextlib.suppress(Exception):
+                iam.detach_role_policy(RoleName=ec2_iam_role, PolicyArn=arn)
+            with contextlib.suppress(Exception):
+                iam.delete_policy(PolicyArn=arn)
+                print(f"  Deleted managed policy: {name}")
+        else:
+            try:
+                iam.detach_role_policy(RoleName=ec2_iam_role, PolicyArn=arn)
+                iam.delete_policy(PolicyArn=arn)
+                print(f"  Deleted managed policy: {name}")
+            except Exception as _e:
+                print(f"  Warning: could not delete policy {name}: {_e}")
+    if fsx_policy:
+        if suppress:
+            with contextlib.suppress(Exception):
+                iam.delete_role_policy(RoleName=ec2_iam_role, PolicyName=fsx_policy)
+                print(f"  Deleted FSx hydration policy: {fsx_policy}")
+        else:
+            try:
+                iam.delete_role_policy(RoleName=ec2_iam_role, PolicyName=fsx_policy)
+                print(f"  Deleted FSx hydration policy: {fsx_policy}")
+            except Exception as _e:
+                print(f"  Warning: could not delete FSx policy {fsx_policy}: {_e}")
 
 
 def _setup_fsx_hydration_iam(
@@ -1506,10 +1550,7 @@ def main():
             f"  Exception during IAM/template setup after role creation: {_iam_e}"
         )
         print("Cleaning up IAM role to prevent orphan:")
-        for _sfx in ("-A", "-B"):
-            with contextlib.suppress(Exception):
-                iam.delete_role_policy(RoleName=ec2_iam_role, PolicyName=ec2_iam_policy + _sfx)
-                print(f"  Deleted inline policy: {ec2_iam_policy}{_sfx}")
+        _delete_managed_policies(iam, ec2_iam_role, ec2_iam_policy, aws_account_id)
         with contextlib.suppress(Exception):
             iam.delete_role(RoleName=ec2_iam_role)
             print(f"  Deleted IAM role: {ec2_iam_role}")
@@ -1744,16 +1785,8 @@ def main():
             f"  vars_file render failed: {_render_e}"
         )
         print("Cleaning up IAM role to prevent orphan:")
-        for _sfx in ("-A", "-B"):
-            with contextlib.suppress(Exception):
-                iam.delete_role_policy(RoleName=ec2_iam_role, PolicyName=ec2_iam_policy + _sfx)
-                print(f"  Deleted inline policy: {ec2_iam_policy}{_sfx}")
-        if enable_fsx_hydration and fsx_hydration_iam_policy != "UNDEFINED":
-            with contextlib.suppress(Exception):
-                iam.delete_role_policy(
-                    RoleName=ec2_iam_role, PolicyName=fsx_hydration_iam_policy
-                )
-                print(f"  Deleted FSx hydration policy: {fsx_hydration_iam_policy}")
+        _fsx = fsx_hydration_iam_policy if (enable_fsx_hydration and fsx_hydration_iam_policy != "UNDEFINED") else None
+        _delete_managed_policies(iam, ec2_iam_role, ec2_iam_policy, aws_account_id, fsx_policy=_fsx)
         with contextlib.suppress(Exception):
             iam.delete_role(RoleName=ec2_iam_role)
             print(f"  Deleted IAM role: {ec2_iam_role}")
@@ -1852,22 +1885,9 @@ def main():
         print(f"Ansible playbook exited with code {_build_result.returncode}.")
         print(f'Cluster "{cluster_name}" may not have been created successfully.')
         print("Cleaning up IAM resources to allow a clean retry:")
-        for _sfx in ("-A", "-B"):
-            try:
-                iam.delete_role_policy(RoleName=ec2_iam_role, PolicyName=ec2_iam_policy + _sfx)
-                print(f"  Deleted inline policy: {ec2_iam_policy}{_sfx}")
-            except Exception as _e:
-                print(f"  Warning: could not delete policy {ec2_iam_policy}{_sfx}: {_e}")
-        if enable_fsx_hydration:
-            try:
-                iam.delete_role_policy(
-                    RoleName=ec2_iam_role, PolicyName=fsx_hydration_iam_policy
-                )
-                print(f"  Deleted FSx hydration policy: {fsx_hydration_iam_policy}")
-            except Exception as _e:
-                print(
-                    f"  Warning: could not delete FSx policy {fsx_hydration_iam_policy}: {_e}"
-                )
+        _fsx = fsx_hydration_iam_policy if enable_fsx_hydration else None
+        _delete_managed_policies(iam, ec2_iam_role, ec2_iam_policy, aws_account_id,
+                                 suppress=False, fsx_policy=_fsx)
         try:
             iam.delete_role(RoleName=ec2_iam_role)
             print(f"  Deleted IAM role: {ec2_iam_role}")

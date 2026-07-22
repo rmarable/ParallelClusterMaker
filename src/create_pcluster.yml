@@ -105,6 +105,7 @@
       amazon.aws.ec2_key:
         name: "{{ ec2_keypair }}"
         region: "{{ region }}"
+        key_type: ed25519
       no_log: true
       register: ec2_private_key
 
