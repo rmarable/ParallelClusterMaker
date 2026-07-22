@@ -21,7 +21,7 @@ src/create_pcluster.yml   # Ansible playbook — cluster build
 src/delete_pcluster.yml   # Ansible playbook — cluster teardown
 templates/                # Jinja2 templates (config, vars file, install scripts, IAM)
 performance/              # HPC benchmark suite and performance analysis scripts
-tests/                    # pytest suite (263 tests as of last run)
+tests/                    # pytest suite (320 tests as of last run)
 ```
 
 ## Constraints
@@ -46,13 +46,15 @@ tests/                    # pytest suite (263 tests as of last run)
 - **Monitoring wrapper bypasses upstream `post-install.sh`.** The upstream script always re-downloads the tarball from GitHub, defeating the S3 staging. The wrapper extracts the S3-staged tarball directly to `MONITORING_HOME` and calls `installer/install.sh` directly. It also suspends `set -u` around `source /etc/profile` because RHEL 7/8/9, CentOS, and Amazon Linux all ship an `/etc/profile` that references `$HISTCONTROL` unconditionally on an `export` line — this crashes under `set -u` if `HISTCONTROL` is not already in the environment. Ubuntu's `/etc/profile` does not have this issue. Do not remove the `set +u / source /etc/profile / set -u` guard.
 - **`-M` policy naming convention.** Monitoring IAM permissions live in `templates/ParallelClusterInstancePolicy-M.json_src` (7 statements, ~1,400 bytes minified). Named `<ec2_iam_policy>-M` at runtime. `InstanceRole` and `AdditionalIamPolicies` are mutually exclusive in PCluster v3 — monitoring permissions must be attached directly to `ec2_iam_role`, not via `AdditionalIamPolicies`.
 - **Secrets Manager SSH key storage.** At cluster creation, the SSH private key is stored in Secrets Manager at `parallelcluster/<cluster_name>/<serial>/ssh-private-key` and deleted on teardown (`--force-delete-without-recovery`). The secret name is threaded from `pcluster_core._ssh_secret_name` → `make_pcluster.py` → `vars_file.j2` → playbooks. The operator's IAM user/role needs `secretsmanager:CreateSecret`, `PutSecretValue`, `GetSecretValue`, `DeleteSecret`, and `ec2:ImportKeyPair` — these are **not** in any head node managed policy. `rotate_cluster_key.py` rotates the keypair without a cluster rebuild; `active_clusters/<cluster_name>/retrieve_ssh_key.<cluster_name>.sh` recovers the key from Secrets Manager if the local `.pem` is lost.
+- **GPU support is gated on `enable_gpu`.** `is_gpu_instance(instance_type)` in `pcluster_aux_data.py` detects GPU families by prefix (g4dn, g4ad, g5, g5g, g6, gr6, p3, p3dn, p4d, p4de, p5). If `enable_gpu == "false"` but the compute instance is a GPU family, `make_pcluster.py` auto-enables it and prints `*** INFO ***`. GPU block in `postinstall.j2` installs `nvtop`/`htop` and mounts NVMe instance store at `/local_scratch` (single device: XFS; multiple devices: RAID0 via `mdadm`). NVMe device detection uses `/sys/block/nvme*/device/model` filtered for "Instance Storage". **Jinja2 constraint:** `${#arr[@]}` triggers the Jinja2 `{#` comment tag parser — use `$(echo "${arr[@]}" | wc -w)` instead.
+- **EFA-GDR is derived from `enable_gpu` + `enable_efa` + instance family.** `needs_efa_gdr(instance_type, enable_efa)` returns `True` only for p4d/p4de/p5 with EFA enabled. The derived `enable_efa_gdr` variable is set in `make_pcluster.py` and controls the `GdrSupport: true` line in `config.pcluster.j2` under the `Efa:` block. Do not set `GdrSupport` unconditionally — non-GDR instances reject it at cluster creation.
 
 ## Test suite
 
 **Always use the project venv.** Never invoke `python`, `pytest`, or any project tool with the system Python. Use `.venv/bin/python` explicitly, or activate the venv first (`source .venv/bin/activate`). The system Python on this machine is 3.14, which is incompatible with `aws-parallelcluster` and lacks `botocore`.
 
 ```
-.venv/bin/python -m pytest tests/ -q   # must stay green (263 tests)
+.venv/bin/python -m pytest tests/ -q   # must stay green (320 tests)
 make lint                               # ansible-lint — exits 0, passes production profile
 make shellcheck                         # shellcheck on performance/scripts/*.sh
 ```
