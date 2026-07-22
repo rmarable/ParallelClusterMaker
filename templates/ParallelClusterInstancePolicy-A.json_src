@@ -204,7 +204,9 @@
             ],
             "Effect": "Allow",
             "Resource": [
-                "arn:aws:dynamodb:*:<AWS_ACCOUNT_ID>:table/parallelcluster-<CLUSTER_NAME>-DynamoDBTable-*"
+                "arn:aws:dynamodb:*:<AWS_ACCOUNT_ID>:table/parallelcluster-<CLUSTER_NAME>",
+                "arn:aws:dynamodb:*:<AWS_ACCOUNT_ID>:table/parallelcluster-slurm-<CLUSTER_NAME>",
+                "arn:aws:dynamodb:*:<AWS_ACCOUNT_ID>:table/parallelcluster-<CLUSTER_NAME>-*"
             ]
         },
         {

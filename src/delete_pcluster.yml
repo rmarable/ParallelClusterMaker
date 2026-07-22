@@ -35,6 +35,36 @@
           - "================================================================="
           - ""
 
+    - name: Sync performance results to S3 before cluster deletion
+      when: enable_hpc_performance_tests == "true"
+      ignore_errors: true
+      block:
+        - name: Get head node IP for performance results sync
+          command: >
+            pcluster describe-cluster
+              --cluster-name {{ cluster_name }}
+              --region {{ region }}
+          register: _pre_delete_describe
+          changed_when: false
+          failed_when: false
+        - name: Set head node IP fact
+          set_fact:
+            _head_node_ip: >-
+              {{
+                (_pre_delete_describe.stdout | from_json).get('headNode', {}).get('publicIpAddress')
+                or (_pre_delete_describe.stdout | from_json).get('headNode', {}).get('privateIpAddress', '')
+              }}
+          when: _pre_delete_describe.rc == 0 and _pre_delete_describe.stdout != ''
+        - name: Push performance results from head node to S3
+          command: >
+            ssh -o BatchMode=yes -o ConnectTimeout=30 -o StrictHostKeyChecking=accept-new
+            -i "{{ ssh_keypair }}" "{{ ec2_user }}@{{ _head_node_ip }}"
+            aws s3 sync "{{ ec2_user_home }}/performance/{{ cluster_name }}/"
+            "s3://{{ s3_bucketname }}/performance-results/{{ cluster_name }}/{{ cluster_serial_number }}/"
+            --exclude "*.pyc" --exclude "__pycache__/*"
+            --region "{{ region }}"
+          when: _head_node_ip is defined and _head_node_ip != ''
+
     - name: Delete the ParallelCluster v3 stack
       command: >
         pcluster delete-cluster
@@ -138,33 +168,6 @@
         path: "{{ cluster_data_dir }}"
       register: isdir_cdd
 
-    - name: Template the cluster destruction summary report
-      template:
-        src: "{{ sns_destruction_summary_report_src }}"
-        dest: "{{ sns_destruction_summary_report_dest }}"
-        mode: "0644"
-      when: isdir_cdd.stat.isdir is defined and isdir_cdd.stat.isdir
-
-    - name: Distribute the cluster destruction summary report via SNS
-      community.aws.sns:
-        msg: "{{ lookup('file', sns_destruction_summary_report_dest) }}"
-        subject: "Cluster Destruction Notice: {{ cluster_name }}"
-        topic: "sns_alerts_{{ cluster_name }}"
-        region: "{{ region }}"
-      ignore_errors: true
-      delegate_to: localhost
-      when: isdir_cdd.stat.isdir is defined and isdir_cdd.stat.isdir
-
-    - name: Delete the SNS topic associated with this cluster
-      community.aws.sns_topic:
-        name: "sns_alerts_{{ cluster_name }}"
-        region: "{{ region }}"
-        state: absent
-        subscriptions:
-          - endpoint: "{{ cluster_owner_email }}"
-            protocol: "email"
-      ignore_errors: true
-
     - name: Detach the IAM policy associated with Lustre-S3 hydration before role deletion
       when:
         - enable_fsx_hydration is defined and enable_fsx_hydration == "true"
@@ -193,6 +196,7 @@
         name: "{{ item }}"
         region: "{{ region }}"
         state: absent
+        delete_instance_profile: true
       with_items:
         - "{{ ec2_iam_role }}"
       ignore_errors: true
@@ -216,6 +220,33 @@
       command: date +%Y-%m-%d\ \@\ %H:%M:%S
       changed_when: false
       register: stop_delete_timer
+
+    - name: Template the cluster destruction summary report
+      template:
+        src: "{{ sns_destruction_summary_report_src }}"
+        dest: "/tmp/sns_destruction_summary.{{ cluster_name }}.txt"
+        mode: "0644"
+      when: isdir_cdd.stat.isdir is defined and isdir_cdd.stat.isdir
+
+    - name: Distribute the cluster destruction summary report via SNS
+      community.aws.sns:
+        msg: "{{ lookup('file', '/tmp/sns_destruction_summary.' + cluster_name + '.txt') }}"
+        subject: "Cluster Destruction Notice: {{ cluster_name }}"
+        topic: "sns_alerts_{{ cluster_name }}"
+        region: "{{ region }}"
+      ignore_errors: true
+      delegate_to: localhost
+      when: isdir_cdd.stat.isdir is defined and isdir_cdd.stat.isdir
+
+    - name: Delete the SNS topic associated with this cluster
+      community.aws.sns_topic:
+        name: "sns_alerts_{{ cluster_name }}"
+        region: "{{ region }}"
+        state: absent
+        subscriptions:
+          - endpoint: "{{ cluster_owner_email }}"
+            protocol: "email"
+      ignore_errors: true
 
     - name: Print cluster deletion summary
       debug:

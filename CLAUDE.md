@@ -35,6 +35,9 @@ tests/                    # pytest suite (158 tests as of last run)
 - **Defaults file auto-detection.** If `<cluster_name>_defaults.yml` exists in the repo root but `--use_defaults` was not passed, `make_pcluster.py` prints a `*** WARNING ***` and suggests the flag. This is intentional — never suppress it.
 - **Venv guard uses `sys.prefix`.** The three entry-point scripts check `os.path.realpath(sys.prefix)` against the repo's `.venv/` directory, not `sys.executable`. Homebrew Python symlinks resolve outside `.venv/`, so `sys.executable` was incorrect.
 - **Shebangs use `#!/usr/bin/env python`.** Not `python3` — `env python3` on macOS resolves to the system Python, bypassing the active venv.
+- **Ansible deprecation warnings are suppressed globally** via `ansible.cfg` (`deprecation_warnings = False`). Do not re-enable them or work around them per-task.
+- **Performance results on S3 are keyed by serial number.** Results sync to `s3://<s3_bucketname>/performance-results/<cluster_name>/<cluster_serial_number>/` on teardown, so rebuilds of the same cluster name accumulate rather than overwrite. The source tree (scripts, templates) syncs to `s3://<s3_bucketname>/performance/` and is pulled back by postinstall on head node rebuild.
+- **Performance deployment is gated on `enable_hpc_performance_tests`.** All S3 sync tasks (create, delete, postinstall) are wrapped in `when: enable_hpc_performance_tests == "true"` / `{% if enable_hpc_performance_tests == 'true' %}`. Never add performance tasks outside that gate.
 
 ## Test suite
 

@@ -329,16 +329,20 @@ sbatch /fsx/scratch/my_project/sbatch_default_submission_script.sh
 
 ### HPC Performance Tests
 
-Enable with `--enable_hpc_performance_tests=true`.  Deploys the full performance toolkit to the cluster head node at `~/performance/`.
+Enable with `--enable_hpc_performance_tests=true`.  Deploys the full performance toolkit to the cluster head node at `~/performance/` and installs Python plotting dependencies (`matplotlib`, `numpy`, `pandas`, `scipy`, `seaborn`) automatically via postinstall.
+
+**These commands run on the cluster head node** (SSH in via `./access_cluster.py` first):
 
 **Tier 1 — Axb_random smoke test** (no MPI required):
 ```bash
+cd ~/performance
 ./hpc-perftest.sh run -n 5 -C pcluster-test-01
 ./hpc-perftest.sh plot --type unified
 ```
 
-**Tier 2 — standards-based benchmarks** (MPI required):
+**Tier 2 — standards-based benchmarks** (MPI required, run on head node):
 ```bash
+cd ~/performance
 ./hpc-benchmark.sh install                              # build STREAM, OSU, IOR, HPCG (~5 min)
 ./hpc-benchmark.sh run --tests stream,osu,ior,hpcg
 ./hpc-benchmark.sh report
@@ -348,6 +352,8 @@ Enable with `--enable_hpc_performance_tests=true`.  Deploys the full performance
 ```bash
 ./hpc-perftest.sh submit --start 10 --step 10 --total 10
 ```
+
+**Results are preserved on teardown.** When `kill_pcluster.py` runs, performance results are automatically synced from the head node to `s3://<cluster-bucket>/performance-results/<cluster_name>/<cluster_serial_number>/` before the cluster is deleted.  Results from multiple runs of the same cluster name are kept in separate serial-number subdirectories.
 
 Edit `MATRIX_SIZES.conf` to control the test scope.  See `performance/README-PERFORMANCE.md` for full documentation.
 
@@ -381,7 +387,7 @@ ParallelClusterMaker does **not** create or modify VPCs, subnets, gateways, rout
 
 ## Troubleshooting
 
-**IAM permissions:** Check `templates/ParallelClusterInstancePolicy.json_src`.  Most build failures trace back to missing IAM permissions.
+**IAM permissions:** Check `templates/ParallelClusterInstancePolicy-A.json_src`, `-B.json_src`, and `-C.json_src`.  The instance policy is split into three managed policies (≤6,144 bytes each) to stay under the IAM managed policy size limit.  Most build failures trace back to missing IAM permissions.
 
 **Spot capacity:** If compute nodes fail to launch you'll see a `ComputeFleet - CREATE_FAILED` CloudFormation error.  Retry the build or switch to `--cluster_type=ondemand`.
 

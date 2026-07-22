@@ -135,6 +135,10 @@ def cluster_params():
         # Spack
         "spack_root": "/fsx/pkg/spack",
         "pkg_dir": "/fsx/pkg",
+        # Performance paths
+        "performance_rootdir": "/home/testuser/ParallelClusterMaker/performance",
+        "performance_stage_dir": "/tmp/_ParallelClusterMaker_stage/test-cluster-00001220260720/performance/slurm",
+        "performance_template_dir": "/home/testuser/ParallelClusterMaker/performance/jinja2",
         # Performance
         "sid": "slurm-test-cluster",
         # Ansible registered vars (used by sns/access templates)
