@@ -1796,7 +1796,8 @@ def main():
     if enable_hpc_benchmarks and _head_ip:
         print("")
         print("  HPC benchmarks (run these commands on the head node):")
-        print(f"    cd ~/performance && ./hpc-benchmark.sh run --tests stream,osu,ior,hpcg")
+        print(f"    cd ~/performance/{cluster_name}/{cluster_owner}/{scheduler}")
+        print(f"    ./hpc-benchmark.sh run --tests stream,osu,ior,hpcg")
         print(f"    Results sync to s3://{s3_bucketname}/performance-results/{cluster_name}/ on teardown")
     print("")
     print("  Delete this cluster:")
