@@ -1793,6 +1793,11 @@ def main():
         print(f"    Password: aws ssm get-parameter --region {region} \\")
         print(f"      --name /parallelcluster/{cluster_name}/grafana/admin-password \\")
         print("      --with-decryption --query Parameter.Value --output text")
+    if enable_hpc_benchmarks and _head_ip:
+        print("")
+        print("  HPC benchmarks (on head node):")
+        print(f"    cd ~/performance && ./hpc-benchmark.sh run --tests stream,osu,ior,hpcg")
+        print(f"    Results sync to s3://{s3_bucketname}/performance-results/{cluster_name}/ on teardown")
     print("")
     print("  Delete this cluster:")
     print(f"    ./kill_pcluster.py -N {cluster_name} -O {cluster_owner} -A {az}")
