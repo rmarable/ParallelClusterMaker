@@ -281,6 +281,13 @@ cmd_run() {
     local mpi_launcher
     mpi_launcher=$(_detect_mpi)
 
+    # Multi-node runs must be inside a Slurm allocation.
+    if [[ -n "$nodes" && "$nodes" -gt 1 && -z "${SLURM_JOB_ID:-}" ]]; then
+        _die "Multi-node runs require a Slurm allocation. Submit via sbatch or run interactively with:
+  srun --nodes=$nodes --ntasks-per-node=$ppn --pty bash
+  ./hpc-benchmark.sh run --tests $tests --nodes $nodes --ppn $ppn"
+    fi
+
     local total_ranks
     if [[ -n "$nodes" ]]; then
         total_ranks=$(( nodes * ppn ))

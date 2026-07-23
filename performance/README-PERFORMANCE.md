@@ -67,28 +67,63 @@ To install a subset:
 ./hpc-benchmark.sh install --tools stream,osu
 ```
 
-### Step 2 — run
+### Step 2 — run the benchmarks
+
+There are three ways to run the benchmark suite depending on how many nodes you need.
+
+#### Standalone (single node, on the head node directly)
+
+Use this for STREAM and single-node OSU latency/bandwidth checks. No Slurm resource allocations are needed.
 
 ```bash
-# Full suite (30–120 min depending on cluster size)
+# Full suite, single node
 ./hpc-benchmark.sh run --tests stream,osu,ior,hpcg
 
 # Quick memory + MPI check only (~5 min)
 ./hpc-benchmark.sh run --tests stream,osu
-
-# Parallel I/O against a shared filesystem
-./hpc-benchmark.sh run --tests ior --fs-path /fsx/scratch --nodes 4 --ppn 4
-
-# HPCG scaling study across 8 nodes
-./hpc-benchmark.sh run --tests hpcg --nodes 8 --ppn 4 --hpcg-time 1800
 ```
+
+> **Note:** STREAM always runs single-node regardless of `--nodes`. Running without `--nodes` auto-detects the number of cores on the current host.
+
+#### Interactive multi-node via `srun`
+
+Use this for multi-node OSU collective, IOR, and HPCG runs during development or debugging. Slurm spins up the requested compute nodes and drops you into an interactive shell inside the allocation.
+
+```bash
+# Request 4 nodes with 4 ranks each, then run benchmarks
+srun --nodes=4 --ntasks-per-node=4 --pty bash
+cd ~/performance/<cluster_name>/<cluster_owner>/slurm
+./hpc-benchmark.sh run --tests osu,ior,hpcg --nodes 4 --ppn 4
+```
+
+The shell exits and the allocation is released when you type `exit`.
+
+#### Batch via `sbatch`
+
+Use this for long-running or production benchmark runs. The job is queued by Slurm and runs on compute nodes without an interactive session.
+
+```bash
+sbatch --nodes=4 --ntasks-per-node=4 --wrap \
+  "cd ~/performance/<cluster_name>/<cluster_owner>/slurm && \
+   ./hpc-benchmark.sh run --tests stream,osu,ior,hpcg --nodes 4 --ppn 4"
+```
+
+A ready-to-use job script is included at `performance/hpc-benchmark-job.sh`. Edit `CLUSTER_NAME`, `CLUSTER_OWNER`, and the `#SBATCH` directives at the top, then submit:
+
+```bash
+sbatch hpc-benchmark-job.sh
+```
+
+Monitor with `squeue` and retrieve results with `./hpc-benchmark.sh report`.
+
+> **Note:** `hpc-benchmark.sh` will refuse to start a multi-node run (`--nodes > 1`) outside a Slurm allocation and print the correct `srun` command to use instead.
 
 Key options:
 
 | Flag | Default | Notes |
 |---|---|---|
 | `--tests` | `stream,osu,ior,hpcg` | Comma-separated subset |
-| `--nodes` | auto (1 node, all cores) | Nodes for OSU collective, IOR, HPCG |
+| `--nodes` | auto (1 node, all cores) | Nodes for OSU collective, IOR, HPCG; must be inside Slurm allocation if > 1 |
 | `--ppn` | `1` | MPI ranks per node |
 | `--fs-path` | `./ior_scratch` | Filesystem to stress with IOR |
 | `--ior-size` | `1g` | Per-process transfer size for IOR |

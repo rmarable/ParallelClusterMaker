@@ -491,7 +491,7 @@ ParallelClusterMaker does **not** create or modify VPCs, subnets, gateways, rout
 
 ## Troubleshooting
 
-**IAM permissions:** Check `templates/ParallelClusterInstancePolicy-A.json_src`, `-B.json_src`, and `-C.json_src`.  The instance policy is split into three managed policies (≤6,144 bytes each) to stay under the IAM managed policy size limit.  Most build failures trace back to missing IAM permissions.
+**IAM permissions:** Check `templates/ParallelClusterInstancePolicy-A.json_src`, `-B.json_src`, and `-C.json_src`.  The instance policy is split into three managed policies (A: 22 stmts, B: 16 stmts, C: 4 stmts — all ≤6,144 bytes minified) to stay under the IAM managed policy size limit.  IAM role and instance-profile resources use both flat-name ARNs (`parallelcluster-<CLUSTER_NAME>-*`) and path-based ARNs (`parallelcluster/<CLUSTER_NAME>/*`) — PCluster v3 uses the latter for compute fleet roles.  Most build failures trace back to missing IAM permissions.
 
 **Spot capacity:** If compute nodes fail to launch you'll see a `ComputeFleet - CREATE_FAILED` CloudFormation error.  Retry the build or switch to `--cluster_type=ondemand`.
 

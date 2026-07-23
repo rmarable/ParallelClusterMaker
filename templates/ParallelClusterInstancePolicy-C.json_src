@@ -2,6 +2,53 @@
     "Version": "2012-10-17",
     "Statement": [
         {
+            "Sid": "EC2DescribeExtras",
+            "Action": [
+                "ec2:DescribeCapacityReservations"
+            ],
+            "Effect": "Allow",
+            "Resource": "*"
+        },
+        {
+            "Sid": "IAMRolePolicy",
+            "Action": [
+                "iam:PutRolePolicy",
+                "iam:GetRolePolicy",
+                "iam:DeleteRolePolicy",
+                "iam:ListRolePolicies"
+            ],
+            "Effect": "Allow",
+            "Resource": [
+                "arn:aws:iam::<AWS_ACCOUNT_ID>:role/parallelcluster-<CLUSTER_NAME>-*",
+                "arn:aws:iam::<AWS_ACCOUNT_ID>:role/parallelcluster-<CLUSTER_OWNER>-*",
+                "arn:aws:iam::<AWS_ACCOUNT_ID>:role/parallelcluster/<CLUSTER_NAME>/*",
+                "arn:aws:iam::<AWS_ACCOUNT_ID>:role/kill-pcluster-role-<CLUSTER_SERIAL_NUMBER>"
+            ],
+            "Condition": {
+                "StringEquals": {
+                    "iam:PermissionsBoundary": "arn:aws:iam::<AWS_ACCOUNT_ID>:policy/parallelcluster-<CLUSTER_OWNER>-boundary"
+                }
+            }
+        },
+        {
+            "Sid": "IAMPassRoleInstanceProfile",
+            "Action": [
+                "iam:PassRole"
+            ],
+            "Effect": "Allow",
+            "Resource": [
+                "arn:aws:iam::<AWS_ACCOUNT_ID>:instance-profile/parallelcluster-<CLUSTER_NAME>-*",
+                "arn:aws:iam::<AWS_ACCOUNT_ID>:instance-profile/parallelcluster-<CLUSTER_OWNER>-*",
+                "arn:aws:iam::<AWS_ACCOUNT_ID>:instance-profile/parallelcluster/<CLUSTER_NAME>/*",
+                "arn:aws:iam::<AWS_ACCOUNT_ID>:instance-profile/pclustermaker-*"
+            ],
+            "Condition": {
+                "StringEquals": {
+                    "iam:PassedToService": "ec2.amazonaws.com"
+                }
+            }
+        },
+        {
             "Sid": "AllowAccessToSSM",
             "Action": [
                 "ssm:DescribeAssociation",

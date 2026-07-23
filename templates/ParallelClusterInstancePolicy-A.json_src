@@ -50,6 +50,7 @@
             "Sid": "EC2ModifyTagged",
             "Action": [
                 "ec2:AttachVolume",
+                "ec2:CreateTags",
                 "ec2:AuthorizeSecurityGroupEgress",
                 "ec2:RevokeSecurityGroupEgress",
                 "ec2:AuthorizeSecurityGroupIngress",

@@ -43,7 +43,10 @@
                 "lambda:ListVersionsByFunction",
                 "lambda:PublishVersion",
                 "lambda:AddPermission",
-                "lambda:RemovePermission"
+                "lambda:RemovePermission",
+                "lambda:UpdateFunctionCode",
+                "lambda:UpdateFunctionConfiguration",
+                "lambda:TagResource"
             ],
             "Effect": "Allow",
             "Resource": [
@@ -56,7 +59,9 @@
             "Action": [
                 "logs:CreateLogGroup",
                 "logs:CreateLogStream",
-                "logs:PutLogEvents"
+                "logs:PutLogEvents",
+                "logs:PutRetentionPolicy",
+                "logs:DeleteLogGroup"
             ],
             "Resource": [
                 "arn:aws:logs:*:<AWS_ACCOUNT_ID>:log-group:/parallelcluster/*",
@@ -99,6 +104,7 @@
             "Resource": [
                 "arn:aws:iam::<AWS_ACCOUNT_ID>:role/parallelcluster-<CLUSTER_NAME>-*",
                 "arn:aws:iam::<AWS_ACCOUNT_ID>:role/parallelcluster-<CLUSTER_OWNER>-*",
+                "arn:aws:iam::<AWS_ACCOUNT_ID>:role/parallelcluster/<CLUSTER_NAME>/*",
                 "arn:aws:iam::<AWS_ACCOUNT_ID>:role/pclustermaker-role-<CLUSTER_SERIAL_NUMBER>",
                 "arn:aws:iam::<AWS_ACCOUNT_ID>:role/kill-pcluster-role-<CLUSTER_SERIAL_NUMBER>"
             ],
@@ -113,12 +119,17 @@
             "Action": [
                 "iam:GetRole",
                 "iam:DeleteRole",
-                "iam:ListInstanceProfilesForRole"
+                "iam:ListInstanceProfilesForRole",
+                "iam:TagRole",
+                "iam:TagInstanceProfile",
+                "iam:GetPolicy",
+                "iam:GetPolicyVersion"
             ],
             "Effect": "Allow",
             "Resource": [
                 "arn:aws:iam::<AWS_ACCOUNT_ID>:role/parallelcluster-<CLUSTER_NAME>-*",
                 "arn:aws:iam::<AWS_ACCOUNT_ID>:role/parallelcluster-<CLUSTER_OWNER>-*",
+                "arn:aws:iam::<AWS_ACCOUNT_ID>:role/parallelcluster/<CLUSTER_NAME>/*",
                 "arn:aws:iam::<AWS_ACCOUNT_ID>:role/pclustermaker-role-<CLUSTER_SERIAL_NUMBER>",
                 "arn:aws:iam::<AWS_ACCOUNT_ID>:role/kill-pcluster-role-<CLUSTER_SERIAL_NUMBER>"
             ]
@@ -132,6 +143,7 @@
             "Resource": [
                 "arn:aws:iam::<AWS_ACCOUNT_ID>:role/parallelcluster-<CLUSTER_NAME>-*",
                 "arn:aws:iam::<AWS_ACCOUNT_ID>:role/parallelcluster-<CLUSTER_OWNER>-*",
+                "arn:aws:iam::<AWS_ACCOUNT_ID>:role/parallelcluster/<CLUSTER_NAME>/*",
                 "arn:aws:iam::<AWS_ACCOUNT_ID>:role/pclustermaker-role-<CLUSTER_SERIAL_NUMBER>",
                 "arn:aws:iam::<AWS_ACCOUNT_ID>:role/kill-pcluster-role-<CLUSTER_SERIAL_NUMBER>"
             ],
@@ -154,32 +166,13 @@
             "Resource": [
                 "arn:aws:iam::<AWS_ACCOUNT_ID>:role/parallelcluster-<CLUSTER_NAME>-*",
                 "arn:aws:iam::<AWS_ACCOUNT_ID>:role/parallelcluster-<CLUSTER_OWNER>-*",
+                "arn:aws:iam::<AWS_ACCOUNT_ID>:role/parallelcluster/<CLUSTER_NAME>/*",
                 "arn:aws:iam::<AWS_ACCOUNT_ID>:role/pclustermaker-role-<CLUSTER_SERIAL_NUMBER>",
                 "arn:aws:iam::<AWS_ACCOUNT_ID>:role/kill-pcluster-role-<CLUSTER_SERIAL_NUMBER>"
             ],
             "Condition": {
                 "StringLike": {
                     "iam:PolicyARN": "arn:aws:iam::<AWS_ACCOUNT_ID>:policy/parallelcluster-*"
-                }
-            }
-        },
-        {
-            "Sid": "IAMRolePolicy",
-            "Action": [
-                "iam:PutRolePolicy",
-                "iam:GetRolePolicy",
-                "iam:DeleteRolePolicy",
-                "iam:ListRolePolicies"
-            ],
-            "Effect": "Allow",
-            "Resource": [
-                "arn:aws:iam::<AWS_ACCOUNT_ID>:role/parallelcluster-<CLUSTER_NAME>-*",
-                "arn:aws:iam::<AWS_ACCOUNT_ID>:role/parallelcluster-<CLUSTER_OWNER>-*",
-                "arn:aws:iam::<AWS_ACCOUNT_ID>:role/kill-pcluster-role-<CLUSTER_SERIAL_NUMBER>"
-            ],
-            "Condition": {
-                "StringEquals": {
-                    "iam:PermissionsBoundary": "arn:aws:iam::<AWS_ACCOUNT_ID>:policy/parallelcluster-<CLUSTER_OWNER>-boundary"
                 }
             }
         },
@@ -197,25 +190,9 @@
             "Resource": [
                 "arn:aws:iam::<AWS_ACCOUNT_ID>:instance-profile/parallelcluster-<CLUSTER_NAME>-*",
                 "arn:aws:iam::<AWS_ACCOUNT_ID>:instance-profile/parallelcluster-<CLUSTER_OWNER>-*",
+                "arn:aws:iam::<AWS_ACCOUNT_ID>:instance-profile/parallelcluster/<CLUSTER_NAME>/*",
                 "arn:aws:iam::<AWS_ACCOUNT_ID>:instance-profile/pclustermaker-*"
             ]
-        },
-        {
-            "Sid": "IAMPassRoleInstanceProfile",
-            "Action": [
-                "iam:PassRole"
-            ],
-            "Effect": "Allow",
-            "Resource": [
-                "arn:aws:iam::<AWS_ACCOUNT_ID>:instance-profile/parallelcluster-<CLUSTER_NAME>-*",
-                "arn:aws:iam::<AWS_ACCOUNT_ID>:instance-profile/parallelcluster-<CLUSTER_OWNER>-*",
-                "arn:aws:iam::<AWS_ACCOUNT_ID>:instance-profile/pclustermaker-*"
-            ],
-            "Condition": {
-                "StringEquals": {
-                    "iam:PassedToService": "ec2.amazonaws.com"
-                }
-            }
         },
         {
             "Sid": "EFSDescribe",

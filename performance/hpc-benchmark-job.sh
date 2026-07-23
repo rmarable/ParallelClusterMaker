@@ -1,0 +1,38 @@
+#!/bin/bash
+#SBATCH --job-name=hpc-benchmark
+#SBATCH --partition=compute
+#SBATCH --nodes=2
+#SBATCH --ntasks-per-node=4
+#SBATCH --output=hpc-benchmark-%j.out
+#SBATCH --error=hpc-benchmark-%j.err
+
+# Set these to match your cluster.
+CLUSTER_NAME="<cluster_name>"
+CLUSTER_OWNER="<cluster_owner>"
+SCHEDULER="slurm"
+PERF_DIR=~/performance/${CLUSTER_NAME}/${CLUSTER_OWNER}/${SCHEDULER}
+
+cd "$PERF_DIR" || exit 1
+module load openmpi    # or: module load intelmpi
+
+# NODES is set by Slurm to the actual number of allocated nodes.
+NODES=${SLURM_JOB_NUM_NODES}
+PPN=${SLURM_NTASKS_PER_NODE}
+
+# --- Full suite (default) ---
+./hpc-benchmark.sh run --tests stream,osu,ior,hpcg --nodes "$NODES" --ppn "$PPN"
+
+# --- Quick smoke test: memory bandwidth + MPI only (~5 min) ---
+# ./hpc-benchmark.sh run --tests stream,osu --nodes "$NODES" --ppn "$PPN"
+
+# --- IOR against EFS ---
+# ./hpc-benchmark.sh run --tests ior --fs-path /efs --nodes "$NODES" --ppn "$PPN" --ior-size 4g
+
+# --- IOR against FSx for Lustre ---
+# ./hpc-benchmark.sh run --tests ior --fs-path /fsx --nodes "$NODES" --ppn "$PPN" --ior-size 4g
+
+# --- HPCG scaling study (official run requires >= 1800 s) ---
+# ./hpc-benchmark.sh run --tests hpcg --nodes "$NODES" --ppn "$PPN" --hpcg-time 1800
+
+# --- Single-node STREAM only (no MPI ranks needed) ---
+# ./hpc-benchmark.sh run --tests stream
