@@ -115,8 +115,8 @@ All optional parameters have hardcoded defaults and can also be persisted in a Y
 | `max_queue_size` | 8 |
 | `scaledown_idletime` | 5 min |
 | `cluster_lifetime` | 0:8:0 (days:hours:min) |
-| `headnode_root_volume_size` | 250 GB (gp3) |
-| `compute_root_volume_size` | 250 GB (gp3) |
+| `headnode_root_volume_size` | 100 GB (gp3) |
+| `compute_root_volume_size` | 100 GB (gp3) |
 | `ebs_shared_volume_size` | 250 GB (gp3) |
 | `fsx_size` | 1200 GB |
 | `placement_group` | NONE |
