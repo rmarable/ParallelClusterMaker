@@ -7,10 +7,10 @@
 #SBATCH --error=hpc-benchmark-%j.err
 
 # Set these to match your cluster.
-CLUSTER_NAME="<cluster_name>"
-CLUSTER_OWNER="<cluster_owner>"
-SCHEDULER="slurm"
-PERF_DIR=~/performance/${CLUSTER_NAME}/${CLUSTER_OWNER}/${SCHEDULER}
+CLUSTER_NAME="{{ cluster_name }}"
+CLUSTER_OWNER="{{ cluster_owner }}"
+SCHEDULER="{{ scheduler }}"
+PERF_DIR=~/hpc-benchmark/${CLUSTER_NAME}/${CLUSTER_OWNER}/${SCHEDULER}
 
 cd "$PERF_DIR" || exit 1
 module load openmpi    # or: module load intelmpi

@@ -18,10 +18,10 @@ tools/
 vars_files/
 active_clusters/
 cluster_data/
-performance/bin/
-performance/benchmark_results/
-performance/csv/
-performance/logs/
-performance/summary/
+hpc-benchmark/bin/
+hpc-benchmark/benchmark_results/
+hpc-benchmark/csv/
+hpc-benchmark/logs/
+hpc-benchmark/summary/
 CLAUDE-STATE.md
 tests/integration/itest_defaults.yml

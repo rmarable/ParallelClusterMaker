@@ -311,21 +311,17 @@
             mode: "0755"
           with_items:
             - hpc-benchmark.sh
-        - name: Copy performance scripts/ directory to stage_dir
-          ansible.builtin.copy:
-            src: "{{ performance_rootdir }}/scripts"
-            dest: "{{ performance_stage_dir }}/"
-            remote_src: true
-        - name: Copy the ParallelClusterMaker performance toolkit documentation to stage_dir
-          ansible.builtin.copy:
-            src: "{{ item }}"
-            dest: "{{ performance_stage_dir }}/{{ item | basename }}"
-            remote_src: true
-          with_fileglob:
-            - "{{ performance_rootdir }}/README*.*"
+        - name: Render personalised cluster scripts to stage_dir
+          ansible.builtin.template:
+            src: "{{ performance_rootdir }}/{{ item.src }}"
+            dest: "{{ performance_stage_dir }}/{{ item.dest }}"
+            mode: "0755"
+          with_items:
+            - {src: "job_hpc-benchmark.sh.j2", dest: "job_hpc-benchmark.sh"}
+            - {src: "README-PERFORMANCE.md.j2", dest: "README-PERFORMANCE.md"}
         - name: Upload performance source tree to S3 for head node self-repair
           command: >
-            aws s3 sync "{{ performance_rootdir }}/" "s3://{{ s3_bucketname }}/performance/"
+            aws s3 sync "{{ performance_rootdir }}/" "s3://{{ s3_bucketname }}/hpc-benchmark/"
             --exclude "*.pyc"
             --exclude "__pycache__/*"
             --exclude "summary/*"

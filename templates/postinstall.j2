@@ -196,10 +196,11 @@ HeadNode)
 
 	# Deploy performance toolkit from S3 and install Python plotting dependencies.
 
-	aws s3 sync "s3://{{ s3_bucketname }}/performance/" "{{ ec2_user_home }}/performance/" \
+	aws s3 sync "s3://{{ s3_bucketname }}/hpc-benchmark/" "{{ ec2_user_home }}/hpc-benchmark/" \
 		--exclude "*.pyc" --exclude "__pycache__/*" \
 		--exclude "summary/*" --exclude "summary_final/*" --exclude "plots/*"
-	chmod +x "{{ ec2_user_home }}/performance/hpc-benchmark.sh" || true
+	chmod +x "{{ ec2_user_home }}/hpc-benchmark/hpc-benchmark.sh" \
+		"{{ ec2_user_home }}/hpc-benchmark/job_hpc-benchmark.sh" || true
 {% if 'ubuntu' in base_os %}
 	pip3 install --quiet --break-system-packages matplotlib numpy pandas scipy seaborn
 {% else %}

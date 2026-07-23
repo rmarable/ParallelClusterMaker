@@ -356,7 +356,7 @@ sbatch /fsx/scratch/my_project/sbatch_default_submission_script.sh
 
 ### HPC Benchmarks
 
-Enable with `--enable_hpc_benchmarks=true`.  Deploys the benchmark suite to the cluster head node at `~/performance/` and installs Python plotting dependencies (`matplotlib`, `numpy`, `pandas`, `scipy`, `seaborn`) automatically via postinstall.
+Enable with `--enable_hpc_benchmarks=true`.  Deploys the benchmark suite to the cluster head node at `~/hpc-benchmark/` and installs Python plotting dependencies (`matplotlib`, `numpy`, `pandas`, `scipy`, `seaborn`) automatically via postinstall.
 
 **These commands run on the cluster head node** (SSH in via `./access_cluster.py` first):
 
@@ -368,9 +368,9 @@ module load openmpi
 ./hpc-benchmark.sh report
 ```
 
-**Results are preserved on teardown.** When `kill_pcluster.py` runs, benchmark results are automatically synced from the head node to `s3://<cluster-bucket>/performance-results/<cluster_name>/<cluster_serial_number>/` before the cluster is deleted.  Results from multiple runs of the same cluster name are kept in separate serial-number subdirectories.
+**Results are preserved on teardown.** When `kill_pcluster.py` runs, benchmark results are automatically synced from the head node to `s3://<cluster-bucket>/hpc-benchmark-results/<cluster_name>/<cluster_serial_number>/` before the cluster is deleted.  Results from multiple runs of the same cluster name are kept in separate serial-number subdirectories.
 
-See `performance/README-PERFORMANCE.md` for full documentation.
+See `hpc-benchmark/README-PERFORMANCE.md` for full documentation.
 
 ---
 
@@ -508,7 +508,7 @@ ParallelClusterMaker does **not** create or modify VPCs, subnets, gateways, rout
 ```
 make test       # pytest — template rendering + unit tests
 make lint       # ansible-lint on src/create_pcluster.yml and src/delete_pcluster.yml
-make shellcheck # shellcheck on performance/hpc-benchmark.sh
+make shellcheck # shellcheck on hpc-benchmark/hpc-benchmark.sh
 ```
 
 CI runs all three automatically on every push and pull request.

@@ -97,7 +97,7 @@ def cluster_params():
         "ebs_shared_volume_iops": 3000,
         "ebs_shared_volume_throughput": 125,
         "ebs_encryption": "false",
-        "ebs_performance_dir": "/shared/performance/test-cluster/testuser/slurm",
+        "ebs_performance_dir": "/shared/hpc-benchmark/test-cluster/testuser/slurm",
         # EFS (enabled so guarded block is rendered)
         "enable_efs": "true",
         "efs_root": "/efs",
@@ -105,13 +105,13 @@ def cluster_params():
         "efs_performance_mode": "generalPurpose",
         "efs_throughput_mode": "bursting",
         "efs_pkg_dir": "/efs/pkg",
-        "efs_hpc_performance_dir": "/efs/performance/test-cluster/testuser/slurm",
+        "efs_hpc_performance_dir": "/efs/hpc-benchmark/test-cluster/testuser/slurm",
         # FSx (enabled so guarded block is rendered)
         "enable_fsx": "true",
         "fsx_root": "/fsx",
         "fsx_size": 1200,
         "fsx_pkg_dir": "/fsx/pkg",
-        "fsx_hpc_performance_dir": "/fsx/performance/test-cluster/testuser/slurm",
+        "fsx_hpc_performance_dir": "/fsx/hpc-benchmark/test-cluster/testuser/slurm",
         "enable_fsx_hydration": "true",
         "fsx_chunk_size": 1024,
         "fsx_hydration_iam_policy": "pclustermaker-fsx-s3-policy-test-cluster-00001220260720",
@@ -125,7 +125,7 @@ def cluster_params():
         "external_nfs_server_root": "/nfs",
         "external_nfs_mount_list_template_dest": "external_nfs_mount_list.test-cluster.conf",
         "external_nfs_pkg_dir": "/nfs/pkg",
-        "external_nfs_hpc_performance_dir": "/nfs/performance/test-cluster/testuser/slurm",
+        "external_nfs_hpc_performance_dir": "/nfs/hpc-benchmark/test-cluster/testuser/slurm",
         # Scripts
         "pre_install_script": "templates/preinstall.j2",
         "post_install_script": "templates/postinstall.j2",
@@ -146,9 +146,9 @@ def cluster_params():
         "grafana_tunnel_src": "/home/testuser/ParallelClusterMaker/templates/grafana_tunnel.j2",
         "grafana_tunnel_dest": "/tmp/_ParallelClusterMaker_stage/test-cluster-00001220260720/grafana_tunnel.test-cluster.sh",
         # Performance paths
-        "performance_rootdir": "/home/testuser/ParallelClusterMaker/performance",
-        "performance_stage_dir": "/tmp/_ParallelClusterMaker_stage/test-cluster-00001220260720/performance/slurm",
-        "performance_template_dir": "/home/testuser/ParallelClusterMaker/performance/jinja2",
+        "performance_rootdir": "/home/testuser/ParallelClusterMaker/hpc-benchmark",
+        "performance_stage_dir": "/tmp/_ParallelClusterMaker_stage/test-cluster-00001220260720/hpc-benchmark/slurm",
+        "performance_template_dir": "/home/testuser/ParallelClusterMaker/hpc-benchmark/jinja2",
         # Performance
         "sid": "slurm-test-cluster",
         # Ansible registered vars (used by sns/access templates)
@@ -219,5 +219,29 @@ def cluster_params_gpu_gdr_enabled(cluster_params):
         "compute_instance_type": "p4d.24xlarge",
         "base_os": "ubuntu2404",
         "pcluster_os": "ubuntu2404",
+    }
+    return {**cluster_params, **overrides}
+
+
+@pytest.fixture
+def cluster_params_hpc_benchmarks_disabled(cluster_params):
+    """cluster_params variant with enable_hpc_benchmarks=false.
+
+    Verifies that the benchmark sync block is absent from postinstall
+    when the feature flag is off.
+    """
+    return {**cluster_params, "enable_hpc_benchmarks": "false"}
+
+
+@pytest.fixture
+def cluster_params_efa_enabled(cluster_params):
+    """cluster_params variant with enable_efa=true (c5n instance).
+
+    Verifies the Efa: block appears in config.pcluster.j2.
+    """
+    overrides = {
+        "enable_efa": "true",
+        "enable_efa_gdr": "false",
+        "compute_instance_type": "c5n.18xlarge",
     }
     return {**cluster_params, **overrides}

@@ -104,6 +104,73 @@ def test_template_renders_monitoring_enabled_variant(
         assert "monitoring_version_checksum:" in rendered
     if fname == "config.pcluster.j2":
         assert "monitoring" in rendered.lower(), "monitoring block absent from config"
+    if fname == "monitoring-post-install-wrapper.j2":
+        assert "monitoring" in rendered.lower(), "monitoring block absent from wrapper"
+
+
+@pytest.mark.parametrize("tdir,fname", _collect_templates())
+def test_template_renders_hpc_benchmarks_enabled(tdir, fname, cluster_params):
+    """postinstall must contain the benchmark sync block when enable_hpc_benchmarks=true."""
+    env = _make_env(tdir)
+    rendered = env.get_template(fname).render(**cluster_params)
+    assert isinstance(rendered, str)
+    if fname == "postinstall.j2":
+        assert "hpc-benchmark/" in rendered, "hpc-benchmark S3 sync block absent"
+        assert "hpc-benchmark.sh" in rendered, "hpc-benchmark.sh chmod absent"
+        assert "job_hpc-benchmark.sh" in rendered, "job_hpc-benchmark.sh chmod absent"
+
+
+@pytest.mark.parametrize("tdir,fname", _collect_templates())
+def test_template_renders_hpc_benchmarks_disabled(tdir, fname, cluster_params_hpc_benchmarks_disabled):
+    """postinstall must NOT contain the benchmark block when enable_hpc_benchmarks=false."""
+    env = _make_env(tdir)
+    rendered = env.get_template(fname).render(**cluster_params_hpc_benchmarks_disabled)
+    assert isinstance(rendered, str)
+    if fname == "postinstall.j2":
+        assert "aws s3 sync" not in rendered, \
+            "hpc-benchmark S3 sync command present when enable_hpc_benchmarks=false"
+
+
+@pytest.mark.parametrize("tdir,fname", _collect_templates())
+def test_template_renders_efa_enabled(tdir, fname, cluster_params_efa_enabled):
+    """config.pcluster.j2 must contain the Efa block when enable_efa=true."""
+    env = _make_env(tdir)
+    rendered = env.get_template(fname).render(**cluster_params_efa_enabled)
+    assert isinstance(rendered, str)
+    if fname == "config.pcluster.j2":
+        assert "Efa:" in rendered, "Efa block absent when enable_efa=true"
+
+
+@pytest.mark.parametrize("tdir,fname", _collect_templates())
+def test_template_renders_efs_enabled(tdir, fname, cluster_params):
+    """config.pcluster.j2 must contain the EFS SharedStorage block when enable_efs=true."""
+    env = _make_env(tdir)
+    rendered = env.get_template(fname).render(**cluster_params)
+    assert isinstance(rendered, str)
+    if fname == "config.pcluster.j2":
+        assert "StorageType: Efs" in rendered, \
+            "EFS SharedStorage block absent when enable_efs=true"
+
+
+@pytest.mark.parametrize("tdir,fname", _collect_templates())
+def test_template_renders_fsx_enabled(tdir, fname, cluster_params):
+    """config.pcluster.j2 must contain the FSx SharedStorage block when enable_fsx=true."""
+    env = _make_env(tdir)
+    rendered = env.get_template(fname).render(**cluster_params)
+    assert isinstance(rendered, str)
+    if fname == "config.pcluster.j2":
+        assert "FsxLustre" in rendered or "LustreFileSystemId" in rendered, \
+            "FSx SharedStorage block absent when enable_fsx=true"
+
+
+@pytest.mark.parametrize("tdir,fname", _collect_templates())
+def test_template_renders_spot_cluster(tdir, fname, cluster_params):
+    """vars_file.j2 must contain spot_price when cluster_type=spot."""
+    env = _make_env(tdir)
+    rendered = env.get_template(fname).render(**cluster_params)
+    assert isinstance(rendered, str)
+    if fname == "vars_file.j2":
+        assert "spot_price:" in rendered, "spot_price absent when cluster_type=spot"
 
 
 @pytest.mark.parametrize("tdir,fname", _collect_templates())

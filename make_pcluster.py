@@ -1796,10 +1796,11 @@ def main():
     if enable_hpc_benchmarks and _head_ip:
         print("")
         print("  HPC benchmarks (run these commands on the head node):")
-        print(f"    cd ~/performance/{cluster_name}/{cluster_owner}/{scheduler}")
+        print(f"    cd ~/hpc-benchmark/{cluster_name}/{cluster_owner}/{scheduler}")
+        print(f"    ./hpc-benchmark.sh install")
         print(f"    ./hpc-benchmark.sh run --tests stream,osu,ior,hpcg")
         print(f"    Note: multi-node tests require a Slurm allocation (srun/sbatch)")
-        print(f"    Results sync to s3://{s3_bucketname}/performance-results/{cluster_name}/ on teardown")
+        print(f"    Results sync to s3://{s3_bucketname}/hpc-benchmark-results/{cluster_name}/ on teardown")
     print("")
     print("  Delete this cluster:")
     print(f"    ./kill_pcluster.py -N {cluster_name} -O {cluster_owner} -A {az}")

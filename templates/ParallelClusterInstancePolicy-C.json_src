@@ -10,6 +10,14 @@
             "Resource": "*"
         },
         {
+            "Sid": "CloudWatchMetrics",
+            "Action": [
+                "cloudwatch:PutMetricData"
+            ],
+            "Effect": "Allow",
+            "Resource": "*"
+        },
+        {
             "Sid": "IAMRolePolicy",
             "Action": [
                 "iam:PutRolePolicy",

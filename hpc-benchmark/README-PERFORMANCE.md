@@ -9,11 +9,11 @@ Standards-based HPC benchmarks deployed to the cluster head node by
 
 When `enable_hpc_benchmarks=true`, `create_pcluster.yml`:
 
-1. Stages cluster-specific scripts (rendered Jinja2 templates) to a local `stage_dir/` tree, then SCP-deploys to `~/performance/<cluster_name>/<cluster_owner>/slurm/` on the head node
-2. Uploads the full performance source tree to `s3://<cluster-bucket>/performance/` so postinstall can self-repair on head node rebuild (S3 → `~/performance/` via `aws s3 sync`)
+1. Stages cluster-specific scripts (rendered Jinja2 templates) to a local `stage_dir/` tree, then SCP-deploys to `~/hpc-benchmark/<cluster_name>/<cluster_owner>/slurm/` on the head node
+2. Uploads the full performance source tree to `s3://<cluster-bucket>/hpc-benchmark/` so postinstall can self-repair on head node rebuild (S3 → `~/hpc-benchmark/` via `aws s3 sync`)
 3. Postinstall installs `matplotlib numpy pandas scipy seaborn` via `pip3` on every head node bootstrap
 
-On teardown, `delete_pcluster.yml` syncs results from `~/performance/<cluster_name>/` to `s3://<cluster-bucket>/performance-results/<cluster_name>/<cluster_serial_number>/` before destroying the cluster.  Each serial number gets its own subdirectory so rebuilds of the same cluster name accumulate rather than overwrite.
+On teardown, `delete_pcluster.yml` syncs results from `~/hpc-benchmark/<cluster_name>/` to `s3://<cluster-bucket>/hpc-benchmark-results/<cluster_name>/<cluster_serial_number>/` before destroying the cluster.  Each serial number gets its own subdirectory so rebuilds of the same cluster name accumulate rather than overwrite.
 
 ---
 
@@ -92,7 +92,7 @@ Use this for multi-node OSU collective, IOR, and HPCG runs during development or
 ```bash
 # Request 4 nodes with 4 ranks each, then run benchmarks
 srun --nodes=4 --ntasks-per-node=4 --pty bash
-cd ~/performance/<cluster_name>/<cluster_owner>/slurm
+cd ~/hpc-benchmark/<cluster_name>/<cluster_owner>/slurm
 ./hpc-benchmark.sh run --tests osu,ior,hpcg --nodes 4 --ppn 4
 ```
 
@@ -104,14 +104,14 @@ Use this for long-running or production benchmark runs. The job is queued by Slu
 
 ```bash
 sbatch --nodes=4 --ntasks-per-node=4 --wrap \
-  "cd ~/performance/<cluster_name>/<cluster_owner>/slurm && \
+  "cd ~/hpc-benchmark/<cluster_name>/<cluster_owner>/slurm && \
    ./hpc-benchmark.sh run --tests stream,osu,ior,hpcg --nodes 4 --ppn 4"
 ```
 
-A ready-to-use job script is included at `performance/hpc-benchmark-job.sh`. Edit `CLUSTER_NAME`, `CLUSTER_OWNER`, and the `#SBATCH` directives at the top, then submit:
+A ready-to-use job script is included at `job_hpc-benchmark.sh`. Edit `CLUSTER_NAME`, `CLUSTER_OWNER`, and the `#SBATCH` directives at the top, then submit:
 
 ```bash
-sbatch hpc-benchmark-job.sh
+sbatch job_hpc-benchmark.sh
 ```
 
 Monitor with `squeue` and retrieve results with `./hpc-benchmark.sh report`.
@@ -171,19 +171,10 @@ it exercises sparse, memory-bound operations. Runs under 1800 s are marked
 
 ## File inventory
 
-### Top-level (entry points)
-
 | File | Purpose |
 |---|---|
 | `hpc-benchmark.sh` | Dispatcher: `install`, `run`, `report` |
-
-### `scripts/` (implementation)
-
-No helper scripts remain — `hpc-benchmark.sh` is self-contained and manages its own build and results directories.
-
-### `jinja2/` (cluster-specific templates)
-
-No Jinja2 templates remain for the benchmark suite.
+| `job_hpc-benchmark.sh` | Ready-to-use Slurm batch script |
 
 ---
 

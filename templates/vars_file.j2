@@ -162,16 +162,16 @@ enable_hpc_benchmarks: "{{ enable_hpc_benchmarks }}"
 
 # HPC performance test directories
 
-headnode_performance_dir_dest: "{{ ec2_user_home }}/performance/{{ cluster_name }}/{{ cluster_owner }}/{{ scheduler }}"
-performance_rootdir: "{{ local_workingdir }}/performance"
-performance_stage_dir: "{{ stage_dir }}/performance/{{ scheduler }}"
-performance_template_dir: "{{ local_workingdir }}/performance/jinja2"
+headnode_performance_dir_dest: "{{ ec2_user_home }}/hpc-benchmark/{{ cluster_name }}/{{ cluster_owner }}/{{ scheduler }}"
+performance_rootdir: "{{ local_workingdir }}/hpc-benchmark"
+performance_stage_dir: "{{ stage_dir }}/hpc-benchmark/{{ scheduler }}"
+performance_template_dir: "{{ local_workingdir }}/hpc-benchmark/jinja2"
 
 # EBS mount definitions
 
 ebs_root: /shared
 ebs_encryption: "{{ ebs_encryption }}"
-ebs_performance_dir: "{{ ebs_root }}/performance/{{ cluster_name }}/{{ cluster_owner }}/{{ scheduler }}"
+ebs_performance_dir: "{{ ebs_root }}/hpc-benchmark/{{ cluster_name }}/{{ cluster_owner }}/{{ scheduler }}"
 ebs_shared_dir: "{{ ebs_shared_dir }}"
 ebs_shared_volume_size: {{ ebs_shared_volume_size }}
 ebs_shared_volume_type: "{{ ebs_shared_volume_type }}"
@@ -186,7 +186,7 @@ enable_fsx: "{{ enable_fsx }}"
 # EFS definitions
 
 efs_root: /efs
-efs_hpc_performance_dir: "{{ efs_root }}/performance/{{ cluster_name }}/{{ cluster_owner }}/{{ scheduler }}"
+efs_hpc_performance_dir: "{{ efs_root }}/hpc-benchmark/{{ cluster_name }}/{{ cluster_owner }}/{{ scheduler }}"
 efs_pkg_dir: "{{ efs_root }}/pkg"
 efs_encryption: "{{ efs_encryption }}"
 efs_performance_mode: "{{ efs_performance_mode }}"
@@ -202,7 +202,7 @@ external_nfs_mount_list_template_orig: "{{ cluster_template_dir }}/external_nfs_
 external_nfs_mount_list_template_src: "{{ cluster_data_dir }}/external_nfs_mount_list.{{ cluster_name }}.conf"
 external_nfs_mount_list_template_dest: "external_nfs_mount_list.{{ cluster_name }}.conf"
 external_nfs_pkg_dir: "/nfs/pkg"
-external_nfs_hpc_performance_dir: "/nfs/performance/{{ cluster_name }}/{{ cluster_owner }}/{{ scheduler }}"
+external_nfs_hpc_performance_dir: "/nfs/hpc-benchmark/{{ cluster_name }}/{{ cluster_owner }}/{{ scheduler }}"
 {% endif %}
 
 {% if enable_fsx == 'true' %}
@@ -210,7 +210,7 @@ external_nfs_hpc_performance_dir: "/nfs/performance/{{ cluster_name }}/{{ cluste
 
 fsx_root: /fsx
 fsx_size: {{ fsx_size }}
-fsx_hpc_performance_dir: "{{ fsx_root }}/performance/{{ cluster_name }}/{{ cluster_owner }}/{{ scheduler }}"
+fsx_hpc_performance_dir: "{{ fsx_root }}/hpc-benchmark/{{ cluster_name }}/{{ cluster_owner }}/{{ scheduler }}"
 fsx_pkg_dir: "{{ fsx_root }}/pkg"
 enable_fsx_hydration: "{{ enable_fsx_hydration }}"
 {% if enable_fsx_hydration == 'true' %}
@@ -225,7 +225,7 @@ fsx_s3_export_path: "{{ fsx_s3_export_path }}"
 
 # Vanilla shared EBS HPC performance definitions
 
-ebs_hpc_performance_dir: "{{ ebs_shared_dir }}/performance/{{ cluster_name }}/{{ cluster_owner }}/{{ scheduler }}"
+ebs_hpc_performance_dir: "{{ ebs_shared_dir }}/hpc-benchmark/{{ cluster_name }}/{{ cluster_owner }}/{{ scheduler }}"
 
 # Spack configuration
 

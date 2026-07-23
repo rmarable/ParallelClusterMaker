@@ -58,8 +58,8 @@
           command: >
             ssh -o BatchMode=yes -o ConnectTimeout=30 -o StrictHostKeyChecking=accept-new
             -i "{{ ssh_keypair }}" "{{ ec2_user }}@{{ _head_node_ip }}"
-            aws s3 sync "{{ ec2_user_home }}/performance/{{ cluster_name }}/"
-            "s3://{{ s3_bucketname }}/performance-results/{{ cluster_name }}/{{ cluster_serial_number }}/"
+            aws s3 sync "{{ ec2_user_home }}/hpc-benchmark/{{ cluster_name }}/"
+            "s3://{{ s3_bucketname }}/hpc-benchmark-results/{{ cluster_name }}/{{ cluster_serial_number }}/"
             --exclude "*.pyc" --exclude "__pycache__/*"
             --region "{{ region }}"
           when: _head_node_ip is defined and _head_node_ip != ''
@@ -70,7 +70,7 @@
             msg:
               - "WARNING: Could not sync performance results to S3 (rc={{ _perf_sync.rc | default(-1) }})."
               - "Head node may be unreachable, IAM policies may be missing, or S3 bucket may not exist."
-              - "Results under {{ ec2_user_home }}/performance/{{ cluster_name }}/ on the head node may be lost."
+              - "Results under {{ ec2_user_home }}/hpc-benchmark/{{ cluster_name }}/ on the head node may be lost."
               - "Proceeding with cluster deletion."
           when: _perf_sync is defined and (_perf_sync.rc is not defined or _perf_sync.rc != 0)
       rescue:
