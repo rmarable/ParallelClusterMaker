@@ -653,7 +653,7 @@ def _validate_network(
         print(f"  Fix: set vpc_name in your defaults file to the Name tag of")
         print(f"       an existing VPC, then re-run.")
         _hint = f"{cluster_name}_defaults.yml" if cluster_name else "<cluster_name>_defaults.yml"
-        print(f'  Hint: you probably forgot to add "--use_defaults={_hint}"')
+        print(f"  Hint: you probably forgot to add --use_defaults={_hint}")
         print("")
         sys.exit(1)
     vpc_id = vpc_ids[0]
