@@ -296,6 +296,10 @@ cmd_run() {
     ts=$(_timestamp)
     mkdir -p "$results_dir/$ts"
 
+    # Record the invocation so report can display it later.
+    echo "./hpc-benchmark.sh run --tests $tests --nodes $nodes --ppn $ppn --hpcg-time $hpcg_time --ior-size $ior_size --results-dir $results_dir" \
+        > "$results_dir/$ts/cmd.txt"
+
     echo ""
     echo "================================================================================"
     echo "  hpc-benchmark.sh run"
@@ -438,6 +442,12 @@ cmd_report() {
     echo "  hpc-benchmark.sh report"
     echo "  Results from: $results_dir"
     echo "================================================================================"
+
+    if [[ -f "$results_dir/cmd.txt" ]]; then
+        echo ""
+        echo "--- Command ---"
+        echo "  $(cat "$results_dir/cmd.txt")"
+    fi
 
     # ---- STREAM ----
     if [[ -f "$results_dir/stream.txt" ]]; then
