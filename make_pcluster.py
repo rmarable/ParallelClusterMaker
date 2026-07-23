@@ -579,7 +579,7 @@ def main():
         "cluster_owner_department": "hpc",
         "cluster_type": "spot",
         "compute_instance_type": "c8g.2xlarge",
-        "compute_root_volume_size": 100,
+        "compute_root_volume_size": 250,
         "compute_root_volume_type": "gp3",
         "compute_root_volume_iops": 3000,
         "compute_root_volume_throughput": 125,

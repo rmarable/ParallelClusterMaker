@@ -21,7 +21,7 @@ headnode_root_volume_size: 100        # GB
 headnode_root_volume_type: gp3        # gp2 | gp3 | io1 | io2 | st1
 headnode_root_volume_iops: 3000
 headnode_root_volume_throughput: 125  # MB/s
-compute_root_volume_size: 100         # GB
+compute_root_volume_size: 250         # GB
 compute_root_volume_type: gp3         # gp2 | gp3 | io1 | io2 | st1
 compute_root_volume_iops: 3000
 compute_root_volume_throughput: 125   # MB/s
