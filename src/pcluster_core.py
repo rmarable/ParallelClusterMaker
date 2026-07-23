@@ -624,6 +624,7 @@ def _validate_network(
     compute_az_list,
     compute_subnet_ids_override,
     use_private_compute_subnet,
+    cluster_name="",
 ):
     """Return (vpc_id, headnode_subnet_id, compute_subnet_ids, vpc_cidr).
 
@@ -651,6 +652,8 @@ def _validate_network(
         print(f'  No VPC named "{vpc_name}" exists in this account and region.')
         print(f"  Fix: set vpc_name in your defaults file to the Name tag of")
         print(f"       an existing VPC, then re-run.")
+        _hint = f"{cluster_name}_defaults.yml" if cluster_name else "<cluster_name>_defaults.yml"
+        print(f'  Hint: you probably forgot to add "--use_defaults={_hint}"')
         print("")
         sys.exit(1)
     vpc_id = vpc_ids[0]

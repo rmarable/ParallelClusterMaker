@@ -872,6 +872,7 @@ def main():
             compute_az_list,
             compute_subnet_ids_override,
             use_private_compute_subnet,
+            cluster_name,
         )
         _fut_account = _pool.submit(_get_account_id)
         _fut_describe = _pool.submit(_check_cluster_exists)
