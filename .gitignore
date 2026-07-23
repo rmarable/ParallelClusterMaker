@@ -18,6 +18,8 @@ tools/
 vars_files/
 active_clusters/
 cluster_data/
+performance/bin/
+performance/benchmark_results/
 performance/csv/
 performance/logs/
 performance/summary/
