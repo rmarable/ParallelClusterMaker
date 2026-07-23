@@ -21,7 +21,7 @@ src/create_pcluster.yml   # Ansible playbook — cluster build
 src/delete_pcluster.yml   # Ansible playbook — cluster teardown
 templates/                # Jinja2 templates (config, vars file, install scripts, IAM)
 hpc-benchmark/            # HPC benchmark suite and performance analysis scripts
-tests/                    # pytest suite (320 tests as of last run)
+tests/                    # pytest suite (398 tests as of last run)
 ```
 
 ## Constraints
@@ -54,7 +54,7 @@ tests/                    # pytest suite (320 tests as of last run)
 **Always use the project venv.** Never invoke `python`, `pytest`, or any project tool with the system Python. Use `.venv/bin/python` explicitly, or activate the venv first (`source .venv/bin/activate`). The system Python on this machine is 3.14, which is incompatible with `aws-parallelcluster` and lacks `botocore`.
 
 ```
-.venv/bin/python -m pytest tests/ -q   # must stay green (320 tests)
+.venv/bin/python -m pytest tests/ -q   # must stay green (398 tests)
 make lint                               # ansible-lint — exits 0, passes production profile
 make shellcheck                         # shellcheck on hpc-benchmark/hpc-benchmark.sh
 ```

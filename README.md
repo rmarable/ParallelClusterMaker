@@ -361,7 +361,7 @@ Enable with `--enable_hpc_benchmarks=true`.  Deploys the benchmark suite to the 
 **These commands run on the cluster head node** (SSH in via `./access_cluster.py` first):
 
 ```bash
-cd ~/performance
+cd ~/hpc-benchmark
 module load openmpi
 ./hpc-benchmark.sh install                              # build STREAM, OSU, IOR, HPCG (~5 min)
 ./hpc-benchmark.sh run --tests stream,osu,ior,hpcg
