@@ -1795,7 +1795,7 @@ def main():
         print("      --with-decryption --query Parameter.Value --output text")
     if enable_hpc_benchmarks and _head_ip:
         print("")
-        print("  HPC benchmarks (on head node):")
+        print("  HPC benchmarks (run these commands on the head node):")
         print(f"    cd ~/performance && ./hpc-benchmark.sh run --tests stream,osu,ior,hpcg")
         print(f"    Results sync to s3://{s3_bucketname}/performance-results/{cluster_name}/ on teardown")
     print("")
