@@ -1,0 +1,134 @@
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Sid": "IAMListGlobal",
+            "Action": [
+                "iam:ListGroups",
+                "iam:ListRoles",
+                "iam:ListUsers"
+            ],
+            "Effect": "Allow",
+            "Resource": [
+                "arn:aws:iam::<AWS_ACCOUNT_ID>:group/*",
+                "arn:aws:iam::<AWS_ACCOUNT_ID>:role/*",
+                "arn:aws:iam::<AWS_ACCOUNT_ID>:user/*"
+            ]
+        },
+        {
+            "Sid": "IAMCreateRole",
+            "Action": [
+                "iam:CreateRole"
+            ],
+            "Effect": "Allow",
+            "Resource": [
+                "arn:aws:iam::<AWS_ACCOUNT_ID>:role/parallelcluster-<CLUSTER_NAME>-*",
+                "arn:aws:iam::<AWS_ACCOUNT_ID>:role/parallelcluster/<CLUSTER_NAME>/*",
+                "arn:aws:iam::<AWS_ACCOUNT_ID>:role/pclustermaker-role-<CLUSTER_SERIAL_NUMBER>"
+            ]
+        },
+        {
+            "Sid": "IAMRoleRead",
+            "Action": [
+                "iam:GetRole",
+                "iam:DeleteRole",
+                "iam:ListInstanceProfilesForRole",
+                "iam:TagRole",
+                "iam:TagInstanceProfile",
+                "iam:GetPolicy",
+                "iam:GetPolicyVersion"
+            ],
+            "Effect": "Allow",
+            "Resource": [
+                "arn:aws:iam::<AWS_ACCOUNT_ID>:role/parallelcluster-<CLUSTER_NAME>-*",
+                "arn:aws:iam::<AWS_ACCOUNT_ID>:role/parallelcluster/<CLUSTER_NAME>/*",
+                "arn:aws:iam::<AWS_ACCOUNT_ID>:role/pclustermaker-role-<CLUSTER_SERIAL_NUMBER>"
+            ]
+        },
+        {
+            "Sid": "IAMPassRole",
+            "Action": [
+                "iam:PassRole"
+            ],
+            "Effect": "Allow",
+            "Resource": [
+                "arn:aws:iam::<AWS_ACCOUNT_ID>:role/parallelcluster-<CLUSTER_NAME>-*",
+                "arn:aws:iam::<AWS_ACCOUNT_ID>:role/parallelcluster/<CLUSTER_NAME>/*",
+                "arn:aws:iam::<AWS_ACCOUNT_ID>:role/pclustermaker-role-<CLUSTER_SERIAL_NUMBER>"
+            ],
+            "Condition": {
+                "StringEquals": {
+                    "iam:PassedToService": [
+                        "ec2.amazonaws.com",
+                        "lambda.amazonaws.com"
+                    ]
+                }
+            }
+        },
+        {
+            "Sid": "IAMAttachDetachPolicy",
+            "Action": [
+                "iam:AttachRolePolicy",
+                "iam:DetachRolePolicy"
+            ],
+            "Effect": "Allow",
+            "Resource": [
+                "arn:aws:iam::<AWS_ACCOUNT_ID>:role/parallelcluster-<CLUSTER_NAME>-*",
+                "arn:aws:iam::<AWS_ACCOUNT_ID>:role/parallelcluster/<CLUSTER_NAME>/*",
+                "arn:aws:iam::<AWS_ACCOUNT_ID>:role/pclustermaker-role-<CLUSTER_SERIAL_NUMBER>"
+            ],
+            "Condition": {
+                "StringLike": {
+                    "iam:PolicyARN": "arn:aws:iam::<AWS_ACCOUNT_ID>:policy/pclustermaker-policy-<CLUSTER_SERIAL_NUMBER>-*"
+                }
+            }
+        },
+        {
+            "Sid": "IAMInstanceProfile",
+            "Action": [
+                "iam:CreateInstanceProfile",
+                "iam:DeleteInstanceProfile",
+                "iam:GetInstanceProfile",
+                "iam:AddRoleToInstanceProfile",
+                "iam:RemoveRoleFromInstanceProfile",
+                "iam:ListInstanceProfiles"
+            ],
+            "Effect": "Allow",
+            "Resource": [
+                "arn:aws:iam::<AWS_ACCOUNT_ID>:instance-profile/parallelcluster-<CLUSTER_NAME>-*",
+                "arn:aws:iam::<AWS_ACCOUNT_ID>:instance-profile/parallelcluster/<CLUSTER_NAME>/*",
+                "arn:aws:iam::<AWS_ACCOUNT_ID>:instance-profile/pclustermaker-role-<CLUSTER_SERIAL_NUMBER>"
+            ]
+        },
+        {
+            "Sid": "IAMRolePolicy",
+            "Action": [
+                "iam:GetRolePolicy",
+                "iam:DeleteRolePolicy",
+                "iam:ListRolePolicies"
+            ],
+            "Effect": "Allow",
+            "Resource": [
+                "arn:aws:iam::<AWS_ACCOUNT_ID>:role/parallelcluster-<CLUSTER_NAME>-*",
+                "arn:aws:iam::<AWS_ACCOUNT_ID>:role/parallelcluster/<CLUSTER_NAME>/*"
+            ]
+        },
+        {
+            "Sid": "IAMPassRoleInstanceProfile",
+            "Action": [
+                "iam:PassRole"
+            ],
+            "Effect": "Allow",
+            "Resource": [
+                "arn:aws:iam::<AWS_ACCOUNT_ID>:instance-profile/parallelcluster-<CLUSTER_NAME>-*",
+                "arn:aws:iam::<AWS_ACCOUNT_ID>:instance-profile/parallelcluster/<CLUSTER_NAME>/*",
+                "arn:aws:iam::<AWS_ACCOUNT_ID>:instance-profile/pclustermaker-role-<CLUSTER_SERIAL_NUMBER>"
+            ],
+            "Condition": {
+                "StringEquals": {
+                    "iam:PassedToService": "ec2.amazonaws.com"
+                }
+            }
+        }
+    ]
+}

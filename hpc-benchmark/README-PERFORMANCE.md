@@ -1,0 +1,392 @@
+# ParallelClusterMaker Performance Toolkit
+
+Standards-based HPC benchmarks deployed to the cluster head node by
+`create_pcluster.yml` when `enable_hpc_benchmarks=true`.
+
+---
+
+## Deployment
+
+When `enable_hpc_benchmarks=true`, `create_pcluster.yml`:
+
+1. Stages cluster-specific scripts (rendered Jinja2 templates) to a local `stage_dir/` tree, then SCP-deploys to `~/hpc-benchmark/<cluster_name>/<cluster_owner>/slurm/` on the head node
+2. Uploads `hpc-benchmark.sh` -- and only that file, via an `--exclude "*" --include` allowlist -- to `s3://<cluster-bucket>/hpc-benchmark/`, so postinstall can restore the driver to `~/hpc-benchmark/` if the head node's EBS root is replaced.  The personalized `<cluster_name>/<cluster_owner>/slurm/` tree from step 1 is *not* on S3 and cannot be restored this way
+3. Postinstall installs `matplotlib numpy pandas scipy seaborn` via `pip3` on every head node bootstrap
+
+On teardown, `delete_pcluster.yml` syncs results from `~/hpc-benchmark/<cluster_name>/` to `s3://parallelclustermaker-results-<account-id>-<region>/hpc-benchmark-results/<cluster_name>/<cluster_serial_number>/` before destroying the cluster.  That bucket is deliberately not the per-cluster bucket, which teardown deletes by default; it is keyed on account and region, nothing in the toolkit ever deletes it, and each serial number gets its own subdirectory — so rebuilds of the same cluster name accumulate rather than overwrite.
+
+---
+
+## Quick start
+
+SSH into the head node first (`./access_cluster.py -N <cluster_name>`), then:
+
+```bash
+cd ~/hpc-benchmark/<cluster_name>/<cluster_owner>/slurm
+module load openmpi    # or intelmpi
+./hpc-benchmark.sh install
+./hpc-benchmark.sh run --tests stream,osu,ior,hpcg
+./hpc-benchmark.sh report
+```
+
+---
+
+## Standards-based benchmarks (`hpc-benchmark.sh`)
+
+Industry-standard tools covering memory bandwidth, MPI communication, parallel I/O,
+and sparse linear algebra.
+
+| Benchmark | Measures |
+|---|---|
+| [STREAM](https://www.cs.virginia.edu/stream/) | Sustainable memory bandwidth — Copy, Scale, Add, Triad |
+| [OSU Micro-Benchmarks](https://mvapich.cse.ohio-state.edu/benchmarks/) | MPI point-to-point latency & bandwidth; allreduce and alltoall |
+| [IOR](https://github.com/hpc/ior) | Parallel filesystem I/O throughput (POSIX, file-per-process) |
+| [HPCG](https://hpcg-benchmark.org/) | Sparse conjugate gradient — more representative of real workloads than HPL |
+
+### Prerequisites
+
+```bash
+# MPI (OpenMPI is available by default on ParallelCluster)
+module load openmpi    # or: module load intelmpi
+
+# Build tools
+sudo apt-get install gcc make wget    # ubuntu2204 | ubuntu2404 | ubuntu2204arm | ubuntu2404arm
+sudo dnf install gcc make wget        # rhel9 | rhel9arm
+```
+
+`install` requires `gcc`, `make`, `sha256sum`, and either `wget` or `curl`, and aborts if any is missing. OSU, IOR, and HPCG additionally need an MPI compiler wrapper on `PATH` — load the module first.
+
+### Step 1 — install (one-time, about a minute)
+
+```bash
+./hpc-benchmark.sh install
+```
+
+Builds STREAM, OSU v7.5.2, IOR v4.0.0, and HPCG v3.1 from source into `./bin/`.
+Each tarball's SHA-256 checksum is verified against a value pinned in the
+script before extraction; a mismatch or download failure aborts the install
+rather than building from a possibly corrupted or tampered source.
+To install a subset:
+
+```bash
+./hpc-benchmark.sh install --tools stream,osu
+```
+
+`install` puts one STREAM binary and a copy of the checksum-verified source in
+`bin/`.  Two things follow from `-march=native`, and the suite handles them
+differently:
+
+- **Different microarchitecture, same architecture** — for example a `c5.xlarge`
+  head node (Intel Skylake) and a `g5.xlarge` GPU node (AMD Zen 3), both
+  `x86_64`.  Handled automatically.  STREAM binaries are named for the
+  microarchitecture `gcc -march=native` resolves to on the node that built them
+  (`bin/stream-skylake-avx512`, `bin/stream-znver3`), so `run` looks for the one
+  matching the node it is on and compiles it from the cached source — a few
+  seconds — if it is missing.  Binaries for every node class accumulate in the
+  shared `bin/`, so the compile happens once per class, not once per job.  You do
+  not need to rebuild anything by hand, and there is no node class on which
+  STREAM silently reports another core's numbers.
+- **Different architecture** (Graviton head node, x86_64 compute nodes, or the
+  reverse): OSU, IOR, and HPCG are built by `configure`/`make` without
+  `-march=native`, and while they are portable across microarchitectures they
+  are not portable across architectures — an x86_64 binary will not load at all
+  on Graviton.  `install` records `uname -m` in `bin/.build_arch` and `run`
+  aborts up front on a mismatch rather than failing inside `mpirun`.  Rebuild
+  those tools inside an allocation on the nodes you plan to measure:
+
+  ```bash
+  srun --nodes=1 --pty bash
+  cd ~/hpc-benchmark/<cluster_name>/<cluster_owner>/slurm
+  ./hpc-benchmark.sh install
+  ```
+
+A `--tests stream` run skips the `.build_arch` check entirely, since STREAM
+builds itself for the node it lands on and does not touch the binaries that
+stamp guards.
+
+On the rare node where `gcc` cannot report its `-march=native` target, `run`
+says so, builds a throwaway binary into that run's results directory rather than
+mislabeling one in the shared `bin/`, and proceeds.
+
+### Step 2 — run the benchmarks
+
+There are three ways to run the benchmark suite depending on how many nodes you need.
+
+#### Standalone (single node, on the head node directly)
+
+Use this for STREAM and single-node OSU latency/bandwidth checks. No Slurm resource allocations are needed.
+
+```bash
+# Full suite, single node
+./hpc-benchmark.sh run --tests stream,osu,ior,hpcg
+
+# Quick memory + MPI check only (~5 min)
+./hpc-benchmark.sh run --tests stream,osu
+```
+
+> **Note:** STREAM always runs single-node regardless of `--nodes`. Running without `--nodes` uses `$SLURM_NTASKS` when one is set, otherwise `nproc` on the current host, and forces `--ppn 1`.
+
+> **OSU needs at least 2 MPI slots.** The latency and bandwidth tests run 2 ranks
+> regardless of `--ppn`, so a 1-slot allocation cannot run them — and Open MPI
+> reports that as "There are not enough slots available in the system to satisfy
+> the 2 slots that were requested" followed by the path of the binary, which
+> reads as a problem with the binary rather than with the allocation. Inside
+> Slurm, ask for the slots up front (`srun --ntasks=2 ...`); on the head node
+> outside any allocation there is no such limit. `run` checks this before it
+> creates a results directory and prints the working command.
+
+#### Interactive multi-node via `srun`
+
+Use this for multi-node OSU collective, IOR, and HPCG runs during development or debugging. Slurm spins up the requested compute nodes and drops you into an interactive shell inside the allocation.
+
+```bash
+# Request 4 nodes with 4 ranks each, then run benchmarks
+srun --nodes=4 --ntasks-per-node=4 --pty bash
+cd ~/hpc-benchmark/<cluster_name>/<cluster_owner>/slurm
+./hpc-benchmark.sh run --tests osu,ior,hpcg --nodes 4 --ppn 4
+```
+
+The shell exits and the allocation is released when you type `exit`.
+
+#### Batch via `sbatch`
+
+Use this for long-running or production benchmark runs. The job is queued by Slurm and runs on compute nodes without an interactive session.
+
+```bash
+sbatch --nodes=4 --ntasks-per-node=4 --wrap \
+  "cd ~/hpc-benchmark/<cluster_name>/<cluster_owner>/slurm && \
+   ./hpc-benchmark.sh run --tests stream,osu,ior,hpcg --nodes 4 --ppn 4"
+```
+
+A job script is included at `job_hpc-benchmark.sh`. `CLUSTER_NAME`, `CLUSTER_OWNER`, and `SCHEDULER` are already filled in for this cluster; it takes `NODES` and `PPN` from `$SLURM_JOB_NUM_NODES` and `$SLURM_NTASKS_PER_NODE`. It ships with `#SBATCH --nodes=2` and runs the full suite. Adjust the `#SBATCH` directives, uncomment one of the alternate `run` lines if needed, then submit:
+
+```bash
+sbatch job_hpc-benchmark.sh
+```
+
+The `#SBATCH --partition=` and `--ntasks-per-node=` directives are rendered from this cluster's queue layout, so the shipped script is submittable as-is:
+
+| Cluster | Partition | `--ntasks-per-node` |
+|---|---|---|
+| CPU queue only | `compute` | 4 |
+| Both queues | `compute` | 4 |
+| GPU queue only | `gpu` | NVIDIA GPU count of the GPU instance types |
+
+A GPU-only cluster has no `compute` partition, so a hardcoded `--partition=compute` would be rejected by `sbatch` with an invalid-partition error before anything ran.
+
+On a cluster with **both** queues the script targets `compute`. To run the same suite on the GPU nodes, override both directives on the command line — the exact command, with this cluster's GPU count already substituted, is in the commented GPU section at the bottom of the script:
+
+```bash
+sbatch --partition=gpu --ntasks-per-node=<gpu_count> job_hpc-benchmark.sh
+```
+
+**A CPU head node can benchmark both partitions.** Nothing in this suite requires the head node to be a GPU instance, and `c5.xlarge` head with a `g5` GPU queue is the layout it is designed around. `install` runs once on the head node; `run` then adapts to whatever node the job lands on — STREAM compiles per microarchitecture, and OSU builds a CUDA-enabled tree on the GPU node if the head node could not. The only configuration this does not cover is a head node and a queue on *different architectures* (x86_64 head, Graviton `g5g` queue), which `make_pcluster.py` rejects at cluster-creation time.
+
+The GPU rank count is the NVIDIA GPU count that `ec2:DescribeInstanceTypes` reports for the queue's instance types, so one MPI rank lands per GPU. Where the queue holds several instance types with different GPU counts, it is the smallest of them — the only value every node in the queue can satisfy. Slurm GRES (`--gres=gpu:N`) is configured by the ParallelCluster cookbook, not by this toolkit, so matching the rank count is what makes the placement correct with or without it. If the GPU instance types report no NVIDIA devices (`g4ad` is AMD), the count falls back to 4 — `--ntasks-per-node=0` is not a valid `sbatch` value — and you should set it to the instance type's vCPU count instead.
+
+Monitor with `squeue` and retrieve results with `./hpc-benchmark.sh report`.
+
+> **Note:** `hpc-benchmark.sh` will refuse to start a multi-node run (`--nodes > 1`) outside a Slurm allocation and print the correct `srun` command to use instead.
+
+Key options:
+
+| Flag | Default | Notes |
+|---|---|---|
+| `--tests` | `stream,osu,ior,hpcg` | Comma-separated subset |
+| `--nodes` | auto (`$SLURM_NTASKS` or `nproc`, `--ppn` forced to 1) | Nodes for OSU collective, IOR, HPCG; must be inside Slurm allocation if > 1 |
+| `--ppn` | `1` | MPI ranks per node |
+| `--fs-path` | `./ior_scratch` | Filesystem to stress with IOR |
+| `--ior-size` | `1g` | Per-process transfer size for IOR (`-b`; `-t` is fixed at 1m) |
+| `--hpcg-time` | `1800` | Min HPCG run time (< 1800 s is flagged invalid) |
+| `--results-dir` | `./benchmark_results` | Parent directory for timestamped run output |
+
+`--nodes` and `--ppn` accept positive integers up to 9999999 with no leading zeros; anything else aborts the run.
+
+### Step 3 — report
+
+```bash
+./hpc-benchmark.sh report
+
+# Report on a specific run
+./hpc-benchmark.sh report --results-dir ./benchmark_results/20260719_143022_31337
+```
+
+Pointed at the parent directory, `report` picks the most recent timestamped run.
+
+Results are written to `benchmark_results/<YYYYmmdd_HHMMSS>_<pid>/`:
+
+```
+cmd.txt
+stream.txt
+osu/latency.txt  osu/bandwidth.txt  osu/allreduce.txt  osu/alltoall.txt
+ior.txt
+hpcg/hpcg.dat  hpcg/hpcg_output.txt  hpcg/HPCG-Benchmark_*.txt
+```
+
+`cmd.txt` records the exact invocation. `report` summarizes STREAM Copy/Scale/Add/Triad, OSU 8-byte latency and peak bandwidth, IOR write/read, and the HPCG GFLOP/s rating, then lists every output file.
+
+### What to look for
+
+**STREAM Triad** is the headline number — it reflects sustainable memory
+bandwidth under a real access pattern. Compare against the instance spec sheet
+(`lshw -class memory` shows theoretical peak).
+
+**OSU latency at 8 bytes** reveals the raw MPI overhead between two ranks.
+On EFA-enabled instances (e.g. `hpc6a`, `c5n`) expect < 2 µs. On standard
+Ethernet expect 20–50 µs.
+
+**IOR write/read** shows filesystem throughput. Run it against each filesystem
+you plan to use (EBS, EFS, FSx for Lustre) with the same parameters to compare
+directly.
+
+**HPCG GFLOP/s** correlates with real solver performance better than HPL because
+it exercises sparse, memory-bound operations. Runs under 1800 s are marked
+`INVALID` in the official result file.
+
+---
+
+## Tuning `--nodes` and `--ppn` by instance class
+
+### How the flags map to each benchmark
+
+| Benchmark | Uses `--nodes`/`--ppn`? | Notes |
+|---|---|---|
+| STREAM | No | Always `OMP_NUM_THREADS=$(nproc)`, single node |
+| OSU latency/bandwidth | No | Hardcoded `-n 2` (pt2pt only) |
+| OSU allreduce/alltoall | Yes | `total_ranks = nodes × ppn` |
+| IOR | Yes | `total_ranks = nodes × ppn` |
+| HPCG | Yes | `total_ranks = nodes × ppn`, 104³ problem size per rank |
+
+### Recommended values by instance class
+
+Set `--ppn` to the **vCPU count** of the compute instance. Set `--nodes` to the number of compute nodes in your Slurm allocation.
+
+| Instance class | vCPUs | Mem (GB) | `--ppn` | `--ior-size` | HPCG problem size |
+|---|---|---|---|---|---|
+| `.xlarge` (c5/c6i/m5/r5) | 4 | 8–32 | 4 | 2g | 104³ (default) |
+| `.2xlarge` | 8 | 16–64 | 8 | 2g | 104³ |
+| `.4xlarge` | 16 | 32–128 | 16 | 4g | 128³ on r-family |
+| `.8xlarge` | 32 | 64–256 | 32 | 4g | 128³–144³ |
+| `.12xlarge` / `.16xlarge` | 48–64 | 96–256 | 48–64 | 8g | 144³ |
+| `hpc6a.48xlarge` | 96 | 192 | 96 | 8g | 144³ |
+| `hpc7g.16xlarge` | 64 | 128 | 64 | 8g | 144³ |
+
+Example for `.xlarge` compute nodes:
+
+```bash
+NODES=2   # number of compute nodes in your allocation
+PPN=4     # vCPUs per .xlarge node
+
+./hpc-benchmark.sh run \
+  --tests stream,osu,ior,hpcg \
+  --nodes $NODES --ppn $PPN \
+  --ior-size 2g \
+  --hpcg-time 1800
+```
+
+---
+
+## Where instance class warrants additional tuning
+
+### Memory-optimized (r5, r6i, r7i, x2iedn)
+
+The default HPCG problem size (104³/rank) uses only ~200–400 MB per rank — far below 25% of RAM on memory-heavy instances. Increase it to properly stress the memory subsystem:
+
+| Instance | RAM/node | Recommended problem size |
+|---|---|---|
+| `r5.xlarge` (4 ranks) | 32 GB | 128³ |
+| `r5.2xlarge` (8 ranks) | 64 GB | 144³ |
+| `r5.4xlarge`+ | 128 GB+ | 160³+ |
+
+**The problem size is not a CLI flag.** `cmd_run` writes `hpcg.dat` from a heredoc in the `hpcg)` case branch. Find it with `grep -n 'hpcg_run/hpcg.dat' hpc-benchmark.sh` and edit the `104 104 104` line before running:
+
+```bash
+# Default — change to match your instance memory
+104 104 104
+# For r5.xlarge with 4 ranks (~1.3 GB/rank):
+128 128 128
+```
+
+### HPC-optimized and EFA instances (hpc6a, hpc7g, c5n, c6gn)
+
+EFA lowers MPI latency. Expected OSU numbers vs. standard Ethernet:
+
+| Metric | Standard Ethernet | EFA |
+|---|---|---|
+| OSU latency (8 bytes) | 20–50 µs | < 2 µs |
+| OSU bandwidth (peak) | 10–25 GB/s | > 100 GB/s on hpc6a |
+
+No `--ppn` change needed, but use more nodes (4–8+) to expose collective scaling behavior. OSU allreduce and alltoall results are most meaningful on these instances.
+
+For IOR on c5n/c6gn with FSx for Lustre, increase `--ior-size` to expose filesystem parallelism:
+
+```bash
+./hpc-benchmark.sh run --tests ior \
+  --nodes 4 --ppn 4 \
+  --fs-path /fsx \
+  --ior-size 8g
+```
+
+### GPU instances (g4dn, g5, p3, p4d, p5)
+
+STREAM measures **CPU DRAM bandwidth only** — the GPU's HBM is not exercised. Treat STREAM results as a CPU memory baseline, not a GPU memory benchmark. HPCG also runs on CPU; GPU-accelerated HPCG requires a separate CUDA build (not included here).
+
+**OSU's CUDA support follows the node that builds it.** `install` inspects the node it runs on: if `nvidia-smi` reports a device *and* a CUDA toolkit is present (`include/cuda.h` plus `lib64/libcudart.*` under `$CUDA_HOME`, `/usr/local/cuda`, or `/opt/nvidia/cuda`), the device-to-device tests are compiled in. Otherwise OSU is built `--enable-cuda=no` for host-to-host MPI only.
+
+That check is deliberately about the *node*, not about the cluster. A CPU head node fronting a GPU queue — `c5.xlarge` head, `g5.xlarge` compute, the common layout — has no device and no toolkit, so an install run there produces a host-to-host OSU even though the cluster has GPUs. This is not a workaround for a missing flag: any `--enable-cuda` other than `=no` makes OSU's `configure` abort outright on a missing `-lcuda`, `-lcudart`, or `cuda.h`, so forcing it on from a cluster-level setting would fail the entire install and take STREAM, IOR, and HPCG down with OSU.
+
+**`=yes` or `=basic` depends on `nvcc`.** Both define `_ENABLE_CUDA_`, which is the only thing `-d cuda` tests, so device-to-device works either way. `=yes` additionally builds OSU's managed-memory CUDA kernels from `util/kernel.cu`, which requires `nvcc` — and `configure` never checks for it, so `=yes` on a node carrying the runtime libraries without the compiler driver configures cleanly and then fails in `make`. `install` therefore uses `=yes` only where `nvcc` is on `PATH` or at `$CUDA_HOME/bin/nvcc`, and `=basic` otherwise. Nothing in this suite is lost by `=basic`: every kernel code path in `osu_latency` and `osu_bw` is additionally guarded on managed memory, and `run` only ever requests device buffers (`D D`). The mode used is recorded in `bin/osu/.cuda_enabled`.
+
+**`run` builds the CUDA tree itself when the installed one cannot serve.** When a job lands on a GPU node and the installed OSU either has no CUDA support or was linked against an MPI that is not CUDA-aware, `run` compiles one from the tarball `install` cached — into `bin/osu-cuda`, kept separate from `bin/osu` so the host-to-host numbers stay comparable across runs and node classes — and uses it for the device-to-device tests only. This is the same build-on-demand approach STREAM uses for microarchitectures; no interactive allocation and no manual rebuild are needed. The first such job pays a few minutes for `configure` and `make`, logged to `bin/build_logs/osu-cuda.log`; every later job on any GPU node reuses the tree, since `bin/` is shared storage.
+
+The build is serialized with a `bin/.osu-cuda.lock` directory so two concurrent GPU jobs cannot interleave their `make install` into one prefix. A job that finds the lock held skips the device tests rather than waiting — blocking inside an allocation costs node-hours. If a job is killed mid-build the lock survives it; the message names the exact path to remove.
+
+Nothing about this can fail the run. The build needs a CUDA toolkit, a CUDA-aware MPI (whose own `mpicc`/`mpicxx` it uses -- not whatever is first on `PATH`), `make`, and the cached tarball (re-verified against its pinned checksum, since `bin/` is shared writable storage); if any is missing, the host-to-host results are still written and the reason is printed. That is the normal case on a CPU-only cluster.
+
+`run` writes `osu/latency_cuda.txt` and `osu/bandwidth_cuda.txt` from `osu_latency`/`osu_bw` with `-d cuda D D` (device buffers on both ends), alongside the host-to-host results. All three prerequisites are required and it says which is missing otherwise: a CUDA-linked binary, recorded at `bin/osu/.cuda_enabled` or `bin/osu-cuda/.cuda_enabled`; an NVIDIA device on the node running the job; and an MPI that is itself CUDA-aware (see below). On instances with EFA-GDR (GPUDirect RDMA) enabled, these are the tests that actually exercise the GPU interconnect; the host-to-host results characterize the host side and remain meaningful on their own.
+
+**A CUDA-linked binary and a GPU are not enough -- the MPI must be CUDA-aware too.** A ParallelCluster GPU AMI ships **two** Open MPI installs and the one on the default `PATH` is not the one that can move device buffers. Measured on the AL2023 x86_64 image: `/opt/amazon/openmpi` is 4.1.7 with `mpi_built_with_cuda_support:false`, while `/opt/amazon/openmpi5` is 5.0.9amzn1 with it `true`. Handing `-d cuda D D` to 4.1.7 does not fail cleanly -- it **hangs** at the first message size, both ranks at 99.9% CPU and 0% GPU utilization, until the allocation's time limit. On a queue with no time limit that is forever, and nothing is reported and no result file is written, which is why the wrong MPI is worse than no MPI at all.
+
+`run` therefore probes for a CUDA-aware MPI and uses it for the device-to-device tests only. The test is `ompi_info`'s own answer, never a version number or a directory name, so this is not specific to any one OS:
+
+```
+ompi_info --parsable --all | grep mpi_built_with_cuda_support:value
+```
+
+The first candidate tried is the default `mpirun`, so an image whose default MPI is already CUDA-aware needs nothing further. If none is found the device tests are **skipped with the reason named** rather than launched into a hang; the host-to-host results are unaffected. Set `HPC_BENCHMARK_CUDA_MPI` to an MPI install root to name one explicitly -- it says where to look, not what the answer is, so an override pointing at a non-CUDA-aware MPI is still rejected.
+
+Because OSU binaries link against whichever MPI compiled them, using a different MPI means rebuilding: `bin/osu` is deliberately built with the **default** `mpicc` so the host-to-host numbers stay comparable across runs, and `bin/osu-cuda` is built with the CUDA-aware MPI's own wrappers. `install` prints which MPI it linked `bin/osu` against and whether that MPI can do `-d cuda`, so a cluster where `run` will need a second tree is visible at install time rather than hours later. The MPI each tree was built against is recorded as the third field of its `.cuda_enabled` stamp; a tree built against a different MPI is rebuilt rather than reused.
+
+One case this does not cover: a cluster mixing CPU architectures between the head node and the GPU queue (an x86 head node with a `g5g` Graviton queue) is refused by the architecture stamp before any OSU test runs, because the host-to-host binaries cannot load there at all. Build and run the suite from inside an allocation on that node class instead.
+
+**STREAM follows the GPU node class automatically.** GPU clusters are the most common case where the head node and the compute nodes are the same architecture but a *different microarchitecture* — a `c5.xlarge` head node is Intel Skylake while a `g5.xlarge` is AMD Zen 3, and both report `x86_64`. `run` detects that no `bin/stream-<march>` exists for the node it is on and compiles one from the cached source before running, so a GPU-partition job reports that node's real bandwidth with no manual step. The first GPU job pays a few seconds for the compile; later jobs reuse `bin/stream-znver3`. See [Step 1 — install](#step-1--install-one-time-about-a-minute) for the mechanism.
+
+### ARM instances (Graviton: c7g, m7g, r7g, hpc7g)
+
+No parameter changes needed — set `--ppn` to vCPU count as normal. HPCG and OSU compile natively for ARM at install time.
+
+---
+
+## File inventory
+
+Three files land in the deployed `slurm/` directory shown under Quick start:
+
+| File | Purpose |
+|---|---|
+| `hpc-benchmark.sh` | Dispatcher: `install`, `run`, `report` |
+| `job_hpc-benchmark.sh` | Slurm batch script, pre-filled with this cluster's name and owner |
+| `README-PERFORMANCE.md` | This file |
+
+`install` adds `bin/` (compiled binaries) and `run` adds `benchmark_results/` alongside them. Both are gitignored in the repo.
+
+Postinstall separately syncs the whole S3 copy of the source tree to `~/hpc-benchmark/`, one level above this directory, so the unrendered `.j2` templates also appear there. Run the benchmarks from the `slurm/` directory, not from `~/hpc-benchmark/`.
+
+---
+
+## Tips
+
+- Use `byobu` or `screen` on the head node to protect long runs from SSH timeouts.
+- ParallelClusterMaker defaults `max_cpu_queue_size` and `max_gpu_queue_size` to 8, which becomes the `MaxCount` on each Slurm queue. This is the toolkit's own default, not a ParallelCluster limit. Raise `--max_cpu_queue_size`/`--max_gpu_queue_size` at cluster creation before submitting large job arrays — neither can be changed without rebuilding or editing the cluster config.
+- EC2 service quotas can cap the fleet below `max_*_queue_size`. Quotas are per-region and expressed in vCPUs per instance family (separate limits for On-Demand and Spot), so a queue of 8 large instances can exceed the limit while 8 small ones do not. Check the account's quotas for the compute instance family before a large run; a queue that exceeds them leaves nodes stuck in `CONFIGURING` or `DOWN`.
+- For IOR against FSx for Lustre, set `--fs-path /fsx` and tune `--ior-size` to match your expected file sizes.
+- On memory-heavy instances, raise the HPCG problem size above the 104³ default — see [Memory-optimized](#memory-optimized-r5-r6i-r7i-x2iedn).

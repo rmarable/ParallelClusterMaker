@@ -1,0 +1,49 @@
+*~
+*#
+.DS_Store
+.venv/
+*.class
+*.egg-info/
+.idea/
+*.pem
+*.pyc
+*.pyo
+*.retry
+.serverless
+.swp
+TODO
+__pycache__/
+deprecated/
+tools/
+vars_files/
+active_clusters/
+cluster_data/
+hpc-benchmark/bin/
+hpc-benchmark/benchmark_results/
+hpc-benchmark/csv/
+hpc-benchmark/logs/
+hpc-benchmark/summary/
+tests/integration/itest_defaults.yml
+
+# Operator cluster configs: these hold a real VPC name and subnet IDs.
+# pcluster_defaults.yml is the generic template that stays tracked.
+osiris_defaults.yml
+iris_defaults.yml
+isis_defaults.yml
+
+# Dense AI-pairing rationale/incident-history docs, kept on disk for local
+# development. CLAUDE.local.md is a Claude Code-recognized filename that
+# auto-loads alongside CLAUDE.md in the same directory -- see
+# https://code.claude.com/docs/en/memory.md. The lean CLAUDE.md files stay
+# tracked; these do not.
+CLAUDE.local.md
+templates/CLAUDE.local.md
+hpc-benchmark/CLAUDE.local.md
+CLAUDE-STATE.md
+docs/sessions.md
+
+# Doc-hygiene tests that check properties of the files above -- gitignored
+# alongside them since they test content that isn't part of the public repo.
+tests/test_claude_docs_citations.py
+tests/test_claude_docs_line_citations.py
+tests/test_claude_docs_preamble_budget.py

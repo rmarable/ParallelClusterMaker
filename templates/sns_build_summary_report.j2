@@ -1,0 +1,60 @@
+
+================================================================================
+                       Cluster Build Summary Report
+================================================================================
+
+Launched the environment: {{ start_overall_timer.stdout }}
+Initiated stack creation: {{ start_stack_creation_timer.stdout }}
+Completed stack creation: {{ stop_stack_creation_timer.stdout }}
+Finished the environment: {{ stop_overall_timer.stdout }}
+
+Cluster Stack Name:      {{ cluster_name }}
+AWS Availability Zone:   {{ az }}
+HPC Scheduler Type:      {{ scheduler }}
+Head Node Instance Type: {{ headnode_instance_type }}
+Compute Instance Type:   {{ compute_instance_type }}
+
+{% set _storage_labels = [ebs_shared_dir] %}
+{% if enable_efs == 'true' %}{% set _ = _storage_labels.append('/efs') %}{% endif %}
+{% if enable_fsx == 'true' %}{% set _ = _storage_labels.append('/fsx') %}{% endif %}
+{% if enable_external_nfs == 'true' %}{% set _ = _storage_labels.append('/nfs') %}{% endif %}
+{% set _storage_col = (_storage_labels | map('length') | max) + 2 %}
+Shared storage:
+    {{ ebs_shared_dir.ljust(_storage_col) }}EBS ({{ ebs_shared_volume_type }}, {{ ebs_shared_volume_size }} GB)
+{% if enable_efs == 'true' %}
+    {{ '/efs'.ljust(_storage_col) }}EFS ({{ efs_throughput_mode }} throughput)
+{% endif %}
+{% if enable_fsx == 'true' %}
+    {{ '/fsx'.ljust(_storage_col) }}FSx for Lustre ({{ fsx_size }} GB)
+{% if enable_fsx_hydration == 'true' %}
+            S3 import: s3://{{ fsx_s3_import_bucket }}/{{ fsx_s3_import_path }}
+            S3 export: s3://{{ fsx_s3_export_bucket }}/{{ fsx_s3_export_path }}
+{% endif %}
+{% endif %}
+{% if enable_external_nfs == 'true' %}
+    {{ '/nfs'.ljust(_storage_col) }}external NFS ({{ external_nfs_server }})
+{% endif %}
+    Spack and shared packages install under {{ pkg_dir }}
+
+Access the head node by any of the following:
+
+(1) ParallelClusterMaker access script:
+    ./access_cluster.py -N {{ cluster_name }}
+
+(2) ParallelCluster CLI:
+    pcluster ssh --cluster-name {{ cluster_name }} -i {{ ssh_keypair }}
+
+(3) ssh with the cluster's private key:
+    ssh -i {{ ssh_keypair }} {{ ec2_user }}@{{ head_node_public_ip }}
+
+Compute nodes idle for more than {{ scaledown_idletime }} minutes are
+terminated automatically, so an idle cluster scales its compute fleet
+to zero on its own. The head node keeps running and billing until the
+cluster is destroyed.
+
+Nothing tears this cluster down on a timer. Destroy it with:
+
+$ ./kill_pcluster.py -N {{ cluster_name }} -O {{ cluster_owner }} -A {{ az }}
+
+CloudWatch dashboards and log streams are enabled for this cluster:
+https://console.aws.amazon.com/cloudwatch/home?region={{ region }}

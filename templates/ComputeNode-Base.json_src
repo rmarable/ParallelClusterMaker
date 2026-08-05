@@ -1,0 +1,147 @@
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Sid": "S3ObjectsRead",
+            "Action": [
+                "s3:GetObject",
+                "s3:GetObjectVersion"
+            ],
+            "Effect": "Allow",
+            "Resource": [
+                "arn:aws:s3:::parallelcluster-*/*",
+                "arn:aws:s3:::*-aws-parallelcluster/*",
+                "arn:aws:s3:::parallelclustermaker-<CLUSTER_SERIAL_NUMBER>/*"
+            ]
+        },
+        {
+            "Sid": "CloudFormationDescribeStackResource",
+            "Action": [
+                "cloudformation:DescribeStackResource"
+            ],
+            "Effect": "Allow",
+            "Resource": [
+                "arn:aws:cloudformation:*:<AWS_ACCOUNT_ID>:stack/<CLUSTER_NAME>/*",
+                "arn:aws:cloudformation:*:<AWS_ACCOUNT_ID>:stack/<CLUSTER_NAME>-*/*"
+            ]
+        },
+        {
+            "Sid": "EC2DescribeInstanceAttribute",
+            "Action": [
+                "ec2:DescribeInstanceAttribute"
+            ],
+            "Effect": "Allow",
+            "Resource": "*"
+        },
+        {
+            "Sid": "LogsWrite",
+            "Effect": "Allow",
+            "Action": [
+                "logs:CreateLogGroup",
+                "logs:CreateLogStream",
+                "logs:PutLogEvents",
+                "logs:PutRetentionPolicy"
+            ],
+            "Resource": [
+                "arn:aws:logs:*:<AWS_ACCOUNT_ID>:log-group:/parallelcluster/*",
+                "arn:aws:logs:*:<AWS_ACCOUNT_ID>:log-group:/aws/parallelcluster/*"
+            ]
+        },
+        {
+            "Sid": "LogsRead",
+            "Effect": "Allow",
+            "Action": [
+                "logs:DescribeLogStreams",
+                "logs:GetLogEvents",
+                "logs:FilterLogEvents"
+            ],
+            "Resource": [
+                "arn:aws:logs:*:<AWS_ACCOUNT_ID>:log-group:/parallelcluster/<CLUSTER_NAME>:*",
+                "arn:aws:logs:*:<AWS_ACCOUNT_ID>:log-group:/parallelcluster/<CLUSTER_NAME>/*",
+                "arn:aws:logs:*:<AWS_ACCOUNT_ID>:log-group:/aws/parallelcluster/<CLUSTER_NAME>:*",
+                "arn:aws:logs:*:<AWS_ACCOUNT_ID>:log-group:/aws/parallelcluster/<CLUSTER_NAME>/*"
+            ]
+        },
+        {
+            "Sid": "LogsDescribeGlobal",
+            "Effect": "Allow",
+            "Action": [
+                "logs:DescribeLogGroups"
+            ],
+            "Resource": "*"
+        },
+        {
+            "Sid": "CloudWatchMetrics",
+            "Action": [
+                "cloudwatch:PutMetricData"
+            ],
+            "Effect": "Allow",
+            "Resource": "*"
+        },
+        {
+            "Sid": "AllowAccessToSSM",
+            "Action": [
+                "ssm:DescribeAssociation",
+                "ssm:ListAssociations",
+                "ssm:GetDocument",
+                "ssm:ListInstanceAssociations",
+                "ssm:UpdateAssociationStatus",
+                "ssm:UpdateInstanceInformation",
+                "ec2messages:AcknowledgeMessage",
+                "ec2messages:DeleteMessage",
+                "ec2messages:FailMessage",
+                "ec2messages:GetEndpoint",
+                "ec2messages:GetMessages",
+                "ec2messages:SendReply",
+                "ssmmessages:CreateControlChannel",
+                "ssmmessages:CreateDataChannel",
+                "ssmmessages:OpenControlChannel",
+                "ssmmessages:OpenDataChannel"
+            ],
+            "Effect": "Allow",
+            "Resource": "*"
+        },
+        {
+            "Sid": "DynamoDBComputeCRUD",
+            "Action": [
+                "dynamodb:PutItem",
+                "dynamodb:GetItem",
+                "dynamodb:DeleteItem",
+                "dynamodb:Query",
+                "dynamodb:UpdateItem",
+                "dynamodb:Scan",
+                "dynamodb:BatchGetItem",
+                "dynamodb:BatchWriteItem"
+            ],
+            "Effect": "Allow",
+            "Resource": [
+                "arn:aws:dynamodb:*:<AWS_ACCOUNT_ID>:table/parallelcluster-<CLUSTER_NAME>",
+                "arn:aws:dynamodb:*:<AWS_ACCOUNT_ID>:table/parallelcluster-slurm-<CLUSTER_NAME>",
+                "arn:aws:dynamodb:*:<AWS_ACCOUNT_ID>:table/parallelcluster-slurm-<CLUSTER_NAME>/index/*",
+                "arn:aws:dynamodb:*:<AWS_ACCOUNT_ID>:table/parallelcluster-<CLUSTER_NAME>-*"
+            ]
+        },
+        {
+            "Sid": "SQSComputeSignal",
+            "Action": [
+                "sqs:SendMessage",
+                "sqs:ReceiveMessage",
+                "sqs:ChangeMessageVisibility",
+                "sqs:DeleteMessage"
+            ],
+            "Effect": "Allow",
+            "Resource": [
+                "arn:aws:sqs:*:<AWS_ACCOUNT_ID>:parallelcluster-<CLUSTER_NAME>-*",
+                "arn:aws:sqs:*:<AWS_ACCOUNT_ID>:pclustermaker-<CLUSTER_SERIAL_NUMBER>-*"
+            ]
+        },
+        {
+            "Sid": "STS",
+            "Action": [
+                "sts:GetCallerIdentity"
+            ],
+            "Effect": "Allow",
+            "Resource": "*"
+        }
+    ]
+}

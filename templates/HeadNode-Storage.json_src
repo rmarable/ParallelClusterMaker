@@ -1,0 +1,221 @@
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Sid": "CloudFormation",
+            "Action": [
+                "cloudformation:DescribeStackEvents",
+                "cloudformation:DescribeStackResources",
+                "cloudformation:ListStackResources",
+                "cloudformation:GetTemplate",
+                "cloudformation:CreateStack",
+                "cloudformation:DeleteStack",
+                "cloudformation:UpdateStack"
+            ],
+            "Effect": "Allow",
+            "Resource": [
+                "arn:aws:cloudformation:*:<AWS_ACCOUNT_ID>:stack/<CLUSTER_NAME>/*",
+                "arn:aws:cloudformation:*:<AWS_ACCOUNT_ID>:stack/<CLUSTER_NAME>-*/*",
+                "arn:aws:cloudformation:*:<AWS_ACCOUNT_ID>:stack/parallelcluster-<CLUSTER_SERIAL_NUMBER>-*",
+                "arn:aws:cloudformation:*:<AWS_ACCOUNT_ID>:stack/terminate-pcluster-<CLUSTER_SERIAL_NUMBER>-*"
+            ]
+        },
+        {
+            "Sid": "CloudFormationSignalResource",
+            "Action": [
+                "cloudformation:SignalResource"
+            ],
+            "Effect": "Allow",
+            "Resource": [
+                "arn:aws:cloudformation:*:<AWS_ACCOUNT_ID>:stack/<CLUSTER_NAME>/*",
+                "arn:aws:cloudformation:*:<AWS_ACCOUNT_ID>:stack/<CLUSTER_NAME>-*/*"
+            ]
+        },
+        {
+            "Sid": "CloudFormationExtras",
+            "Action": [
+                "cloudformation:DescribeStackResource",
+                "cloudformation:DescribeStacks",
+                "cloudformation:ListStacks",
+                "cloudformation:ValidateTemplate"
+            ],
+            "Effect": "Allow",
+            "Resource": "*"
+        },
+        {
+            "Sid": "S3Bucket",
+            "Action": [
+                "s3:CreateBucket",
+                "s3:DeleteBucket",
+                "s3:ListBucket",
+                "s3:ListBucketVersions",
+                "s3:GetBucketPolicy",
+                "s3:GetBucketRequestPayment",
+                "s3:GetBucketVersioning",
+                "s3:GetBucketTagging",
+                "s3:PutBucketVersioning",
+                "s3:PutBucketTagging",
+                "s3:GetEncryptionConfiguration",
+                "s3:PutEncryptionConfiguration"
+            ],
+            "Effect": "Allow",
+            "Resource": [
+                "arn:aws:s3:::parallelcluster-*",
+                "arn:aws:s3:::parallelclustermaker-<CLUSTER_SERIAL_NUMBER>"
+            ]
+        },
+        {
+            "Sid": "S3ResultsBucket",
+            "Action": [
+                "s3:ListBucket"
+            ],
+            "Effect": "Allow",
+            "Resource": [
+                "arn:aws:s3:::parallelclustermaker-results-<AWS_ACCOUNT_ID>-<AWS_REGION>"
+            ]
+        },
+        {
+            "Sid": "S3ResultsObjects",
+            "Action": [
+                "s3:GetObject",
+                "s3:PutObject"
+            ],
+            "Effect": "Allow",
+            "Resource": [
+                "arn:aws:s3:::parallelclustermaker-results-<AWS_ACCOUNT_ID>-<AWS_REGION>/hpc-benchmark-results/*"
+            ]
+        },
+        {
+            "Sid": "S3Inventory",
+            "Action": [
+                "s3:HeadBucket",
+                "s3:ListAllMyBuckets"
+            ],
+            "Effect": "Allow",
+            "Resource": "*"
+        },
+        {
+            "Sid": "S3ObjectsHeadNode",
+            "Action": [
+                "s3:GetObject",
+                "s3:GetObjectVersion",
+                "s3:PutObject",
+                "s3:DeleteObject"
+            ],
+            "Effect": "Allow",
+            "Resource": [
+                "arn:aws:s3:::parallelcluster-*/*",
+                "arn:aws:s3:::parallelclustermaker-<CLUSTER_SERIAL_NUMBER>/*"
+            ]
+        },
+        {
+            "Sid": "Lambda",
+            "Action": [
+                "lambda:CreateFunction",
+                "lambda:DeleteFunction",
+                "lambda:GetFunction",
+                "lambda:GetFunctionConfiguration",
+                "lambda:InvokeFunction",
+                "lambda:ListVersionsByFunction",
+                "lambda:PublishVersion",
+                "lambda:AddPermission",
+                "lambda:RemovePermission",
+                "lambda:UpdateFunctionCode",
+                "lambda:UpdateFunctionConfiguration",
+                "lambda:TagResource"
+            ],
+            "Effect": "Allow",
+            "Resource": [
+                "arn:aws:lambda:*:<AWS_ACCOUNT_ID>:function:parallelcluster-*"
+            ]
+        },
+        {
+            "Sid": "EFSDescribe",
+            "Action": [
+                "elasticfilesystem:CreateMountTarget",
+                "elasticfilesystem:CreateTags",
+                "elasticfilesystem:DeleteTags",
+                "elasticfilesystem:DescribeFileSystems",
+                "elasticfilesystem:DescribeMountTargets",
+                "elasticfilesystem:DescribeTags",
+                "elasticfilesystem:DescribeMountTargetSecurityGroups"
+            ],
+            "Effect": "Allow",
+            "Resource": "*"
+        },
+        {
+            "Sid": "EFSDelete",
+            "Action": [
+                "elasticfilesystem:DeleteFileSystem",
+                "elasticfilesystem:DeleteMountTarget",
+                "elasticfilesystem:ModifyMountTargetSecurityGroups",
+                "elasticfilesystem:UpdateFileSystem"
+            ],
+            "Effect": "Allow",
+            "Resource": "*",
+            "Condition": {
+                "StringEquals": {
+                    "aws:ResourceTag/parallelcluster:cluster-name": "<CLUSTER_NAME>"
+                }
+            }
+        },
+        {
+            "Sid": "FSxDescribe",
+            "Action": [
+                "fsx:DescribeFileSystems",
+                "fsx:ListTagsForResource",
+                "fsx:TagResource"
+            ],
+            "Effect": "Allow",
+            "Resource": "*"
+        },
+        {
+            "Sid": "EFSFSxCreate",
+            "Action": [
+                "elasticfilesystem:CreateFileSystem",
+                "fsx:CreateFileSystem"
+            ],
+            "Effect": "Allow",
+            "Resource": "*",
+            "Condition": {
+                "StringEquals": {
+                    "aws:RequestTag/parallelcluster:cluster-name": "<CLUSTER_NAME>"
+                }
+            }
+        },
+        {
+            "Sid": "FSxDelete",
+            "Action": [
+                "fsx:DeleteFileSystem",
+                "fsx:UpdateFileSystem",
+                "fsx:UntagResource"
+            ],
+            "Effect": "Allow",
+            "Resource": "*",
+            "Condition": {
+                "StringEquals": {
+                    "aws:ResourceTag/parallelcluster:cluster-name": "<CLUSTER_NAME>"
+                }
+            }
+        },
+        {
+            "Sid": "Route53ReadOnly",
+            "Action": [
+                "route53:GetHostedZone",
+                "route53:ListHostedZones",
+                "route53:ListResourceRecordSets",
+                "route53:GetChange"
+            ],
+            "Effect": "Allow",
+            "Resource": "*"
+        },
+        {
+            "Sid": "Route53RecordSets",
+            "Action": [
+                "route53:ChangeResourceRecordSets"
+            ],
+            "Effect": "Allow",
+            "Resource": "arn:aws:route53:::hostedzone/*"
+        }
+    ]
+}

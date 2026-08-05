@@ -1,0 +1,97 @@
+#!/bin/bash
+#SBATCH --job-name=hpc-benchmark
+#SBATCH --partition={{ 'compute' if enable_cpu_queue == 'true' else 'gpu' }}
+#SBATCH --nodes=2
+#SBATCH --ntasks-per-node={{ 4 if enable_cpu_queue == 'true' else (gpu_ranks_per_node if gpu_ranks_per_node > 0 else 4) }}
+#SBATCH --output=hpc-benchmark-%j.out
+#SBATCH --error=hpc-benchmark-%j.err
+
+# Set these to match your cluster.
+CLUSTER_NAME="{{ cluster_name }}"
+CLUSTER_OWNER="{{ cluster_owner }}"
+SCHEDULER="{{ scheduler }}"
+PERF_DIR=~/hpc-benchmark/${CLUSTER_NAME}/${CLUSTER_OWNER}/${SCHEDULER}
+
+cd "$PERF_DIR" || exit 1
+module load openmpi    # or: module load intelmpi
+
+# NODES is set by Slurm to the actual number of allocated nodes.
+NODES=${SLURM_JOB_NUM_NODES}
+PPN=${SLURM_NTASKS_PER_NODE}
+
+# --- Full suite (default) ---
+./hpc-benchmark.sh run --tests stream,osu,ior,hpcg --nodes "$NODES" --ppn "$PPN"
+
+# --- Quick smoke test: memory bandwidth + MPI only (~5 min) ---
+# ./hpc-benchmark.sh run --tests stream,osu --nodes "$NODES" --ppn "$PPN"
+
+# --- IOR against EFS ---
+# ./hpc-benchmark.sh run --tests ior --fs-path /efs --nodes "$NODES" --ppn "$PPN" --ior-size 4g
+
+# --- IOR against FSx for Lustre ---
+# ./hpc-benchmark.sh run --tests ior --fs-path /fsx --nodes "$NODES" --ppn "$PPN" --ior-size 4g
+
+# --- HPCG scaling study (official run requires >= 1800 s) ---
+# ./hpc-benchmark.sh run --tests hpcg --nodes "$NODES" --ppn "$PPN" --hpcg-time 1800
+
+# --- Single-node STREAM only (no MPI ranks needed) ---
+# ./hpc-benchmark.sh run --tests stream
+{% if enable_gpu_queue == 'true' %}
+
+################################################################################
+# GPU queue — partition "gpu" ({{ gpu_instance_types | join(', ') }})
+################################################################################
+{% if enable_cpu_queue == 'true' %}
+#
+# This cluster has two partitions:
+#
+#   compute  {{ cpu_instance_types | join(', ') }}
+#   gpu      {{ gpu_instance_types | join(', ') }}
+#
+# The directives above target "compute".  To run the same suite on the GPU
+# nodes, override the partition and the rank count on the command line:
+#
+#   sbatch --partition=gpu --ntasks-per-node={{ gpu_ranks_per_node if gpu_ranks_per_node > 0 else 4 }} job_hpc-benchmark.sh
+{% else %}
+#
+# "gpu" is the only partition on this cluster — there is no CPU queue — so the
+# directives above already target it:
+#
+#   sbatch job_hpc-benchmark.sh
+{% endif %}
+#
+{% if gpu_ranks_per_node > 0 %}
+# --ntasks-per-node={{ gpu_ranks_per_node }} is the NVIDIA GPU count that ec2:DescribeInstanceTypes
+# reports for this queue's instance types, so one MPI rank lands per GPU.  Where
+# the queue holds several instance types with different GPU counts, this is the
+# smallest of them — the only value every node in the queue can satisfy.  Slurm
+# GRES (--gres=gpu:N) is configured by the ParallelCluster cookbook rather than
+# by this toolkit, so matching the rank count is what makes the placement
+# correct with or without it.
+{% else %}
+# This queue's instance types report no NVIDIA devices to
+# ec2:DescribeInstanceTypes, so the rank count falls back to the CPU default of
+# 4.  Set --ntasks-per-node to the vCPU count of the instance type instead.
+{% endif %}
+#
+# STREAM reports CPU DRAM bandwidth and HPCG runs on the CPU, so neither
+# measures the GPU itself.  OSU does, via osu/latency_cuda.txt and
+# osu/bandwidth_cuda.txt, which "run" writes next to the host-to-host results
+# whenever the node has a device and a CUDA-enabled OSU is available.
+#
+# No manual rebuild and no interactive allocation are needed for either.
+# "install" compiles OSU with CUDA when the node it runs on has a device and a
+# toolkit; on a CPU head node it cannot, so the first GPU job builds a
+# CUDA-enabled tree under bin/osu-cuda from the tarball that install cached, and
+# uses it for the device tests only.  That costs a few minutes once -- bin/ is
+# shared storage, so every later GPU job reuses it.  If the build cannot be done
+# on the node (no toolkit, no mpicc, another job already building), the
+# host-to-host results are still written and the reason is printed.
+#
+# STREAM needs the same treatment for a different reason.  It is compiled with
+# -march=native, and the head node and the GPU nodes are frequently the same
+# architecture but a different microarchitecture (an Intel head node and an AMD
+# GPU node both report x86_64), so a single binary would quietly under-report.
+# "run" therefore keeps one STREAM binary per microarchitecture under bin/ and
+# compiles the missing one, in seconds, on whichever node the job lands on.
+{% endif %}

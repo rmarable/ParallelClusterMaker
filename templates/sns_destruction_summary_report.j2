@@ -1,0 +1,32 @@
+================================================================================
+               Destruction Summary Report for {{ cluster_name }}
+================================================================================
+
+{{ _delete_headline }}
+
+Initiated destruction: {{ start_delete_timer.stdout }}
+Completed destruction: {{ stop_delete_timer.stdout }}
+
+Availability Zone:     {{ az }}
+Cluster Owner:         {{ cluster_owner }}
+Serial Number:         {{ cluster_serial_number }}
+{% if _orphaned_resources %}
+
+*** WARNING: {{ _orphaned_resources | length }} CLEANUP STEP(S) FAILED ***
+
+These resources are still in the account and must be removed by hand.
+Re-running kill_pcluster.py will not retry them once the serial file is gone:
+
+{% for resource in _orphaned_resources %}
+  - {{ resource }}
+{% endfor %}
+{% endif %}
+{% if _retained_resources %}
+
+Retained in the account on purpose. These are not failures, but they are
+still billing until removed by hand:
+
+{% for resource in _retained_resources %}
+  - {{ resource }}
+{% endfor %}
+{% endif %}

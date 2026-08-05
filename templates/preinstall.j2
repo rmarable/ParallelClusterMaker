@@ -1,0 +1,140 @@
+#!/bin/bash
+set -euo pipefail
+################################################################################
+# Name:		preinstall.{{ cluster_name }}.sh
+# Author:	Rodney Marable <rodney.marable@gmail.com>
+# Created On:	April 20, 2019
+# Last Changed:	May 30, 2019
+# Deployed On:	{{ lookup('pipe','date \"+%B %e, %Y\" | tr -s \" \"') }}
+# Purpose:	Perform preinstall tasks on cluster {{ cluster_name }}
+################################################################################
+
+# Install Python3 and required libraries.
+{% if 'ubuntu' in base_os %}
+
+sudo apt-get -y update
+
+# Hold the kernel back, but let userspace upgrade.  Two reasons, both learned the
+# hard way: a kernel bump triggers an initramfs rebuild whose runtime is
+# unbounded inside CloudFormation's bootstrap window (this is what timed out
+# cluster osiris), and PCluster's AMI ships EFA and Lustre modules built against
+# the kernel it boots -- replacing that kernel without rebuilding them loses the
+# interconnect or the Lustre client on next boot.  Userspace still upgrades
+# because python3-dev below implies source builds: numpy/scipy/pandas have no
+# aarch64 wheels for every release, so the ARM base_os values compile them.
+# The hold persists, which also stops unattended-upgrades doing this later.
+#
+# The status filter is load-bearing, not tidiness.  `dpkg-query -W 'linux-*'`
+# reports every package dpkg has ever heard of, installed or not -- on the
+# ubuntu2404 AMI that is 20 names, 11 of them not-installed phantoms like
+# linux-headers-686-pae and linux-headers-3.0.  `apt-mark hold` exits 100 on any
+# name with neither an installed nor a candidate version ("E: Can't select
+# installed nor candidate version from package ..."), and the `|| true` below
+# guards dpkg-query, not apt-mark.  That is what failed osiris's head node
+# bootstrap with OnNodeStartExecutionFailure and return code 100.
+_kernel_pkgs=$(dpkg-query -W -f='${db:Status-Status} ${Package}\n' 'linux-image*' 'linux-headers*' 'linux-modules*' 'linux-aws*' 2>/dev/null | awk '$1 == "installed" { print $2 }' || true)
+if [ -n "$_kernel_pkgs" ]; then
+    # shellcheck disable=SC2086
+    sudo apt-mark hold $_kernel_pkgs
+fi
+
+sudo DEBIAN_FRONTEND=noninteractive apt-get -y dist-upgrade
+sudo apt-get -y install python3 python3-pip python3-dev unzip
+# Do NOT add --upgrade here. Debian's python3-pip ships
+# /usr/lib/python3/dist-packages/pip-<ver>.dist-info WITHOUT a RECORD file (only
+# INSTALLER, METADATA, WHEEL, entry_points.txt, top_level.txt -- verified on the
+# ubuntu2404 AMI), and pip cannot uninstall a distribution it has no file
+# manifest for. `--upgrade` reaches "Attempting uninstall: pip / Found existing
+# installation: pip 24.0" and dies there, which under `set -euo pipefail` failed
+# osiris's head node bootstrap at 12:26 on 2026-07-27 with return code 1.
+# `--break-system-packages` permits writing into the system tree; it does not
+# make a dpkg-owned pip uninstallable. `--ignore-installed` sidesteps the
+# uninstall step entirely and installs over the top, which is what we want:
+# nothing here needs the distro pip removed, only a newer one on PATH.
+# `--dry-run` does NOT reproduce the failure -- it returns before the uninstall.
+sudo pip3 install --ignore-installed --break-system-packages pip
+# --ignore-installed here for the same reason, and pre-emptively: the RECORD-less
+# dist-info is a property of distro packaging, not of pip itself, so any of these
+# eight that the AMI happens to ship via dpkg is the requests failure again.  It
+# was observed on the RHEL arm below, where python3-requests is preinstalled;
+# whether this AMI ships any of them has not been checked, and it should not have
+# to be re-checked every time the AMI moves.
+sudo pip3 install --ignore-installed --break-system-packages \
+    'boto3>=1.34,<2' 'matplotlib>=3.8,<4' \
+    'numpy>=1.26,<2' 'pandas>=2.2,<3' 'requests>=2.31,<3' \
+    'seaborn>=0.13,<1' 'scipy>=1.12,<2' 'tailhead>=1.0'
+{% else %}
+
+# Hold the kernel back for the same two reasons as the apt path above: an
+# unbounded dracut rebuild inside CloudFormation's bootstrap window, and
+# PCluster's EFA and Lustre kernel modules are built against the kernel the AMI
+# boots.  This was measured on the RHEL 9 PCluster AMI -- a full update crossed
+# 5.14.0-611.55.1.el9_7 -> 5.14.0-687.30.1.el9_8 and the dracut rebuild was
+# still running when CloudFormation gave up.
+#
+# dnf --exclude needs no package enumeration, so none of the apt-mark machinery
+# above (the dpkg-query status filter, the phantom-package problem, the `|| true`
+# guard) has an analog here.
+#
+# Both Lustre spellings are excluded because this arm serves two distros that
+# name the client differently.  AL2023 packages it as `lustre-client` and has no
+# `kmod-lustre*` at all (checked against the al2023 core repo metadata on both
+# arches), so the RHEL glob alone silently protects nothing there.  On RHEL
+# `lustre-client` is the userspace half of the same client and has no business
+# jumping versions away from the kmod either, so the extra flag is correct on
+# both rather than merely inert on one.  Neither distro carries an `efa*` package
+# in its core repo -- EFA comes from Amazon's own installer on the AMI -- so that
+# glob is kept on the strength of node state, not repo contents.
+sudo dnf -y --exclude='kernel*' --exclude='kmod-lustre*' --exclude='lustre-client*' --exclude='efa*' update
+sudo dnf -y install python3 python3-pip python3-devel unzip
+
+# --ignore-installed rather than --upgrade for the same reason as the apt path:
+# nothing here needs the distro pip removed, only a newer one on PATH, and an
+# RPM-owned dist-info may carry no RECORD for pip to uninstall against.  No
+# --break-system-packages: RHEL 9 and AL2023 both ship pip 21.3.1 on Python 3.9,
+# which predates PEP 668 and rejects the flag.
+sudo pip3 install --ignore-installed pip
+
+# 'ansible' is deliberately absent from both arms.  Nothing on a node imports it
+# -- only src/create_pcluster.yml uses ansible and that runs on the operator's
+# workstation -- and `ansible>=9,<10` is exactly what failed this OS before:
+# every non-prerelease 9.x needs ansible-core 2.16, whose requires_python is
+# >=3.10, while both AMIs on this arm ship Python 3.9.  Every pin below is
+# satisfiable on 3.9 (verified against each project's requires_python at its
+# floor).
+#
+# --ignore-installed for the same RECORD reason as the pip line above, and this
+# arm is where it was *observed*: RHEL 9 ships python3-requests-2.25.1 as an RPM
+# whose dist-info carries no RECORD (verified on head node i-0000000000000020:
+# INSTALLER, LICENSE, METADATA, WHEEL, top_level.txt and nothing else), so
+# 'requests>=2.31' reached "Attempting uninstall: requests" and died there.  That
+# failed osiris's head node on 2026-07-28 with return code 1, eight minutes into
+# runpreinstall.  numpy was uninstalled successfully first, so the aborted
+# transaction left the node with *less* than it started with.
+sudo pip3 install --ignore-installed \
+    'boto3>=1.34,<2' 'matplotlib>=3.8,<4' \
+    'numpy>=1.26,<2' 'pandas>=2.2,<3' 'requests>=2.31,<3' \
+    'seaborn>=0.13,<1' 'scipy>=1.12,<2' 'tailhead>=1.0'
+{% endif %}
+
+# Upgrade awscli to the most current version (arch-aware).
+
+ARCH=$(uname -m)
+if [[ "$ARCH" == "aarch64" ]]; then
+    AWSCLI_URL="https://awscli.amazonaws.com/awscli-exe-linux-aarch64.zip"
+else
+    AWSCLI_URL="https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip"
+fi
+curl "$AWSCLI_URL" -o /tmp/awscliv2.zip
+unzip /tmp/awscliv2.zip -d /tmp
+sudo /tmp/aws/install --update
+rm -rf /tmp/awscliv2.zip /tmp/aws
+
+{% if hyperthreading == 'false' %}
+# Disable Intel HyperThreading.
+
+for cpunum in $(cat /sys/devices/system/cpu/cpu*/topology/thread_siblings_list | cut -s -d, -f2- | tr ',' '\n' | sort -un)
+do
+	echo 0 | sudo tee /sys/devices/system/cpu/cpu$cpunum/online > /dev/null
+done
+{% endif %}

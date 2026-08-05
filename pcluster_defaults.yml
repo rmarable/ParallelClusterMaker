@@ -1,0 +1,166 @@
+---
+################################################################################
+# pcluster_defaults.yml
+# Default values for make_pcluster.py, kill_pcluster.py, and access_cluster.py.
+# Pass --use_defaults to load these values; CLI arguments always take precedence.
+################################################################################
+
+# --- Cluster identity ---
+cluster_owner_department: hpc
+cluster_type: spot                    # ondemand | spot
+prod_level: dev                       # dev | test | stage | prod
+project_id: UNDEFINED
+turbot_account: disabled              # https://turbot.com/
+
+# --- Instance Definitions ---
+base_os: ubuntu2404arm                # ubuntu2204 | ubuntu2404 | ubuntu2204arm | ubuntu2404arm | rhel9 | rhel9arm | alinux2023 | alinux2023arm
+## Head node
+## REQUIRED for clusters to work
+## Do *NOT* mix x86_64 and Graviton architectures for any node type
+headnode_instance_type: c8g.xlarge
+headnode_root_volume_size: 100        # GB
+headnode_root_volume_type: gp3        # gp2 | gp3 | io1 | io2 | st1
+headnode_root_volume_iops: 3000
+headnode_root_volume_throughput: 125  # MB/s
+## Compute nodes
+## Use a comma-separated list for multiple instance types
+## Do *NOT* mix x86_64 and Graviton architectures for any node type
+## Leave compute_instance_type empty for GPU-only clusters
+compute_instance_type: c8g.2xlarge, c7g.2xlarge, c6g.2xlarge
+compute_root_volume_size: 250         # GB
+compute_root_volume_type: gp3         # gp2 | gp3 | io1 | io2 | st1
+compute_root_volume_iops: 3000
+compute_root_volume_throughput: 125   # MB/s
+## GPU nodes
+## Use a comma-separated list for multiple instance types
+## Valid GPU instance families: g4dn, g4ad, g5, g5g, g6, p3, p3dn, p4d, p4de, p5
+## Do *NOT* mix x86_64 and Graviton architectures for any node type
+## Leave gpu_instance_type empty for compute-only clusters
+gpu_instance_type:
+gpu_root_volume_size: 250             # GB
+gpu_root_volume_type: gp3             # gp2 | gp3 | io1 | io2 | st1
+gpu_root_volume_iops: 3000
+gpu_root_volume_throughput: 125       # MB/s
+## Optional features
+custom_ami: NONE
+hyperthreading: "true"
+placement_group: NONE                 # NONE | DYNAMIC
+
+# --- Autoscaling ---
+scaledown_idletime: 5                 # minutes
+## CPU
+initial_cpu_queue_size: 2
+max_cpu_queue_size: 8
+maintain_cpu_initial_size: "false"
+## GPU
+initial_gpu_queue_size: 2
+max_gpu_queue_size: 8
+maintain_gpu_initial_size: "false"
+
+# --- Scheduler ---
+scheduler: slurm
+
+# --- EBS ---
+ebs_encryption: "false"
+ebs_shared_dir: /shared
+ebs_shared_volume_size: 250           # GB
+ebs_shared_volume_type: gp3           # gp2 | gp3 | io1 | io2 | st1
+ebs_shared_volume_iops: 3000
+ebs_shared_volume_throughput: 125     # MB/s
+
+# --- Head node bootstrap ---
+# Seconds CloudFormation waits for the head node to signal success. PCluster
+# starts this clock when it begins creating the wait condition, which is BEFORE
+# the head node instance exists -- and EFS/FSx provisioning sits on the head
+# node's critical path, so a shared filesystem spends the budget before
+# preinstall runs at all (measured: 17m22s for a 1200 GB Lustre filesystem).
+# Left at 2100, the toolkit raises this automatically when enable_efs or
+# enable_fsx is true. Any other value is used verbatim. Max 43200 (CFN's own
+# ceiling). Cannot be changed on a running cluster -- PCluster marks it
+# UpdatePolicy.UNSUPPORTED.
+head_node_bootstrap_timeout: 2100
+
+# --- EFS ---
+enable_efs: "false"
+efs_encryption: "false"
+efs_performance_mode: generalPurpose  # generalPurpose | maxIO
+efs_throughput_mode: bursting         # bursting | provisioned | elastic
+
+# --- FSx for Lustre ---
+# S3 hydration uses ONE bucket with two prefixes. AWS requires the export and
+# import buckets to be the same, so "fsx_s3_import_bucket == fsx_s3_export_bucket"
+# with only the import and export folders allowed to differ. Mismatches are rejected
+# before the build starts.
+#   - Keep fsx_s3_import_path and fsx_s3_export_path distinct, or dehydrated files
+#     overwrite the hydration source.
+#   - Both prefixes are validated up front and must already contain at least one
+#     object -- an empty or misspelled prefix fails immediately.
+#   - Leaving fsx_s3_export_bucket UNDEFINED makes export follow the import
+#     bucket *and* path.
+#   - Any fsx_s3_* value requires enable_fsx_hydration=true, which requires
+#     enable_fsx=true. Hydration with fsx_s3_import_bucket=UNDEFINED is an error.
+enable_fsx: "false"
+fsx_size: 1200                        # GB, must be a multiple of 1200
+fsx_chunk_size: 1024                  # MB
+enable_fsx_hydration: "false"
+fsx_s3_import_bucket: UNDEFINED
+fsx_s3_import_path: import
+fsx_s3_export_bucket: UNDEFINED
+fsx_s3_export_path: export
+
+# --- EFA ---
+enable_efa: "false"
+
+# --- External NFS ---
+enable_external_nfs: "false"
+external_nfs_server: ""
+
+# --- Networking ---
+# WARNING: The toolkit auto-discovers VPCs and subnets by convention (default
+# VPC, first subnet per AZ). This is non-deterministic when multiple subnets
+# exist in an AZ. For production clusters, explicitly set headnode_subnet_id,
+# compute_subnet_ids, and vpc_name rather than relying on auto-discovery.
+vpc_name: "vpc_default"
+# Make sure headnode_subnet_id lives in --az
+headnode_subnet_id: ""  # leave empty to auto-discover
+compute_az: ""          # comma-separated; defaults to --az if empty
+compute_subnet_ids: ""  # comma-separated; leave empty to auto-discover
+gpu_az: ""              # comma-separated; defaults to compute_az if empty, then --az
+gpu_subnet_ids: ""      # comma-separated; leave empty to use compute_subnet_ids
+## Private subnet flags (only affect auto-discovery when subnet IDs are not explicit)
+use_private_compute_subnet: "false"
+use_private_gpu_subnet: "false"  # only auto-discover private subnets for GPU nodes
+
+# --- Performance tests ---
+enable_hpc_benchmarks: "false"
+
+# --- Monitoring (aws-parallelcluster-monitoring Grafana/Prometheus stack) ---
+enable_monitoring: "false"
+monitoring_version: "v2.6"  # pin to a specific release tag from aws-samples/aws-parallelcluster-monitoring
+# SHA-256 of the release tarball for supply-chain integrity.
+# Obtain with: curl -sL https://github.com/aws-samples/aws-parallelcluster-monitoring/archive/refs/tags/v2.6.tar.gz | sha256sum
+monitoring_version_checksum: "sha256:4afa56a59228c1d8f4e405d07a2291f31853842128e6f7a0e52e1e2c1e262d55"
+# Docker Compose CLI plugin, staged to S3 for the alinux2023 base_os values only.
+# AL2023 does not package docker-compose-plugin (confirmed absent from the al2023
+# core repo on x86_64 and aarch64), so upstream's installer/os/alinux2023.sh curls
+# the binary from github.com at node boot -- unverified and unreachable from a
+# private subnet.  The build stages it to S3 with these checksums instead and the
+# wrapper installs it before the installer runs; see monitoring-post-install-wrapper.j2.
+# The version below is ours, not upstream's -- the wrapper deletes upstream's
+# download entirely, so its own COMPOSE_VERSION goes unused and the two need not
+# agree.  v2.29.7 matches what monitoring v2.6 would have fetched.
+# Obtain with: curl -sL https://github.com/docker/compose/releases/download/<ver>/docker-compose-linux-<arch>.sha256
+docker_compose_version: "v2.29.7"
+docker_compose_checksum_x86_64: "sha256:383ce6698cd5d5bbf958d2c8489ed75094e34a77d340404d9f32c4ae9e12baf0"
+docker_compose_checksum_aarch64: "sha256:6e9fbd5daa20dca5d7d89145081ae8155d68ef2928b497d9f85b54fe0f9dbb2c"
+
+# --- kill_pcluster.py ---
+delete_s3_bucketname: "true"
+
+# --- Custom deployment scripts ---
+pre_install_script: scripts/pre-deployment.sh
+post_install_script: scripts/post-deployment.sh
+
+# --- Misc ---
+ansible_verbosity: ""
+debug_mode: "false"

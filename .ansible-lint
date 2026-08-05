@@ -1,0 +1,35 @@
+---
+# ansible-lint configuration for ParallelClusterMaker
+# Correctness rules run; style/formatting rules are warn-only or skipped.
+
+profile: basic
+
+warn_list:
+  # Style: builtin module FQCNs (ansible.builtin.command vs command) — cosmetic
+  - fqcn[action-core]
+  # Style: task key ordering
+  - key-order
+  # Style: task naming for debug/block tasks
+  - name[missing]
+  # Style: comma spacing in YAML flow sequences
+  - yaml[commas]
+  # Style: block task indentation — pre-existing layout, not a runtime bug
+  - yaml[indentation]
+  # Idiom: no-handler — intentional pattern (notify would require restructuring)
+  - no-handler
+  # Idiom: command-instead-of-shell — intentional where pipes are used
+  - command-instead-of-shell
+  # Idiom: risky-shell-pipe — pipes here are intentional and reviewed
+  - risky-shell-pipe
+  # Idiom: var-naming — existing variable names are stable public interface
+  - var-naming
+  # Idempotency: no-changed-when — pcluster CLI commands are inherently stateful;
+  # registering changed_when on every poll would be misleading
+  - no-changed-when
+  # Unpredictability: ignore-errors — intentional on cleanup tasks where resources
+  # may not exist (S3 bucket, SNS topic, IAM role already deleted, etc.)
+  - ignore-errors
+  # Style: long lines in scp/ssh commands — breaking these would harm readability
+  - yaml[line-length]
+  # Style: Jinja2 spacing inside regex_replace call — cosmetic
+  - jinja[spacing]

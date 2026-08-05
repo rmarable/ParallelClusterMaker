@@ -1,0 +1,570 @@
+#!/bin/bash
+set -euo pipefail
+################################################################################
+# Name:		postinstall.{{ cluster_name }}.sh
+# Author:	Rodney Marable <rodney.marable@gmail.com>
+# Created On:	April 20, 2019
+# Last Changed:	June 26, 2019
+# Deployed On:	{{ lookup('pipe','date \"+%B %e, %Y\" | tr -s \" \"') }}
+# Purpose:	Perform postinstall tasks on cluster {{ cluster_name }}
+################################################################################
+#
+# Source the local profile to ensure PATH works as expected.
+# All three options are suspended, not just `set -u`. A profile fragment is
+# written for an interactive shell and is under no obligation to survive any of
+# them: an RPM-based /etc/profile exports $HISTCONTROL unconditionally, which is
+# fatal under `set -u`, and AL2023's /etc/profile.d/debuginfod.sh runs
+#   DEBUGINFOD_URLS=$(cat /dev/null "/etc/debuginfod"/*.urls 2>/dev/null | tr '\n' ' ')
+# where /etc/debuginfod/ does not exist -- `cat` exits 1, `tr` exits 0, and
+# `pipefail` promotes the failure to the assignment, killing the node. That is
+# what failed the first alinux2023 build of this cluster, 690 ms in with no
+# output. Ubuntu's own profile is clean, but a site can drop anything into
+# /etc/profile.d, so the guard applies on every OS. Same guard as
+# monitoring-post-install-wrapper.j2; do not remove it and do not narrow it
+# back to `set +u`.
+
+set +euo pipefail
+source /etc/profile
+set -euo pipefail
+
+# Set values for some important variables. 
+
+EC2_HOME="{{ ec2_user_home }}"
+SRC="{{ ec2_user_src }}"
+
+# This script is registered as OnNodeConfigured on the head node and on every
+# compute queue, so every block below must be explicit about where it runs.
+#
+# The node type comes from /etc/parallelcluster/cfnconfig, which the
+# aws-parallelcluster-environment::cfnconfig_mixed recipe writes during the init
+# phase -- before any custom action runs -- as cfn_node_type=HeadNode or
+# cfn_node_type=ComputeFleet.  There is NO PARALLELCLUSTER_NODE_TYPE environment
+# variable: custom_action_executor.py builds the child environment from
+# os.environ plus the cfn_<event> script variables, and fetch_and_run keeps its
+# own PCLUSTER_NODE_TYPE as an unexported shell variable.  Reading a nonexistent
+# variable through `${...:-HeadNode}` is what made every compute node on cluster
+# osiris run the entire head-node path on 2026-07-27: ten g4dn.xlarge instances
+# cloned Lmod into shared NFS and pulled the toolkit down from S3, the gpu queue
+# tripped protected mode, and the stack failed 82 minutes in.  The default was
+# not a safety net -- it converted "the variable does not exist" into "be a head
+# node" and kept the `*)` arm below from ever firing.
+#
+# An absent cfnconfig means this is not a ParallelCluster node -- an operator
+# re-running the script by hand -- so HeadNode is the right default there.  A
+# cfnconfig that exists without cfn_node_type is a changed upstream contract and
+# must abort rather than silently pick a side.
+
+NODE_TYPE="HeadNode"
+if [ -f /etc/parallelcluster/cfnconfig ]
+then
+	# shellcheck disable=SC1091
+	source /etc/parallelcluster/cfnconfig
+	NODE_TYPE="${cfn_node_type-}"
+	if [ -z "$NODE_TYPE" ]
+	then
+		echo "ERROR: /etc/parallelcluster/cfnconfig defines no cfn_node_type" >&2
+		exit 1
+	fi
+fi
+
+# Configure a local_scratch directory and set the sticky bit if instance
+# store volumes are not being used: https://en.wikipedia.org/wiki/Sticky_bit
+
+if [ ! -d /scratch ]
+then
+	sudo mkdir -p /local_scratch
+	sudo chmod 1777 /local_scratch
+	ln -sfn /local_scratch /scratch
+else
+	ln -sfn /scratch /local_scratch
+fi
+
+{% if enable_gpu == 'true' %}
+# Mount NVMe instance store at /local_scratch if present; fall back to the
+# sticky-bit directory already created above for instances without instance store.
+#
+# Three filters, all load-bearing.  The model check is what keeps EBS volumes --
+# which also enumerate as /dev/nvme* -- from being reformatted.  The holders and
+# blkid checks keep us off devices ParallelCluster's own cookbook already claimed:
+# aws-parallelcluster-environment::ephemeral_drives runs BEFORE OnNodeConfigured,
+# and on any instance type with instance store it puts every such device into an
+# LVM physical volume (/dev/vg.01/lv_ephemeral), formats it ext4, and mounts it on
+# /scratch.  mkfs.xfs then fails with "cannot open /dev/nvme1n1: Device or resource
+# busy", and under `set -euo pipefail` that is a failed compute node -- which
+# clustermgtd retries until the partition trips protected mode and the whole stack
+# fails.  That is exactly what happened to osiris's gpu queue on 2026-07-27
+# (g4dn.xlarge, one instance-store device, 8 bootstrap failures before teardown).
+# This block was unreachable until session 22 made postinstall run on compute
+# nodes; instance store exists only there, so no earlier build could expose it.
+#
+# On a single-device instance type the practical result is that this block now
+# no-ops and /local_scratch is the symlink to PCluster's own /scratch made above.
+# It still fires on devices PCluster left alone.  Do not "simplify" either check
+# away: holders alone misses a formatted-but-unmounted device, and blkid alone
+# misses a device claimed with no filesystem signature of its own.
+
+_GPU_SCRATCH=/local_scratch
+mapfile -t _NVME_DEVS < <(
+    find /sys/block -maxdepth 1 -name 'nvme*' | while read -r _b; do
+        # One if rather than three `[[ ... ]] && continue` guards.  This is style,
+        # not correctness: both forms were run under bash 5.3 against the same
+        # fake sysfs and emit the same devices with status 0, in every position
+        # (`continue` inside a loop body is exempt from `set -e`).  The single
+        # condition is kept because the three tests are one decision.
+        _model=$(cat "$_b/device/model" 2>/dev/null | tr -d ' ')
+        _dev="/dev/$(basename "$_b")"
+        if [[ "$_model" == "AmazonEC2NVMeInstanceStorage" ]] &&
+           [[ -z "$(ls -A "$_b/holders" 2>/dev/null)" ]] &&
+           ! sudo blkid "$_dev" > /dev/null 2>&1
+        then
+            basename "$_b"
+        fi
+    done | sort
+)
+_NVME_COUNT=$(echo "${_NVME_DEVS[*]}" | wc -w | tr -d ' ')
+
+if [[ $_NVME_COUNT -eq 1 ]]; then
+    _DEV="/dev/${_NVME_DEVS[0]}"
+    sudo mkfs.xfs -f "$_DEV"
+    sudo mount -o noatime,nodiratime "$_DEV" "$_GPU_SCRATCH"
+    echo "$_DEV $_GPU_SCRATCH xfs noatime,nodiratime,nofail 0 0" | sudo tee -a /etc/fstab > /dev/null
+    sudo chmod 1777 "$_GPU_SCRATCH"
+elif [[ $_NVME_COUNT -gt 1 ]]; then
+    _RAID_DEVS=("${_NVME_DEVS[@]/#//dev/}")
+    sudo mdadm --create /dev/md0 --level=0 --raid-devices="$_NVME_COUNT" "${_RAID_DEVS[@]}" --force
+    sudo mkfs.xfs -f /dev/md0
+    sudo mount -o noatime,nodiratime /dev/md0 "$_GPU_SCRATCH"
+    echo "/dev/md0 $_GPU_SCRATCH xfs noatime,nodiratime,nofail 0 0" | sudo tee -a /etc/fstab > /dev/null
+    sudo chmod 1777 "$_GPU_SCRATCH"
+fi
+
+# Install monitoring tools.  Installed here rather than relying on the
+# head-node-only package block below, which compute nodes never reach.
+#
+# A compute node must refresh its package index first.  OnNodeStart -- and
+# therefore preinstall.j2's index refresh -- is registered on the head node only,
+# so a compute node's /var/lib/apt/lists (or dnf cache) is whatever the AMI
+# shipped.  With no Packages file for the release, `apt-get -y install nvtop`
+# exits 100 with "E: Unable to locate package nvtop"; that failed osiris's gpu
+# queue at 17:42 on 2026-07-27, one line after the NVMe fix above let the node get
+# this far.  The head node needs no refresh here: preinstall.j2 already did one,
+# and the head-node package block below does another.
+#
+# nvtop is head-node-only where it is available at all.  It is outside the default
+# repositories (multiverse on Ubuntu, EPEL on RHEL), the operator logs into the
+# head node rather than a compute node, and it is the only such package on either
+# path.  On AL2023 it is not installed anywhere: it is absent from the core repo
+# on both arches, and there is no EPEL to reach for -- see that arm below.
+#
+# Both commands are non-fatal, which no other install in this file is.  A compute
+# node that exits non-zero is not simply lost: clustermgtd relaunches it and
+# counts it toward the partition's 10-failure protected-mode threshold, so one
+# transient mirror outage would cost the whole stack.  Nothing in the toolkit's
+# job path imports either package -- they are diagnostics.
+
+{% if 'ubuntu' in base_os %}
+if [ "$NODE_TYPE" == "HeadNode" ]
+then
+	sudo apt-get -y install nvtop htop || echo "WARNING: nvtop/htop unavailable on this node" >&2
+else
+	sudo apt-get -y update || echo "WARNING: apt index refresh failed; htop may be unavailable" >&2
+	sudo apt-get -y install htop || echo "WARNING: htop unavailable on this node" >&2
+fi
+{% elif 'alinux' in base_os %}
+# Same node-type split for the same reasons, but htop only on both node types.
+# nvtop is absent from the al2023 core repo on x86_64 and aarch64 alike, and
+# there is no EPEL to fall back on: epel-release is not packaged for al2023, and
+# the EPEL 9 release RPM is built for el9 -- so the RHEL arm's URL install must
+# not be copied here.  Adding a repository nothing then installs from would be
+# pure bootstrap latency plus a network dependency a private-subnet cluster has
+# to satisfy.  Non-fatal for the same reason as the other two arms.
+if [ "$NODE_TYPE" == "HeadNode" ]
+then
+	sudo dnf -y install htop || echo "WARNING: htop unavailable on this node" >&2
+else
+	sudo dnf -y makecache || echo "WARNING: dnf metadata refresh failed; htop may be unavailable" >&2
+	sudo dnf -y install htop || echo "WARNING: htop unavailable on this node" >&2
+fi
+{% else %}
+# Same split for the same reasons.  nvtop is in EPEL, which is not in RHEL's own
+# repositories -- it installs by URL rather than by name -- so the head node adds
+# it here and the compute node installs only htop, which is in baseos.  Every
+# command in this block is non-fatal for the reason above.
+if [ "$NODE_TYPE" == "HeadNode" ]
+then
+	sudo dnf -y install "https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm" || echo "WARNING: EPEL unavailable; nvtop will not install" >&2
+	sudo dnf -y install nvtop htop || echo "WARNING: nvtop/htop unavailable on this node" >&2
+else
+	sudo dnf -y makecache || echo "WARNING: dnf metadata refresh failed; htop may be unavailable" >&2
+	sudo dnf -y install htop || echo "WARNING: htop unavailable on this node" >&2
+fi
+{% endif %}
+{% endif %}
+
+if [ "$NODE_TYPE" == "HeadNode" ]
+then
+
+# Configure Spack:
+# https://spack.io/
+# Head node only: $SPACK_DIR lives on shared storage, so a recursive chown from
+# every scaling compute node would be redundant and would race.
+
+SPACK_DIR="{{ spack_root }}"
+if [ ! -d "$SPACK_DIR" ]
+then
+	sudo mkdir -p "$SPACK_DIR"
+fi
+sudo chown -R "{{ ec2_user }}:{{ ec2_user }}" "$SPACK_DIR"
+sudo chmod -R 755 "$SPACK_DIR"
+
+{% if 'ubuntu' in base_os %}
+# Install critical packages via apt-get.
+#
+# `bc` is here for Lmod's ./configure, which hard-quits on a missing bc with
+# "You must have bc in your path. Quitting!" -- see the dnf arm below, where it
+# was observed.  Nothing else in the toolkit calls bc.  It is on the Ubuntu arm
+# too even though that AMI happens to ship it, because "the base image happens to
+# carry it" is not a property worth depending on across image bumps.
+sudo apt-get -y update
+sudo apt-get -y install gcc git lua5.4 liblua5.4-dev lua-filesystem nfs-common parallel pigz tcl tcsh zsh lua-posix tcllib binutils bc
+{% elif 'alinux' in base_os %}
+# Install critical packages via dnf.  Same kernel exclusions and the same `bc`
+# requirement as the RHEL arm below -- read that comment for both.
+#
+# No EPEL and no CRB here, unlike RHEL: lua, lua-devel, lua-filesystem, lua-posix,
+# lua-term, bc, tcl and every build tool on this line are all in the al2023 core
+# repo on x86_64 and aarch64 (checked against the repo metadata, not assumed), so
+# there is nothing left for a second repository to supply.  epel-release is not
+# packaged for al2023 at all, so the RHEL arm's URL install has no analog.
+#
+# tcllib is deliberately NOT on this line: it is absent from the al2023 core repo,
+# and nothing in this toolkit references it -- Lmod uses tcl itself.  Adding it
+# back for symmetry with the other two arms would fail the node.
+#
+# lua-term is here because it comes from the core repo as an RPM rather than being
+# built by luarocks; see the luarocks block below, which is a no-op on this arm.
+sudo dnf -y --exclude='kernel*' --exclude='kmod-lustre*' --exclude='lustre-client*' --exclude='efa*' update
+sudo dnf -y install gcc git lua lua-devel lua-filesystem lua-posix lua-term nfs-utils parallel pigz rpm-build tcl tcsh zsh binutils bc
+{% else %}
+# Install critical packages via dnf.
+#
+# The kernel is excluded here for the same two reasons as preinstall.j2: an
+# unbounded dracut rebuild inside the bootstrap window, and PCluster's EFA and
+# Lustre modules are built against the kernel the AMI boots.
+#
+# EPEL is required: lua-devel, lua-posix, lua-filesystem, and tcllib are not in
+# RHEL 9's baseos or appstream repositories.  It installs by URL because
+# epel-release itself is not packaged in RHEL, unlike CentOS and Amazon Linux.
+#
+# CodeReady Builder is enabled best-effort because its repository id is not the
+# same everywhere: `crb` on Rocky, Alma, and CentOS Stream, and a longer
+# codeready-builder-for-rhel-9-* id on genuine RHEL, whose exact spelling depends
+# on whether the AMI is registered through RHUI or subscription-manager.  Rather
+# than guess, try each and let the package install below be the arbiter -- it is
+# fatal, so if any of these packages really needs CRB the node fails loudly with
+# the missing package named instead of on an unrecognized repository id.
+# `dnf config-manager` itself is a dnf-plugins-core subcommand and may be absent.
+#
+# `bc` is NOT on the RHEL 9 PCluster AMI (verified on head node i-0000000000000015)
+# and Lmod's ./configure hard-quits without it: "You must have bc in your path.
+# Quitting!", which under `set -euo pipefail` is OnNodeConfiguredExecutionFailure.
+# That failed osiris at 17:26 on 2026-07-28, one stage after the pip fix let the
+# node get this far.  It is in rhel-9-baseos, so it needs neither EPEL nor CRB.
+# The only other tool ./configure can quit on is one of sha1sum|shasum|md5sum|md5,
+# and sha1sum is present on both AMIs.
+
+sudo dnf -y --exclude='kernel*' --exclude='kmod-lustre*' --exclude='lustre-client*' --exclude='efa*' update
+sudo dnf -y install "https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm"
+for _crb in crb codeready-builder-for-rhel-9-rhui-rpms "codeready-builder-for-rhel-9-$(uname -m)-rpms"
+do
+	sudo dnf -y config-manager --set-enabled "$_crb" 2>/dev/null && break
+done || true
+sudo dnf -y install gcc git lua lua-devel lua-filesystem nfs-utils parallel pigz rpm-build tcl tcsh zsh lua-posix tcllib binutils bc
+{% endif %}
+
+fi  # end HeadNode-only package and Spack directory block
+
+# Create a local source directory for the {{ ec2_user }} user account.
+# Head node only: $SRC is under {{ ec2_user_home }}, which ParallelCluster
+# NFS-exports from the head node, and only the head-node blocks below build in it.
+
+if [ "$NODE_TYPE" == "HeadNode" ] && [ ! -d "$SRC" ]
+then
+	sudo mkdir -p "$SRC"
+	sudo chown -R "{{ ec2_user }}:{{ ec2_user }}" "$SRC"
+	sudo chmod -R 755 "$SRC"
+fi
+{% if enable_external_nfs == 'true' %}
+
+# Create directories and persistently mount all external NFS file systems 
+# listed in the external_nfs_mount_list configuration file.
+
+external_nfs_server="{{ external_nfs_server }}"
+NFS_MOUNT_LIST=$(mktemp)
+aws s3 cp "s3://{{ s3_bucketname }}/{{ s3_script_path }}/{{ external_nfs_mount_list_template_dest }}" "$NFS_MOUNT_LIST"
+while IFS= read -r dir; do
+	[[ -z "$dir" || "$dir" == \#* ]] && continue
+	sudo mkdir -p "{{ external_nfs_server_root }}/$dir"
+	sudo chown root:root "{{ external_nfs_server_root }}/$dir"
+	sudo chmod -R 755 "{{ external_nfs_server_root }}/$dir"
+	echo "${external_nfs_server}:${dir} {{ external_nfs_server_root }}/${dir} nfs defaults 0 0" | sudo tee -a /etc/fstab > /dev/null
+	sudo mount "{{ external_nfs_server_root }}/$dir"
+done < "$NFS_MOUNT_LIST"
+rm -f "$NFS_MOUNT_LIST"
+{% endif %}
+
+# Create the Spack software package directory on the head node.
+# Spack package installation location is controlled by the selected shared
+# storage option.  Only one package location per cluster is supported.
+# Precedence: FSX > EFS > external NFS > EBS
+
+if [ "$NODE_TYPE" == "HeadNode" ]
+then
+	if [ ! -d "{{ pkg_dir }}" ]
+	then
+		sudo mkdir -p "{{ pkg_dir }}"
+		sudo chown -R "{{ ec2_user }}:{{ ec2_user }}" "{{ pkg_dir }}"
+		sudo chmod -R 755 "{{ pkg_dir }}"
+	fi
+fi
+
+# Install luarocks and Lmod only on the head node — compute nodes mount /usr/local
+# from shared storage and inherit the installation.
+
+if [ "$NODE_TYPE" == "HeadNode" ]; then
+{% if 'ubuntu' in base_os %}
+
+# liblua5.1-0-dev is explicit because apt will not install it on its own.  Ubuntu's
+# luarocks package declares an *alternative* dependency group -- liblua5.1-dev |
+# liblua5.2-dev | liblua5.3-dev -- and apt satisfies it with 5.3, while the same
+# package's parallel lua5.1|lua5.2|lua5.3 group leaves luarocks itself running
+# lua_version 5.1.  luaposix, luafilesystem, and lua-term are C extensions that
+# compile against lua.h for the version luarocks targets, so on a stock ubuntu2404
+# AMI they find /usr/include/lua5.3 and /usr/include/lua5.4 but no lua5.1 header at
+# all, and the build fails.  Under `set -euo pipefail` that failed osiris's head node
+# with OnNodeConfiguredExecutionFailure -- and cfn-init records stdout only, so the
+# compiler error went nowhere and the log's last line is the luarocks banner.
+# LUA_VER below is read from the 5.1 interpreter, so the whole block is 5.1: do not
+# "fix" this by switching the rocks to 5.3 without changing that too.
+sudo apt-get install -y luarocks liblua5.1-0-dev
+sudo luarocks install luaposix
+sudo luarocks install luafilesystem
+sudo luarocks install lua-term
+{% elif 'alinux' in base_os %}
+# No luarocks on this arm at all: it is absent from the al2023 core repo on both
+# arches.  All three rocks the other two arms build are packaged as RPMs there
+# instead -- lua-posix, lua-filesystem, and lua-term -- and were installed on the
+# package line above, so there is nothing left to build.  The three
+# `luarocks install` lines are therefore inside the other two arms rather than
+# below the {% raw %}{% endif %}{% endraw %}: as unconditional lines they would run here as well, and
+# `luarocks: command not found` under `set -euo pipefail` is a dead head node.
+#
+# LUA_CPATH and LUA_PATH below need no case for this.  The RPMs install to
+# /usr/lib64/lua/5.4 and /usr/share/lua/5.4 (checked in the repo filelists on both
+# arches) rather than under $LUAROCKS_PREFIX/lib/lua, but the trailing `;;` in both
+# variables expands to the interpreter's own compiled-in default path, which covers
+# lib64.  Do not add a lib64 branch.
+{% else %}
+# No separate header package is needed here.  The alternative-dependency-group
+# problem above is Ubuntu packaging: RHEL's luarocks depends on lua-devel for the
+# same lua it targets, and lua-devel was installed on the package line above.
+# LUA_VER below is still read off the interpreter, so the block stays consistent
+# with whatever version that is.
+sudo dnf install -y luarocks
+sudo luarocks install luaposix
+sudo luarocks install luafilesystem
+sudo luarocks install lua-term
+{% endif %}
+
+# Install and configure Lmod.
+
+cd "$SRC"
+git clone --depth=1 --branch 8.7.55 https://github.com/TACC/Lmod
+cd Lmod
+export PATH=/usr/local/bin:$PATH
+export LUAROCKS_PREFIX=/usr
+LUA_VER=$(lua -e 'print(_VERSION)' | awk '{print $2}')
+export LUA_CPATH="$LUAROCKS_PREFIX/lib/lua/${LUA_VER}/?.so;;"
+export LUA_PATH="$LUAROCKS_PREFIX/share/lua/${LUA_VER}/?.lua;$LUAROCKS_PREFIX/share/lua/${LUA_VER}/?/init.lua;;"
+./configure --prefix=/usr/local --with-module-root-path="{{ pkg_dir }}/modulefiles" --with-spiderCacheDir="{{ pkg_dir }}/ModuleData/cachedir" --with-updateSystemFn="{{ pkg_dir }}/ModuleData/system.txt"
+sudo -E make install
+ln -sf /usr/local/lmod/lmod/libexec/lmod /usr/local/bin/lmod
+
+# Copy the Lmod user login environment environment scripts to /etc/profile.d.
+# Add $SPACK_DIR/bin to $PATH, set $SPACK_ROOT, and enable Spack shell support.
+
+sudo cp /usr/local/lmod/lmod/init/sh /etc/profile.d/lmod.sh
+cat << 'ENVEOF' >> /etc/profile.d/lmod_spack.sh
+#!/bin/sh
+
+export PATH="$PATH:{{ spack_root }}/bin"
+export SPACK_ROOT="{{ spack_root }}"
+source "{{ spack_root }}/share/spack/setup-env.sh"
+ENVEOF
+
+sudo cp /usr/local/lmod/lmod/init/csh /etc/profile.d/lmod.csh
+cat << 'ENVEOF' >> /etc/profile.d/lmod_spack.csh
+#!/bin/csh
+
+setenv PATH "$PATH:{{ spack_root }}/bin"
+setenv SPACK_ROOT "{{ spack_root }}"
+source "{{ spack_root }}/share/spack/setup-env.csh"
+ENVEOF
+
+fi  # end HeadNode-only Lmod/luarocks block
+
+# Install Spack on the cluster head node.
+# Push an alert via SNS when new instances are spawned.
+# Other custom role-specific tasks should be added here.
+
+case "$NODE_TYPE" in
+HeadNode)
+	echo "Customize the pcluster stack head node here."
+	echo "Ready to finish joining the cluster!"
+{% if enable_hpc_benchmarks == 'true' %}
+
+	# Deploy performance toolkit from S3 and install Python plotting dependencies.
+
+	# Allowlist mirrors the upload in create_pcluster.yml.  Only the driver is on
+	# S3; the personalized job script and README arrive by scp into
+	# ~/hpc-benchmark/<cluster>/<owner>/slurm and are not restorable from here.
+	aws s3 sync "s3://{{ s3_bucketname }}/hpc-benchmark/" "{{ ec2_user_home }}/hpc-benchmark/" \
+		--exclude "*" --include "hpc-benchmark.sh"
+	chmod +x "{{ ec2_user_home }}/hpc-benchmark/hpc-benchmark.sh"
+	# --ignore-installed on both arms: without it a resolver decision to replace a
+	# distro-owned transitive dependency (RHEL 9 ships packaging, dateutil and
+	# pyparsing as RPMs) reaches "Attempting uninstall" on a dist-info that has no
+	# RECORD, which is what failed this cluster's head node in preinstall on
+	# 2026-07-28.  The five names here are unpinned, so the direct requirements
+	# are already satisfied by preinstall and would not be replaced -- the
+	# exposure is one level down.  Cost is a re-download of five wheels on the
+	# head node only, gated on enable_hpc_benchmarks; all five publish manylinux
+	# aarch64 wheels, so this is not a from-source build on the arm images.
+{% if 'ubuntu' in base_os %}
+	pip3 install --quiet --ignore-installed --break-system-packages matplotlib numpy pandas scipy seaborn
+{% else %}
+	pip3 install --quiet --ignore-installed matplotlib numpy pandas scipy seaborn
+{% endif %}
+{% endif %}
+	echo "Bootstrapping Spack..."
+	cd "{{ pkg_dir }}"
+	git clone --depth=1 --branch v0.23.0 https://github.com/spack/spack.git
+	chown -R "{{ ec2_user }}:{{ ec2_user }}" "{{ pkg_dir }}"
+{% if enable_fsx == 'true' and enable_fsx_hydration == 'true' %}
+
+	# Create scripts in /usr/local/bin that will:
+	# - import s3://{{ fsx_s3_import_bucket }}/{{ fsx_s3_import_path }} from Lustre
+	# - export s3://{{ fsx_s3_export_bucket }}/{{ fsx_s3_export_path }} to Lustre
+	# - check the status of an export-S3-to-Lustre process
+
+	sudo su -c "echo \"nohup find {{ fsx_root }} -type f -print0 | xargs -0 -n 1 sudo lfs hsm_restore &\" > /usr/local/bin/import-s3-to-lustre.sh"
+	sudo su -c "echo \"nohup find {{ fsx_root }} -type f -print0 | xargs -0 -n 1 sudo lfs hsm_archive &\" > /usr/local/bin/export-lustre-to-s3.sh"
+	sudo su -c "echo \"find {{ fsx_root }} -type f -print0 | xargs -0 -n 1 -P 8 sudo lfs hsm_action | grep \\\"ARCHIVE\\\" | wc -l\" > /usr/local/bin/check-lustre-export-progress.sh"
+
+	for script in /usr/local/bin/import-s3-to-lustre.sh /usr/local/bin/export-lustre-to-s3.sh /usr/local/bin/check-lustre-export-progress.sh
+	do
+		sudo chmod 0755 "$script"
+		sudo chown root:root "$script"
+	done
+{% endif %}
+	;;
+ComputeFleet)
+	echo "Customize the pcluster stack compute instances here."
+	echo "Ready to finish joining the cluster!"
+	;;
+*)
+	# NODE_TYPE comes from cfn_node_type in /etc/parallelcluster/cfnconfig,
+	# which ParallelCluster writes as HeadNode or ComputeFleet. A third value
+	# means the contract changed and node-type gating above silently stopped
+	# applying.
+	echo "ERROR: unrecognized cfn_node_type: $NODE_TYPE" >&2
+	exit 1
+	;;
+esac
+
+# Create some local aliases for HPC operator convenience.  Prevent multiple
+# copies of each alias from proliferating in the {{ ec2_user }} bash profile.
+#
+# Head node only. {{ ec2_user_home }} is NFS-exported from the head node, so
+# every compute node appending here would be a concurrent read-modify-write on
+# one file -- the grep guard does not make that safe -- and nobody logs into a
+# compute node interactively anyway.
+
+if [ "$NODE_TYPE" == "HeadNode" ]
+then
+
+# src
+BASHRC="{{ ec2_user_home }}/.bashrc"
+LINE_SRC="alias src='cd ~/src'"
+grep -qF -- "$LINE_SRC" "$BASHRC" || echo "$LINE_SRC" >> "$BASHRC"
+
+# ebs-pdir
+LINE_EBS="alias ebsdir='cd \"{{ ebs_performance_dir }}\"'"
+grep -qF -- "$LINE_EBS" "$BASHRC" || echo "$LINE_EBS" >> "$BASHRC"
+{% if enable_efs == 'true' %}
+
+# efs-pkgdir
+LINE_EFS_PKGDIR="alias epkgdir='cd \"{{ efs_pkg_dir }}\"'"
+grep -qF -- "$LINE_EFS_PKGDIR" "$BASHRC" || echo "$LINE_EFS_PKGDIR" >> "$BASHRC"
+{% endif %}
+{% if enable_efs == 'true' and enable_hpc_benchmarks == 'true' %}
+
+# efs-pdir
+LINE_EFS_PDIR="alias edir='cd \"{{ efs_hpc_performance_dir }}\"'"
+grep -qF -- "$LINE_EFS_PDIR" "$BASHRC" || echo "$LINE_EFS_PDIR" >> "$BASHRC"
+{% endif %}
+{% if enable_fsx == 'true' %}
+
+# fsx-pkgdir
+LINE_FSX_PKGDIR="alias fpkgdir='cd \"{{ fsx_pkg_dir }}\"'"
+grep -qF -- "$LINE_FSX_PKGDIR" "$BASHRC" || echo "$LINE_FSX_PKGDIR" >> "$BASHRC"
+{% endif %}
+{% if enable_fsx == 'true' and enable_hpc_benchmarks == 'true' %}
+
+# fsx-pdir
+LINE_FSX_PDIR="alias fdir='cd \"{{ fsx_hpc_performance_dir }}\"'"
+grep -qF -- "$LINE_FSX_PDIR" "$BASHRC" || echo "$LINE_FSX_PDIR" >> "$BASHRC"
+{% endif %}
+{% if enable_external_nfs == 'true' %}
+
+# nfs-pkgdir
+LINE_EXTERNAL_NFS_PKGDIR="alias npkgdir='cd \"{{ external_nfs_pkg_dir }}\"'"
+grep -qF -- "$LINE_EXTERNAL_NFS_PKGDIR" "$BASHRC" || echo "$LINE_EXTERNAL_NFS_PKGDIR" >> "$BASHRC"
+{% endif %}
+{% if enable_external_nfs == 'true' and enable_hpc_benchmarks == 'true' %}
+
+# nfs-pdir
+LINE_EXTERNAL_NFS_PDIR="alias ndir='cd \"{{ external_nfs_hpc_performance_dir }}\"'"
+grep -qF -- "$LINE_EXTERNAL_NFS_PDIR" "$BASHRC" || echo "$LINE_EXTERNAL_NFS_PDIR" >> "$BASHRC"
+{% endif %}
+
+# Cleanup: remove the Lmod build tree, which only the head node created.
+
+cd "$SRC"
+for dir in Lmod luarocks-*
+do
+	rm -rf "$dir"
+done
+
+fi  # end HeadNode-only alias and cleanup block
+
+# Drop the completion marker that check_pcluster.py and diagnose_pcluster.py
+# look for. This is the last statement before exit: `set -e` at the top means
+# any earlier failure aborts before the marker is written, so its presence
+# means the whole script ran to completion.
+#
+# Head node only. /opt/parallelcluster/shared is NFS-exported from the head
+# node, so a compute node writing here would either be denied by root-squash --
+# aborting its own bootstrap under `set -e` -- or silently re-touch the head
+# node's marker, making it mean "some node finished" instead of "the head node
+# finished". Both consumers SSH to the head node and read only this path. A
+# compute node that fails postinstall is already reported by ParallelCluster,
+# which fails the node's bootstrap on a non-zero exit.
+
+if [ "$NODE_TYPE" == "HeadNode" ]
+then
+	sudo mkdir -p /opt/parallelcluster/shared
+	sudo touch /opt/parallelcluster/shared/custom_action_done
+fi
+
+exit 0
