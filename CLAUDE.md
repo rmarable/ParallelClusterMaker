@@ -52,7 +52,10 @@ standing constraints for local development.
   `pcluster_core.py`), `src/create_pcluster.yml`'s `_build_summary`, and
   `templates/sns_build_summary_report.j2`. A line added to one must be added
   to all three. `_storage_summary_lines` is keyword-only (14 same-typed
-  params) — never call it positionally.
+  params) — never call it positionally. The mount-point column width is
+  derived from the longest active label (`max(len(label)) + 2`), never a
+  hardcoded constant — a fixed width of 6 didn't fit the 7-character
+  `/shared` default and silently dropped its padding.
 - `postinstall.j2` runs on the head node **and** every compute node.
   `NODE_TYPE` must be read from `cfn_node_type` in
   `/etc/parallelcluster/cfnconfig` — there is no `PARALLELCLUSTER_NODE_TYPE`
