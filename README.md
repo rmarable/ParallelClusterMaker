@@ -1,6 +1,6 @@
 # ParallelClusterMaker
 
-This Open Source CLI toolkit automates creation and destruction of [AWS ParallelCluster v3](https://github.com/aws/aws-parallelcluster) stacks.  It lets researchers and engineers stand up a working HPC cluster on AWS without deep infrastructure expertise, and it cuts the support load on the DevOps teams backing them.
+This Open Source CLI toolkit automates creation and destruction of [AWS ParallelCluster v3](https://github.com/aws/aws-parallelcluster) stacks, letting researchers and engineers stand up a working HPC cluster on AWS without deep infrastructure expertise while reducing the support load on DevOps/IT teams.
 
 This codebase was co-written with [Claude Code](https://claude.ai/code) (Anthropic).
 
@@ -67,7 +67,7 @@ permissions), and installation steps.
 
 ## Defaults
 
-All optional parameters have hardcoded defaults and can also be persisted in a YAML defaults file.  `pcluster_defaults.yml` is the template — **copy it to your own file before use**; do not pass the toolkit's copy directly as it is shared and may be overwritten by updates.  The most commonly referenced defaults:
+All optional parameters have hardcoded defaults and can also be persisted in a YAML defaults file.  `pcluster_defaults.yml` is the template — **copy the file before use**; the tracked version is shared and may be overwritten by updates, so never pass that one directly.  The most commonly referenced defaults:
 
 | Parameter | Default |
 |---|---|
@@ -212,14 +212,14 @@ Mixed CPU + GPU cluster (separate queues):
 
 RHEL 9 cluster (login user is `ec2-user`, not `ubuntu`):
 ```
-./make_pcluster.py -A us-east-2a -O rmarable -E rodney.marable@gmail.com -N enkidu \
+./make_pcluster.py -A us-east-1a -O rmarable -E rodney.marable@gmail.com -N enkidu \
     --base_os=rhel9 --headnode_instance_type=c5.xlarge \
     --compute_instance_type=c5.2xlarge
 ```
 
 Amazon Linux 2023 cluster on Graviton (login user is `ec2-user`):
 ```
-./make_pcluster.py -A us-east-2a -O rmarable -E rodney.marable@gmail.com -N ninlil \
+./make_pcluster.py -A us-east-1a -O rmarable -E rodney.marable@gmail.com -N ninlil \
     --base_os=alinux2023arm --headnode_instance_type=c8g.xlarge \
     --compute_instance_type=c8g.2xlarge
 ```
@@ -230,7 +230,7 @@ Building from a custom AMI (must match base_os):
     --enable_fsx=true --custom_ami=ami-123456789abc --base_os=ubuntu2204
 ```
 
-A new stack typically takes approximately 30–35 minutes to build.  Two measured `us-east-2` builds of the same cluster shape (`c5.xlarge` head node, two queues, `ubuntu2404`): **34m 24s** with a 1200 GB FSx for Lustre filesystem, and **21m 14s** with EFS instead.  Actual time depends on region, instance type availability, and which shared filesystems are enabled — FSx dominates when it is on, because its provisioning sits on the head node's critical path (see Troubleshooting).
+A new stack typically takes approximately 30–35 minutes to build.  Two measured `us-east-1` builds of the same cluster shape (`c5.xlarge` head node, two queues, `ubuntu2404`): **34m 24s** with a 1200 GB FSx for Lustre filesystem, and **21m 14s** with EFS instead.  Actual time depends on region, instance type availability, and which shared filesystems are enabled — FSx dominates when it is on, because its provisioning sits on the head node's critical path (see Troubleshooting).
 
 ---
 
@@ -270,8 +270,8 @@ Teardown deletes ten kinds of resource after the CloudFormation stack is gone: t
 ```
 =================================================================
 
-Initiated shutdown: 2026-07-26 @ 01:33:12
-Completed shutdown: 2026-07-26 @ 01:41:48
+Initiated shutdown: 2026-08-03 @ 01:33:12
+Completed shutdown: 2026-08-03 @ 01:41:48
 
 Cluster osiris has been deleted, but 2 cleanup step(s) FAILED.
 The following resources are still in the account and must be
@@ -411,15 +411,15 @@ Example output:
 
 ```
 Diagnosing cluster: my-cluster  (us-east-1)
-  serial: 20260724-abc123
+  serial: 20260804-abc123
 
 === CloudWatch: head node bootstrap logs ===
 
-  log group: /aws/parallelcluster/my-cluster-202607241130
+  log group: /aws/parallelcluster/my-cluster-202608041130
 
   --- cfn-init ---
-  2026-07-24 11:32:01  ConfigSet: default
-  2026-07-24 11:32:05  Install packages: ok
+  2026-08-04 17:24:45  ConfigSet: default
+  2026-08-04 17:24:49  Install packages: ok
   ...
 
 === Slurm node states (sinfo -N -l) ===
@@ -440,7 +440,7 @@ Diagnosing cluster: my-cluster  (us-east-1)
 
 === Postinstall marker ===
 
-  [PASS] /opt/parallelcluster/shared/custom_action_done  (serial: 20260724-abc123)
+  [PASS] /opt/parallelcluster/shared/custom_action_done  (serial: 20260803-abc123)
 ```
 
 ---
@@ -639,7 +639,7 @@ Both `compute_instance_type` and `gpu_instance_type` accept comma-separated list
 **What the GPU postinstall block does:**  `templates/postinstall.j2` gates a GPU block on `enable_gpu == 'true'`.  Postinstall runs as an `OnNodeConfigured` custom action on the head node and on every compute queue, so this block runs on the GPU compute nodes — which are the only instances that have NVMe instance store to configure.
 
 - NVMe instance store detection — scans `/sys/block/nvme*` and accepts a device only if it passes three independent filters: the model string matches `AmazonEC2NVMeInstanceStorage` (whitespace stripped), `holders/` is empty, and `blkid` finds no filesystem signature.  The model check keeps EBS volumes, which also appear as `/dev/nvme*`, from being formatted.  The other two keep the toolkit off devices ParallelCluster already claimed, and neither subsumes the other — a device inside an LVM volume has holders but no signature of its own, while a formatted-but-unmounted device has a signature and no holders
-- **ParallelCluster usually claims these devices first.**  Its `aws-parallelcluster-environment::ephemeral_drives` cookbook runs *before* `OnNodeConfigured` and, on any instance type with instance store, puts every such device into an LVM physical volume, formats it `ext4`, and mounts it on `/scratch`.  On that common case the toolkit's block correctly does nothing and `/local_scratch` is a symlink to PCluster's `/scratch` — verified on a live `g4dn.xlarge`.  Without the holders/`blkid` filters, `mkfs.xfs` on a claimed device fails with `Device or resource busy`, which fails the node
+- **ParallelCluster usually claims these devices first.**  The `aws-parallelcluster-environment::ephemeral_drives` cookbook runs *before* `OnNodeConfigured` and, on any instance type with instance store, puts every such device into an LVM physical volume, formatted `ext4` and mounted on `/scratch`.  On that common case the toolkit's block correctly does nothing and `/local_scratch` is a symlink to PCluster's `/scratch` — verified on a live `g4dn.xlarge`.  Without the holders/`blkid` filters, `mkfs.xfs` on a claimed device fails with `Device or resource busy`, which fails the node
 - Single unclaimed device: formatted XFS, mounted at `/local_scratch` with `noatime,nodiratime,nofail`
 - Multiple unclaimed devices (`p4d.24xlarge` has 8×1000 GB, `p5.48xlarge` has 8×3800 GB, per `aws ec2 describe-instance-types`): RAID0 via `mdadm`, mounted at `/local_scratch`
 - No instance store present (e.g. `p3.2xlarge`): `/local_scratch` remains a sticky-bit directory on the root EBS volume
@@ -655,13 +655,19 @@ Both `compute_instance_type` and `gpu_instance_type` accept comma-separated list
 
 Enable with `--enable_efa=true`.  Supported on every `base_os` value the toolkit accepts.  Requires a supported instance type (c5n.18xlarge, hpc6a.48xlarge, hpc7a.96xlarge, hpc7g.16xlarge, etc.).  A dynamic placement group is created automatically.
 
+EFA (Elastic Fabric Adapter) is an OS-bypass network interface that gives tightly-coupled, latency-sensitive MPI jobs a much faster interconnect than standard TCP/IP networking — closer to InfiniBand than to a regular NIC.  EFA matters most for multi-node jobs with heavy collective communication (large all-reduce, halo exchanges, etc.); a single-node job, or one bound by disk or ordinary network I/O, sees little benefit.  On p4d, p4de, and p5 instances, EFA-GDR (GPUDirect RDMA) is enabled automatically, letting the network adapter read and write GPU memory directly instead of staging through host memory — which matters for multi-node GPU jobs.
+
+**Not yet verified on hardware.**  EFA-enabled builds have not been run against real instances; the config generation and instance-type gating are unit-tested, but the actual interconnect behavior is unconfirmed.
+
 ### Placement Groups
 
-Enable with `--placement_group=DYNAMIC`.  PCluster creates one managed cluster placement group per queue; it is applied to the CPU and GPU compute queues only.  The head node is never placed in a placement group.  `--enable_efa=true` sets this to `DYNAMIC` automatically if it is still `NONE`.
+Enable with `--placement_group=DYNAMIC`.  PCluster creates one managed cluster placement group per queue, applied to the CPU and GPU compute queues only.  The head node is never placed in a placement group.  `--enable_efa=true` sets this to `DYNAMIC` automatically when the setting is still `NONE`.
 
 ### HyperThreading
 
 Disable with `--hyperthreading=false`.
+
+HyperThreading (Intel) / SMT (AMD) exposes each physical CPU core as two logical vCPUs sharing the same execution resources.  Many HPC workloads — anything compute- or memory-bandwidth-bound rather than I/O-bound — run faster with HyperThreading disabled, since two threads contending for one core's resources often costs more than the extra thread gains.  Disabling HyperThreading also changes the per-node rank count Slurm submits with: `cpu_ranks_per_node` divides vCPUs by `DefaultThreadsPerCore` instead of always halving (see [Job Submission](#job-submission)).
 
 ---
 
@@ -763,13 +769,13 @@ The `arm` suffix is the toolkit's, not ParallelCluster's — it drives instance-
 - On Amazon Linux 2023, neither EPEL nor CRB is used, because `epel-release` is not packaged for al2023 at all and everything the toolkit needs is already in the core repo.  Four packages the RHEL arm installs are absent from al2023 on both architectures, so that arm differs accordingly: `luarocks` (the three Lua rocks come from the core repo as RPMs instead, and the luarocks build step is a no-op), `tcllib` (unused by the toolkit — Lmod uses `tcl` itself), and `nvtop` (so GPU clusters get `htop` only, on both node types).  Do not add any of them back for symmetry with RHEL; each one would fail the node.
 - `pip3` is called with `--break-system-packages` on Ubuntu and without it on RHEL 9 and Amazon Linux 2023, both of which ship a pip that predates PEP 668 and rejects the flag.
 - Every `pip3 install` on a node carries `--ignore-installed`, on both families.  pip cannot uninstall a distribution whose `dist-info` has no `RECORD` file, and distro-packaged Python modules routinely ship exactly that — Ubuntu's `python3-pip` and RHEL 9's `python3-requests` are both confirmed cases.  Any install that resolves to replacing one dies at `Attempting uninstall:`, which under `set -euo pipefail` fails the node's bootstrap.  `--ignore-installed` skips the uninstall and installs over the top; nothing in the toolkit needs the distro package removed.  This is a different problem from `--break-system-packages`, which only permits writing into the system tree.
-- `nvtop` (GPU clusters) is installed on the head node only, on Ubuntu and RHEL 9 — it is outside the default repositories in each, and the operator logs into the head node rather than a compute node.  It is not installed at all on Amazon Linux 2023, which does not package it.
-- On RHEL 9, `bc` is installed explicitly because Lmod's `./configure` hard-quits without it (`You must have bc in your path. Quitting!`) rather than degrading.  It is on the Ubuntu and Amazon Linux 2023 package lines too, deliberately: those AMIs happen to ship `bc` incidentally, and depending on what a base image carries by accident is how the RHEL gap stayed hidden.  (Upstream's own monitoring installer claims `bc` is absent from the default al2023 repos; the repo metadata says otherwise on both architectures.)
+- `nvtop` (GPU clusters) is installed on the head node only, on Ubuntu and RHEL 9 — the package sits outside the default repositories in each, and the operator logs into the head node rather than a compute node.  Amazon Linux 2023 skips `nvtop` entirely, since the package isn't available there.
+- On RHEL 9, `bc` is installed explicitly because Lmod's `./configure` hard-quits without `bc` (`You must have bc in your path. Quitting!`) rather than degrading.  `bc` is on the Ubuntu and Amazon Linux 2023 package lines too, deliberately: those AMIs happen to ship `bc` incidentally, and depending on what a base image carries by accident is how the RHEL gap stayed hidden.  (Upstream's own monitoring installer claims `bc` is absent from the default al2023 repos; the repo metadata says otherwise on both architectures.)
 - The dnf kernel exclusions cover both Lustre spellings — `kmod-lustre*` and `lustre-client*` — because the two distros name the client differently.  Amazon Linux 2023 has no `kmod-lustre*` package at all, so the RHEL glob alone would silently protect nothing there.
 
-**Both Amazon Linux 2023 arms are validated on live cluster builds as of 2026-07-28.**  `alinux2023` reached `CREATE_COMPLETE` on a `c5.xlarge` head node with EFS, a `c5.2xlarge` CPU queue, two `g4dn.xlarge` GPU nodes, benchmarks, and monitoring; `alinux2023arm` reached `CREATE_COMPLETE` on a `c8g.xlarge` head node with EFS, a 1200 GB FSx for Lustre filesystem, a `c8g.2xlarge` CPU queue, benchmarks, and monitoring.  Every package claim above was confirmed against the head node's and every compute node's own bootstrap logs on both architectures, not merely against the stack's exit status: `luarocks`, `epel`, `tcllib`, and `nvtop` appear nowhere; the three Lua rocks install as core-repo RPMs; `bc` is already present and Lmod's `./configure` finds it; and `dnf update` upgrades a single package with no kernel, dracut, or initramfs activity.  The Docker Compose CLI plugin is staged and checksum-verified per architecture — `docker-compose-linux-x86_64-v2.29.7` and `docker-compose-linux-aarch64-v2.29.7` respectively — and upstream's `github.com` download is removed from the extracted tree on both.
+**Both Amazon Linux 2023 arms are validated on live cluster builds.**  `alinux2023` reached `CREATE_COMPLETE` on a `c5.xlarge` head node with EFS, a `c5.2xlarge` CPU queue, two `g4dn.xlarge` GPU nodes, benchmarks, and monitoring; `alinux2023arm` reached `CREATE_COMPLETE` on a `c8g.xlarge` head node with EFS, a 1200 GB FSx for Lustre filesystem, a `c8g.2xlarge` CPU queue, benchmarks, and monitoring.  Every package claim above was confirmed against the head node's and every compute node's own bootstrap logs on both architectures, not merely against the stack's exit status: `luarocks`, `epel`, `tcllib`, and `nvtop` appear nowhere; the three Lua rocks install as core-repo RPMs; `bc` is already present and Lmod's `./configure` finds it; and `dnf update` upgrades a single package with no kernel, dracut, or initramfs activity.  The Docker Compose CLI plugin is staged and checksum-verified per architecture — `docker-compose-linux-x86_64-v2.29.7` and `docker-compose-linux-aarch64-v2.29.7` respectively — and upstream's `github.com` download is removed from the extracted tree on both.
 
-**Both RHEL 9 arms are validated on live cluster builds as of 2026-07-28.**  `rhel9` reached `CREATE_COMPLETE` on a `c5.xlarge` head node with EFS, a CPU queue, a `g4dn.xlarge` GPU queue, benchmarks, and monitoring; `rhel9arm` reached `CREATE_COMPLETE` on a `c8g.xlarge` head node with EFS, a 1200 GB FSx for Lustre filesystem, benchmarks, and monitoring.  The whole RPM bootstrap path is confirmed on both architectures: EPEL by release-RPM URL, the CodeReady Builder repository id, all three luarocks rocks compiling against `lua-devel` with no separate header package, and `dnf update` upgrading `dracut` itself while installing zero `kernel*` packages and regenerating no initramfs.  All eight pip pins resolved from `manylinux_2_17_aarch64` wheels on Graviton.
+**Both RHEL 9 arms are validated on live cluster builds.**  `rhel9` reached `CREATE_COMPLETE` on a `c5.xlarge` head node with EFS, a CPU queue, a `g4dn.xlarge` GPU queue, benchmarks, and monitoring; `rhel9arm` reached `CREATE_COMPLETE` on a `c8g.xlarge` head node with EFS, a 1200 GB FSx for Lustre filesystem, benchmarks, and monitoring.  The whole RPM bootstrap path is confirmed on both architectures: EPEL by release-RPM URL, the CodeReady Builder repository id, all three luarocks rocks compiling against `lua-devel` with no separate header package, and `dnf update` upgrading `dracut` itself while installing zero `kernel*` packages and regenerating no initramfs.  All eight pip pins resolved from `manylinux_2_17_aarch64` wheels on Graviton.
 
 ### Node bootstrap scripts
 
@@ -799,7 +805,7 @@ Every stack includes [Spack](https://spack.io/) and [Lmod](https://github.com/TA
 
 Both are built on the head node only.  Compute nodes mount the same shared storage and inherit the installation, so having every scaling node repeat the clone and `chown -R` would be wasted boot time on a tree that is already populated.
 
-**`MODULEPATH` comes from Spack, not from Lmod's compiled-in root.**  Lmod is configured with `--with-module-root-path=<shared>/pkg/modulefiles`, but that setting is only ever read by Lmod's `init/profile` script, and postinstall installs `init/sh` instead — which defines the `module`, `ml`, and `clearMT` shell functions and sets `MODULESHOME`, with no reference to `MODULEPATH` at all.  What populates `MODULEPATH` on a login shell is `/etc/profile.d/lmod_spack.sh` sourcing Spack's `setup-env.sh`, which appends Spack's own module roots.  Consequently `<shared>/pkg/modulefiles` is not created by the install and will not exist on a fresh cluster — nothing reads it, so this is expected rather than a broken installation.  If you want to hand-place modulefiles outside Spack, create that directory yourself and add it to `MODULEPATH` (or to `LMOD_SITE_MODULEPATH`) from your own `--post_install_script` hook.
+**`MODULEPATH` comes from Spack, not from Lmod's compiled-in root.**  Lmod is configured with `--with-module-root-path=<shared>/pkg/modulefiles`, but that setting is only ever read by Lmod's `init/profile` script, and postinstall installs `init/sh` instead — which defines the `module`, `ml`, and `clearMT` shell functions and sets `MODULESHOME`, with no reference to `MODULEPATH` at all.  What populates `MODULEPATH` on a login shell is `/etc/profile.d/lmod_spack.sh` sourcing Spack's `setup-env.sh`, which appends Spack's own module roots.  Consequently `<shared>/pkg/modulefiles` is not created by the install and will not exist on a fresh cluster — nothing reads that path, so this is expected rather than a broken installation.  If you want to hand-place modulefiles outside Spack, create that directory yourself and add its path to `MODULEPATH` (or to `LMOD_SITE_MODULEPATH`) from your own `--post_install_script` hook.
 
 ### Job Submission
 
@@ -819,7 +825,7 @@ Note this is a *core* count, which is not the same as the GPU benchmark's `--nta
 
 ### HPC Benchmarks
 
-Enable with `--enable_hpc_benchmarks=true`.  Cluster creation deploys the benchmark suite to a personalized working directory on the head node — `~/hpc-benchmark/<cluster_name>/<cluster_owner>/slurm/` — holding the driver, a `job_hpc-benchmark.sh` rendered for this cluster's queue layout, and a `README-PERFORMANCE.md` naming this cluster's own paths.  Postinstall also installs the Python plotting dependencies (`matplotlib`, `numpy`, `pandas`, `scipy`, `seaborn`) and drops a second copy of the driver at `~/hpc-benchmark/hpc-benchmark.sh`; that copy is restored from S3 on every head node boot so a replaced EBS root does not lose it, and it is the only file staged there.  Work out of the personalized directory — it is the one with the rendered job script.
+Enable with `--enable_hpc_benchmarks=true`.  Cluster creation deploys the benchmark suite to a personalized working directory on the head node — `~/hpc-benchmark/<cluster_name>/<cluster_owner>/slurm/` — holding the driver, a `job_hpc-benchmark.sh` rendered for this cluster's queue layout, and a `README-PERFORMANCE.md` naming this cluster's own paths.  Postinstall also installs the Python plotting dependencies (`matplotlib`, `numpy`, `pandas`, `scipy`, `seaborn`) and drops a second copy of the driver at `~/hpc-benchmark/hpc-benchmark.sh`; that copy is restored from S3 on every head node boot, so a replaced EBS root never loses the driver — the only file staged there.  Work out of the personalized directory, since that is the one with the rendered job script.
 
 **These commands run on the cluster head node** (SSH in via `./access_cluster.py` first):
 
@@ -831,11 +837,11 @@ module load openmpi
 ./hpc-benchmark.sh report
 ```
 
-**Results are preserved on teardown.**  `kill_pcluster.py` syncs benchmark results from the head node to `s3://parallelclustermaker-results-<account-id>-<region>/hpc-benchmark-results/<cluster_name>/<cluster_serial_number>/` before deleting the cluster.  That bucket is **not** the per-cluster bucket: it is keyed on your account and region, it is created on the first build that enables benchmarks, and nothing in this toolkit ever deletes it — so results from multiple builds of the same cluster name land in separate serial-number subdirectories and accumulate rather than overwriting each other.  It is the one bucket you are expected to prune by hand.
+**Results are preserved on teardown.**  `kill_pcluster.py` syncs benchmark results from the head node to `s3://parallelclustermaker-results-<account-id>-<region>/hpc-benchmark-results/<cluster_name>/<cluster_serial_number>/` before deleting the cluster.  That bucket is **not** the per-cluster bucket — keyed on your account and region, created on the first build that enables benchmarks, and never deleted by this toolkit — so results from multiple builds of the same cluster name land in separate serial-number subdirectories and accumulate rather than overwriting each other.  This is the one bucket you are expected to prune by hand.
 
-**STREAM follows whatever node it lands on.**  STREAM is compiled `-march=native`, which binds the binary to the *microarchitecture* rather than the architecture — a `c5.xlarge` head node is Intel Skylake and a `g5.xlarge` GPU node is AMD Zen 3, and `uname -m` calls both `x86_64`.  `install` caches the source and `run` compiles `bin/stream-<march>` on the node it is executing on, so a job on a GPU partition measures that node's real bandwidth with no manual step.  OSU, IOR, and HPCG are built by `configure`/`make` without `-march=native` and are portable across microarchitectures, so those stay in `bin/` guarded by an architecture stamp.
+**STREAM is rebuilt per node.**  STREAM is compiled `-march=native`, which binds the binary to the *microarchitecture* rather than the architecture — a `c5.xlarge` head node is Intel Skylake and a `g5.xlarge` GPU node is AMD Zen 3, and `uname -m` calls both `x86_64`.  `install` caches the source and `run` compiles `bin/stream-<march>` locally, so a job on a GPU partition measures that node's real bandwidth with no manual step.  OSU, IOR, and HPCG are built by `configure`/`make` without `-march=native` and are portable across microarchitectures, so those stay in `bin/` guarded by an architecture stamp.
 
-**OSU builds itself on the GPU node when the head node cannot.**  `install` enables CUDA only when the node running it has both an NVIDIA device and a CUDA toolkit, because OSU's `configure` aborts outright on a missing `-lcuda`, `-lcudart`, or `cuda.h` rather than degrading — deriving that from a cluster-level flag would fail the whole install and take STREAM, IOR, and HPCG down with OSU.  On a CPU head node it therefore produces a host-to-host OSU, and the first GPU-partition job builds a CUDA-enabled tree under `bin/osu-cuda` on the GPU node itself and writes `osu/latency_cuda.txt` and `osu/bandwidth_cuda.txt` alongside the host-to-host results.  `bin/` is shared storage, so later GPU jobs reuse it.  That build can never fail the run: if it cannot be done on the node, the host-to-host results are still written and the reason is printed.
+**OSU builds itself on the GPU node when the head node cannot.**  `install` enables CUDA only when the node running `install` has both an NVIDIA device and a CUDA toolkit, because OSU's `configure` aborts outright on a missing `-lcuda`, `-lcudart`, or `cuda.h` rather than degrading — deriving that from a cluster-level flag would fail the whole install and take STREAM, IOR, and HPCG down with OSU.  A CPU head node therefore produces a host-to-host OSU, and the first GPU-partition job builds a CUDA-enabled tree under `bin/osu-cuda` on the GPU node itself and writes `osu/latency_cuda.txt` and `osu/bandwidth_cuda.txt` alongside the host-to-host results.  `bin/` is shared storage, so later GPU jobs reuse that build.  This step can never fail the run: a node that can't build CUDA support still writes the host-to-host results, with the reason printed.
 
 **Both partitions are benchmarkable from a CPU head node.**  The shipped `job_hpc-benchmark.sh` is submittable as-is: its `#SBATCH --partition=` and `--ntasks-per-node=` directives are rendered from this cluster's queue layout.  A GPU-only cluster has no `compute` partition, so a hardcoded partition would be rejected by `sbatch` before anything ran; on such a cluster the rank count is the NVIDIA GPU count reported for the queue's instance types, so one rank lands per GPU.  On a cluster with both queues the script targets `compute`, and the GPU run is the same script with two directives overridden:
 
@@ -904,13 +910,13 @@ aws ssm get-parameter \
 
 **Note:** PCluster head nodes ship a web server running on port 80 — `apache2` on Ubuntu, `httpd` on RHEL 9.  The monitoring installer stops and disables whichever is present so the nginx container can bind ports 80 and 443.
 
-**Monitoring is verified on RHEL 9, on both architectures** (2026-07-28).  Upstream's `detect_platform` resolves `PLATFORM_ID=platform:el9` on x86_64 and Graviton alike, and the container stack reached `Started` on both — so the v2.6 installer is arch-agnostic on el9, not x86-only.
+**Monitoring is verified on RHEL 9, on both architectures.**  Upstream's `detect_platform` resolves `PLATFORM_ID=platform:el9` on x86_64 and Graviton alike, and the container stack reached `Started` on both — so the v2.6 installer is arch-agnostic on el9, not x86-only.
 
 **IAM:** Monitoring permissions are granted via a separate managed policy `<ec2_iam_policy>-HeadNode-Monitoring` (8 statements, ~1,550 bytes minified).  It is created and attached during `make_pcluster.py` and deleted during `kill_pcluster.py`.
 
 **Supply chain:** The `aws-parallelcluster-monitoring` tarball is downloaded from GitHub at cluster-build time, checksum-verified, and staged in the cluster's S3 bucket.  Head nodes pull from S3, not GitHub, so private-subnet nodes and air-gapped environments work without internet access.
 
-On Amazon Linux 2023 that applies to the Docker Compose CLI plugin as well.  AL2023 does not package `docker-compose-plugin`, so upstream's installer downloads the binary from `github.com` on every node at boot, with no integrity check — which fails outright on a private subnet.  The toolkit instead downloads it once at build time, verifies it against `--docker_compose_checksum_x86_64` / `--docker_compose_checksum_aarch64` (both defaulted in `pcluster_defaults.yml` and matching Docker's own published sums for `v2.29.7`), stages it to S3, and installs it from there on every node before the monitoring installer runs.  The wrapper also deletes upstream's download from the extracted tree so it cannot overwrite the verified copy, and fails the build by name if that edit stops matching in a future monitoring release.  Because the download is removed rather than reused, `--docker_compose_version` is the toolkit's own pin and need not match upstream's.  The Ubuntu and RHEL 9 arms install the plugin from a signed distro repository and use none of this.
+On Amazon Linux 2023 that applies to the Docker Compose CLI plugin as well.  AL2023 does not package `docker-compose-plugin`, so upstream's installer downloads the binary from `github.com` on every node at boot, with no integrity check — which fails outright on a private subnet.  The toolkit instead downloads the binary once at build time, verifies the checksum against `--docker_compose_checksum_x86_64` / `--docker_compose_checksum_aarch64` (both defaulted in `pcluster_defaults.yml` and matching Docker's own published sums for `v2.29.7`), stages the verified binary to S3, and installs from there on every node before the monitoring installer runs.  The wrapper also deletes upstream's download from the extracted tree so that download can never overwrite the verified copy, and fails the build by name if that edit stops matching in a future monitoring release.  Because the download is removed rather than reused, `--docker_compose_version` is the toolkit's own pin and need not match upstream's.  The Ubuntu and RHEL 9 arms install the plugin from a signed distro repository and use none of this.
 
 **Version:** Pin a specific release tag with `--monitoring_version=v2.6` (default).
 
@@ -1007,7 +1013,7 @@ If it still times out, set `head_node_bootstrap_timeout` explicitly in your defa
 head_node_bootstrap_timeout: 5400
 ```
 
-The ceiling is 43200 (12 hours), CloudFormation's own limit; larger values are clamped with a warning.  The value cannot be changed on a running cluster — PCluster marks it `UpdatePolicy.UNSUPPORTED`, so it takes a rebuild.  To find where the time actually went, compare the `CREATE_IN_PROGRESS`/`CREATE_COMPLETE` timestamps per resource:
+The ceiling is 43200 (12 hours), CloudFormation's own limit; larger values are clamped with a warning.  The value cannot be changed on a running cluster — PCluster marks that setting `UpdatePolicy.UNSUPPORTED`, so changing the timeout means a full rebuild.  To find where the time actually went, compare the `CREATE_IN_PROGRESS`/`CREATE_COMPLETE` timestamps per resource:
 
 ```
 aws cloudformation describe-stack-events --stack-name <cluster_name> \
@@ -1018,7 +1024,7 @@ The `preinstall`/`postinstall` scripts exclude the kernel from their package upg
 
 **Compute nodes fail to bootstrap after editing `postinstall.j2`:** Postinstall runs on the head node *and* on every compute node, and it runs under `set -euo pipefail` — a non-zero exit fails the node's bootstrap.
 
-A compute-node failure does not stop the way a head-node failure does, which makes it more expensive rather than less.  `clustermgtd` marks the node `DOWN`, relaunches it, and repeats until the queue's bootstrap-failure count reaches **10**, at which point `clusterstatusmgtd` puts the cluster in `PROTECTED` state and the stack fails — after ten instance launches and, in one measured case, 82 minutes.  So a two-line mistake in a block that runs on compute nodes costs the whole build.  Check the *compute* node's log stream, not just the head node's: the head node can finish cleanly while the fleet fails behind it.
+A compute-node failure does not stop the way a head-node failure does, which costs more, not less.  `clustermgtd` marks the node `DOWN`, relaunches the node, and repeats until the queue's bootstrap-failure count reaches **10**, at which point `clusterstatusmgtd` puts the cluster in `PROTECTED` state and the stack fails — after ten instance launches and, in one measured case, 82 minutes.  So a two-line mistake in a block that runs on compute nodes costs the whole build.  Check the *compute* node's log stream, not just the head node's: the head node can finish cleanly while the rest of the fleet fails.
 
 Anything added there must declare where it belongs:
 
