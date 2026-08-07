@@ -104,6 +104,11 @@ standing constraints for local development.
   validated in `make_pcluster.py` via `_validate_download_checksum` *before*
   the first AWS mutation (`_setup_iam`). No `_HARDCODED_DEFAULTS` entry may
   be a placeholder.
+- `enable_external_nfs` gets a pre-flight reachability check
+  (`_check_external_nfs_reachable`, before `_setup_iam`) — but only a
+  confirmed-empty `showmount` export list is a hard failure. It runs from
+  the operator's machine, not the target VPC, so an unreachable port or a
+  missing `showmount` binary only warns and lets the build proceed.
 - Performance/benchmark results sync to the long-lived
   `parallelclustermaker-results-<account_id>-<region>` bucket (derived by
   `_derive_results_bucket`, keyword-only on `aws_account_id`+`region` only),
