@@ -53,6 +53,7 @@ from pcluster_core import (
     _load_or_create_serial,
     _normalize_fsx_buckets,
     _check_fsx_s3,
+    _check_external_nfs_reachable,
     _load_defaults_file,
     _resolve as _pcore_resolve,
     _resolve_bool as _pcore_resolve_bool,
@@ -1362,13 +1363,8 @@ def main():
         p_val("enable_external_nfs", debug_mode)
         p_val("external_nfs_server", debug_mode)
 
-    # Todo - if enable_external_nfs=true, check to ensure external_nfs_server
-    # actually exists through a ping test or running showmount/rpcinfo to verify
-    # NFS shares are being exported.  Something like:
-    #
-    # $ showmount -e external_nfs_server (fail if empty)
-    # $ rpcinfo -t remote_nfs_server nfs 4 (fail if empty)
-    # $ ping -c 4 remote_nfs_server (fail if packet_loss > 0)
+    if enable_external_nfs:
+        _check_external_nfs_reachable(external_nfs_server)
 
     # Set external_nfs_server to a dummy value if external NFS support has not
     # been enabled.

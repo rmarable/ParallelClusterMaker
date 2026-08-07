@@ -27,6 +27,7 @@ from pcluster_core import (
     _load_or_create_serial,
     _normalize_fsx_buckets,
     _check_fsx_s3,
+    _check_external_nfs_reachable,
     _storage_summary_lines,
     _derive_head_node_bootstrap_timeout,
     _derive_docker_compose_staging,
@@ -535,6 +536,113 @@ class TestAnEmptyExportPrefixIsNotAnError:
             ]
             relaxed[label] = flags[0] if flags else True
         assert relaxed == {"import": True, "export": False}, relaxed
+
+
+# ---------------------------------------------------------------------------
+# _check_external_nfs_reachable
+# ---------------------------------------------------------------------------
+
+
+class _FakeSocket:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc_info):
+        return False
+
+
+def _fake_connect_ok(*a, **kw):
+    return _FakeSocket()
+
+
+def _fake_connect_refused(*a, **kw):
+    raise OSError("Connection refused")
+
+
+class _FakeShowmountResult:
+    def __init__(self, returncode=0, stdout="", stderr=""):
+        self.returncode = returncode
+        self.stdout = stdout
+        self.stderr = stderr
+
+
+class TestCheckExternalNfsReachable:
+    """Only one outcome (confirmed-empty exports) is a hard failure; every
+    other branch is a WARNING that lets the build proceed, because this
+    check runs from the operator's machine, which may not share the target
+    VPC's network path to the filer."""
+
+    def test_reachable_with_exports_passes_silently(self, monkeypatch, capsys):
+        monkeypatch.setattr("pcluster_core.socket.create_connection", _fake_connect_ok)
+        seen = {}
+
+        def fake_run(cmd, **kw):
+            seen["cmd"] = cmd
+            return _FakeShowmountResult(
+                returncode=0, stdout="Export list for filer.corp:\n/data *\n"
+            )
+
+        monkeypatch.setattr("pcluster_core.subprocess.run", fake_run)
+        _check_external_nfs_reachable("filer.corp")  # must not raise
+        assert seen["cmd"] == ["showmount", "-e", "filer.corp"]
+        assert "WARNING" not in capsys.readouterr().out
+
+    def test_unreachable_port_warns_and_never_calls_showmount(self, monkeypatch, capsys):
+        monkeypatch.setattr("pcluster_core.socket.create_connection", _fake_connect_refused)
+
+        def explode(*a, **kw):
+            raise AssertionError("showmount should not run when port 2049 is unreachable")
+
+        monkeypatch.setattr("pcluster_core.subprocess.run", explode)
+        _check_external_nfs_reachable("filer.corp")  # must not raise
+        out = capsys.readouterr().out
+        assert "WARNING" in out
+        assert "port 2049" in out
+
+    def test_showmount_missing_warns(self, monkeypatch, capsys):
+        monkeypatch.setattr("pcluster_core.socket.create_connection", _fake_connect_ok)
+
+        def missing(*a, **kw):
+            raise FileNotFoundError("showmount")
+
+        monkeypatch.setattr("pcluster_core.subprocess.run", missing)
+        _check_external_nfs_reachable("filer.corp")  # must not raise
+        assert "not installed" in capsys.readouterr().out
+
+    def test_showmount_timeout_warns(self, monkeypatch, capsys):
+        monkeypatch.setattr("pcluster_core.socket.create_connection", _fake_connect_ok)
+
+        def slow(*a, **kw):
+            raise subprocess.TimeoutExpired(cmd="showmount", timeout=10)
+
+        monkeypatch.setattr("pcluster_core.subprocess.run", slow)
+        _check_external_nfs_reachable("filer.corp")  # must not raise
+        assert "timed out" in capsys.readouterr().out
+
+    def test_showmount_nonzero_exit_warns(self, monkeypatch, capsys):
+        monkeypatch.setattr("pcluster_core.socket.create_connection", _fake_connect_ok)
+        monkeypatch.setattr(
+            "pcluster_core.subprocess.run",
+            lambda *a, **kw: _FakeShowmountResult(
+                returncode=1, stderr="showmount: filer.corp: RPC: Program not registered"
+            ),
+        )
+        _check_external_nfs_reachable("filer.corp")  # must not raise
+        out = capsys.readouterr().out
+        assert "WARNING" in out
+        assert "NFSv4-only" in out
+
+    def test_confirmed_empty_exports_raises(self, monkeypatch):
+        monkeypatch.setattr("pcluster_core.socket.create_connection", _fake_connect_ok)
+        monkeypatch.setattr(
+            "pcluster_core.subprocess.run",
+            lambda *a, **kw: _FakeShowmountResult(
+                returncode=0, stdout="Export list for filer.corp:\n"
+            ),
+        )
+        with pytest.raises(SystemExit) as exc:
+            _check_external_nfs_reachable("filer.corp")
+        assert "exports nothing" in str(exc.value)
 
 
 # ---------------------------------------------------------------------------

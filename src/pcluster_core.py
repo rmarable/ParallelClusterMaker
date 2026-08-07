@@ -10,6 +10,7 @@ import contextlib
 import json
 import os
 import re
+import socket
 import subprocess
 import sys
 import time
@@ -201,6 +202,60 @@ def _check_fsx_s3(s3_client, bucket, path, label, *, require_objects=True):
         sys.exit(f"ERROR: Lustre hydration: cannot list s3://{bucket}/{path}: {_e}")
     if result.get("KeyCount", 0) == 0:
         sys.exit(f"ERROR: Please ensure s3://{bucket}/{path} exists!")
+
+
+def _check_external_nfs_reachable(server, *, port_timeout=5, showmount_timeout=10):
+    """Best-effort pre-flight check for an external NFS server.
+
+    Two independent, non-authoritative signals are gathered; only one
+    result is a hard failure. This runs from the operator's own machine,
+    which is not guaranteed to share the target VPC's network path to the
+    filer (VPC peering / Direct Connect / on-prem-only routing), so a false
+    failure here would block a config that works once the head node exists.
+    """
+    try:
+        with socket.create_connection((server, 2049), timeout=port_timeout):
+            pass
+    except OSError as e:
+        print("*** WARNING ***")
+        print(f"{server} did not answer on port 2049 (NFS) within {port_timeout}s: {e}")
+        print("  This may be a real problem, or this filer may only be reachable")
+        print("  from inside the cluster's VPC, not from where make_pcluster.py runs.")
+        print("")
+        return
+
+    try:
+        result = subprocess.run(
+            ["showmount", "-e", server],
+            capture_output=True,
+            text=True,
+            timeout=showmount_timeout,
+        )
+    except FileNotFoundError:
+        print("*** WARNING ***")
+        print(f"'showmount' is not installed -- cannot verify {server} exports NFS shares.")
+        print("  Install nfs-common (Debian/Ubuntu) or nfs-utils (RHEL/Amazon Linux).")
+        print("")
+        return
+    except subprocess.TimeoutExpired:
+        print("*** WARNING ***")
+        print(f"showmount -e {server} timed out after {showmount_timeout}s.")
+        print("")
+        return
+
+    if result.returncode != 0:
+        print("*** WARNING ***")
+        print(f"showmount -e {server} failed (rc={result.returncode}): {result.stderr.strip()}")
+        print("  This may be an NFSv4-only server with no mountd -- cannot verify exports.")
+        print("")
+        return
+
+    export_lines = [line for line in result.stdout.splitlines()[1:] if line.strip()]
+    if not export_lines:
+        sys.exit(
+            f"ERROR: {server} answered showmount but exports nothing -- "
+            "check the NFS server's /etc/exports (or equivalent) before building."
+        )
 
 
 # Slurm node states that mean a node is usable. Everything else -- down, drain,
