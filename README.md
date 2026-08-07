@@ -1,8 +1,8 @@
 # ParallelClusterMaker
 
-This Open Source CLI toolkit automates creation and destruction of [AWS ParallelCluster v3](https://github.com/aws/aws-parallelcluster) stacks, letting researchers and engineers stand up a working HPC cluster on AWS without deep infrastructure expertise while reducing the support load on DevOps/IT teams.
+This Open Source CLI toolkit automates creation and destruction of [AWS ParallelCluster v3](https://github.com/aws/aws-parallelcluster) stacks.  It lets researchers and engineers stand up a working HPC cluster on AWS without deep infrastructure expertise.
 
-This codebase was co-written with [Claude Code](https://claude.ai/code) (Anthropic).
+This codebase was co-written with [Claude Code](https://claude.ai/code) (Anthropic). AI-assisted contributions are accepted under a public policy ([AI_POLICY.md](AI_POLICY.md)): the tool or model must be disclosed, and a human remains responsible for every line submitted.
 
 ---
 
@@ -273,7 +273,7 @@ Teardown takes 5–10 minutes.  The cluster's EFS and FSx filesystems are delete
 
 Teardown is always manual and at your discretion — nothing in this toolkit schedules a cluster's destruction.  Idle compute cost is bounded instead by `scaledown_idletime`: ParallelCluster terminates compute nodes that sit idle longer than that, scaling the fleet to zero on its own.  A head node left running still bills, so run `kill_pcluster.py` when you are finished with a cluster.
 
-### When cleanup leaves something behind
+### When Cleanup Leaves Something Behind
 
 Teardown deletes ten kinds of resource after the CloudFormation stack is gone: the S3 bucket, the FSx hydration policy, the Grafana SSM parameter, the Secrets Manager secret, four managed IAM policies, the monitoring policy, the IAM role and its instance profile, the external NFS security group, and the SNS topic.  Each step tolerates its own failure so that one AWS error cannot abandon the other nine — but every ignored failure is collected and reported, and teardown then exits non-zero:
 
@@ -518,11 +518,11 @@ Not optional.  The `SharedStorage:` block in `templates/config.pcluster.j2` emit
 
 `--ebs_encryption` also governs the head node, CPU queue, and GPU queue root volumes.
 
-### Node-local scratch (`/local_scratch`)
+### Node-Local Scratch (`/local_scratch`)
 
 Local to a single instance, not shared.  `templates/postinstall.j2` creates `/local_scratch` as a sticky-bit directory on the root EBS volume and symlinks `/scratch` to it.  When `enable_gpu` is `true` and NVMe instance store devices are present, `/local_scratch` is backed by those instead — one device is formatted XFS, several are assembled into a RAID0 array.  See [GPU](#gpu) for the device detection logic.
 
-Postinstall is registered as an `OnNodeConfigured` custom action on the head node and on every compute queue (`templates/config.pcluster.j2`), so `/local_scratch` is created on every instance.  This matters for the instance-store path: NVMe instance store exists only on compute instances, so a head-node-only registration leaves the RAID0 block unreachable in practice.  See [Node bootstrap scripts](#node-bootstrap-scripts) for how the script gets to the node.
+Postinstall is registered as an `OnNodeConfigured` custom action on the head node and on every compute queue (`templates/config.pcluster.j2`), so `/local_scratch` is created on every instance.  This matters for the instance-store path: NVMe instance store exists only on compute instances, so a head-node-only registration leaves the RAID0 block unreachable in practice.  See [Node Bootstrap Scripts](#node-bootstrap-scripts) for how the script gets to the node.
 
 Data in `/local_scratch` does not survive instance termination, and compute nodes terminate on scale-down.
 
@@ -534,7 +534,7 @@ Enable with `--enable_efs=true`.  Mounted at `/efs` on all instances.  Costs alm
 
 Enable with `--enable_fsx=true`.  Mounted at `/fsx`.  `--fsx_size` must be a positive multiple of 1200 GB; the default and minimum is 1200.  `--fsx_chunk_size` (the S3 imported-file chunk size, default 1024 MB) must fall between 1,024 MB (1 GB) and 512,000 MB (500 GB).
 
-#### S3 hydration and dehydration
+#### S3 Hydration and Dehydration
 
 Requires `--enable_fsx_hydration=true`.  Setting any `--fsx_s3_*` value without that flag is an error, as is setting the flag without `--enable_fsx=true`.
 
@@ -697,13 +697,13 @@ Required arguments:
 | `-A` | Action: `add`, `remove`, or `list` |
 | `-T` | Queue type: `compute` (CPU) or `gpu`.  Required for `add`; ignored by `remove` and `list`. |
 
-### Listing queues
+### Listing Queues
 
 ```
 ./manage_pcluster_queue.py -N <cluster_name> -A list
 ```
 
-### Adding queues
+### Adding Queues
 
 ```
 # Add a spot CPU queue
@@ -722,13 +722,13 @@ Required arguments:
     --initial_size 1 --max_size 4 --maintain_initial_size true
 ```
 
-### Removing a queue
+### Removing a Queue
 
 ```
 ./manage_pcluster_queue.py -N osiris -A remove -Q compute-spot-overflow
 ```
 
-### Applying the change
+### Applying the Change
 
 **Automated (`-W`/`--wait`):** the script stops the fleet, applies the config, and restarts the fleet, printing status every 30 seconds.  It warns that the operation can take up to 30 minutes; each individual poll loop times out at 45 minutes.  Run inside `screen` or `tmux` to avoid losing the session mid-update.
 
@@ -756,7 +756,7 @@ Required arguments:
 
 ## Software Environment
 
-### Operating systems
+### Operating Systems
 
 `--base_os` accepts eight values, in two package-manager families:
 
@@ -787,7 +787,7 @@ The `arm` suffix is the toolkit's, not ParallelCluster's — it drives instance-
 
 **Both RHEL 9 arms are validated on live cluster builds.**  `rhel9` reached `CREATE_COMPLETE` on a `c5.xlarge` head node with EFS, a CPU queue, a `g4dn.xlarge` GPU queue, benchmarks, and monitoring; `rhel9arm` reached `CREATE_COMPLETE` on a `c8g.xlarge` head node with EFS, a 1200 GB FSx for Lustre filesystem, benchmarks, and monitoring.  The whole RPM bootstrap path is confirmed on both architectures: EPEL by release-RPM URL, the CodeReady Builder repository id, all three luarocks rocks compiling against `lua-devel` with no separate header package, and `dnf update` upgrading `dracut` itself while installing zero `kernel*` packages and regenerating no initramfs.  All eight pip pins resolved from `manylinux_2_17_aarch64` wheels on Graviton.
 
-### Node bootstrap scripts
+### Node Bootstrap Scripts
 
 Two stages run on every node, in this order:
 
@@ -798,7 +798,7 @@ The stages are wired as a PCluster `Sequence`, so stage 2 runs only if stage 1 s
 
 Paths passed to `--pre_install_script` / `--post_install_script` are relative to the repository root.
 
-#### The kernel is never upgraded
+#### The Kernel Is Never Upgraded
 
 `preinstall.j2` upgrades the AMI's packages — `apt-get dist-upgrade` on Ubuntu, `dnf update` on RHEL 9 — but holds back the running kernel along with the out-of-tree modules built against it.  Ubuntu does this with `apt-mark hold` on the installed `linux-*` packages; RHEL 9 with `--exclude='kernel*' --exclude='kmod-lustre*' --exclude='efa*'`.  Two independent reasons:
 
@@ -1030,7 +1030,7 @@ aws cloudformation describe-stack-events --stack-name <cluster_name> \
     --query 'StackEvents[].[Timestamp,LogicalResourceId,ResourceStatus]' --output text | sort
 ```
 
-The `preinstall`/`postinstall` scripts exclude the kernel from their package upgrades precisely because a kernel bump added an unbounded initramfs rebuild to this window — see [The kernel is never upgraded](#the-kernel-is-never-upgraded).
+The `preinstall`/`postinstall` scripts exclude the kernel from their package upgrades precisely because a kernel bump added an unbounded initramfs rebuild to this window — see [The Kernel Is Never Upgraded](#the-kernel-is-never-upgraded).
 
 **Compute nodes fail to bootstrap after editing `postinstall.j2`:** Postinstall runs on the head node *and* on every compute node, and it runs under `set -euo pipefail` — a non-zero exit fails the node's bootstrap.
 
@@ -1047,7 +1047,7 @@ Anything added there must declare where it belongs:
 
 **A bootstrap failure whose log ends on a cheerful-looking line:** `cfn-init` captures **stdout only** — a failing command's `stderr` is written nowhere.  So the last line of `cfn-init-cmd.log` is routinely the successful-looking start of the step that failed: `Attempting uninstall: requests` for a pip failure, a list of successful `set on hold` lines for an `apt-mark` exit 100, the `luarocks` download banner for a compiler error.  Read the last line as *where* execution stopped, never as *why*.  To get the reason, re-run the same command by hand on the node (`aws ssm start-session --target <instance-id>`, then execute the rendered `/opt/parallelcluster/scripts/...` step or the individual command) and read its stderr directly.  A related consequence: any block in the toolkit's own scripts that runs without `set -x` — the monitoring wrapper, for instance — leaves no trace in the log at all, so absence of a command from `cfn-init-cmd.log` is not evidence it did not run.
 
-**Postinstall appears to do nothing:** Check that `postinstall.<cluster>.sh` in the cluster's S3 bucket is rendered shell and not raw Jinja2.  The toolkit's templates are rendered by a `template:` task in `src/create_pcluster.yml`; only your own `--post_install_script` hook is copied verbatim.  If the two are conflated, nodes run the hook and skip everything the toolkit's script does — Spack, Lmod, the package installs, `/local_scratch`, and the GPU block.  See [Node bootstrap scripts](#node-bootstrap-scripts).
+**Postinstall appears to do nothing:** Check that `postinstall.<cluster>.sh` in the cluster's S3 bucket is rendered shell and not raw Jinja2.  The toolkit's templates are rendered by a `template:` task in `src/create_pcluster.yml`; only your own `--post_install_script` hook is copied verbatim.  If the two are conflated, nodes run the hook and skip everything the toolkit's script does — Spack, Lmod, the package installs, `/local_scratch`, and the GPU block.  See [Node Bootstrap Scripts](#node-bootstrap-scripts).
 
 **EBS root volume tagging:** May fail on macOS due to IAM tag permission restrictions.  Build from an EC2 instance to avoid this.
 
@@ -1057,7 +1057,7 @@ Anything added there must declare where it belongs:
 
 ## Development
 
-### Running the test suite
+### Running the Test Suite
 
 ```
 make test       # pytest — template rendering + unit tests
@@ -1092,7 +1092,7 @@ package manager, and each arm must actually install its own sentinel packages ra
 rendering to nothing.  Adding a `base_os` value means adding a fixture — an unexercised
 Jinja2 arm passes every text assertion written against it.
 
-### Integration tests
+### Integration Tests
 
 A live end-to-end smoke test is available at `tests/integration/run_integration_test.sh`.
 It provisions a real cluster using your own defaults file, submits a Slurm job, verifies
@@ -1122,7 +1122,7 @@ are never committed.  A run costs roughly $0.21-$0.34 in EC2 charges.
 See [`tests/integration/README.md`](tests/integration/README.md) for the flag
 reference, prerequisites, cost derivation, log paths, and exit codes.
 
-### Known ansible-lint warnings
+### Known ansible-lint Warnings
 
 `make lint` exits 0 but emits a small number of warnings that are intentional and safe to ignore:
 
@@ -1172,3 +1172,5 @@ By using this software:
 https://github.com/rmarable/ParallelClusterMaker/issues
 
 Pull requests welcome: https://github.com/rmarable/ParallelClusterMaker/pulls
+
+AI-assisted contributions are welcome — see [AI_POLICY.md](AI_POLICY.md) for submission guidance.

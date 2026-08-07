@@ -9,7 +9,7 @@ account.
 
 The cluster name is generated per run as `itest-<HHMMSS>`.
 
-## What it tests
+## What It Tests
 
 `run_integration_test.sh` exercises the full cluster lifecycle:
 
@@ -37,7 +37,7 @@ CPU queue. A GPU-only defaults file fails at `sbatch`.
 - `jq` installed: `brew install jq` or `apt install jq`
 - A defaults YAML file for your target environment (VPC, subnet, instance types, etc.)
 
-## Defaults file
+## Defaults File
 
 The script requires a `--defaults` file — it does **not** generate one.  This
 is intentional: network topology (VPC name, subnets, AZ) and instance choices
@@ -107,7 +107,7 @@ source .venv/bin/activate
 
 Any unrecognized argument is a hard error.
 
-## Cost estimate
+## Cost Estimate
 
 `itest_defaults.yml.example` provisions three instances: one `c5.xlarge` head
 node and two `c5.xlarge` compute nodes. At the us-east-1 on-demand rate of
@@ -131,7 +131,7 @@ Cluster name is `itest-<HHMMSS>`, so the log paths carry that name:
 Slurm job output lands at `/tmp/itest-job.out` on the head node, which is gone
 after teardown. Use `--keep` if you need to read it.
 
-## Exit codes
+## Exit Codes
 
 | Code | Meaning |
 |---|---|

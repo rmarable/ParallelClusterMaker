@@ -17,7 +17,7 @@ On teardown, `delete_pcluster.yml` syncs results from `~/hpc-benchmark/<cluster_
 
 ---
 
-## Quick start
+## Quick Start
 
 SSH into the head node first (`./access_cluster.py -N <cluster_name>`), then:
 
@@ -31,7 +31,7 @@ module load openmpi    # or intelmpi
 
 ---
 
-## Standards-based benchmarks (`hpc-benchmark.sh`)
+## Standards-Based Benchmarks (`hpc-benchmark.sh`)
 
 Industry-standard tools covering memory bandwidth, MPI communication, parallel I/O,
 and sparse linear algebra.
@@ -56,7 +56,7 @@ sudo dnf install gcc make wget        # rhel9 | rhel9arm
 
 `install` requires `gcc`, `make`, `sha256sum`, and either `wget` or `curl`, and aborts if any is missing. OSU, IOR, and HPCG additionally need an MPI compiler wrapper on `PATH` — load the module first.
 
-### Step 1 — install (one-time, about a minute)
+### Step 1 — Install (One-Time, About a Minute)
 
 ```bash
 ./hpc-benchmark.sh install
@@ -108,11 +108,11 @@ On the rare node where `gcc` cannot report its `-march=native` target, `run`
 says so, builds a throwaway binary into that run's results directory rather than
 mislabeling one in the shared `bin/`, and proceeds.
 
-### Step 2 — run the benchmarks
+### Step 2 — Run the Benchmarks
 
 There are three ways to run the benchmark suite depending on how many nodes you need.
 
-#### Standalone (single node, on the head node directly)
+#### Standalone (Single Node, on the Head Node Directly)
 
 Use this for STREAM and single-node OSU latency/bandwidth checks. No Slurm resource allocations are needed.
 
@@ -135,7 +135,7 @@ Use this for STREAM and single-node OSU latency/bandwidth checks. No Slurm resou
 > outside any allocation there is no such limit. `run` checks this before it
 > creates a results directory and prints the working command.
 
-#### Interactive multi-node via `srun`
+#### Interactive Multi-Node via `srun`
 
 Use this for multi-node OSU collective, IOR, and HPCG runs during development or debugging. Slurm spins up the requested compute nodes and drops you into an interactive shell inside the allocation.
 
@@ -202,7 +202,7 @@ Key options:
 
 `--nodes` and `--ppn` accept positive integers up to 9999999 with no leading zeros; anything else aborts the run.
 
-### Step 3 — report
+### Step 3 — Report
 
 ```bash
 ./hpc-benchmark.sh report
@@ -225,7 +225,7 @@ hpcg/hpcg.dat  hpcg/hpcg_output.txt  hpcg/HPCG-Benchmark_*.txt
 
 `cmd.txt` records the exact invocation. `report` summarizes STREAM Copy/Scale/Add/Triad, OSU 8-byte latency and peak bandwidth, IOR write/read, and the HPCG GFLOP/s rating, then lists every output file.
 
-### What to look for
+### What to Look For
 
 **STREAM Triad** is the headline number — it reflects sustainable memory
 bandwidth under a real access pattern. Compare against the instance spec sheet
@@ -245,9 +245,9 @@ it exercises sparse, memory-bound operations. Runs under 1800 s are marked
 
 ---
 
-## Tuning `--nodes` and `--ppn` by instance class
+## Tuning `--nodes` and `--ppn` by Instance Class
 
-### How the flags map to each benchmark
+### How the Flags Map to Each Benchmark
 
 | Benchmark | Uses `--nodes`/`--ppn`? | Notes |
 |---|---|---|
@@ -257,7 +257,7 @@ it exercises sparse, memory-bound operations. Runs under 1800 s are marked
 | IOR | Yes | `total_ranks = nodes × ppn` |
 | HPCG | Yes | `total_ranks = nodes × ppn`, 104³ problem size per rank |
 
-### Recommended values by instance class
+### Recommended Values by Instance Class
 
 Set `--ppn` to the **vCPU count** of the compute instance. Set `--nodes` to the number of compute nodes in your Slurm allocation.
 
@@ -286,9 +286,9 @@ PPN=4     # vCPUs per .xlarge node
 
 ---
 
-## Where instance class warrants additional tuning
+## Where Instance Class Warrants Additional Tuning
 
-### Memory-optimized (r5, r6i, r7i, x2iedn)
+### Memory-Optimized (r5, r6i, r7i, x2iedn)
 
 The default HPCG problem size (104³/rank) uses only ~200–400 MB per rank — far below 25% of RAM on memory-heavy instances. Increase it to properly stress the memory subsystem:
 
@@ -307,7 +307,7 @@ The default HPCG problem size (104³/rank) uses only ~200–400 MB per rank — 
 128 128 128
 ```
 
-### HPC-optimized and EFA instances (hpc6a, hpc7g, c5n, c6gn)
+### HPC-Optimized and EFA Instances (hpc6a, hpc7g, c5n, c6gn)
 
 EFA lowers MPI latency. Expected OSU numbers vs. standard Ethernet:
 
@@ -327,7 +327,7 @@ For IOR on c5n/c6gn with FSx for Lustre, increase `--ior-size` to expose filesys
   --ior-size 8g
 ```
 
-### GPU instances (g4dn, g5, p3, p4d, p5)
+### GPU Instances (g4dn, g5, p3, p4d, p5)
 
 STREAM measures **CPU DRAM bandwidth only** — the GPU's HBM is not exercised. Treat STREAM results as a CPU memory baseline, not a GPU memory benchmark. HPCG also runs on CPU; GPU-accelerated HPCG requires a separate CUDA build (not included here).
 
@@ -359,15 +359,15 @@ Because OSU binaries link against whichever MPI compiled them, using a different
 
 One case this does not cover: a cluster mixing CPU architectures between the head node and the GPU queue (an x86 head node with a `g5g` Graviton queue) is refused by the architecture stamp before any OSU test runs, because the host-to-host binaries cannot load there at all. Build and run the suite from inside an allocation on that node class instead.
 
-**STREAM follows the GPU node class automatically.** GPU clusters are the most common case where the head node and the compute nodes are the same architecture but a *different microarchitecture* — a `c5.xlarge` head node is Intel Skylake while a `g5.xlarge` is AMD Zen 3, and both report `x86_64`. `run` detects that no `bin/stream-<march>` exists for the node it is on and compiles one from the cached source before running, so a GPU-partition job reports that node's real bandwidth with no manual step. The first GPU job pays a few seconds for the compile; later jobs reuse `bin/stream-znver3`. See [Step 1 — install](#step-1--install-one-time-about-a-minute) for the mechanism.
+**STREAM follows the GPU node class automatically.** GPU clusters are the most common case where the head node and the compute nodes are the same architecture but a *different microarchitecture* — a `c5.xlarge` head node is Intel Skylake while a `g5.xlarge` is AMD Zen 3, and both report `x86_64`. `run` detects that no `bin/stream-<march>` exists for the node it is on and compiles one from the cached source before running, so a GPU-partition job reports that node's real bandwidth with no manual step. The first GPU job pays a few seconds for the compile; later jobs reuse `bin/stream-znver3`. See [Step 1 — Install](#step-1--install-one-time-about-a-minute) for the mechanism.
 
-### ARM instances (Graviton: c7g, m7g, r7g, hpc7g)
+### ARM Instances (Graviton: c7g, m7g, r7g, hpc7g)
 
 No parameter changes needed — set `--ppn` to vCPU count as normal. HPCG and OSU compile natively for ARM at install time.
 
 ---
 
-## File inventory
+## File Inventory
 
 Three files land in the deployed `slurm/` directory shown under Quick start:
 
@@ -389,4 +389,4 @@ Postinstall separately syncs the whole S3 copy of the source tree to `~/hpc-benc
 - ParallelClusterMaker defaults `max_cpu_queue_size` and `max_gpu_queue_size` to 8, which becomes the `MaxCount` on each Slurm queue. This is the toolkit's own default, not a ParallelCluster limit. Raise `--max_cpu_queue_size`/`--max_gpu_queue_size` at cluster creation before submitting large job arrays — neither can be changed without rebuilding or editing the cluster config.
 - EC2 service quotas can cap the fleet below `max_*_queue_size`. Quotas are per-region and expressed in vCPUs per instance family (separate limits for On-Demand and Spot), so a queue of 8 large instances can exceed the limit while 8 small ones do not. Check the account's quotas for the compute instance family before a large run; a queue that exceeds them leaves nodes stuck in `CONFIGURING` or `DOWN`.
 - For IOR against FSx for Lustre, set `--fs-path /fsx` and tune `--ior-size` to match your expected file sizes.
-- On memory-heavy instances, raise the HPCG problem size above the 104³ default — see [Memory-optimized](#memory-optimized-r5-r6i-r7i-x2iedn).
+- On memory-heavy instances, raise the HPCG problem size above the 104³ default — see [Memory-Optimized](#memory-optimized-r5-r6i-r7i-x2iedn).

@@ -22,6 +22,19 @@ standing constraints for local development.
 - Work lands on `main`; there is no other branch in this repo.
 - Do not amend existing commits unless explicitly asked.
 
+## AI Submissions
+
+- Contributor-facing policy lives in `AI_POLICY.md` — read it before any
+  change involving AI assistance. This section only adds what governs
+  operating as an AI agent in this repo; it does not restate that file.
+- **Never open a GitHub issue or PR without explicit user confirmation**,
+  the same rule as `git commit`/`git push` above — proposing a change is
+  fine, filing it is not.
+- Commits that used AI assistance carry `Co-Authored-By: <Tool/Model>
+  <email>`, matching this repo's existing convention (e.g.
+  `Co-Authored-By: Claude Code <noreply@anthropic.com>`) — do not invent a
+  different trailer format.
+
 ## Architecture
 
 - All Python logic must live in `src/pcluster_core.py` or
