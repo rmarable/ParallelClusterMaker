@@ -63,6 +63,7 @@ from pcluster_core import (
     _delete_managed_policies,
     _setup_fsx_hydration_iam,
     _validate_network,
+    _default_loginnode_instance_type,
     _get_efa_instance_types,
     _ssh_secret_name,
     _get_od_price,
@@ -318,6 +319,30 @@ def main():
         choices=["true", "false"],
         help="enable external NFS mounts (default = false)",
         required=False,
+        default=None,
+    )
+    parser.add_argument(
+        "--enable_loginnode",
+        choices=["true", "false"],
+        help="enable a login node pool separate from the head node (default = false)",
+        required=False,
+        default=None,
+    )
+    parser.add_argument(
+        "--loginnode_instance_type",
+        help=(
+            "login node EC2 instance type "
+            "(falls back to c8g.xlarge on Graviton base_os, c5.xlarge on "
+            "x86_64, when unset and no --use_defaults file sets one)"
+        ),
+        required=False,
+        default=None,
+    )
+    parser.add_argument(
+        "--loginnode_count",
+        help="number of login nodes in the pool (default = 1)",
+        required=False,
+        type=int,
         default=None,
     )
     parser.add_argument(
@@ -619,6 +644,12 @@ def main():
         default=None,
     )
     parser.add_argument(
+        "--loginnode_subnet_id",
+        help="explicit subnet ID for the login node pool; overrides auto-discovery",
+        required=False,
+        default=None,
+    )
+    parser.add_argument(
         "--compute_az",
         help="comma-separated AZs for the compute fleet (default: same as --az)",
         required=False,
@@ -696,6 +727,9 @@ def main():
         "enable_efa": "false",
         "enable_efs": "false",
         "enable_external_nfs": "false",
+        "enable_loginnode": "false",
+        "loginnode_subnet_id": "",
+        "loginnode_count": 1,
         "head_node_bootstrap_timeout": 2100,
         "enable_fsx": "false",
         "enable_fsx_hydration": "false",
@@ -799,6 +833,11 @@ def main():
     enable_efa = _resolve_bool("enable_efa")
     enable_efs = _resolve_bool("enable_efs")
     enable_external_nfs = _resolve_bool("enable_external_nfs")
+    enable_loginnode = _resolve_bool("enable_loginnode")
+    loginnode_instance_type = _resolve("loginnode_instance_type")
+    if loginnode_instance_type is None:
+        loginnode_instance_type = _default_loginnode_instance_type(base_os)
+    loginnode_count = _resolve("loginnode_count", int)
     gpu_instance_type = _resolve("gpu_instance_type")
     gpu_root_volume_size = _resolve("gpu_root_volume_size", int)
     gpu_root_volume_type = _resolve("gpu_root_volume_type")
@@ -883,6 +922,7 @@ def main():
     turbot_account = _resolve("turbot_account")
     vpc_name = _resolve("vpc_name")
     headnode_subnet_id = _resolve("headnode_subnet_id")
+    loginnode_subnet_id = _resolve("loginnode_subnet_id")
     compute_az_raw = _resolve("compute_az")
     compute_subnet_ids_override = _resolve("compute_subnet_ids")
     use_private_compute_subnet = _resolve("use_private_compute_subnet")
@@ -977,14 +1017,14 @@ def main():
         print("")
         print("Please delete this cluster properly and retry the build:")
         print(
-            "$ ./kill_pcluster.py -N "
+            "./kill_pcluster.py -N "
             + cluster_name
             + " -O "
             + cluster_owner
             + " -A "
             + az
         )
-        print("$ " + cluster_build_command)
+        print(cluster_build_command)
         print("")
         print("Aborting...")
         sys.exit(1)
@@ -1019,23 +1059,32 @@ def main():
     with ThreadPoolExecutor(max_workers=3) as _pool:
         _fut_network = _pool.submit(
             _validate_network,
-            ec2client,
-            az,
-            vpc_name,
-            headnode_subnet_id,
-            compute_az_list,
-            compute_subnet_ids_override,
-            use_private_compute_subnet,
-            cluster_name,
-            gpu_az_list,
-            gpu_subnet_ids_override,
-            use_private_gpu_subnet,
+            ec2client=ec2client,
+            az=az,
+            vpc_name=vpc_name,
+            headnode_subnet_id=headnode_subnet_id,
+            compute_az_list=compute_az_list,
+            compute_subnet_ids_override=compute_subnet_ids_override,
+            use_private_compute_subnet=use_private_compute_subnet,
+            cluster_name=cluster_name,
+            gpu_az_list=gpu_az_list,
+            gpu_subnet_ids_override=gpu_subnet_ids_override,
+            use_private_gpu_subnet=use_private_gpu_subnet,
+            enable_loginnode=_b(enable_loginnode),
+            loginnode_subnet_id=loginnode_subnet_id,
         )
         _fut_account = _pool.submit(_get_account_id)
         _fut_describe = _pool.submit(_check_cluster_exists)
 
     try:
-        vpc_id, subnet_id, compute_subnet_ids, gpu_subnet_ids, vpc_cidr = _fut_network.result()
+        (
+            vpc_id,
+            subnet_id,
+            compute_subnet_ids,
+            gpu_subnet_ids,
+            vpc_cidr,
+            loginnode_subnet_id,
+        ) = _fut_network.result()
     except Exception as _e:
         sys.exit(f"ERROR: Network/VPC discovery failed: {_e}")
     try:
@@ -1189,12 +1238,27 @@ def main():
         p_fail(headnode_instance_type, "headnode_instance_type", ec2_instances_full_list)
     base_os_instance_check(base_os, headnode_instance_type, debug_mode)
 
+    # Validate login node, gated on enable_loginnode — mirrors how GPU-queue
+    # instance types are only checked when that queue is enabled.
+    if enable_loginnode:
+        if loginnode_instance_type not in ec2_instances_full_list:
+            p_fail(loginnode_instance_type, "loginnode_instance_type", ec2_instances_full_list)
+        base_os_instance_check(base_os, loginnode_instance_type, debug_mode)
+        # AWS's own LoginNodesPoolSchema.count floors at 0 (a defined-but-empty
+        # pool); no upper bound is enforced there either.
+        if loginnode_count < 0:
+            refer_to_docs_and_quit(
+                f"loginnode_count must be >= 0, got {loginnode_count}."
+            )
+
     # Architecture check — the head node and every queue type must share one
     # architecture. The head node is included here because base_os_instance_check
     # only knows the hardcoded ARM family prefixes above; describe_instance_types
     # is authoritative and covers families that list does not yet name.
     # describe_instance_types accepts max 100 per call; paginate in chunks.
     _all_instance_types = [headnode_instance_type] + cpu_instance_types + gpu_instance_types
+    if enable_loginnode:
+        _all_instance_types = _all_instance_types + [loginnode_instance_type]
     _arch_map = {}
     _gpu_count_map = {}
     _vcpu_map = {}
@@ -1708,6 +1772,10 @@ def main():
         "gpu_vcpus_per_node": gpu_vcpus_per_node,
         "enable_efa_gdr": _b(enable_efa and any(needs_efa_gdr(t) for t in cpu_instance_types + gpu_instance_types)),
         "enable_external_nfs": _b(enable_external_nfs),
+        "enable_loginnode": _b(enable_loginnode),
+        "loginnode_instance_type": loginnode_instance_type,
+        "loginnode_count": loginnode_count,
+        "loginnode_subnet_id": loginnode_subnet_id,
         "enable_fsx": _b(enable_fsx),
         "enable_fsx_hydration": _b(enable_fsx_hydration),
         "enable_hpc_benchmarks": _b(enable_hpc_benchmarks),
@@ -1958,13 +2026,13 @@ def main():
         print('Setting Ansible verbosity to: "' + ansible_verbosity + '"')
     print("")
     print("View the configuration file for cluster " + cluster_name + ":")
-    print("$ cat " + vars_file_path)
+    print("cat " + vars_file_path)
     print("")
     print("Ready to execute:")
-    print("$ " + cluster_build_command)
+    print(cluster_build_command)
     print("")
     print('Preparing to build cluster "' + cluster_name + '" using this command:')
-    print("$ " + ansible_build_cmd_string)
+    print(ansible_build_cmd_string)
 
     # Exit the script, cleanup any orphaned state files, and delete all IAM roles
     # and policies associated with this cluster if the operator types 'CTRL-C'
@@ -2083,6 +2151,8 @@ def main():
     print(f"  Availability Zone: {az}")
     print(f"  VPC:               {vpc_name}")
     print(f"  Head Node:         {headnode_instance_type}")
+    if enable_loginnode:
+        print(f"  Login Node:        {loginnode_instance_type} (x{loginnode_count})")
     if enable_cpu_queue:
         print(f"  CPU Queue:         {', '.join(cpu_instance_types)}")
     if enable_gpu_queue:
@@ -2103,6 +2173,9 @@ def main():
         enable_gpu_queue=enable_gpu_queue,
         region=region,
         cluster_type=cluster_type,
+        loginnode_instance_type=loginnode_instance_type,
+        loginnode_count=loginnode_count,
+        enable_loginnode=enable_loginnode,
     ):
         print(_cost_line)
     print("")

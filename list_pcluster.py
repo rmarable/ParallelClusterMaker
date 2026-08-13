@@ -99,10 +99,17 @@ def _print_table(records, wide):
         s = ", ".join(types) if types else "-"
         return s if trunc is None else _truncate(s, trunc)
 
+    def fmt_loginnode(r):
+        if r.get("enable_loginnode") != "true":
+            return "-"
+        s = f"{r.get('loginnode_instance_type', '')} (x{r.get('loginnode_count', 0)})"
+        return s if trunc is None else _truncate(s, trunc)
+
     rows = []
     for r in records:
         cpu_t = fmt_types(r.get("cpu_instance_types") or [])
         gpu_t = fmt_types(r.get("gpu_instance_types") or [])
+        login_t = fmt_loginnode(r)
         min_max_cpu = (
             f"{r['initial_cpu_queue_size']}/{r['max_cpu_queue_size']}"
             if r.get("enable_cpu_queue") == "true" else "-/-"
@@ -116,6 +123,7 @@ def _print_table(records, wide):
             r["cluster_owner"],
             r["region"],
             r["headnode_instance_type"],
+            login_t,
             cpu_t,
             gpu_t,
             min_max_cpu,
@@ -126,7 +134,7 @@ def _print_table(records, wide):
         ])
 
     headers = [
-        "Cluster", "Owner", "Region", "Head Node",
+        "Cluster", "Owner", "Region", "Head Node", "Login Node",
         "CPU Types", "GPU Types", "Min/Max CPU", "Min/Max GPU",
         "Type", "Age", "Status",
     ]

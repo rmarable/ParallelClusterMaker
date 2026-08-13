@@ -1417,12 +1417,12 @@ class TestPostinstallNodeTypeGating:
         assert once.count("alias src=") == 1, once
 
     def test_an_unknown_node_type_is_a_hard_failure(self, cluster_params):
-        """cfn_node_type is HeadNode or ComputeFleet. A third value means the
-        contract changed and every gate above silently stopped applying, which
-        must not look like success."""
-        r, _, _ = _run_postinstall(cluster_params, "LoginNode")
+        """cfn_node_type is HeadNode, ComputeFleet, or LoginNode. A fourth value
+        means the contract changed and every gate above silently stopped
+        applying, which must not look like success."""
+        r, _, _ = _run_postinstall(cluster_params, "SomeOtherNodeType")
         assert r.returncode != 0, "an unrecognized node type must not exit 0"
-        assert b"LoginNode" in r.stderr
+        assert b"SomeOtherNodeType" in r.stderr
 
     def test_a_manual_run_outside_a_custom_action_does_not_abort(self, cluster_params):
         """No cfnconfig means this is not a ParallelCluster node, so HeadNode is
@@ -4289,6 +4289,34 @@ def _rendered_sns(overrides, cluster_params):
     ).render(**variables)
 
 
+_LAUNCH_SUMMARY_TASK = "Print cluster launch summary"
+
+
+def _launch_summary_expression():
+    """The pre-build "Print cluster launch summary" debug message, unwrapped
+    from its {{ }} the same way _summary_expression unwraps the post-build
+    one. A genuinely separate, independently-written list literal in the same
+    file -- not the same summary referenced twice."""
+    with open(os.path.join(REPO_ROOT, "src", "create_pcluster.yml")) as fh:
+        plays = yaml.safe_load(fh)
+    for play in plays:
+        for task in play.get("tasks") or []:
+            if task.get("name") == _LAUNCH_SUMMARY_TASK:
+                value = task["debug"]["msg"].strip()
+                assert value.startswith("{{") and value.endswith("}}"), value
+                return value[2:-2]
+    raise AssertionError(f"task not found: {_LAUNCH_SUMMARY_TASK!r}")
+
+
+def _rendered_launch_summary(overrides, cluster_params):
+    variables = {**_vars_for(overrides, cluster_params), **_RUNTIME_FACTS}
+    env = _make_env(os.path.join(REPO_ROOT, "templates"))
+    lines = env.compile_expression(
+        _launch_summary_expression(), undefined_to_none=False
+    )(**variables)
+    return "\n".join(lines)
+
+
 # The mount point alone is not enough to prove the filesystem was reported: on an
 # FSx cluster pkg_dir is /fsx/pkg, so a bare "/fsx" check still passes after the
 # mount line is deleted. Match the label the line carries. Both surfaces indent
@@ -4439,6 +4467,157 @@ class TestSummaryMountPointsMatchTheClusterConfig:
         root = _vars_for(overrides, cluster_params)["external_nfs_server_root"]
         assert _MOUNT_LINES["/nfs"].startswith(root)
         assert root not in _config_mount_dirs(overrides, cluster_params)
+
+
+class TestReportingSurfacesNameTheLoginNode:
+    """Login node appears on three independently-maintained literals -- the
+    pre-build "Print cluster launch summary" debug message, the post-build
+    _build_summary set_fact (used for the SNS notification), and the SNS
+    report template itself -- plus list_pcluster.py's table and the cost
+    estimate, covered elsewhere. A line added to one and missed on another is
+    worse than not adding it anywhere, so all three are checked independently,
+    the same discipline the storage-summary tests above use."""
+
+    def test_the_launch_summary_names_the_login_node_only_when_enabled(
+        self, cluster_params, cluster_params_loginnode_enabled
+    ):
+        assert "Login Node:" not in _rendered_launch_summary({}, cluster_params)
+        text = _rendered_launch_summary({}, cluster_params_loginnode_enabled)
+        assert (
+            f"Login Node:        "
+            f"{cluster_params_loginnode_enabled['loginnode_instance_type']} "
+            f"(x{cluster_params_loginnode_enabled['loginnode_count']})"
+        ) in text
+
+    def test_the_launch_summary_reports_the_pool_size(self, cluster_params_loginnode_pool):
+        text = _rendered_launch_summary({}, cluster_params_loginnode_pool)
+        assert "(x3)" in text
+
+    def test_the_build_summary_names_the_login_node_only_when_enabled(
+        self, cluster_params, cluster_params_loginnode_enabled
+    ):
+        assert "Login Node:" not in _rendered_summary({}, cluster_params)
+        text = _rendered_summary({}, cluster_params_loginnode_enabled)
+        assert (
+            f"Login Node:        "
+            f"{cluster_params_loginnode_enabled['loginnode_instance_type']} "
+            f"(x{cluster_params_loginnode_enabled['loginnode_count']})"
+        ) in text
+
+    def test_the_build_summary_reports_the_pool_size(self, cluster_params_loginnode_pool):
+        text = _rendered_summary({}, cluster_params_loginnode_pool)
+        assert "(x3)" in text
+
+    def test_the_sns_report_names_the_login_node_only_when_enabled(
+        self, cluster_params, cluster_params_loginnode_enabled
+    ):
+        assert "Login Node Instance Type:" not in _rendered_sns({}, cluster_params)
+        text = _rendered_sns({}, cluster_params_loginnode_enabled)
+        assert (
+            f"Login Node Instance Type: "
+            f"{cluster_params_loginnode_enabled['loginnode_instance_type']} "
+            f"(x{cluster_params_loginnode_enabled['loginnode_count']})"
+        ) in text
+
+    def test_the_sns_report_reports_the_pool_size(self, cluster_params_loginnode_pool):
+        text = _rendered_sns({}, cluster_params_loginnode_pool)
+        assert "(x3)" in text
+
+
+class TestLoginNodesConfigBlock:
+    """LoginNodes is an optional top-level block, sibling to HeadNode/Scheduling,
+    gated on enable_loginnode. It gets ComputeNode-Base IAM (never HeadNode-level
+    privileges) and the same CustomActions script references as HeadNode, though
+    postinstall.j2 treats the node type like ComputeFleet at runtime, not
+    HeadNode -- that's a separate decision from what scripts are *registered*
+    here, which is what this class checks."""
+
+    def _config(self, params):
+        env = _make_env(os.path.join(REPO_ROOT, "templates"))
+        return env.get_template("config.pcluster.j2").render(**params)
+
+    def test_disabled_by_default_renders_no_loginnodes_key(self, cluster_params):
+        parsed = yaml.safe_load(self._config(cluster_params))
+        assert "LoginNodes" not in parsed
+
+    @pytest.mark.parametrize(
+        "fixture_name", ["cluster_params_loginnode_enabled", "cluster_params_loginnode_pool"]
+    )
+    def test_the_pool_block_carries_every_required_field(self, fixture_name, request):
+        params = request.getfixturevalue(fixture_name)
+        parsed = yaml.safe_load(self._config(params))
+        pool = parsed["LoginNodes"]["Pools"][0]
+
+        assert pool["Name"] == params["cluster_name"]
+        # Asserted against the fixture's own value, not a hardcoded 1, so this
+        # still means something once loginnode_count=3 is exercised -- proves
+        # the value threads through rather than the template happening to
+        # always render 1.
+        assert pool["Count"] == params["loginnode_count"]
+        assert pool["InstanceType"] == params["loginnode_instance_type"]
+        assert pool["Networking"]["SubnetIds"] == [params["loginnode_subnet_id"]]
+
+        policies = pool["Iam"]["AdditionalIamPolicies"]
+        assert any(
+            p["Policy"].endswith("-ComputeNode-Base") for p in policies
+        ), f"login node does not get ComputeNode-Base: {policies}"
+        assert not any(
+            "InstanceRole" in str(p) for p in policies
+        ), "login node must not carry head-node-level IAM"
+
+        head_start = parsed["HeadNode"]["CustomActions"]["OnNodeStart"]["Sequence"]
+        head_configured = parsed["HeadNode"]["CustomActions"]["OnNodeConfigured"]["Sequence"]
+        login_start = pool["CustomActions"]["OnNodeStart"]["Sequence"]
+        login_configured = pool["CustomActions"]["OnNodeConfigured"]["Sequence"]
+        assert [s["Script"] for s in login_start] == [s["Script"] for s in head_start]
+        assert [s["Script"] for s in login_configured] == [
+            s["Script"] for s in head_configured
+        ]
+
+    def test_pool_count_actually_threads_through_not_just_defaults_to_one(
+        self, cluster_params_loginnode_pool
+    ):
+        parsed = yaml.safe_load(self._config(cluster_params_loginnode_pool))
+        assert parsed["LoginNodes"]["Pools"][0]["Count"] == 3
+
+    def test_external_nfs_combined_with_loginnode_grants_the_security_group(
+        self, cluster_params_loginnode_enabled
+    ):
+        """postinstall.j2's external-NFS mount block is gated only on
+        enable_external_nfs, not on node type, so it also runs on the login
+        node -- without this grant, sudo mount fails outright under
+        set -euo pipefail because the login node's auto-created security
+        group has no network path to the filer."""
+        params = dict(cluster_params_loginnode_enabled, enable_external_nfs="true")
+        parsed = yaml.safe_load(self._config(params))
+        pool = parsed["LoginNodes"]["Pools"][0]
+        assert pool["Networking"]["AdditionalSecurityGroups"] == [
+            params["external_nfs_sg"]["group_id"]
+        ]
+
+    def test_pcluster_own_schema_accepts_the_rendered_pool(
+        self, cluster_params_loginnode_enabled, monkeypatch
+    ):
+        """The authoritative check: load the rendered config through PCluster's
+        own ClusterSchema. A key-casing typo is silently ignored by marshmallow
+        rather than rejected, so a substring/yaml check alone would miss it."""
+        from pcluster.schemas.cluster_schema import ClusterSchema
+
+        monkeypatch.setenv("AWS_REGION", "us-east-1")
+        monkeypatch.setenv("AWS_DEFAULT_REGION", "us-east-1")
+
+        params = dict(cluster_params_loginnode_enabled)
+        params["subnet_id"] = "subnet-0abc1234"
+        params["compute_subnet_ids"] = ["subnet-0abc1234"]
+        params["gpu_subnet_ids"] = ["subnet-0abc1234"]
+        params["loginnode_subnet_id"] = "subnet-0abc1234"
+        params["external_nfs_sg"] = {"group_id": "sg-0abc1234"}
+        parsed = yaml.safe_load(self._config(params))
+        config = ClusterSchema(cluster_name="test-cluster").load(parsed)
+        pool = config.login_nodes.pools[0]
+        assert pool.name == params["cluster_name"]
+        assert pool.count == params["loginnode_count"]
+        assert pool.instance_type == params["loginnode_instance_type"]
 
 
 class TestHeadNodeBootstrapTimeoutReachesTheClusterConfig:

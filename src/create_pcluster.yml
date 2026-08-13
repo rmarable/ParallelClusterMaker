@@ -451,6 +451,7 @@
               "VPC Name:          " + vpc_name,
               "Availability Zone: " + az,
             ]
+            + (["Login Node:        " + loginnode_instance_type + " (x" + loginnode_count | string + ")"] if enable_loginnode | bool else [])
             + (["CPU Queue:         " + (cpu_instance_types | join(", ")) + "  (min: " + initial_cpu_queue_size | string + "  max: " + max_cpu_queue_size | string + ")"] if enable_cpu_queue | bool else [])
             + (["GPU Queue:         " + (gpu_instance_types | join(", ")) + "  (min: " + initial_gpu_queue_size | string + "  max: " + max_gpu_queue_size | string + ")"] if enable_gpu_queue | bool else [])
             + (["EFA Enabled:       TRUE"] if enable_efa | bool else [])
@@ -759,6 +760,7 @@
               "OS:                " + base_os,
               "Scheduler:         " + scheduler,
             ]
+            + (["Login Node:        " + loginnode_instance_type + " (x" + loginnode_count | string + ")"] if enable_loginnode | bool else [])
             + (["CPU Queue:         " + (cpu_instance_types | join(", "))] if enable_cpu_queue | bool else [])
             + (["GPU Queue:         " + (gpu_instance_types | join(", "))] if enable_gpu_queue | bool else [])
             + (["EFA:               enabled"] if enable_efa | bool else [])

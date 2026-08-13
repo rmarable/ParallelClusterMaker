@@ -32,6 +32,9 @@ headnode_root_volume_size: {{ headnode_root_volume_size }}
 headnode_root_volume_type: "{{ headnode_root_volume_type }}"
 headnode_root_volume_iops: {{ headnode_root_volume_iops }}
 headnode_root_volume_throughput: {{ headnode_root_volume_throughput }}
+enable_loginnode: "{{ enable_loginnode }}"
+loginnode_instance_type: "{{ loginnode_instance_type }}"
+loginnode_count: {{ loginnode_count }}
 compute_instance_type: "{{ compute_instance_type }}"
 cpu_instance_types: {{ cpu_instance_types | tojson }}
 gpu_instance_type: "{{ gpu_instance_type }}"
@@ -61,6 +64,7 @@ vpc_id: "{{ vpc_id }}"
 vpc_cidr: "{{ vpc_cidr }}"
 vpc_name: "{{ vpc_name }}"
 subnet_id: "{{ subnet_id }}"
+loginnode_subnet_id: "{{ loginnode_subnet_id }}"
 compute_az_list: "{{ compute_az_list | join(',') }}"
 compute_subnet_ids: "{{ compute_subnet_ids | join(',') }}"
 use_private_compute_subnet: "{{ use_private_compute_subnet | lower }}"

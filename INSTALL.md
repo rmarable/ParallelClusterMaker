@@ -10,6 +10,10 @@
   * On Debian/Ubuntu (`apt`), run `sudo apt-get install autoconf automake gcc jq libtool make libreadline-dev`.
   * On RPM-based distributions, install the equivalents with your package manager; use `readline-devel` instead of `libreadline-dev`.
 * macOS also needs a modern `bash`, GNU `coreutils`, and `shellcheck` to run the test suite. See [Development environment (macOS)](#development-environment-macos). These are not required to operate the toolkit itself — only `make test`, `make lint`, and `make shellcheck` need them.
+* Node.js >= 10.13.0 must be installed and on `PATH`. `pcluster create-cluster`/`update-cluster` shell out locally to the AWS CDK library ParallelCluster uses to synthesize the CloudFormation stack — this runs on the machine invoking `make_pcluster.py`, not on any cluster node, so it is not listed in `pcluster_defaults.yml`'s `base_os` package sets. Without it, `create-cluster` fails immediately with `Unable to find node executable`.
+  * On macOS, run `brew install node`.
+  * On Debian/Ubuntu (`apt`), run `sudo apt-get install nodejs`, or follow [NodeSource's install instructions](https://github.com/nodesource/distributions) for a newer version than your distribution ships.
+  * On RPM-based distributions, install the `nodejs` package with your package manager.
 
 ## Python version
 

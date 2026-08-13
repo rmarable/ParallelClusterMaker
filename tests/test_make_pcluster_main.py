@@ -138,7 +138,7 @@ def staged(mp, tmp_path, monkeypatch):
     monkeypatch.setattr(
         mp, "_validate_network",
         lambda *a, **k: ("vpc-0abc", "subnet-0head", ["subnet-0cpu"],
-                         ["subnet-0gpu"], "10.0.0.0/16"),
+                         ["subnet-0gpu"], "10.0.0.0/16", "subnet-0login"),
     )
     monkeypatch.setattr(
         mp, "_load_or_create_serial",
@@ -307,6 +307,68 @@ class TestBuildPreflight:
         assert "base_os=ubuntu2404 is x86_64" in capsys.readouterr().out
         assert _playbook_vars(staged["record"]) is None
 
+    def test_loginnode_instance_type_must_exist(self, staged, monkeypatch, capsys):
+        with pytest.raises(SystemExit):
+            _run_main(staged, monkeypatch, "--enable_loginnode", "true",
+                      "--loginnode_instance_type", "not-a-real-instance-type")
+        out = capsys.readouterr().out
+        assert "not-a-real-instance-type" in out
+        assert _playbook_vars(staged["record"]) is None
+
+    def test_loginnode_architecture_must_match_base_os(self, staged, monkeypatch, capsys):
+        """A Graviton login node on an x86 cluster cannot boot; this must fail
+        at preflight, not 15+ minutes into a real build."""
+        with pytest.raises(SystemExit):
+            _run_main(staged, monkeypatch, "--base_os", "ubuntu2404",
+                      "--headnode_instance_type", "c5.xlarge",
+                      "--compute_instance_type", "c5.2xlarge",
+                      "--enable_loginnode", "true",
+                      "--loginnode_instance_type", "c8g.xlarge")
+        out = capsys.readouterr().out
+        assert "is ARM/Graviton but base_os=ubuntu2404 is x86_64" in out
+        assert _playbook_vars(staged["record"]) is None
+
+    def test_loginnode_instance_type_falls_back_by_architecture_on_x86(self, staged, monkeypatch):
+        """Regression: a flat c8g.xlarge (Graviton) fallback would silently
+        fail preflight for an operator who opts into --enable_loginnode=true
+        on an x86_64 cluster without also setting --loginnode_instance_type
+        and without --use_defaults. The architecture-aware fallback in
+        _default_loginnode_instance_type must resolve to c5.xlarge here
+        instead, so preflight succeeds."""
+        with pytest.raises(SystemExit) as exc:
+            _run_main(staged, monkeypatch, "--base_os", "ubuntu2404",
+                      "--headnode_instance_type", "c5.xlarge",
+                      "--compute_instance_type", "c5.2xlarge",
+                      "--enable_loginnode", "true")
+        assert exc.value.code == 0
+        v = _rendered_vars(staged)
+        assert v["loginnode_instance_type"] == "c5.xlarge"
+
+    def test_loginnode_count_cannot_be_negative(self, staged, monkeypatch, capsys):
+        with pytest.raises(SystemExit):
+            _run_main(staged, monkeypatch, "--enable_loginnode", "true",
+                      "--loginnode_count", "-1")
+        assert "loginnode_count must be >= 0" in capsys.readouterr().out
+        assert _playbook_vars(staged["record"]) is None
+
+    def test_loginnode_count_zero_is_accepted(self, staged, monkeypatch):
+        """AWS's own LoginNodesPoolSchema.count floors at 0 — a defined-but-empty
+        pool is valid, the same shape as a compute queue scaled to zero."""
+        with pytest.raises(SystemExit) as exc:
+            _run_main(staged, monkeypatch, "--enable_loginnode", "true",
+                      "--loginnode_count", "0")
+        assert exc.value.code == 0
+        v = _rendered_vars(staged)
+        assert v["loginnode_count"] == 0
+
+    def test_loginnode_count_validation_skipped_when_disabled(self, staged, monkeypatch):
+        """A negative loginnode_count must not fail preflight when the feature
+        is off entirely — the validation is gated on enable_loginnode, not on
+        the count alone."""
+        with pytest.raises(SystemExit) as exc:
+            _run_main(staged, monkeypatch, "--loginnode_count", "-1")
+        assert exc.value.code == 0
+
 
 class TestExistingS3Bucket:
     """The bucket name is derived from the serial, so a bucket that already
@@ -474,6 +536,17 @@ class TestDerivedVariablesReachTheVarsFile:
             _run_main(staged, monkeypatch, "-D", "true")
         cmd = next(c for c in staged["record"]["calls"] if "ansible-playbook" in c)
         assert "-vvv" in cmd
+
+    def test_loginnode_instance_type_reaches_the_vars_file(self, staged, monkeypatch):
+        with pytest.raises(SystemExit) as exc:
+            _run_main(staged, monkeypatch, "--enable_loginnode", "true",
+                      "--loginnode_instance_type", "c8g.2xlarge",
+                      "--loginnode_count", "2")
+        assert exc.value.code == 0
+        v = _rendered_vars(staged)
+        assert v["enable_loginnode"] == "true"
+        assert v["loginnode_instance_type"] == "c8g.2xlarge"
+        assert v["loginnode_count"] == 2
 
 
 class TestIdleComputeNotice:

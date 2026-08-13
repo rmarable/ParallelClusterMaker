@@ -298,10 +298,10 @@ def main():
         print('Setting Ansible verbosity to "' + ansible_verbosity + '"')
     print("")
     print("Ready to execute:")
-    print("$ " + cluster_destroy_command)
+    print(cluster_destroy_command)
     print("")
     print('Preparing to delete cluster "' + cluster_name + '" using this command:')
-    print("$ " + ansible_destroy_cmd_string)
+    print(ansible_destroy_cmd_string)
 
     # Exit the script if the operator types 'CTRL-C' within 5 seconds after the
     # abort header is displayed.
@@ -338,7 +338,7 @@ def main():
     if _rebuild_cmd:
         print("To rebuild the cluster:")
         print("")
-        print("$ " + _rebuild_cmd)
+        print(_rebuild_cmd)
 
     # Delete cluster_serial_number_file and vars_file_path.
 

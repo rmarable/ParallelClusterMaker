@@ -165,6 +165,7 @@ _COST_PARAMS = (
     "cpu_instance_types", "max_cpu_queue_size", "enable_cpu_queue",
     "gpu_instance_types", "max_gpu_queue_size", "enable_gpu_queue",
     "region", "cluster_type",
+    "loginnode_instance_type", "loginnode_count", "enable_loginnode",
 )
 
 
@@ -421,3 +422,112 @@ class TestCostSummaryLines:
         )
         assert len(lines) == 1
         assert "unavailable" in lines[0]
+
+
+class TestCostSummaryLinesLoginNode:
+    """A login-node pool is always billed on-demand -- LoginNodesPoolSchema has
+    no capacity_type field at all, unlike HeadNode/SlurmQueues -- so this line
+    must never carry a spot-price bracket, unlike the CPU/GPU queue lines in
+    the same output. The easiest way to break this is copy-pasting the
+    CPU-queue-line test, which would silently expect a spot branch that
+    should not exist for this node type -- that case gets its own test,
+    called out explicitly rather than folded in with the others."""
+
+    def test_absent_when_disabled(self):
+        pc, ec2 = _make_clients(od_prices={"c8g.2xlarge": "0.31904"})
+        lines = _cost_summary_lines(
+            pricing_client=pc, ec2client=ec2,
+            headnode_instance_type="c8g.2xlarge",
+            cpu_instance_types=["c8g.2xlarge"], max_cpu_queue_size=8,
+            enable_cpu_queue=True,
+            gpu_instance_types=[], max_gpu_queue_size=0, enable_gpu_queue=False,
+            region="us-east-1", cluster_type="ondemand",
+            loginnode_instance_type="c8g.xlarge", loginnode_count=1,
+            enable_loginnode=False,
+        )
+        assert not any("Login node" in l for l in lines)
+
+    def test_present_when_enabled(self):
+        pc, ec2 = _make_clients(
+            od_prices={"c8g.2xlarge": "0.31904", "c8g.xlarge": "0.15952"}
+        )
+        lines = _cost_summary_lines(
+            pricing_client=pc, ec2client=ec2,
+            headnode_instance_type="c8g.2xlarge",
+            cpu_instance_types=["c8g.2xlarge"], max_cpu_queue_size=8,
+            enable_cpu_queue=True,
+            gpu_instance_types=[], max_gpu_queue_size=0, enable_gpu_queue=False,
+            region="us-east-1", cluster_type="ondemand",
+            loginnode_instance_type="c8g.xlarge", loginnode_count=1,
+            enable_loginnode=True,
+        )
+        login_line = next(l for l in lines if "Login node" in l)
+        # 1 x 0.15952
+        assert "0.160" in login_line
+
+    def test_count_multiplier_is_applied(self):
+        pc, ec2 = _make_clients(od_prices={"c8g.xlarge": "0.15952"})
+        lines = _cost_summary_lines(
+            pricing_client=pc, ec2client=ec2,
+            headnode_instance_type="c8g.xlarge",
+            cpu_instance_types=[], max_cpu_queue_size=0, enable_cpu_queue=False,
+            gpu_instance_types=[], max_gpu_queue_size=0, enable_gpu_queue=False,
+            region="us-east-1", cluster_type="ondemand",
+            loginnode_instance_type="c8g.xlarge", loginnode_count=3,
+            enable_loginnode=True,
+        )
+        login_line = next(l for l in lines if "Login node" in l)
+        # 3 x 0.15952 = 0.47856
+        assert "0.479" in login_line
+
+    def test_no_spot_bracket_in_spot_mode(self):
+        """Unlike the CPU/GPU queue lines, this one carries no [~$X/hr spot]
+        bracket at all in spot mode -- a login-node pool cannot be spot."""
+        pc, ec2 = _make_clients(
+            od_prices={"c8g.xlarge": "0.15952", "c8g.2xlarge": "0.31904"},
+            spot_prices={"c8g.2xlarge": "0.1366"},
+        )
+        lines = _cost_summary_lines(
+            pricing_client=pc, ec2client=ec2,
+            headnode_instance_type="c8g.xlarge",
+            cpu_instance_types=["c8g.2xlarge"], max_cpu_queue_size=4,
+            enable_cpu_queue=True,
+            gpu_instance_types=[], max_gpu_queue_size=0, enable_gpu_queue=False,
+            region="us-east-1", cluster_type="spot",
+            loginnode_instance_type="c8g.xlarge", loginnode_count=1,
+            enable_loginnode=True,
+        )
+        login_line = next(l for l in lines if "Login node" in l)
+        assert "spot" not in login_line
+        cpu_line = next(l for l in lines if "CPU queue" in l)
+        assert "spot" in cpu_line, "the CPU line should still show spot pricing"
+
+    def test_spot_mode_annotates_on_demand_only(self):
+        """The missing bracket must read as intentional, not a rendering bug --
+        the login-node line gets a fixed annotation in spot mode instead."""
+        pc, ec2 = _make_clients(od_prices={"c8g.xlarge": "0.15952"})
+        lines = _cost_summary_lines(
+            pricing_client=pc, ec2client=ec2,
+            headnode_instance_type="c8g.xlarge",
+            cpu_instance_types=[], max_cpu_queue_size=0, enable_cpu_queue=False,
+            gpu_instance_types=[], max_gpu_queue_size=0, enable_gpu_queue=False,
+            region="us-east-1", cluster_type="spot",
+            loginnode_instance_type="c8g.xlarge", loginnode_count=1,
+            enable_loginnode=True,
+        )
+        login_line = next(l for l in lines if "Login node" in l)
+        assert "on-demand only" in login_line
+
+    def test_failure_path_shows_unavailable(self):
+        pc, ec2 = _make_clients(od_prices={})
+        lines = _cost_summary_lines(
+            pricing_client=pc, ec2client=ec2,
+            headnode_instance_type="c8g.xlarge",
+            cpu_instance_types=[], max_cpu_queue_size=0, enable_cpu_queue=False,
+            gpu_instance_types=[], max_gpu_queue_size=0, enable_gpu_queue=False,
+            region="us-east-1", cluster_type="ondemand",
+            loginnode_instance_type="xx.fake", loginnode_count=1,
+            enable_loginnode=True,
+        )
+        login_line = next(l for l in lines if "Login node" in l)
+        assert "unavailable" in login_line

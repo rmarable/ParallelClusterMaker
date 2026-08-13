@@ -12,6 +12,9 @@ Cluster Stack Name:      {{ cluster_name }}
 AWS Availability Zone:   {{ az }}
 HPC Scheduler Type:      {{ scheduler }}
 Head Node Instance Type: {{ headnode_instance_type }}
+{% if enable_loginnode == 'true' %}
+Login Node Instance Type: {{ loginnode_instance_type }} (x{{ loginnode_count }})
+{% endif %}
 Compute Instance Type:   {{ compute_instance_type }}
 
 {% set _storage_labels = [ebs_shared_dir] %}

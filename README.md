@@ -31,6 +31,7 @@ permissions), and installation steps.
 - Separate CPU and GPU queues — the GPU queue exists only when `--gpu_instance_type` is set
 - Multi-instance-type queues via `--compute_instance_type` and `--gpu_instance_type`, each accepting a comma-separated list
 - Separate instance types and EBS configurations for the head node, CPU queue, and GPU queue
+- Optional login node pool, keeping general users off the head node (`--enable_loginnode`); see [Login Nodes](#login-nodes)
 - Spot capacity by default (`--cluster_type=spot`), with current market rates printed at build time
 - EFA on supported instance types in both queues (`--enable_efa`), with EFA-GDR enabled automatically on p4d/p4de/p5
 - Dynamic EFA instance type lookup at launch time, with a static fallback list
@@ -255,6 +256,15 @@ Example:
 ./access_cluster.py -N pcluster-test-01
 Connecting to head node of pcluster-test-01...
 ```
+
+If the cluster has a [login node](#login-nodes) (`--enable_loginnode=true`), `access_cluster.py` connects there by default instead of the head node.  Pass `-L`/`--login_node` or `-H`/`--head_node` to choose explicitly:
+
+```
+./access_cluster.py -N pcluster-test-01 -L    # login node
+./access_cluster.py -N pcluster-test-01 -H    # head node, even if a login node is enabled
+```
+
+`-L` on a cluster built with `--enable_loginnode=false` (or an older cluster from before this feature existed) fails with a clear error rather than connecting to the head node silently.
 
 ---
 
@@ -678,6 +688,27 @@ Enable with `--placement_group=DYNAMIC`.  PCluster creates one managed cluster p
 Disable with `--hyperthreading=false`.
 
 HyperThreading (Intel) / SMT (AMD) exposes each physical CPU core as two logical vCPUs sharing the same execution resources.  Many HPC workloads — anything compute- or memory-bandwidth-bound rather than I/O-bound — run faster with HyperThreading disabled, since two threads contending for one core's resources often costs more than the extra thread gains.  Disabling HyperThreading also changes the per-node rank count Slurm submits with: `cpu_ranks_per_node` divides vCPUs by `DefaultThreadsPerCore` instead of always halving (see [Job Submission](#job-submission)).
+
+### Login Nodes
+
+Enable with `--enable_loginnode=true` (default: `false`).  AWS ParallelCluster's `LoginNodes` feature adds a separate, right-sized instance pool for interactive logins and job submission, keeping general users off the head node — which carries elevated IAM permissions and runs cluster orchestration.
+
+```
+./make_pcluster.py -N prod01 -O rmarable -E rmarable@example.com -A us-east-1a \
+    ... \
+    --enable_loginnode=true \
+    --loginnode_instance_type=c5.xlarge \
+    --loginnode_count=2
+```
+
+- **`--loginnode_instance_type`** falls back to an architecture-aware default when unset (`c8g.xlarge` on Graviton `base_os` values, `c5.xlarge` on x86_64) — matching whatever `base_os` you built with is required, same as every other node type.
+- **`--loginnode_count`** (default `1`) sizes a static, always-on pool — there is no autoscaling to zero, so this is a real ongoing cost distinct from the CPU/GPU compute queues, which do scale down when idle.
+- **The root volume can be neither sized nor encrypted through this toolkit.**  AWS ParallelCluster exposes no `RootVolume`/`LocalStorage` key for `LoginNodes/Pools` — it always uses the AMI default.
+- **IAM is `ComputeNode-Base`**, the same least-privilege policy the compute/GPU queues get — never the head node's `InstanceRole`.
+- **A login-node bootstrap failure does not fail the cluster build.**  Login nodes run behind their own Auto Scaling Group and load balancer health check, architecturally separate from the head node's `CreationPolicy`/wait condition and from Slurm's compute-fleet protected mode — a broken postinstall script produces a running cluster with an unhealthy, continuously-replaced login node pool instead of a failed `pcluster create-cluster` call.
+- **Enabling this only makes a more-secure *option* available.**  Nothing prevents an operator from still using `-H`/direct SSH to the head node — the actual security benefit depends on people using `-L`.
+
+Connect with `access_cluster.py -L` (or `-H` for the head node explicitly — see [Accessing a Cluster](#accessing-a-cluster)).  When `--loginnode_count` is greater than 1, `-L` connects to an unspecified member of the pool, not a chosen one; per-node targeting is not yet implemented.
 
 ---
 

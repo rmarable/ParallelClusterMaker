@@ -196,3 +196,113 @@ class TestAgeStr:
         assert mod._age_str("not-a-date") == "?"
         assert mod._age_str("") == "?"
         assert mod._age_str(None) == "?"
+
+
+# ---------------------------------------------------------------------------
+# _print_table
+# ---------------------------------------------------------------------------
+
+
+def _import_list_pcluster():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "list_pcluster", os.path.join(_repo_root, "list_pcluster.py")
+    )
+    orig = sys.prefix
+    sys.prefix = os.path.join(_repo_root, ".venv")
+    try:
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+    finally:
+        sys.prefix = orig
+    return mod
+
+
+def _base_record(**overrides):
+    record = {
+        "cluster_name": "mycluster",
+        "cluster_owner": "alice",
+        "region": "us-east-1",
+        "headnode_instance_type": "c8g.2xlarge",
+        "cpu_instance_types": ["c8g.2xlarge"],
+        "gpu_instance_types": [],
+        "enable_cpu_queue": "true",
+        "enable_gpu_queue": "false",
+        "initial_cpu_queue_size": 0,
+        "max_cpu_queue_size": 8,
+        "initial_gpu_queue_size": 0,
+        "max_gpu_queue_size": 0,
+        "cluster_type": "ondemand",
+        "age": "3d",
+        "status": "CREATE_COMPLETE",
+    }
+    record.update(overrides)
+    return record
+
+
+class TestPrintTableLoginNodeColumn:
+    """r.get(...), never r[...], for both enable_loginnode and the two
+    loginnode_* fields it reads -- a cluster record from before this feature
+    existed has no enable_loginnode key at all, and must render "-" rather
+    than raise KeyError."""
+
+    def test_pre_feature_record_renders_a_dash_rather_than_raising(self, capsys):
+        mod = _import_list_pcluster()
+        record = _base_record()
+        assert "enable_loginnode" not in record
+        mod._print_table([record], wide=True)
+        out = capsys.readouterr().out
+        lines = out.splitlines()
+        header_cols = [c.strip() for c in lines[0].split("  ") if c.strip()]
+        login_idx = header_cols.index("Login Node")
+        row_cols = [c.strip() for c in lines[2].split("  ") if c.strip()]
+        assert row_cols[login_idx] == "-"
+
+    def test_explicitly_disabled_record_renders_a_dash(self, capsys):
+        mod = _import_list_pcluster()
+        record = _base_record(enable_loginnode="false")
+        mod._print_table([record], wide=True)
+        out = capsys.readouterr().out
+        lines = out.splitlines()
+        header_cols = [c.strip() for c in lines[0].split("  ") if c.strip()]
+        login_idx = header_cols.index("Login Node")
+        row_cols = [c.strip() for c in lines[2].split("  ") if c.strip()]
+        assert row_cols[login_idx] == "-"
+
+    def test_enabled_record_shows_instance_type_and_count(self, capsys):
+        mod = _import_list_pcluster()
+        record = _base_record(
+            enable_loginnode="true",
+            loginnode_instance_type="c8g.xlarge",
+            loginnode_count=2,
+        )
+        mod._print_table([record], wide=True)
+        out = capsys.readouterr().out
+        assert "c8g.xlarge (x2)" in out
+
+    def test_narrow_mode_truncates_the_login_node_column(self, capsys):
+        mod = _import_list_pcluster()
+        long_type = "some-hypothetical-really-long-instance-type-name.24xlarge"
+        record = _base_record(
+            enable_loginnode="true",
+            loginnode_instance_type=long_type,
+            loginnode_count=1,
+        )
+        mod._print_table([record], wide=False)
+        out = capsys.readouterr().out
+        assert long_type not in out, (
+            "the Login Node column ignored --wide/narrow truncation, unlike "
+            "every other column in this table"
+        )
+
+    def test_wide_mode_does_not_truncate(self, capsys):
+        mod = _import_list_pcluster()
+        long_type = "some-hypothetical-really-long-instance-type-name.24xlarge"
+        record = _base_record(
+            enable_loginnode="true",
+            loginnode_instance_type=long_type,
+            loginnode_count=1,
+        )
+        mod._print_table([record], wide=True)
+        out = capsys.readouterr().out
+        assert long_type in out

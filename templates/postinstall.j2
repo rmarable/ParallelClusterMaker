@@ -472,11 +472,19 @@ ComputeFleet)
 	echo "Customize the pcluster stack compute instances here."
 	echo "Ready to finish joining the cluster!"
 	;;
+LoginNode)
+	# Treated like ComputeFleet, not HeadNode: login nodes NFS-mount the same
+	# shared /home the head node exports, and running the Spack/Lmod build
+	# steps here would race the head node (and every other login node in the
+	# pool) writing the same shared paths concurrently at boot.
+	echo "Customize the pcluster stack login node here."
+	echo "Ready to finish joining the cluster!"
+	;;
 *)
 	# NODE_TYPE comes from cfn_node_type in /etc/parallelcluster/cfnconfig,
-	# which ParallelCluster writes as HeadNode or ComputeFleet. A third value
-	# means the contract changed and node-type gating above silently stopped
-	# applying.
+	# which ParallelCluster writes as HeadNode, ComputeFleet, or LoginNode. A
+	# fourth value means the contract changed and node-type gating above
+	# silently stopped applying.
 	echo "ERROR: unrecognized cfn_node_type: $NODE_TYPE" >&2
 	exit 1
 	;;

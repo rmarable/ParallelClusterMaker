@@ -29,6 +29,7 @@ from pcluster_core import (
     _check_fsx_s3,
     _check_external_nfs_reachable,
     _storage_summary_lines,
+    _validate_network,
     _derive_head_node_bootstrap_timeout,
     _derive_docker_compose_staging,
     _derive_results_bucket,
@@ -832,6 +833,79 @@ class TestStorageSummaryLinesTakesKeywordsOnly:
             assert passed == expected, (
                 f"call site keywords {sorted(passed ^ expected)} do not match the "
                 "function's parameters"
+            )
+
+
+_VALIDATE_NETWORK_DEFAULTS = dict(
+    ec2client=object(),
+    az="us-east-1a",
+    vpc_name="vpc_default",
+    headnode_subnet_id="",
+    compute_az_list=["us-east-1a"],
+    compute_subnet_ids_override="",
+    use_private_compute_subnet="false",
+    cluster_name="test-cluster",
+    gpu_az_list=None,
+    gpu_subnet_ids_override=None,
+    use_private_gpu_subnet="false",
+    enable_loginnode="false",
+    loginnode_subnet_id="",
+)
+
+
+class TestValidateNetworkTakesKeywordsOnly:
+    """Adding the login-node subnet block made this four near-identical
+    subnet-resolution blocks (head/compute/gpu/login) with several
+    similarly-typed string/list parameters -- exactly the shape that let
+    _storage_summary_lines silently accept a transposed argument pair through
+    the whole suite before it was made keyword-only. Same guard, same reason."""
+
+    def test_positional_arguments_are_rejected(self):
+        params = inspect.signature(_validate_network).parameters
+        positional = [
+            name for name, p in params.items()
+            if p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD)
+        ]
+        assert not positional, (
+            f"{positional} can be passed positionally again; a transposed pair "
+            "at the call site would resolve a wrong subnet rather than raising"
+        )
+
+    def test_calling_positionally_raises(self):
+        with pytest.raises(TypeError):
+            _validate_network(*_VALIDATE_NETWORK_DEFAULTS.values())
+
+    def test_the_make_pcluster_call_site_names_every_argument(self):
+        """A keyword-only signature is only half of it: the call site has to
+        pass names, and f(**locals()) or a stray positional would defeat the
+        guard. make_pcluster.py calls this via ThreadPoolExecutor.submit(
+        _validate_network, ...), so the function reference itself is a
+        legitimate positional argument to submit() -- everything else must
+        still be a keyword."""
+        repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        with open(os.path.join(repo_root, "make_pcluster.py")) as fh:
+            tree = ast.parse(fh.read())
+        calls = [
+            node for node in ast.walk(tree)
+            if isinstance(node, ast.Call)
+            and any(
+                isinstance(a, ast.Name) and a.id == "_validate_network"
+                for a in node.args
+            )
+        ]
+        assert calls, "no _validate_network call found in make_pcluster.py"
+        expected = set(_VALIDATE_NETWORK_DEFAULTS)
+        for call in calls:
+            other_positional = [
+                a for a in call.args
+                if not (isinstance(a, ast.Name) and a.id == "_validate_network")
+            ]
+            assert not other_positional, "call site passes a positional argument"
+            passed = {kw.arg for kw in call.keywords}
+            assert None not in passed, "call site splats **kwargs instead of naming"
+            assert passed == expected, (
+                f"call site keywords {sorted(passed ^ expected)} do not match "
+                "the function's parameters"
             )
 
 

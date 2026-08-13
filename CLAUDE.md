@@ -121,8 +121,26 @@ standing constraints for local development.
   `rotate_cluster_key.py`.
 - `templates/access_cluster.j2` and `templates/grafana_tunnel.j2` must
   distinguish a failed AWS call from a genuinely stopped cluster (rc and
-  stderr, not `2>/dev/null || true`) via the shared `_describe_head_node`
-  pattern.
+  stderr, not `2>/dev/null || true`) — `_describe_node` in the former
+  (renamed once it could resolve login nodes too), `_describe_head_node`,
+  untouched, in the latter.
+- Login node support (`--enable_loginnode`, default `"false"`) adds a
+  `LoginNodes:` pool sibling to `HeadNode:`/`Scheduling:` in
+  `config.pcluster.j2`. `loginnode_instance_type`'s hardcoded fallback is
+  architecture-aware (`_default_loginnode_instance_type` in
+  `pcluster_core.py`: `c8g.xlarge` on Graviton `base_os`, `c5.xlarge` on
+  x86_64) — a flat literal would silently fail preflight for an operator who
+  opts in on an x86_64 cluster without also setting the flag.
+- The login node gets `ComputeNode-Base` via `AdditionalIamPolicies`, never
+  HeadNode's `InstanceRole` — head-node-level privileges there would defeat
+  the feature's purpose of keeping general users off that surface.
+- `postinstall.j2` treats `NODE_TYPE == "LoginNode"` like `ComputeFleet`,
+  not `HeadNode` — it NFS-mounts the same shared `/home`, and running the
+  Spack/Lmod build steps there would race the head node (and every other
+  login node in the pool) writing the same paths concurrently at boot.
+- AWS ParallelCluster exposes no `RootVolume`/`LocalStorage` key for
+  `LoginNodes/Pools` — the login node's root volume can be neither sized
+  nor encrypted through this toolkit; it always uses the AMI default.
 - Teardown's credential-destroying tasks (EC2 keypair, local `.pem`,
   Secrets Manager secret, `active_clusters/<cluster>/`) must be gated on
   positive confirmation the CloudFormation stack is gone — never on
@@ -145,6 +163,12 @@ standing constraints for local development.
   (`deprecation_warnings = False`). Do not re-enable or work around per-task.
 - If `<cluster_name>_defaults.yml` exists but `--use_defaults` was not
   passed, `make_pcluster.py` prints a `*** WARNING ***` — never suppress it.
+- **Node.js (>= 10.13.0) must be on `PATH` locally.** `pcluster
+  create-cluster`/`update-cluster` shell out to the AWS CDK library
+  ParallelCluster uses to synthesize CloudFormation — on the operator's
+  machine, never a cluster node — and fail immediately with `Unable to find
+  node executable` without it. Not a toolkit dependency to work around;
+  install it (`INSTALL.md`).
 
 ## Test suite
 

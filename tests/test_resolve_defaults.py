@@ -596,3 +596,42 @@ def test_readme_tag_table_matches_the_config_template():
         f"README tagging table drift — undocumented: {sorted(emitted - documented)}, "
         f"documented but not emitted: {sorted(documented - emitted)}"
     )
+
+
+def test_loginnode_instance_type_help_documents_both_architectures():
+    """loginnode_instance_type's hardcoded fallback is architecture-conditional
+    (c8g.xlarge on Graviton, c5.xlarge on x86_64), so it cannot be expressed as
+    a single "(default = X)" claim the way every other flag's help text is —
+    this is the documented exception test_argparse_help_defaults_match_hardcoded_defaults
+    needs; both branch values must appear in the help string instead."""
+    import re as _re
+
+    with open(os.path.join(REPO_ROOT, "make_pcluster.py")) as fh:
+        src = fh.read()
+
+    for block in _re.findall(r"add_argument\((.*?)\n    \)", src, _re.S):
+        if '"--loginnode_instance_type"' not in block:
+            continue
+        assert "c8g.xlarge" in block and "c5.xlarge" in block, (
+            "--loginnode_instance_type help text must document both the "
+            "Graviton and x86_64 fallback values"
+        )
+        return
+    raise AssertionError("--loginnode_instance_type add_argument block not found")
+
+
+def test_default_loginnode_instance_type_covers_every_base_os():
+    """_default_loginnode_instance_type must return an architecture-correct
+    fallback for every supported base_os, not just the ones it was written
+    against — mirrors the ARM_OSES | X86_OSES exhaustiveness discipline used
+    elsewhere for architecture checks, so a 9th base_os added later can't
+    silently fall through un-covered."""
+    from pcluster_core import _default_loginnode_instance_type
+    from pcluster_aux_data import ARM_OSES, X86_OSES
+
+    for base_os in ARM_OSES:
+        assert _default_loginnode_instance_type(base_os) == "c8g.xlarge", base_os
+    for base_os in X86_OSES:
+        assert _default_loginnode_instance_type(base_os) == "c5.xlarge", base_os
+
+    assert set(ARM_OSES) | set(X86_OSES), "ARM_OSES/X86_OSES must not be empty"

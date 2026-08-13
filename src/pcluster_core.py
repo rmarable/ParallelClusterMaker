@@ -996,7 +996,15 @@ def _get_efa_instance_types(ec2client, fallback):
     return set(fallback)
 
 
+def _default_loginnode_instance_type(base_os):
+    """Return the architecture-aware hardcoded fallback for loginnode_instance_type."""
+    from pcluster_aux_data import ARM_OSES
+
+    return "c8g.xlarge" if base_os in ARM_OSES else "c5.xlarge"
+
+
 def _validate_network(
+    *,
     ec2client,
     az,
     vpc_name,
@@ -1008,8 +1016,10 @@ def _validate_network(
     gpu_az_list=None,
     gpu_subnet_ids_override=None,
     use_private_gpu_subnet="false",
+    enable_loginnode="false",
+    loginnode_subnet_id="",
 ):
-    """Return (vpc_id, headnode_subnet_id, compute_subnet_ids, gpu_subnet_ids, vpc_cidr).
+    """Return (vpc_id, headnode_subnet_id, compute_subnet_ids, gpu_subnet_ids, vpc_cidr, loginnode_subnet_id).
 
     Auto-discovery picks the *first* subnet returned by EC2 in each AZ.
     EC2 does not guarantee ordering, so the result is non-deterministic when
@@ -1127,7 +1137,21 @@ def _validate_network(
                 _discover_subnet(gaz, private_only=_gpu_private) for gaz in _gpu_azs
             ]
 
-    return vpc_id, headnode_subnet_id, compute_subnet_ids, gpu_subnet_ids, vpc_cidr
+    if enable_loginnode == "true":
+        if loginnode_subnet_id:
+            print(f"  Using explicit login node subnet: {loginnode_subnet_id}")
+        else:
+            print(f"  Auto-discovering login node subnet in {az}...")
+            loginnode_subnet_id = _discover_subnet(az)
+
+    return (
+        vpc_id,
+        headnode_subnet_id,
+        compute_subnet_ids,
+        gpu_subnet_ids,
+        vpc_cidr,
+        loginnode_subnet_id,
+    )
 
 
 _REGION_TO_LOCATION = {
@@ -1232,6 +1256,7 @@ def _cost_summary_lines(
     cpu_instance_types, max_cpu_queue_size, enable_cpu_queue,
     gpu_instance_types, max_gpu_queue_size, enable_gpu_queue,
     region, cluster_type,
+    loginnode_instance_type="", loginnode_count=0, enable_loginnode=False,
 ):
     """Return list of strings to inject into the build summary.
 
@@ -1293,6 +1318,19 @@ def _cost_summary_lines(
             lines.append(f"    Head node  ({headnode_instance_type} × 1):   ${hn_od:.3f}/hr")
         else:
             lines.append(f"    Head node  ({headnode_instance_type} × 1):   {hn_err}")
+
+        if enable_loginnode and loginnode_instance_type and loginnode_count > 0:
+            ln_od, ln_err = _get_od_price(pricing_client, loginnode_instance_type, region)
+            _spot_note = "  (on-demand only)" if is_spot else ""
+            if ln_od is not None:
+                lines.append(
+                    f"    Login node ({loginnode_instance_type} × {loginnode_count}):   "
+                    f"${ln_od * loginnode_count:.3f}/hr{_spot_note}"
+                )
+            else:
+                lines.append(
+                    f"    Login node ({loginnode_instance_type} × {loginnode_count}):   {ln_err}"
+                )
 
         if enable_cpu_queue and cpu_instance_types and max_cpu_queue_size > 0:
             label = ", ".join(cpu_instance_types)
@@ -1619,6 +1657,9 @@ def _read_cluster_record(cluster_name, repo_root):
         "serial":                 _str("cluster_serial_number"),
         "region":                 _str("region"),
         "headnode_instance_type": _str("headnode_instance_type"),
+        "enable_loginnode":       _str("enable_loginnode", "false"),
+        "loginnode_instance_type": _str("loginnode_instance_type"),
+        "loginnode_count":        _int("loginnode_count"),
         "cpu_instance_types":     _strlist("cpu_instance_types"),
         "gpu_instance_types":     _strlist("gpu_instance_types"),
         "enable_cpu_queue":       _str("enable_cpu_queue", "false"),

@@ -4121,7 +4121,7 @@ def _render_template(name, cluster_params):
 
 
 def _run_access_script(tmp_path, name, cluster_params, *, aws_rc, aws_stdout,
-                       aws_stderr=""):
+                       aws_stderr="", env_extra=None):
     """Execute a rendered access script with a stub `aws` and stop before ssh.
 
     A missing instance and a failed API call are told apart only by the exit
@@ -4143,11 +4143,17 @@ def _run_access_script(tmp_path, name, cluster_params, *, aws_rc, aws_stdout,
 
     stub = run_dir / "bin"
     stub.mkdir()
+    # A separate directory from the mktemp capture below: that one is asserted
+    # empty after the run to prove the stderr-capture cleanup trap fired, and
+    # this argv log would otherwise look like a leak of its own.
+    argv_dir = run_dir / "argv"
+    argv_dir.mkdir()
     # shlex.quote, not repr: Python's repr renders a newline as a backslash-n
     # escape, which bash single quotes pass through literally -- the stub then
     # answers the 6-character string "None\n" and the `== "None"` test misses.
     (stub / "aws").write_text(
         "#!/bin/bash\n"
+        f'echo "$@" >> {shlex.quote(str(argv_dir / "aws_args"))}\n'
         f"printf '%s' {shlex.quote(aws_stdout)}\n"
         f"printf '%s' {shlex.quote(aws_stderr)} >&2\n"
         f"exit {aws_rc}\n"
@@ -4183,6 +4189,8 @@ def _run_access_script(tmp_path, name, cluster_params, *, aws_rc, aws_stdout,
     keypair.write_text("")
 
     env = dict(os.environ, PATH=str(stub), AWS_PROFILE="stub-profile")
+    if env_extra:
+        env.update(env_extra)
     r = subprocess.run(
         [_BASH, str(script)],
         capture_output=True, text=True, env=env, cwd=str(run_dir),
@@ -4353,6 +4361,69 @@ class TestAFailedAwsCallIsNotReportedAsAStoppedCluster:
         assert (r.returncode == 0) == (aws_rc == 0), r.stderr + r.stdout
         leaked = list(capture_dir.iterdir())
         assert not leaked, f"{name} left its stderr capture behind: {leaked}"
+
+
+def _argv_dir_for(tmp_path, name, aws_rc):
+    """Mirrors _run_access_script's own run_dir/argv_dir derivation. Needed
+    because that function returns (result, capture_dir) throughout the
+    existing suite, and adding a third return value would touch every one of
+    its call sites for the sake of this one class."""
+    return tmp_path / f"run-{name}-{aws_rc}" / "argv"
+
+
+class TestAccessClusterLoginNodeSelection:
+    """access_cluster.py resolves -L/-H into one of two fixed literals and
+    passes it via the ACCESS_NODE_TYPE environment variable; access_cluster.j2
+    reads it (defaulting to HeadNode when unset, so existing behavior is
+    unchanged for clusters that never set it) and both the EC2 tag filter and
+    the diagnostic messages must follow it. grafana_tunnel.j2 has none of this
+    -- it is untouched, out of scope per the plan -- so this class covers
+    access_cluster.j2 only, reusing the same rc/stderr matrix the head-node
+    tests above use."""
+
+    def test_default_still_queries_head_node(self, tmp_path, access_params):
+        r, _ = _run_access_script(
+            tmp_path, "access_cluster.j2", access_params,
+            aws_rc=0, aws_stdout="10.0.1.20\n",
+        )
+        assert r.returncode == 0, r.stderr + r.stdout
+        args = (_argv_dir_for(tmp_path, "access_cluster.j2", 0) / "aws_args").read_text()
+        assert "Values=HeadNode" in args
+        assert "Values=LoginNode" not in args
+
+    def test_login_node_tag_filter_is_used_when_selected(self, tmp_path, access_params):
+        r, _ = _run_access_script(
+            tmp_path, "access_cluster.j2", access_params,
+            aws_rc=0, aws_stdout="10.0.1.20\n",
+            env_extra={"ACCESS_NODE_TYPE": "LoginNode"},
+        )
+        assert r.returncode == 0, r.stderr + r.stdout
+        args = (_argv_dir_for(tmp_path, "access_cluster.j2", 0) / "aws_args").read_text()
+        assert "Values=LoginNode" in args
+        assert "Values=HeadNode" not in args
+
+    def test_login_node_diagnostics_name_the_login_node_when_absent(
+        self, tmp_path, access_params
+    ):
+        r, _ = _run_access_script(
+            tmp_path, "access_cluster.j2", access_params,
+            aws_rc=0, aws_stdout="None\n",
+            env_extra={"ACCESS_NODE_TYPE": "LoginNode"},
+        )
+        assert r.returncode != 0, r.stdout
+        assert "No running login node found" in r.stderr, r.stderr
+        assert "head node" not in r.stderr
+
+    def test_login_node_diagnostics_name_the_login_node_on_auth_failure(
+        self, tmp_path, access_params
+    ):
+        r, _ = _run_access_script(
+            tmp_path, "access_cluster.j2", access_params,
+            aws_rc=255, aws_stdout="", aws_stderr="AccessDenied\n",
+            env_extra={"ACCESS_NODE_TYPE": "LoginNode"},
+        )
+        assert r.returncode != 0, r.stdout
+        assert "while looking up the login node" in r.stderr, r.stderr
 
 
 def _run_osu_slots(tmp_path, tests, extra_args):

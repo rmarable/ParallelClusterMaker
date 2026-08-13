@@ -872,8 +872,8 @@ def _make_ec2client(
 class TestValidateNetwork:
     def test_explicit_subnets_returned_unchanged(self):
         ec2 = _make_ec2client()
-        vpc_id, hn_subnet, compute_subnets, gpu_subnets, cidr = _validate_network(
-            ec2, "us-east-1a", "vpc_default",
+        vpc_id, hn_subnet, compute_subnets, gpu_subnets, cidr, _ln = _validate_network(
+            ec2client=ec2, az="us-east-1a", vpc_name="vpc_default",
             headnode_subnet_id="subnet-explicit-hn",
             compute_az_list=["us-east-1a"],
             compute_subnet_ids_override="subnet-explicit-c1,subnet-explicit-c2",
@@ -886,8 +886,8 @@ class TestValidateNetwork:
 
     def test_auto_discovers_headnode_subnet(self):
         ec2 = _make_ec2client()
-        _, hn_subnet, _, _, _ = _validate_network(
-            ec2, "us-east-1a", "vpc_default",
+        _, hn_subnet, _, _, _, _ = _validate_network(
+            ec2client=ec2, az="us-east-1a", vpc_name="vpc_default",
             headnode_subnet_id="",
             compute_az_list=["us-east-1a"],
             compute_subnet_ids_override="",
@@ -902,7 +902,7 @@ class TestValidateNetwork:
         ec2 = _make_ec2client(vpcs=[])
         with pytest.raises(SystemExit):
             _validate_network(
-                ec2, "us-east-1a", "my-missing-vpc",
+                ec2client=ec2, az="us-east-1a", vpc_name="my-missing-vpc",
                 headnode_subnet_id="",
                 compute_az_list=["us-east-1a"],
                 compute_subnet_ids_override="",
@@ -916,7 +916,7 @@ class TestValidateNetwork:
         ec2 = _make_ec2client(subnets_by_az={"us-east-1a": []})
         with pytest.raises(SystemExit):
             _validate_network(
-                ec2, "us-east-1a", "vpc_default",
+                ec2client=ec2, az="us-east-1a", vpc_name="vpc_default",
                 headnode_subnet_id="",
                 compute_az_list=["us-east-1a"],
                 compute_subnet_ids_override="",
@@ -929,8 +929,8 @@ class TestValidateNetwork:
         ec2 = _make_ec2client(
             subnets_by_az={"us-east-1a": [{"SubnetId": "subnet-1"}, {"SubnetId": "subnet-2"}]}
         )
-        _, hn_subnet, _, _, _ = _validate_network(
-            ec2, "us-east-1a", "vpc_default",
+        _, hn_subnet, _, _, _, _ = _validate_network(
+            ec2client=ec2, az="us-east-1a", vpc_name="vpc_default",
             headnode_subnet_id="",
             compute_az_list=[],
             compute_subnet_ids_override="subnet-explicit",
@@ -945,8 +945,8 @@ class TestValidateNetwork:
         ec2 = _make_ec2client(
             subnets_by_az={"us-east-1a": [{"SubnetId": "subnet-aaa"}]}
         )
-        _, _, compute_subnets, gpu_subnets, _ = _validate_network(
-            ec2, "us-east-1a", "vpc_default",
+        _, _, compute_subnets, gpu_subnets, _, _ = _validate_network(
+            ec2client=ec2, az="us-east-1a", vpc_name="vpc_default",
             headnode_subnet_id="subnet-hn",
             compute_az_list=["us-east-1a"],
             compute_subnet_ids_override="subnet-compute-1",
@@ -959,8 +959,8 @@ class TestValidateNetwork:
         ec2 = _make_ec2client(
             subnets_by_az={"us-east-1a": [{"SubnetId": "subnet-aaa"}]}
         )
-        _, _, compute_subnets, gpu_subnets, _ = _validate_network(
-            ec2, "us-east-1a", "vpc_default",
+        _, _, compute_subnets, gpu_subnets, _, _ = _validate_network(
+            ec2client=ec2, az="us-east-1a", vpc_name="vpc_default",
             headnode_subnet_id="subnet-hn",
             compute_az_list=["us-east-1a"],
             compute_subnet_ids_override="subnet-compute-1",
@@ -1025,8 +1025,8 @@ class TestPrivateGpuSubnetIsNotSilentlyIgnored:
         kwargs = dict(self._COMMON)
         kwargs.update(over)
         ec2 = _make_public_private_ec2client()
-        _, _, compute_subnets, gpu_subnets, _ = _validate_network(
-            ec2, "us-east-1a", "vpc_default", **kwargs
+        _, _, compute_subnets, gpu_subnets, _, _ = _validate_network(
+            ec2client=ec2, az="us-east-1a", vpc_name="vpc_default", **kwargs
         )
         return compute_subnets, gpu_subnets
 
@@ -1054,7 +1054,7 @@ class TestPrivateGpuSubnetIsNotSilentlyIgnored:
 
         ec2.describe_subnets = _spy
         _validate_network(
-            ec2, "us-east-1a", "vpc_default",
+            ec2client=ec2, az="us-east-1a", vpc_name="vpc_default",
             headnode_subnet_id="subnet-hn",
             compute_az_list=["us-east-1a"],
             compute_subnet_ids_override="",
@@ -1147,7 +1147,7 @@ class TestPrivateGpuSubnetIsNotSilentlyIgnored:
 
         ec2.describe_subnets = _spy
         _validate_network(
-            ec2, "us-east-1a", "vpc_default",
+            ec2client=ec2, az="us-east-1a", vpc_name="vpc_default",
             headnode_subnet_id="subnet-hn",
             compute_az_list=["us-east-1a"],
             compute_subnet_ids_override="",

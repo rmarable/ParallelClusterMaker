@@ -41,6 +41,13 @@ gpu_root_volume_size: 250             # GB
 gpu_root_volume_type: gp3             # gp2 | gp3 | io1 | io2 | st1
 gpu_root_volume_iops: 3000
 gpu_root_volume_throughput: 125       # MB/s
+## Login node
+## OPTIONAL feature for clusters where users shouldn't login to the head node
+## Do *NOT* mix x86_64 and Graviton architectures for any node type
+## AWS ParallelCluster does not support configuring a login node's root
+## volume; it always uses the AMI default (see LoginNodes-v3.html).
+loginnode_instance_type: c8g.xlarge
+loginnode_count: 1                    # number of login nodes in the pool
 ## Optional features
 custom_ami: NONE
 hyperthreading: "true"
@@ -115,6 +122,9 @@ enable_efa: "false"
 enable_external_nfs: "false"
 external_nfs_server: ""
 
+# --- Login node ---
+enable_loginnode: "false"
+
 # --- Networking ---
 # WARNING: The toolkit auto-discovers VPCs and subnets by convention (default
 # VPC, first subnet per AZ). This is non-deterministic when multiple subnets
@@ -123,6 +133,8 @@ external_nfs_server: ""
 vpc_name: "vpc_default"
 # Make sure headnode_subnet_id lives in --az
 headnode_subnet_id: ""  # leave empty to auto-discover
+# Make sure loginnode_subnet_id lives in --az, like headnode_subnet_id
+loginnode_subnet_id: ""  # leave empty to auto-discover
 compute_az: ""          # comma-separated; defaults to --az if empty
 compute_subnet_ids: ""  # comma-separated; leave empty to auto-discover
 gpu_az: ""              # comma-separated; defaults to compute_az if empty, then --az

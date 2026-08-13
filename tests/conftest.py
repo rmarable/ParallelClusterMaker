@@ -45,6 +45,7 @@ def cluster_params():
         "vpc_cidr": "10.0.0.0/16",
         "vpc_name": "test-vpc",
         "subnet_id": "subnet-0abc123",
+        "loginnode_subnet_id": "subnet-0abc123",
         "compute_az_list": ["us-east-1a"],
         "compute_subnet_ids": ["subnet-0abc123"],
         "use_private_compute_subnet": "false",
@@ -60,6 +61,9 @@ def cluster_params():
         "headnode_root_volume_type": "gp3",
         "headnode_root_volume_iops": 3000,
         "headnode_root_volume_throughput": 125,
+        "enable_loginnode": "false",
+        "loginnode_instance_type": "c8g.xlarge",
+        "loginnode_count": 1,
         "compute_instance_type": "c8g.2xlarge",
         "cpu_instance_types": ["c8g.2xlarge"],
         "gpu_instance_type": "",
@@ -389,6 +393,35 @@ def cluster_params_monitoring_enabled(cluster_params):
         "enable_monitoring": "true",
     }
     return {**cluster_params, **overrides}
+
+
+@pytest.fixture
+def cluster_params_loginnode_enabled(cluster_params):
+    """cluster_params variant with enable_loginnode=true, a pool of 1.
+
+    Exercises the LoginNodes block in config.pcluster.j2, the postinstall
+    LoginNode case arm, and the login-node lines in the reporting surfaces.
+    """
+    overrides = {
+        "enable_loginnode": "true",
+        "loginnode_instance_type": "c8g.xlarge",
+        "loginnode_count": 1,
+        "loginnode_subnet_id": "subnet-0abc123",
+    }
+    return {**cluster_params, **overrides}
+
+
+@pytest.fixture
+def cluster_params_loginnode_pool(cluster_params_loginnode_enabled):
+    """cluster_params_loginnode_enabled variant with a pool of 3.
+
+    Distinguishes "loginnode_count threads through" from "the template
+    happens to always render 1".
+    """
+    overrides = {
+        "loginnode_count": 3,
+    }
+    return {**cluster_params_loginnode_enabled, **overrides}
 
 
 @pytest.fixture
