@@ -208,11 +208,6 @@ def refer_to_docs_and_quit(error_msg):
 # EC2 instance definitions #
 ############################
 
-default_instance_types = {
-    "default_head_node_instance_type": "c8g.xlarge",
-    "default_compute_instance_type": "c8g.xlarge",
-}
-
 # General Purpose
 
 ec2_instances_general_purpose = [

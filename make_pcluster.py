@@ -78,7 +78,6 @@ from pcluster_core import (
 from pcluster_aux_data import ARM_OSES, base_os_efa, derive_ranks_per_node, is_gpu_instance, needs_efa_gdr, nvidia_gpu_count, parse_instance_type_list, usable_vcpu_count
 from pcluster_aux_data import base_os_instance_check
 from pcluster_aux_data import ctrlC_Abort
-from pcluster_aux_data import default_instance_types
 from pcluster_aux_data import ec2_instances_efa
 from pcluster_aux_data import ec2_instances_full_list
 from pcluster_aux_data import illegal_az_msg
