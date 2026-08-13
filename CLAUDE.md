@@ -138,6 +138,18 @@ standing constraints for local development.
   not `HeadNode` — it NFS-mounts the same shared `/home`, and running the
   Spack/Lmod build steps there would race the head node (and every other
   login node in the pool) writing the same paths concurrently at boot.
+- `config.pcluster.j2`'s `LoginNodes` block gets `OnNodeConfigured` only,
+  never `OnNodeStart` — that is `preinstall.j2` (full package upgrade, pip
+  installs, awscli download), reserved for `HeadNode`. Giving login nodes
+  `OnNodeStart` repeats all of that on every boot and every ASG replacement.
+- `monitoring-post-install-wrapper.j2`'s `LoginNode` arm polls (bounded,
+  `MONITORING_LOGIN_WAIT_SECONDS`/`_POLL_SECONDS`) for the head node's
+  `MONITORING_HOME` instead of failing immediately — PCluster's CDK gates
+  the login-node pool only on the head node's EC2 instance existing, not its
+  bootstrap completing, unlike `ComputeFleet`'s `clustermgtd` ordering.
+- `access_cluster.py`'s default node selection also requires
+  `loginnode_count > 0` — `enable_loginnode=true` alone does not guarantee
+  any login-node instance is actually running.
 - AWS ParallelCluster exposes no `RootVolume`/`LocalStorage` key for
   `LoginNodes/Pools` — the login node's root volume can be neither sized
   nor encrypted through this toolkit; it always uses the AMI default.

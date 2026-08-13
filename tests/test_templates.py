@@ -1513,6 +1513,22 @@ class TestPostinstallNodeTypeGating:
         assert "/local_scratch" in trace, f"instance store not mounted: {trace}"
         assert "mdadm" not in trace, "a single device must not be assembled into RAID0"
 
+    def test_a_login_node_never_claims_the_instance_store(
+        self, cluster_params_gpu_queue_enabled
+    ):
+        """A login node's local NVMe storage has nothing to do with the GPU
+        queue -- this block must not claim it just because enable_gpu is true
+        cluster-wide. Same fixture and device as the ComputeFleet-formats-it
+        test above; only NODE_TYPE differs."""
+        r, trace, _ = _run_postinstall(
+            cluster_params_gpu_queue_enabled, "LoginNode", nvme_devices=["nvme1n1"]
+        )
+        assert r.returncode == 0, r.stderr.decode()
+        assert "mkfs" not in trace, (
+            f"a login node's instance store was formatted: {trace}"
+        )
+        assert "mdadm" not in trace, trace
+
     def test_multiple_instance_store_devices_are_striped(
         self, cluster_params_gpu_queue_enabled
     ):
@@ -4508,6 +4524,17 @@ class TestReportingSurfacesNameTheLoginNode:
         text = _rendered_summary({}, cluster_params_loginnode_pool)
         assert "(x3)" in text
 
+    def test_the_build_summary_access_instructions_reflect_the_login_node_default(
+        self, cluster_params, cluster_params_loginnode_enabled
+    ):
+        disabled_text = _rendered_summary({}, cluster_params)
+        assert "Access the head node:" in disabled_text
+
+        enabled_text = _rendered_summary({}, cluster_params_loginnode_enabled)
+        assert "Access the head node:" not in enabled_text
+        assert "Access the cluster (login node by default; -H for the head node):" in enabled_text
+        assert "(head node)" in enabled_text
+
     def test_the_sns_report_names_the_login_node_only_when_enabled(
         self, cluster_params, cluster_params_loginnode_enabled
     ):
@@ -4523,14 +4550,68 @@ class TestReportingSurfacesNameTheLoginNode:
         text = _rendered_sns({}, cluster_params_loginnode_pool)
         assert "(x3)" in text
 
+    def test_the_sns_report_header_fields_share_one_column(
+        self, cluster_params_loginnode_enabled
+    ):
+        """Login Node Instance Type: is one character longer than every other
+        label in this block (Head Node Instance Type: included) -- a hardcoded
+        per-line space count, the exact defect class CLAUDE.md documents as
+        previously fixed for the storage-summary block a few lines below in
+        this same file, put its value one column later than the rest. The
+        column width must now be derived from the longest active label."""
+        text = _rendered_sns({}, cluster_params_loginnode_enabled)
+        lines = [
+            ln for ln in text.splitlines()
+            if ln.startswith((
+                "Cluster Stack Name:",
+                "AWS Availability Zone:",
+                "HPC Scheduler Type:",
+                "Head Node Instance Type:",
+                "Login Node Instance Type:",
+                "Compute Instance Type:",
+            ))
+        ]
+        assert len(lines) == 6, f"expected all six header lines, got: {lines}"
+
+        def _value_column(line):
+            label, _, rest = line.partition(":")
+            padding = len(rest) - len(rest.lstrip(" "))
+            return len(label) + 1 + padding
+
+        value_columns = {_value_column(ln) for ln in lines}
+        assert len(value_columns) == 1, (
+            f"header fields do not share one column: {lines}"
+        )
+
+    def test_the_sns_report_access_instructions_reflect_the_login_node_default(
+        self, cluster_params, cluster_params_loginnode_enabled
+    ):
+        """access_cluster.py connects to the login node by default whenever
+        enable_loginnode=true, so a report captioning ./access_cluster.py -N
+        as unconditionally reaching the head node is misleading -- the
+        ParallelCluster-CLI and raw-ssh methods next to it are still
+        guaranteed head-node, so only the heading/caption around method (1)
+        needs to change."""
+        disabled_text = _rendered_sns({}, cluster_params)
+        assert "Access the head node by any of the following:" in disabled_text
+
+        enabled_text = _rendered_sns({}, cluster_params_loginnode_enabled)
+        assert "Access the head node by any of the following:" not in enabled_text
+        assert "-H" in enabled_text.split("Access the cluster", 1)[1][:120]
+        assert "pcluster ssh --cluster-name" in enabled_text
+        assert "(head node)" in enabled_text
+
 
 class TestLoginNodesConfigBlock:
     """LoginNodes is an optional top-level block, sibling to HeadNode/Scheduling,
     gated on enable_loginnode. It gets ComputeNode-Base IAM (never HeadNode-level
-    privileges) and the same CustomActions script references as HeadNode, though
-    postinstall.j2 treats the node type like ComputeFleet at runtime, not
-    HeadNode -- that's a separate decision from what scripts are *registered*
-    here, which is what this class checks."""
+    privileges) and the compute-queue CustomActions shape -- OnNodeConfigured
+    only, no OnNodeStart -- not HeadNode's. HeadNode is the only node type that
+    runs preinstall.j2 (kernel-held apt/dnf upgrade, pip installs, a fresh
+    awscli download); registering it as LoginNodes' OnNodeStart too would make
+    every login node repeat all of that on every boot and every ASG
+    replacement, exactly the "latency regression, not a fix" reasoning that
+    already keeps it off the compute/GPU queues (root CLAUDE.md)."""
 
     def _config(self, params):
         env = _make_env(os.path.join(REPO_ROOT, "templates"))
@@ -4565,11 +4646,12 @@ class TestLoginNodesConfigBlock:
             "InstanceRole" in str(p) for p in policies
         ), "login node must not carry head-node-level IAM"
 
-        head_start = parsed["HeadNode"]["CustomActions"]["OnNodeStart"]["Sequence"]
+        assert "OnNodeStart" not in pool["CustomActions"], (
+            "login nodes must not run preinstall.j2 -- that's HeadNode-only, "
+            "same as the compute/GPU queues"
+        )
         head_configured = parsed["HeadNode"]["CustomActions"]["OnNodeConfigured"]["Sequence"]
-        login_start = pool["CustomActions"]["OnNodeStart"]["Sequence"]
         login_configured = pool["CustomActions"]["OnNodeConfigured"]["Sequence"]
-        assert [s["Script"] for s in login_start] == [s["Script"] for s in head_start]
         assert [s["Script"] for s in login_configured] == [
             s["Script"] for s in head_configured
         ]

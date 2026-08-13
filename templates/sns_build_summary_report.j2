@@ -8,14 +8,17 @@ Initiated stack creation: {{ start_stack_creation_timer.stdout }}
 Completed stack creation: {{ stop_stack_creation_timer.stdout }}
 Finished the environment: {{ stop_overall_timer.stdout }}
 
-Cluster Stack Name:      {{ cluster_name }}
-AWS Availability Zone:   {{ az }}
-HPC Scheduler Type:      {{ scheduler }}
-Head Node Instance Type: {{ headnode_instance_type }}
+{% set _header_labels = ['Cluster Stack Name:', 'AWS Availability Zone:', 'HPC Scheduler Type:', 'Head Node Instance Type:', 'Compute Instance Type:'] %}
+{% if enable_loginnode == 'true' %}{% set _ = _header_labels.append('Login Node Instance Type:') %}{% endif %}
+{% set _header_col = (_header_labels | map('length') | max) + 1 %}
+{{ 'Cluster Stack Name:'.ljust(_header_col) }}{{ cluster_name }}
+{{ 'AWS Availability Zone:'.ljust(_header_col) }}{{ az }}
+{{ 'HPC Scheduler Type:'.ljust(_header_col) }}{{ scheduler }}
+{{ 'Head Node Instance Type:'.ljust(_header_col) }}{{ headnode_instance_type }}
 {% if enable_loginnode == 'true' %}
-Login Node Instance Type: {{ loginnode_instance_type }} (x{{ loginnode_count }})
+{{ 'Login Node Instance Type:'.ljust(_header_col) }}{{ loginnode_instance_type }} (x{{ loginnode_count }})
 {% endif %}
-Compute Instance Type:   {{ compute_instance_type }}
+{{ 'Compute Instance Type:'.ljust(_header_col) }}{{ compute_instance_type }}
 
 {% set _storage_labels = [ebs_shared_dir] %}
 {% if enable_efs == 'true' %}{% set _ = _storage_labels.append('/efs') %}{% endif %}
@@ -39,15 +42,19 @@ Shared storage:
 {% endif %}
     Spack and shared packages install under {{ pkg_dir }}
 
+{% if enable_loginnode == 'true' %}
+Access the cluster (login node by default; pass -H to access_cluster.py for the head node):
+{% else %}
 Access the head node by any of the following:
+{% endif %}
 
 (1) ParallelClusterMaker access script:
     ./access_cluster.py -N {{ cluster_name }}
 
-(2) ParallelCluster CLI:
+(2) ParallelCluster CLI (head node):
     pcluster ssh --cluster-name {{ cluster_name }} -i {{ ssh_keypair }}
 
-(3) ssh with the cluster's private key:
+(3) ssh with the cluster's private key (head node):
     ssh -i {{ ssh_keypair }} {{ ec2_user }}@{{ head_node_public_ip }}
 
 Compute nodes idle for more than {{ scaledown_idletime }} minutes are

@@ -74,6 +74,34 @@ then
 	rm -f "/tmp/${TARBALL}"
 
 	chown -R "${CLUSTER_USER}:${CLUSTER_USER}" "$MONITORING_HOME"
+elif [ "${cfn_node_type}" == "LoginNode" ]
+then
+	# Unlike ComputeFleet, whose safety above rests on clustermgtd only
+	# launching compute nodes after the head node's runpostinstall completes
+	# ("ordering, not luck"), PCluster's own CDK gives the LoginNodes pool no
+	# such guarantee: it depends only on the head node's raw EC2 instance
+	# existing (cluster_stack.py's login_nodes_stack.node.add_dependency
+	# (self.head_node_instance)), not on its bootstrap completing -- unlike
+	# the CloudWatch alarms in that same file, which do depend on
+	# self.wait_condition. A login node can therefore reach this point before
+	# MONITORING_HOME exists. Poll for a bounded window instead of failing
+	# immediately, which under set -euo pipefail would otherwise send the
+	# login node's ASG through repeated failed-and-replaced cycles until the
+	# head node catches up.
+	_wait_seconds="${MONITORING_LOGIN_WAIT_SECONDS:-300}"
+	_poll_seconds="${MONITORING_LOGIN_POLL_SECONDS:-10}"
+	_deadline=$(( $(date +%s) + _wait_seconds ))
+	while [ ! -r "$MONITORING_HOME/installer/install.sh" ]
+	do
+		if [ "$(date +%s)" -ge "$_deadline" ]
+		then
+			echo "ERROR: $MONITORING_HOME/installer/install.sh is still absent or" >&2
+			echo "       unreadable after ${_wait_seconds}s; the head node's" >&2
+			echo "       monitoring install did not complete in time" >&2
+			exit 1
+		fi
+		sleep "$_poll_seconds"
+	done
 elif [ ! -r "$MONITORING_HOME/installer/install.sh" ]
 then
 	echo "ERROR: $MONITORING_HOME/installer/install.sh is absent or unreadable;" >&2

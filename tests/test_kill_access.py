@@ -17,6 +17,7 @@ from pcluster_core import (
     _read_serial_first_line,
     _extract_rebuild_command,
     _resolve_access_script_path,
+    _resolve_access_node_type,
     _read_turbot_from_vars_file,
 )
 
@@ -230,7 +231,8 @@ class TestAccessClusterNodeTypeResolution:
 
     def test_login_node_flag_selects_login_node(self, tmp_path, monkeypatch):
         mod, calls = _stage_access_cluster(
-            tmp_path, monkeypatch, "mycluster", {"enable_loginnode": "true"}
+            tmp_path, monkeypatch, "mycluster",
+            {"enable_loginnode": "true", "loginnode_count": 1},
         )
         monkeypatch.setattr(sys, "argv", ["access_cluster.py", "-N", "mycluster", "-L"])
         with pytest.raises(SystemExit) as exc:
@@ -242,7 +244,8 @@ class TestAccessClusterNodeTypeResolution:
         self, tmp_path, monkeypatch
     ):
         mod, calls = _stage_access_cluster(
-            tmp_path, monkeypatch, "mycluster", {"enable_loginnode": "true"}
+            tmp_path, monkeypatch, "mycluster",
+            {"enable_loginnode": "true", "loginnode_count": 1},
         )
         monkeypatch.setattr(sys, "argv", ["access_cluster.py", "-N", "mycluster", "-H"])
         with pytest.raises(SystemExit):
@@ -251,12 +254,48 @@ class TestAccessClusterNodeTypeResolution:
 
     def test_default_is_login_node_when_enabled(self, tmp_path, monkeypatch):
         mod, calls = _stage_access_cluster(
-            tmp_path, monkeypatch, "mycluster", {"enable_loginnode": "true"}
+            tmp_path, monkeypatch, "mycluster",
+            {"enable_loginnode": "true", "loginnode_count": 1},
         )
         monkeypatch.setattr(sys, "argv", ["access_cluster.py", "-N", "mycluster"])
         with pytest.raises(SystemExit):
             mod.main()
         assert calls[0]["env"]["ACCESS_NODE_TYPE"] == "LoginNode"
+
+    def test_default_is_head_node_when_count_is_zero(self, tmp_path, monkeypatch):
+        """enable_loginnode=true with loginnode_count=0 is a schema-valid
+        'defined but empty pool' state -- zero login-node instances actually
+        run, so the plain, unflagged command must not route there."""
+        mod, calls = _stage_access_cluster(
+            tmp_path, monkeypatch, "mycluster",
+            {"enable_loginnode": "true", "loginnode_count": 0},
+        )
+        monkeypatch.setattr(sys, "argv", ["access_cluster.py", "-N", "mycluster"])
+        with pytest.raises(SystemExit):
+            mod.main()
+        assert calls[0]["env"]["ACCESS_NODE_TYPE"] == "HeadNode"
+
+    def test_login_node_flag_errors_out_when_count_is_zero(self, tmp_path, monkeypatch):
+        mod, calls = _stage_access_cluster(
+            tmp_path, monkeypatch, "mycluster",
+            {"enable_loginnode": "true", "loginnode_count": 0},
+        )
+        monkeypatch.setattr(sys, "argv", ["access_cluster.py", "-N", "mycluster", "-L"])
+        with pytest.raises(SystemExit) as exc:
+            mod.main()
+        assert "loginnode_count=0" in str(exc.value.code)
+        assert "defined but empty" in str(exc.value.code)
+        assert not calls, "the rendered script must not run when -L is rejected"
+
+    def test_head_node_flag_still_works_when_count_is_zero(self, tmp_path, monkeypatch):
+        mod, calls = _stage_access_cluster(
+            tmp_path, monkeypatch, "mycluster",
+            {"enable_loginnode": "true", "loginnode_count": 0},
+        )
+        monkeypatch.setattr(sys, "argv", ["access_cluster.py", "-N", "mycluster", "-H"])
+        with pytest.raises(SystemExit):
+            mod.main()
+        assert calls[0]["env"]["ACCESS_NODE_TYPE"] == "HeadNode"
 
     def test_default_is_head_node_when_disabled(self, tmp_path, monkeypatch):
         mod, calls = _stage_access_cluster(
@@ -304,7 +343,8 @@ class TestAccessClusterNodeTypeResolution:
         self, tmp_path, monkeypatch
     ):
         mod, _ = _stage_access_cluster(
-            tmp_path, monkeypatch, "mycluster", {"enable_loginnode": "true"}
+            tmp_path, monkeypatch, "mycluster",
+            {"enable_loginnode": "true", "loginnode_count": 1},
         )
         monkeypatch.setattr(
             sys, "argv", ["access_cluster.py", "-N", "mycluster", "-L", "-H"]
@@ -312,3 +352,115 @@ class TestAccessClusterNodeTypeResolution:
         with pytest.raises(SystemExit) as exc:
             mod.main()
         assert exc.value.code == 2, "argparse's own mutually-exclusive-group exit code"
+
+
+# ---------------------------------------------------------------------------
+# _resolve_access_node_type (direct unit tests, no subprocess/module loading)
+# ---------------------------------------------------------------------------
+
+
+class TestResolveAccessNodeType:
+    def test_login_requested_and_available(self):
+        node_type, error = _resolve_access_node_type(
+            {"enable_loginnode": "true", "loginnode_count": 1},
+            "mycluster",
+            login_node_requested=True,
+            head_node_requested=False,
+        )
+        assert node_type == "LoginNode"
+        assert error is None
+
+    def test_head_requested_always_wins_regardless_of_login_state(self):
+        node_type, error = _resolve_access_node_type(
+            {"enable_loginnode": "true", "loginnode_count": 1},
+            "mycluster",
+            login_node_requested=False,
+            head_node_requested=True,
+        )
+        assert node_type == "HeadNode"
+        assert error is None
+
+    def test_default_prefers_login_node_when_available(self):
+        node_type, error = _resolve_access_node_type(
+            {"enable_loginnode": "true", "loginnode_count": 1},
+            "mycluster",
+            login_node_requested=False,
+            head_node_requested=False,
+        )
+        assert node_type == "LoginNode"
+        assert error is None
+
+    def test_default_falls_back_to_head_node_when_disabled(self):
+        node_type, error = _resolve_access_node_type(
+            {"enable_loginnode": "false"},
+            "mycluster",
+            login_node_requested=False,
+            head_node_requested=False,
+        )
+        assert node_type == "HeadNode"
+        assert error is None
+
+    def test_default_falls_back_to_head_node_when_count_is_zero(self):
+        node_type, error = _resolve_access_node_type(
+            {"enable_loginnode": "true", "loginnode_count": 0},
+            "mycluster",
+            login_node_requested=False,
+            head_node_requested=False,
+        )
+        assert node_type == "HeadNode"
+        assert error is None
+
+    def test_default_falls_back_to_head_node_on_an_empty_record(self):
+        node_type, error = _resolve_access_node_type(
+            {},
+            "mycluster",
+            login_node_requested=False,
+            head_node_requested=False,
+        )
+        assert node_type == "HeadNode"
+        assert error is None
+
+    def test_login_requested_but_disabled_is_an_error(self):
+        node_type, error = _resolve_access_node_type(
+            {"enable_loginnode": "false"},
+            "mycluster",
+            login_node_requested=True,
+            head_node_requested=False,
+        )
+        assert node_type is None
+        assert "no login node is configured" in error
+        assert "--enable_loginnode=true" in error
+
+    def test_login_requested_but_count_zero_is_a_distinct_error(self):
+        node_type, error = _resolve_access_node_type(
+            {"enable_loginnode": "true", "loginnode_count": 0},
+            "mycluster",
+            login_node_requested=True,
+            head_node_requested=False,
+        )
+        assert node_type is None
+        assert "loginnode_count=0" in error
+        assert "defined but empty" in error
+        assert "--enable_loginnode=true" not in error, (
+            "already true -- telling the operator to set it again is misleading"
+        )
+
+    def test_missing_loginnode_count_key_treated_as_zero(self):
+        """enable_loginnode=true with no loginnode_count key at all (an older
+        vars file, or a hand-edited record) must not be treated as available --
+        None is not a positive count."""
+        node_type, error = _resolve_access_node_type(
+            {"enable_loginnode": "true"},
+            "mycluster",
+            login_node_requested=False,
+            head_node_requested=False,
+        )
+        assert node_type == "HeadNode"
+        assert error is None
+
+    def test_keyword_only_flags(self):
+        import inspect
+
+        sig = inspect.signature(_resolve_access_node_type)
+        for name in ("login_node_requested", "head_node_requested"):
+            assert sig.parameters[name].kind == inspect.Parameter.KEYWORD_ONLY

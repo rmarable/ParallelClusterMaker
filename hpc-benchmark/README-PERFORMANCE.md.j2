@@ -19,7 +19,7 @@ On teardown, `delete_pcluster.yml` syncs results from `~/hpc-benchmark/<cluster_
 
 ## Quick Start
 
-SSH into the head node first (`./access_cluster.py -N <cluster_name>`), then:
+SSH into the cluster first (`./access_cluster.py -N <cluster_name>` -- connects to the login node by default when one is enabled, the head node otherwise; pass `-H` to reach the head node directly). Both share the same NFS-mounted `$HOME`, so the path below is reachable either way. Then:
 
 ```bash
 cd ~/hpc-benchmark/{{ cluster_name }}/{{ cluster_owner }}/slurm

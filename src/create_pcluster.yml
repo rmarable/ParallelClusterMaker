@@ -794,12 +794,14 @@
                     | map('length') | max | int + 2
                   ) + "external NFS (" + external_nfs_server + ")"] if enable_external_nfs | bool else [])
             + ["  Spack and shared packages install under " + pkg_dir]
+            + [""]
+            + (["Access the cluster (login node by default; -H for the head node):"]
+               if enable_loginnode | bool
+               else ["Access the head node:"])
             + [
-              "",
-              "Access the head node:",
               "  ./access_cluster.py -N " + cluster_name,
-              "  pcluster ssh --cluster-name " + cluster_name + " -i " + ssh_keypair,
-              "  ssh -i " + ssh_keypair + " " + ec2_user + "@" + head_node_public_ip,
+              "  pcluster ssh --cluster-name " + cluster_name + " -i " + ssh_keypair + " (head node)",
+              "  ssh -i " + ssh_keypair + " " + ec2_user + "@" + head_node_public_ip + " (head node)",
               "",
               "Idle compute:",
               "  Compute nodes idle for more than " + (scaledown_idletime | string)

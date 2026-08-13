@@ -32,14 +32,16 @@ set -euo pipefail
 EC2_HOME="{{ ec2_user_home }}"
 SRC="{{ ec2_user_src }}"
 
-# This script is registered as OnNodeConfigured on the head node and on every
-# compute queue, so every block below must be explicit about where it runs.
+# This script is registered as OnNodeConfigured on the head node, on every
+# compute queue, and on the login node pool, so every block below must be
+# explicit about where it runs.
 #
 # The node type comes from /etc/parallelcluster/cfnconfig, which the
 # aws-parallelcluster-environment::cfnconfig_mixed recipe writes during the init
-# phase -- before any custom action runs -- as cfn_node_type=HeadNode or
-# cfn_node_type=ComputeFleet.  There is NO PARALLELCLUSTER_NODE_TYPE environment
-# variable: custom_action_executor.py builds the child environment from
+# phase -- before any custom action runs -- as cfn_node_type=HeadNode,
+# cfn_node_type=ComputeFleet, or cfn_node_type=LoginNode.  There is NO
+# PARALLELCLUSTER_NODE_TYPE environment variable: custom_action_executor.py
+# builds the child environment from
 # os.environ plus the cfn_<event> script variables, and fetch_and_run keeps its
 # own PCLUSTER_NODE_TYPE as an unexported shell variable.  Reading a nonexistent
 # variable through `${...:-HeadNode}` is what made every compute node on cluster
@@ -102,6 +104,14 @@ fi
 # It still fires on devices PCluster left alone.  Do not "simplify" either check
 # away: holders alone misses a formatted-but-unmounted device, and blkid alone
 # misses a device claimed with no filesystem signature of its own.
+#
+# LoginNode is excluded: an interactive login node's local NVMe storage has
+# nothing to do with the GPU queue, and this block would otherwise silently
+# claim and reformat it whenever enable_gpu is true cluster-wide, regardless
+# of loginnode_instance_type.
+
+if [ "$NODE_TYPE" != "LoginNode" ]
+then
 
 _GPU_SCRATCH=/local_scratch
 mapfile -t _NVME_DEVS < <(
@@ -136,6 +146,8 @@ elif [[ $_NVME_COUNT -gt 1 ]]; then
     sudo mount -o noatime,nodiratime /dev/md0 "$_GPU_SCRATCH"
     echo "/dev/md0 $_GPU_SCRATCH xfs noatime,nodiratime,nofail 0 0" | sudo tee -a /etc/fstab > /dev/null
     sudo chmod 1777 "$_GPU_SCRATCH"
+fi
+
 fi
 
 # Install monitoring tools.  Installed here rather than relying on the

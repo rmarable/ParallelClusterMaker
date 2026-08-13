@@ -2212,8 +2212,12 @@ def main():
     print(f"      ./kill_pcluster.py -N {cluster_name} -O {cluster_owner} -A {az}")
     if _head_ip:
         print("")
-        print("  Access the head node:")
+        if enable_loginnode:
+            print("  Access the cluster (login node by default; -H for the head node):")
+        else:
+            print("  Access the head node:")
         print(f"    ./access_cluster.py -N {cluster_name}")
+        print("  Access the head node directly:")
         print(
             f"    ssh -i active_clusters/{cluster_name}/{cluster_serial_number}_{region}.pem {ec2_user}@{_head_ip}"
         )

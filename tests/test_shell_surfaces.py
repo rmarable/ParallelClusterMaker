@@ -16,6 +16,7 @@ import re
 import shlex
 import shutil
 import subprocess
+import time
 
 import pytest
 from jinja2 import Environment, FileSystemLoader, StrictUndefined
@@ -1325,6 +1326,8 @@ def _run_wrapper(
     tree=False,
     upstream_body=None,
     neuter_the_patch=False,
+    extra_env=None,
+    background=False,
 ):
     """Execute the rendered wrapper under real bash with the world stubbed.
 
@@ -1347,7 +1350,16 @@ def _run_wrapper(
     the post-patch verification intact. The two share a predicate on purpose, so
     breaking the patch is the only way to exercise the check.
 
-    Returns (CompletedProcess, trace, monitoring_home).
+    extra_env is merged into the subprocess environment -- used to override the
+    LoginNode wait/poll seconds so a test does not actually wait 300s.
+
+    background=True launches the script via Popen and returns the Popen object
+    in place of a CompletedProcess, letting a caller create the tree mid-wait
+    to exercise the retry-then-succeed path; the caller is responsible for
+    waiting on it and reading trace/stdout/stderr only after it exits.
+
+    Returns (CompletedProcess, trace, monitoring_home), or (Popen, None, monitoring_home)
+    when background=True.
     """
     root = str(tmp_path)
     # Callers pass tmp_path / "<name>" for a second, independent run.
@@ -1459,7 +1471,14 @@ def _run_wrapper(
     script = os.path.join(root, "wrapper.sh")
     with open(script, "w") as fh:
         fh.write(harness + "\n" + wrapper)
-    r = subprocess.run(["bash", script], capture_output=True, cwd=root)
+    env = {**os.environ, **(extra_env or {})}
+    if background:
+        p = subprocess.Popen(
+            ["bash", script], cwd=root, env=env,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        )
+        return p, None, monitoring_home
+    r = subprocess.run(["bash", script], capture_output=True, cwd=root, env=env)
     with open(os.path.join(root, "trace")) as fh:
         trace = fh.read()
     return r, trace, monitoring_home
@@ -1555,16 +1574,17 @@ class TestMonitoringWrapperOnlyTheHeadNodeWritesTheTree:
             f"missing; the `exit 1` in the elif arm is gone: {output!r}"
         )
 
-    def test_an_unrecognized_node_type_does_not_write_the_shared_tree(
+    def test_a_login_node_does_not_write_the_shared_tree(
         self, cluster_params, tmp_path
     ):
         """The gate must name the one node type that may write, not exclude the
         one that may not. Spelling it `!= "ComputeFleet"` is equivalent only
         while those two values are the whole world -- ParallelCluster also has
         login nodes, and they NFS-mount /home from the head node exactly as
-        compute nodes do, so one would reintroduce the race. Upstream's
-        installer rejects anything but head/compute itself, so the property here
-        is only that we do not destroy the tree on the way to that rejection."""
+        compute nodes do, so one would reintroduce the race. LoginNode has its
+        own named branch (see TestMonitoringWrapperLoginNodeBootRace below for
+        the wait/retry it needs that ComputeFleet does not); this test's only
+        concern is that, tree already present, it never writes."""
         r, trace, _ = _run_wrapper(cluster_params, tmp_path, "LoginNode", tree=True)
         for forbidden in ("aws s3 cp", "rm ", "mkdir ", "tar ", "chown "):
             assert forbidden not in trace, (
@@ -1598,6 +1618,78 @@ class TestMonitoringWrapperOnlyTheHeadNodeWritesTheTree:
                 f"the harness records no {expected!r} even on a head node, so the "
                 f"compute-node assertions prove nothing: {trace}"
             )
+
+
+class TestMonitoringWrapperLoginNodeBootRace:
+    """PCluster's own CDK makes the LoginNodes pool depend only on the head
+    node's raw EC2 instance existing, not on its bootstrap completing (unlike
+    the CloudWatch alarms in the same cluster_stack.py, which do depend on
+    wait_condition) -- confirmed by reading the installed aws-parallelcluster
+    package. A login node can therefore reach this wrapper before the head
+    node has populated MONITORING_HOME. Unlike ComputeFleet, which fails
+    immediately because clustermgtd's ordering makes an absent tree a real
+    error, LoginNode polls for a bounded window instead."""
+
+    def test_times_out_and_exits_nonzero_when_the_tree_never_appears(
+        self, cluster_params, tmp_path
+    ):
+        r, trace, _ = _run_wrapper(
+            cluster_params, tmp_path, "LoginNode", tree=False,
+            extra_env={
+                "MONITORING_LOGIN_WAIT_SECONDS": "1",
+                "MONITORING_LOGIN_POLL_SECONDS": "1",
+            },
+        )
+        assert r.returncode != 0
+        output = (r.stdout + r.stderr).decode()
+        assert "monitoring install did not complete in time" in output, output
+        for forbidden in ("aws s3 cp", "rm ", "mkdir ", "tar ", "chown "):
+            assert forbidden not in trace
+
+    def test_succeeds_immediately_when_the_tree_is_already_present(
+        self, cluster_params, tmp_path
+    ):
+        """The common case -- the head node won the race, as it almost always
+        will -- must not pay any wait at all."""
+        r, trace, _ = _run_wrapper(
+            cluster_params, tmp_path, "LoginNode", tree=True,
+            extra_env={
+                "MONITORING_LOGIN_WAIT_SECONDS": "60",
+                "MONITORING_LOGIN_POLL_SECONDS": "60",
+            },
+        )
+        assert r.returncode == 0
+
+    def test_recovers_if_the_tree_appears_during_the_wait(
+        self, cluster_params, tmp_path
+    ):
+        """The actual race: the tree does not exist yet when the login node
+        reaches this point, but the head node finishes within the window."""
+        p, _, monitoring_home = _run_wrapper(
+            cluster_params, tmp_path, "LoginNode", tree=False,
+            extra_env={
+                "MONITORING_LOGIN_WAIT_SECONDS": "20",
+                "MONITORING_LOGIN_POLL_SECONDS": "1",
+            },
+            background=True,
+        )
+        try:
+            time.sleep(2.5)
+            assert p.poll() is None, (
+                "the login node gave up before the tree ever appeared -- the "
+                "wait loop is not actually waiting"
+            )
+            os.makedirs(os.path.join(monitoring_home, "installer"), exist_ok=True)
+            with open(
+                os.path.join(monitoring_home, "installer", "install.sh"), "w"
+            ) as fh:
+                fh.write("#!/bin/bash\n")
+            stdout, stderr = p.communicate(timeout=20)
+        finally:
+            if p.poll() is None:
+                p.kill()
+                p.communicate()
+        assert p.returncode == 0, (stdout + stderr).decode()
 
 
 class TestTheDockerComposePluginIsStagedNotFetchedFromGitHub:

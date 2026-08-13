@@ -46,11 +46,15 @@ class _FakePricingClient:
     def __init__(self, responses):
         # responses: dict of instance_type -> price_str, or Exception to raise
         self._responses = responses
+        self.call_count = 0
+        self.calls = []
 
     def get_products(self, **kwargs):
         itype = next(
             f["Value"] for f in kwargs["Filters"] if f["Field"] == "instanceType"
         )
+        self.call_count += 1
+        self.calls.append(itype)
         val = self._responses.get(itype)
         if val is None:
             return {"PriceList": []}
@@ -464,6 +468,41 @@ class TestCostSummaryLinesLoginNode:
         login_line = next(l for l in lines if "Login node" in l)
         # 1 x 0.15952
         assert "0.160" in login_line
+
+    def test_matching_instance_type_reuses_the_head_node_price_lookup(self):
+        """pcluster_defaults.yml's own shipped example sets both instance
+        types to c8g.xlarge -- must not cost a second, identical live
+        Pricing API call."""
+        pc, ec2 = _make_clients(od_prices={"c8g.xlarge": "0.15952"})
+        lines = _cost_summary_lines(
+            pricing_client=pc, ec2client=ec2,
+            headnode_instance_type="c8g.xlarge",
+            cpu_instance_types=[], max_cpu_queue_size=0, enable_cpu_queue=False,
+            gpu_instance_types=[], max_gpu_queue_size=0, enable_gpu_queue=False,
+            region="us-east-1", cluster_type="ondemand",
+            loginnode_instance_type="c8g.xlarge", loginnode_count=1,
+            enable_loginnode=True,
+        )
+        assert pc.calls == ["c8g.xlarge"], (
+            f"expected exactly one Pricing API call, got: {pc.calls}"
+        )
+        login_line = next(l for l in lines if "Login node" in l)
+        assert "0.160" in login_line
+
+    def test_different_instance_types_each_get_their_own_lookup(self):
+        pc, ec2 = _make_clients(
+            od_prices={"c8g.2xlarge": "0.31904", "c8g.xlarge": "0.15952"}
+        )
+        _cost_summary_lines(
+            pricing_client=pc, ec2client=ec2,
+            headnode_instance_type="c8g.2xlarge",
+            cpu_instance_types=[], max_cpu_queue_size=0, enable_cpu_queue=False,
+            gpu_instance_types=[], max_gpu_queue_size=0, enable_gpu_queue=False,
+            region="us-east-1", cluster_type="ondemand",
+            loginnode_instance_type="c8g.xlarge", loginnode_count=1,
+            enable_loginnode=True,
+        )
+        assert sorted(pc.calls) == ["c8g.2xlarge", "c8g.xlarge"]
 
     def test_count_multiplier_is_applied(self):
         pc, ec2 = _make_clients(od_prices={"c8g.xlarge": "0.15952"})

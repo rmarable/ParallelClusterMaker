@@ -423,6 +423,41 @@ def _resolve_access_script_path(cluster_data_root, cluster_name):
     return path
 
 
+def _resolve_access_node_type(rec, cluster_name, *, login_node_requested, head_node_requested):
+    """Return (node_type, error_message) for access_cluster.py's -L/-H/default selection.
+
+    error_message is a complete "ERROR: ..." string ready to pass to sys.exit,
+    or None on success. rec is a cluster record dict from _read_cluster_record
+    (possibly {} for an unreadable/missing vars file).
+
+    loginnode_count=0 is a schema-valid "defined but empty pool" state (AWS's
+    own LoginNodesPoolSchema.count floors at 0) and gets a distinct error from
+    enable_loginnode=false -- both leave zero login-node instances running, but
+    "rebuild with --enable_loginnode=true" is the wrong instruction when it is
+    already true.
+    """
+    loginnode_enabled = rec.get("enable_loginnode") == "true"
+    loginnode_count = rec.get("loginnode_count") or 0
+    loginnode_available = loginnode_enabled and loginnode_count > 0
+
+    if login_node_requested and not loginnode_enabled:
+        return None, (
+            f"ERROR: no login node is configured for cluster '{cluster_name}'.\n"
+            f"  Rebuild with --enable_loginnode=true to use -L."
+        )
+    if login_node_requested and not loginnode_available:
+        return None, (
+            f"ERROR: cluster '{cluster_name}' has --loginnode_count=0 -- the login "
+            f"node pool is defined but empty.\n"
+            f"  Rebuild with --loginnode_count set to at least 1 to use -L."
+        )
+    if login_node_requested:
+        return "LoginNode", None
+    if head_node_requested:
+        return "HeadNode", None
+    return ("LoginNode" if loginnode_available else "HeadNode"), None
+
+
 # ---------------------------------------------------------------------------
 # Validation guards (extracted from make_pcluster.py main())
 # ---------------------------------------------------------------------------
@@ -1320,7 +1355,13 @@ def _cost_summary_lines(
             lines.append(f"    Head node  ({headnode_instance_type} × 1):   {hn_err}")
 
         if enable_loginnode and loginnode_instance_type and loginnode_count > 0:
-            ln_od, ln_err = _get_od_price(pricing_client, loginnode_instance_type, region)
+            # pcluster_defaults.yml's own shipped example sets both instance
+            # types to c8g.xlarge -- reuse the head node's lookup rather than
+            # making an identical live Pricing API call a second time.
+            if loginnode_instance_type == headnode_instance_type:
+                ln_od, ln_err = hn_od, hn_err
+            else:
+                ln_od, ln_err = _get_od_price(pricing_client, loginnode_instance_type, region)
             _spot_note = "  (on-demand only)" if is_spot else ""
             if ln_od is not None:
                 lines.append(

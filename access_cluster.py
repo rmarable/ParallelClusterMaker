@@ -25,6 +25,7 @@ import subprocess
 sys.path.insert(0, _src_dir)
 from pcluster_core import (
     _resolve_access_script_path,
+    _resolve_access_node_type,
     _validate_cluster_name,
     _read_cluster_record,
 )
@@ -68,20 +69,14 @@ def main():
         )
 
     rec = _read_cluster_record(cluster_name, _repo_root) or {}
-    loginnode_enabled = rec.get("enable_loginnode") == "true"
-
-    if args.login_node and not loginnode_enabled:
-        sys.exit(
-            f"ERROR: no login node is configured for cluster '{cluster_name}'.\n"
-            f"  Rebuild with --enable_loginnode=true to use -L."
-        )
-
-    if args.login_node:
-        node_type = "LoginNode"
-    elif args.head_node:
-        node_type = "HeadNode"
-    else:
-        node_type = "LoginNode" if loginnode_enabled else "HeadNode"
+    node_type, error = _resolve_access_node_type(
+        rec,
+        cluster_name,
+        login_node_requested=args.login_node,
+        head_node_requested=args.head_node,
+    )
+    if error:
+        sys.exit(error)
 
     node_label = "login node" if node_type == "LoginNode" else "head node"
     print(f"Connecting to {node_label} of {cluster_name}...")
