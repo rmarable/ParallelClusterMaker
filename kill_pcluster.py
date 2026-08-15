@@ -44,6 +44,8 @@ from pcluster_core import (
     _read_turbot_from_vars_file,
     _resolve as _pcore_resolve,
     _resolve_bool as _pcore_resolve_bool,
+    _acquire_cluster_lock,
+    _release_cluster_lock,
 )
 from pcluster_aux_data import p_val
 from pcluster_aux_data import ctrlC_Abort
@@ -250,6 +252,13 @@ def main():
         print("Aborting...")
         sys.exit(1)
 
+    # Acquired here, right before the first AWS mutation -- same placement
+    # and purpose as make_pcluster.py's build lock. Guards against a second
+    # process (e.g. a concurrent make_pcluster.py build) touching this
+    # cluster name's state mid-teardown; see _acquire_cluster_lock's own
+    # docstring.
+    _lock_path = _acquire_cluster_lock(cluster_data_dir, "kill_pcluster.py " + " ".join(sys.argv[1:]))
+
     # Parse cluster_serial_number from cluser_serial_number_file.
     # Strip any trailing newlines that would otherwise break the Ansible destroy
     # command string.
@@ -327,6 +336,7 @@ def main():
         print(
             "Check the output above and the CloudFormation console before assuming the cluster is gone."
         )
+        _release_cluster_lock(_lock_path)
         sys.exit(e.returncode)
 
     # Print a friendly banner to the console and include the command used to
@@ -356,6 +366,7 @@ def main():
     print("")
     print("Finished deleting cluster stack " + cluster_name + "!")
     print("Exiting...")
+    _release_cluster_lock(_lock_path)
     sys.exit(0)
 
 

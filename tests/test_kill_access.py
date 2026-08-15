@@ -19,6 +19,8 @@ from pcluster_core import (
     _resolve_access_script_path,
     _resolve_access_node_type,
     _read_turbot_from_vars_file,
+    _acquire_cluster_lock,
+    _release_cluster_lock,
 )
 
 # ---------------------------------------------------------------------------
@@ -464,3 +466,74 @@ class TestResolveAccessNodeType:
         sig = inspect.signature(_resolve_access_node_type)
         for name in ("login_node_requested", "head_node_requested"):
             assert sig.parameters[name].kind == inspect.Parameter.KEYWORD_ONLY
+
+
+# ---------------------------------------------------------------------------
+# _acquire_cluster_lock / _release_cluster_lock
+# ---------------------------------------------------------------------------
+
+
+class TestClusterLock:
+    """mkdir-based lock guarding two processes from touching the same cluster
+    at once -- same shape as hpc-benchmark.sh's .osu-cuda.lock (mkdir is the
+    atomic primitive; a check-then-create with os.path.exists is a race).
+    This is what would have caught the osiris incident: a concurrent
+    kill_pcluster.py deleting an in-flight make_pcluster.py build's state."""
+
+    def test_acquire_creates_the_lock_and_an_owner_file(self, tmp_path):
+        cluster_dir = tmp_path / "active_clusters" / "mycluster"
+        lock_path = _acquire_cluster_lock(str(cluster_dir), "make_pcluster.py -N mycluster")
+        assert os.path.isdir(lock_path)
+        assert lock_path == os.path.join(str(cluster_dir), ".build.lock")
+        with open(os.path.join(lock_path, "owner")) as fh:
+            owner = fh.read()
+        assert f"pid={os.getpid()}" in owner
+        assert "make_pcluster.py -N mycluster" in owner
+
+    def test_acquire_creates_cluster_data_dir_if_missing(self, tmp_path):
+        cluster_dir = tmp_path / "active_clusters" / "mycluster"
+        assert not cluster_dir.exists()
+        _acquire_cluster_lock(str(cluster_dir), "make_pcluster.py")
+        assert cluster_dir.is_dir()
+
+    def test_second_acquire_fails_fast_naming_the_owner(self, tmp_path):
+        cluster_dir = tmp_path / "active_clusters" / "mycluster"
+        _acquire_cluster_lock(str(cluster_dir), "make_pcluster.py -N mycluster")
+        with pytest.raises(SystemExit) as exc:
+            _acquire_cluster_lock(str(cluster_dir), "kill_pcluster.py -N mycluster")
+        message = str(exc.value.code)
+        assert "already running" in message
+        assert "make_pcluster.py -N mycluster" in message, (
+            "the error must name what actually holds the lock, not just that "
+            "something does"
+        )
+        assert "rm -rf" in message and ".build.lock" in message, (
+            "must tell the operator how to recover from a killed process's "
+            "stale lock"
+        )
+
+    def test_release_removes_the_lock_directory(self, tmp_path):
+        cluster_dir = tmp_path / "active_clusters" / "mycluster"
+        lock_path = _acquire_cluster_lock(str(cluster_dir), "make_pcluster.py")
+        _release_cluster_lock(lock_path)
+        assert not os.path.exists(lock_path)
+
+    def test_release_after_acquire_allows_a_fresh_acquire(self, tmp_path):
+        cluster_dir = tmp_path / "active_clusters" / "mycluster"
+        lock_path = _acquire_cluster_lock(str(cluster_dir), "make_pcluster.py")
+        _release_cluster_lock(lock_path)
+        # Must not raise -- the whole point of releasing.
+        lock_path2 = _acquire_cluster_lock(str(cluster_dir), "make_pcluster.py")
+        assert os.path.isdir(lock_path2)
+
+    def test_release_is_safe_when_the_lock_is_already_gone(self, tmp_path):
+        cluster_dir = tmp_path / "active_clusters" / "mycluster"
+        lock_path = os.path.join(str(cluster_dir), ".build.lock")
+        _release_cluster_lock(lock_path)  # must not raise
+
+    def test_release_is_safe_when_only_the_owner_file_is_gone(self, tmp_path):
+        cluster_dir = tmp_path / "active_clusters" / "mycluster"
+        lock_path = _acquire_cluster_lock(str(cluster_dir), "make_pcluster.py")
+        os.remove(os.path.join(lock_path, "owner"))
+        _release_cluster_lock(lock_path)  # must not raise
+        assert not os.path.exists(lock_path)

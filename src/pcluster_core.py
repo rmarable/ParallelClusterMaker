@@ -458,6 +458,62 @@ def _resolve_access_node_type(rec, cluster_name, *, login_node_requested, head_n
     return ("LoginNode" if loginnode_available else "HeadNode"), None
 
 
+def _acquire_cluster_lock(cluster_data_dir, command):
+    """Atomically acquire a per-cluster build/teardown lock. Returns the lock
+    directory path on success; raises SystemExit if another operation already
+    holds it.
+
+    mkdir is the atomic primitive available everywhere -- same shape as
+    hpc-benchmark.sh's .osu-cuda.lock (a check-then-create with os.path.exists
+    is a race; two processes could both see "absent" and both proceed). This
+    guards against exactly what happened once already: a concurrent
+    kill_pcluster.py deleting an in-flight make_pcluster.py build's IAM
+    policies and vars file out from under it, on the same machine/checkout.
+    It does not protect two different machines building the same cluster
+    name -- that would need a distributed (e.g. S3-conditional-write) lock,
+    deliberately out of scope here since nothing has actually hit that case.
+
+    Like the OSU lock, a killed process leaves the lock behind rather than
+    guaranteeing cleanup on every possible crash; the failure message says
+    exactly what to remove by hand, the same tradeoff already accepted there.
+    """
+    os.makedirs(cluster_data_dir, exist_ok=True)
+    lock_path = os.path.join(cluster_data_dir, ".build.lock")
+    try:
+        os.mkdir(lock_path)
+    except FileExistsError:
+        sys.exit(
+            f"ERROR: another operation is already running against this cluster.\n"
+            f"  {_read_lock_owner(lock_path)}\n"
+            f"  If nothing is actually running, a previous one was killed "
+            f"before releasing it:\n"
+            f"    rm -rf {lock_path}"
+        )
+    with open(os.path.join(lock_path, "owner"), "w") as fh:
+        fh.write(
+            f"pid={os.getpid()} host={socket.gethostname()} command={command!r} "
+            f"started={DateTime.now(timezone.utc).isoformat()}\n"
+        )
+    return lock_path
+
+
+def _read_lock_owner(lock_path):
+    try:
+        with open(os.path.join(lock_path, "owner")) as fh:
+            return fh.read().strip()
+    except OSError:
+        return "(lock owner info unavailable)"
+
+
+def _release_cluster_lock(lock_path):
+    """Release a lock acquired by _acquire_cluster_lock. Safe to call even if
+    the lock is already gone (e.g. removed by hand while still held)."""
+    with contextlib.suppress(FileNotFoundError):
+        os.remove(os.path.join(lock_path, "owner"))
+    with contextlib.suppress(FileNotFoundError):
+        os.rmdir(lock_path)
+
+
 # ---------------------------------------------------------------------------
 # Validation guards (extracted from make_pcluster.py main())
 # ---------------------------------------------------------------------------
@@ -1113,11 +1169,14 @@ def _validate_network(
             )
         return subnets[0]["SubnetId"]
 
-    if headnode_subnet_id:
-        print(f"  Using explicit head node subnet: {headnode_subnet_id}")
-    else:
-        print(f"  Auto-discovering head node subnet in {az}...")
-        headnode_subnet_id = _discover_subnet(az)
+    def _resolve_single_subnet(explicit_id, label):
+        if explicit_id:
+            print(f"  Using explicit {label} subnet: {explicit_id}")
+            return explicit_id
+        print(f"  Auto-discovering {label} subnet in {az}...")
+        return _discover_subnet(az)
+
+    headnode_subnet_id = _resolve_single_subnet(headnode_subnet_id, "head node")
 
     if compute_subnet_ids_override:
         compute_subnet_ids = [
@@ -1173,11 +1232,7 @@ def _validate_network(
             ]
 
     if enable_loginnode == "true":
-        if loginnode_subnet_id:
-            print(f"  Using explicit login node subnet: {loginnode_subnet_id}")
-        else:
-            print(f"  Auto-discovering login node subnet in {az}...")
-            loginnode_subnet_id = _discover_subnet(az)
+        loginnode_subnet_id = _resolve_single_subnet(loginnode_subnet_id, "login node")
 
     return (
         vpc_id,

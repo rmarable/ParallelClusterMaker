@@ -161,6 +161,18 @@ standing constraints for local development.
   vars file that predates the key — teardown derives it via
   `_derive_results_bucket` (same function, not a restated literal) when the
   vars file doesn't define it.
+- `make_pcluster.py` and `kill_pcluster.py` acquire a per-cluster
+  mkdir-based lock (`active_clusters/<cluster>/.build.lock`, same shape as
+  `hpc-benchmark.sh`'s `.osu-cuda.lock`) before the first AWS mutation,
+  held through the whole operation. A second process on the same cluster
+  name fails fast naming the lock's owner, never waits — local-machine
+  scope only, not a distributed lock. This is what would have caught the
+  concurrent-process incident that once corrupted an in-flight build.
+- `config.pcluster.j2`'s `OnNodeConfigured` block is a shared Jinja2 macro
+  called at all four `CustomActions` sites (`HeadNode`, `LoginNodes`, both
+  `SlurmQueues`), not four independent copies — that duplication is what
+  let `LoginNodes` silently inherit `HeadNode`'s `OnNodeStart` by
+  copy-paste in the first place.
 
 ## Environment
 

@@ -4602,6 +4602,50 @@ class TestReportingSurfacesNameTheLoginNode:
         assert "(head node)" in enabled_text
 
 
+class TestOnNodeConfiguredIsAMacroNotFourCopies:
+    """config.pcluster.j2's OnNodeConfigured block (postinstall + user postinstall
+    + conditional monitoring script) is identical in HeadNode, LoginNodes, and
+    both SlurmQueues. It used to be four independent copies, and that is exactly
+    how LoginNodes silently inherited HeadNode's OnNodeStart by copy-paste rather
+    than the compute queues' narrower shape (see the adversarial-review bugfix).
+    A shared Jinja2 macro makes that class of drift structurally impossible
+    instead of merely fixed for now -- this class guards that the macro is
+    actually used at all four sites, not just that the rendered output happens
+    to look right today."""
+
+    def test_the_macro_is_called_at_all_four_sites(self):
+        with open(os.path.join(REPO_ROOT, "templates", "config.pcluster.j2")) as fh:
+            source = fh.read()
+        assert source.count("{% macro on_node_configured(") == 1, (
+            "expected exactly one macro definition"
+        )
+        assert source.count("on_node_configured() | indent(") == 4, (
+            "expected the macro to be called at all four CustomActions sites "
+            "(HeadNode, LoginNodes, compute queue, GPU queue) -- a reintroduced "
+            "literal OnNodeConfigured block would not show up here even if it "
+            "rendered correctly"
+        )
+
+    def test_headnode_and_login_node_render_identical_on_node_configured_content(
+        self, cluster_params_loginnode_enabled
+    ):
+        params = dict(
+            cluster_params_loginnode_enabled,
+            enable_gpu_queue="true",
+            enable_gpu="true",
+            gpu_instance_type="p3.2xlarge",
+            gpu_instance_types=["p3.2xlarge"],
+        )
+        env = _make_env(os.path.join(REPO_ROOT, "templates"))
+        rendered = env.get_template("config.pcluster.j2").render(**params)
+        parsed = yaml.safe_load(rendered)
+        head = parsed["HeadNode"]["CustomActions"]["OnNodeConfigured"]["Sequence"]
+        login = parsed["LoginNodes"]["Pools"][0]["CustomActions"]["OnNodeConfigured"]["Sequence"]
+        compute = parsed["Scheduling"]["SlurmQueues"][0]["CustomActions"]["OnNodeConfigured"]["Sequence"]
+        gpu = parsed["Scheduling"]["SlurmQueues"][1]["CustomActions"]["OnNodeConfigured"]["Sequence"]
+        assert head == login == compute == gpu
+
+
 class TestLoginNodesConfigBlock:
     """LoginNodes is an optional top-level block, sibling to HeadNode/Scheduling,
     gated on enable_loginnode. It gets ComputeNode-Base IAM (never HeadNode-level

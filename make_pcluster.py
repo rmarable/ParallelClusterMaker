@@ -74,6 +74,8 @@ from pcluster_core import (
     _derive_docker_compose_staging,
     _derive_results_bucket,
     _validate_download_checksum,
+    _acquire_cluster_lock,
+    _release_cluster_lock,
 )
 from pcluster_aux_data import ARM_OSES, base_os_efa, derive_ranks_per_node, is_gpu_instance, needs_efa_gdr, nvidia_gpu_count, parse_instance_type_list, usable_vcpu_count
 from pcluster_aux_data import base_os_instance_check
@@ -1609,6 +1611,15 @@ def main():
             + fsx_s3_export_path
         )
 
+    # Acquired here, right before the first AWS mutation, and held through
+    # the rest of the build -- same "before spending anything" placement as
+    # the checksum/external-NFS pre-flight checks. Guards against a second
+    # process (e.g. a concurrent kill_pcluster.py) touching this cluster
+    # name's state mid-build; see _acquire_cluster_lock's own docstring.
+    _lock_path = _acquire_cluster_lock(
+        cluster_data_dir, "make_pcluster.py " + " ".join(sys.argv[1:])
+    )
+
     print("  Setting up IAM roles and policies...")
 
     iam = boto3.client("iam")
@@ -1644,6 +1655,7 @@ def main():
             iam, ec2_iam_role, ec2_iam_policy, aws_account_id,
             enable_monitoring=enable_monitoring,
         )
+        _release_cluster_lock(_lock_path)
         sys.exit(1)
 
     try:
@@ -1963,6 +1975,7 @@ def main():
             print(f"  Deleted IAM role: {ec2_iam_role}")
         with contextlib.suppress(FileNotFoundError):
             os.remove(cluster_serial_number_file)
+        _release_cluster_lock(_lock_path)
         sys.exit(1)
 
     # Parse the Python3 interpreter path to ensure ParallelCluster stacks can be
@@ -2081,6 +2094,7 @@ def main():
             print(f"  Warning: could not delete role {ec2_iam_role}: {_e}")
         print("Run kill_pcluster.py to tear down any partial stack before retrying:")
         print(f"  ./kill_pcluster.py -N {cluster_name} -O {cluster_owner} -A {az}")
+        _release_cluster_lock(_lock_path)
         sys.exit(_build_result.returncode)
 
     # Append make_pcluster.py command line and the Ansible playbook command used
@@ -2250,6 +2264,7 @@ def main():
     print("")
     print("Finished creating ParallelCluster stack " + cluster_name + "!")
     print("Exiting...")
+    _release_cluster_lock(_lock_path)
     sys.exit(0)
 
 

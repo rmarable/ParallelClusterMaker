@@ -273,3 +273,42 @@ class TestTeardownAbortWindow:
         assert vars_file_path is None
         assert serial_file is None
         assert serial is None
+
+
+class TestClusterLockDuringTeardown:
+    """The teardown lock (active_clusters/<cluster>/.build.lock -- shared name
+    and mechanism with make_pcluster.py's build lock, since either can hold
+    it) must be released on every exit path, and a lock already held by a
+    concurrent build must stop teardown before it touches AWS at all --
+    exactly the direction that corrupted the osiris build."""
+
+    def _lock_path(self, staged):
+        return os.path.join(str(staged["root"]), "active_clusters", CLUSTER, ".build.lock")
+
+    def test_lock_is_released_after_a_successful_teardown(self, staged):
+        with pytest.raises(SystemExit) as exc:
+            staged["mod"].main()
+        assert exc.value.code == 0
+        assert not os.path.exists(self._lock_path(staged))
+
+    def test_lock_is_released_after_a_failed_playbook(self, staged, monkeypatch):
+        runner = RecordingRun(rc_by_command={"ansible-playbook": 2})
+        monkeypatch.setattr(staged["mod"].subprocess, "run", runner)
+        with pytest.raises(SystemExit):
+            staged["mod"].main()
+        assert not os.path.exists(self._lock_path(staged))
+
+    def test_a_lock_already_held_by_a_build_aborts_before_ansible(self, staged):
+        """The osiris scenario, from teardown's side this time: a build is in
+        progress (holds the lock) and a concurrent kill_pcluster.py must fail
+        fast rather than delete IAM/vars-file state out from under it."""
+        from pcluster_core import _acquire_cluster_lock
+
+        cluster_dir = os.path.join(str(staged["root"]), "active_clusters", CLUSTER)
+        _acquire_cluster_lock(cluster_dir, "make_pcluster.py -N killme (other process)")
+        with pytest.raises(SystemExit) as exc:
+            staged["mod"].main()
+        assert "already running" in str(exc.value.code)
+        assert staged["runner"].command_containing("ansible-playbook") is None
+        assert staged["serial_file"].exists(), "must not delete state while another process holds the lock"
+        assert staged["vars_file"].exists()

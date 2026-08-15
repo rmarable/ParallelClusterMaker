@@ -487,6 +487,51 @@ class TestBuildFailureCleansUpIam:
         assert _playbook_vars(staged["record"]) is None
 
 
+class TestClusterLockDuringBuild:
+    """The build lock (active_clusters/<cluster>/.build.lock) must be released
+    on every exit path a real build can take -- a stuck lock after a normal
+    failure would block every retry, not just a concurrent second process."""
+
+    def _lock_path(self, staged):
+        return os.path.join(str(staged["root"]), "active_clusters", CLUSTER, ".build.lock")
+
+    def test_lock_is_released_after_a_successful_build(self, staged, monkeypatch):
+        with pytest.raises(SystemExit) as exc:
+            _run_main(staged, monkeypatch)
+        assert exc.value.code == 0
+        assert not os.path.exists(self._lock_path(staged))
+
+    def test_lock_is_released_after_a_failed_playbook(self, staged, monkeypatch):
+        staged["record"]["playbook_rc"] = 2
+        with pytest.raises(SystemExit):
+            _run_main(staged, monkeypatch)
+        assert not os.path.exists(self._lock_path(staged))
+
+    def test_lock_is_released_after_iam_setup_fails(self, staged, monkeypatch):
+        def _boom(*a, **k):
+            raise RuntimeError("AccessDenied")
+
+        monkeypatch.setattr(staged["mod"], "_setup_iam", _boom)
+        with pytest.raises(SystemExit):
+            _run_main(staged, monkeypatch)
+        assert not os.path.exists(self._lock_path(staged))
+
+    def test_a_lock_already_held_aborts_before_any_aws_mutation(self, staged, monkeypatch):
+        """Simulates the actual osiris scenario from the other direction: a
+        build already in progress, and a second invocation (this one) must
+        fail fast rather than touch IAM at all."""
+        from pcluster_core import _acquire_cluster_lock
+
+        lock_path = self._lock_path(staged)
+        os.makedirs(os.path.dirname(lock_path), exist_ok=True)
+        _acquire_cluster_lock(os.path.dirname(lock_path), "make_pcluster.py -N buildme (other process)")
+        with pytest.raises(SystemExit) as exc:
+            _run_main(staged, monkeypatch)
+        assert "already running" in str(exc.value.code)
+        assert not staged["deleted"], "no IAM mutation should have been attempted"
+        assert _playbook_vars(staged["record"]) is None
+
+
 class TestDerivedVariablesReachTheVarsFile:
     def test_pcluster_os_strips_the_arm_suffix(self, staged, monkeypatch):
         """PCluster's Os: field rejects the arm suffix, so pcluster_os is
