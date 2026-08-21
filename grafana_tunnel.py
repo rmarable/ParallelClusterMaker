@@ -19,10 +19,16 @@ if os.path.realpath(sys.prefix) != os.path.realpath(os.path.join(_repo_root, ".v
     )
 
 import argparse
-import subprocess
+import subprocess  # noqa: F401 -- tests/test_grafana_tunnel.py patches mod.subprocess.run
 
 sys.path.insert(0, _src_dir)
-from pcluster_core import _validate_cluster_name, _read_cluster_record
+from pcluster_core import (
+    ClusterRecord,
+    PClusterMakerError,
+    _validate_cluster_name,
+    _read_cluster_record,
+    core_manage_grafana_tunnel,
+)
 
 
 def main():
@@ -42,33 +48,25 @@ def main():
     rec = _read_cluster_record(cluster_name, _repo_root)
     if rec is None:
         sys.exit(f"ERROR: no cluster record found for {cluster_name!r}")
-
-    if rec.get("enable_monitoring") != "true":
-        sys.exit(
-            f"ERROR: monitoring is not enabled for cluster {cluster_name!r}.\n"
-            f"  Rebuild with --enable_monitoring=true to use Grafana."
-        )
+    cluster_record = ClusterRecord.from_dict(rec)
 
     tunnel_script = os.path.join(
         _repo_root, "active_clusters", cluster_name,
         f"grafana_tunnel.{cluster_name}.sh",
     )
-    if not os.path.isfile(tunnel_script):
-        sys.exit(
-            f"ERROR: tunnel script not found: {tunnel_script}\n"
-            f"  Make sure the cluster was built with monitoring enabled."
-        )
 
-    port = str(args.port)
-    action = "stop" if args.stop else "start"
-    # The tunnel script's exit status is the only signal that ssh -L actually
-    # bound the port; swallowing it made a dead tunnel look like a live one.
-    result = subprocess.run(["bash", tunnel_script, port, action], check=False)
-    if result.returncode != 0:
-        sys.exit(
-            f"ERROR: tunnel script failed to {action} the tunnel "
-            f"(exit {result.returncode})."
+    try:
+        result = core_manage_grafana_tunnel(
+            cluster_record=cluster_record,
+            tunnel_script_path=tunnel_script,
+            port=args.port,
+            stop=args.stop,
         )
+    except PClusterMakerError as e:
+        sys.exit(str(e))
+
+    if not result.success:
+        sys.exit(f"ERROR: {result.error}.")
 
 
 if __name__ == "__main__":

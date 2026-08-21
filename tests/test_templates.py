@@ -110,6 +110,22 @@ class TestTheTestEnvironmentMatchesAnsible:
         env = _make_env(os.path.join(REPO_ROOT, "templates"))
         assert getattr(env, option) is self._ansible_defaults()[option]
 
+    @pytest.mark.parametrize("option", ["trim_blocks", "lstrip_blocks"])
+    def test_the_production_env_matches_ansible_too(self, option):
+        """Workstream 2 Phase 0: pcluster_core._template_env is the production
+        twin of this file's own _make_env -- the one every Python-side
+        template render (vars_file.j2 today, more as Workstream 2's tiers
+        land) must go through. Pinned the same way, against Ansible's real
+        source, so the two configs cannot drift apart from each other or
+        from what Ansible itself does."""
+        src = os.path.join(REPO_ROOT, "src")
+        if src not in sys.path:
+            sys.path.insert(0, src)
+        import pcluster_core
+
+        env = pcluster_core._template_env(os.path.join(REPO_ROOT, "templates"))
+        assert getattr(env, option) is self._ansible_defaults()[option]
+
     def test_no_playbook_template_task_overrides_them(self):
         """A per-task override would make the env right for every template but one.
         If this ever fires, the override is the thing to reconsider — not this
@@ -131,7 +147,62 @@ class TestTheTestEnvironmentMatchesAnsible:
                             f"{name}: {task.get('name')!r} overrides {option}; "
                             f"_make_env no longer renders it the way Ansible does"
                         )
-        assert checked >= 10, f"only found {checked} template tasks — walker is blind"
+        # This floor is a vacuity guard on the walker, not a target -- it shrinks
+        # as Workstream 2 moves more templates off Ansible's `template:` module
+        # and onto Python's render_template. 3 remain after Tiers 1-3's
+        # cutover: config.pcluster.j2 (deliberately still Ansible-rendered --
+        # it references {{ external_nfs_sg.group_id }}, a runtime AWS value
+        # from a task later in this same playbook, when enable_external_nfs
+        # is true, so it cannot render in Python until Workstream 3 moves
+        # that security group's creation there too) and the two SNS report
+        # templates (Tier 4, out of scope until Workstream 3 supplies the
+        # facts they need). Lower it in the same commit as any further
+        # reduction, the same ratchet discipline as the preamble byte budget
+        # in CLAUDE-STATE.md.
+        assert checked >= 3, f"only found {checked} template tasks — walker is blind"
+
+
+class TestRenderTemplate:
+    """Direct unit tests for pcluster_core.render_template/_template_env,
+    independent of any specific template's content."""
+
+    @staticmethod
+    def _pcluster_core():
+        src = os.path.join(REPO_ROOT, "src")
+        if src not in sys.path:
+            sys.path.insert(0, src)
+        import pcluster_core
+
+        return pcluster_core
+
+    def test_renders_a_template_with_the_given_context(self, tmp_path):
+        (tmp_path / "greeting.j2").write_text("Hello, {{ name }}!\n")
+        out = self._pcluster_core().render_template(
+            str(tmp_path), "greeting.j2", name="world"
+        )
+        assert out == "Hello, world!\n"
+
+    def test_strict_undefined_raises_on_a_missing_variable(self, tmp_path):
+        from jinja2 import UndefinedError
+
+        (tmp_path / "greeting.j2").write_text("Hello, {{ name }}!\n")
+        with pytest.raises(UndefinedError):
+            self._pcluster_core().render_template(str(tmp_path), "greeting.j2")
+
+    def test_trim_blocks_matches_ansible_shape(self, tmp_path):
+        """The exact whitespace bug Phase 0 exists to fix: without
+        trim_blocks=True, the newline after a block tag survives into the
+        rendered file, which Ansible's own template: module never emits."""
+        (tmp_path / "cond.j2").write_text(
+            "before\n{% if true %}\nmiddle\n{% endif %}\nafter\n"
+        )
+        out = self._pcluster_core().render_template(str(tmp_path), "cond.j2")
+        assert out == "before\nmiddle\nafter\n"
+
+    def test_keeps_the_trailing_newline(self, tmp_path):
+        (tmp_path / "plain.j2").write_text("one line\n")
+        out = self._pcluster_core().render_template(str(tmp_path), "plain.j2")
+        assert out.endswith("\n")
 
 
 def _collect_templates():
@@ -392,6 +463,12 @@ _PLACEHOLDER_SUB = {
     "<CLUSTER_SERIAL_NUMBER>": "test-cluster-00001220260720",
     "<CLUSTER_SERIAL_DATESTAMP>": "00001220260720",
     "<VPC_ID>": "vpc-0abc123",
+    # Workstream 5's MCP Lambda policies only. Must stay in lockstep with
+    # _render_policy's own substitution chain -- a placeholder present in
+    # one and not the other renders a literal "<MCP_USER_POOL_ID>" into a
+    # live IAM ARN, which test_iam_policy_no_unsubstituted_placeholders
+    # exists to catch.
+    "<MCP_USER_POOL_ID>": "us-east-1_aBcDeFgHi",
 }
 _POLICY_FILES = [
     "HeadNode-Compute.json_src",
@@ -409,6 +486,37 @@ _POLICY_FILES = [
 # that must not be reachable from an instance has to sweep both.
 _INLINE_INSTANCE_POLICY_FILES = ["LustreS3HydrationPolicy.json_src"]
 _INSTANCE_REACHABLE_POLICY_FILES = _POLICY_FILES + _INLINE_INSTANCE_POLICY_FILES
+
+# Workstream 5's MCP Lambda execution-role policies -- a third category,
+# neither instance-reachable nor the operator's own credentials. They need
+# their own list because _POLICY_FILES is pinned by equality to the five
+# managed cluster policies (test_every_policy_template_is_created_and_deleted)
+# and _INSTANCE_REACHABLE_POLICY_FILES drives guards whose reasoning is
+# specific to a shell on a cluster node.
+#
+# They are NOT exempt from the logs:DeleteLogGroup ban, and that is the
+# deliberate call rather than the convenient one. The ban's rationale --
+# a retained log group is the only surviving record of a failed build --
+# depends on nothing about the principal being an EC2 instance; the
+# instance framing is just where the original incident happened. The
+# stack-mutation draft arrived granting logs:DeleteLogGroup on
+# Resource: "*", which would have let the delete_cluster Lambda erase any
+# cluster's logs account-wide. Removed before the file was moved into
+# templates/ rather than categorized around: the toolkit never calls
+# delete_log_group, upstream's only caller is the build-image path this
+# toolkit does not use, and PCluster's own CloudWatch log group defaults
+# to Retain -- so nothing needs it. See _BAN_APPLIES_TO below.
+_MCP_LAMBDA_POLICY_FILES = [
+    "MCPRouterLambda.json_src",
+    "MCPReadOnlyLambda.json_src",
+    "MCPFleetToggleLambda.json_src",
+    "MCPStackMutation.json_src",
+    "MCPStateAccessReadOnly.json_src",
+    "MCPStateAccessFleetToggle.json_src",
+    "MCPStateAccessStackMutation.json_src",
+    "MCPRegisterLambda.json_src",
+    "MCPAuthorizerLambda.json_src",
+]
 
 
 def _load_policy(fname):
@@ -513,7 +621,16 @@ class TestNoInstancePolicyCanDeleteALogGroup:
 
     _BANNED = "logs:DeleteLogGroup"
 
-    @pytest.mark.parametrize("fname", _INSTANCE_REACHABLE_POLICY_FILES)
+    # Every policy whose principal must never be able to erase a log group.
+    # Instance-reachable ones plus Workstream 5's MCP Lambda execution
+    # roles: the rationale (a retained log group is the only surviving
+    # record of a failed build) turns on what the log group is worth, not
+    # on whether the principal is an EC2 instance. OperatorPolicy stays
+    # out -- purging by hand under operator credentials is exactly what
+    # the retained-log-group bullet expects.
+    _BAN_APPLIES_TO = _INSTANCE_REACHABLE_POLICY_FILES + _MCP_LAMBDA_POLICY_FILES
+
+    @pytest.mark.parametrize("fname", _BAN_APPLIES_TO)
     def test_no_policy_on_an_instance_grants_it(self, fname):
         for stmt in _load_policy(fname)["Statement"]:
             actions = (
@@ -542,7 +659,11 @@ class TestNoInstancePolicyCanDeleteALogGroup:
             f for f in os.listdir(os.path.join(REPO_ROOT, "templates"))
             if f.endswith(".json_src")
         }
-        classified = set(_INSTANCE_REACHABLE_POLICY_FILES) | {"OperatorPolicy.json_src"}
+        classified = (
+            set(_INSTANCE_REACHABLE_POLICY_FILES)
+            | set(_MCP_LAMBDA_POLICY_FILES)
+            | {"OperatorPolicy.json_src"}
+        )
         assert on_disk == classified, (
             f"unclassified policy templates: {sorted(on_disk - classified)}; "
             f"listed but absent: {sorted(classified - on_disk)}"
@@ -1108,20 +1229,64 @@ class TestPostinstallTemplateIsActuallyRendered:
 
     @pytest.mark.parametrize("template", ["preinstall.j2", "postinstall.j2"])
     def test_the_template_is_rendered_by_a_template_task(self, template):
-        """A copy: task cannot render Jinja2 -- it would upload the raw {% %} source."""
-        var = f"{template.split('.')[0]}_template_orig"
-        rendered = []
-        for task in self._tasks():
-            if "template" not in task:
+        """Since Workstream 2 Tier 3, neither template is rendered by an
+        Ansible `template:` task at all -- core_create_cluster
+        (src/pcluster_core.py) renders both directly via render_template,
+        parity-tested against every tests/conftest.py fixture
+        (TestPreinstallPostinstallByteForByteParity) before the Ansible task
+        was deleted. The property this test guards -- that the file actually
+        gets rendered by *something*, not left as dead {% %} source no node
+        ever runs -- now means: render_template is really called on this
+        template name inside core_create_cluster, checked on the AST so a
+        renamed/removed call site fails this rather than a stale string
+        match, the same discipline a `copy:` task substitution first hid."""
+        import ast
+
+        with open(os.path.join(REPO_ROOT, "src", "pcluster_core.py")) as fh:
+            tree = ast.parse(fh.read())
+
+        def _names_a_literal_call(call_node):
+            return any(
+                isinstance(arg, ast.Constant) and arg.value == template
+                for arg in call_node.args
+            )
+
+        def _contains_the_template_name(node):
+            return any(
+                isinstance(n, ast.Constant) and n.value == template
+                for n in ast.walk(node)
+            )
+
+        found = False
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
                 continue
-            for item in task.get("with_items") or []:
-                if isinstance(item, dict) and var in str(item.get("src", "")):
-                    rendered.append(task["name"])
-            if var in str(task.get("template", {}).get("src", "")):
-                rendered.append(task["name"])
-        assert rendered, (
-            f"{template} is not rendered by any template: task -- it is dead "
-            f"template and no node ever runs it"
+            if getattr(node.func, "id", None) != "render_template":
+                continue
+            # Either the template name is passed as a literal directly...
+            if _names_a_literal_call(node):
+                found = True
+                break
+        if not found:
+            # ...or (this codebase's actual shape) the call is inside a `for`
+            # loop whose iterable lists the template name alongside it, e.g.
+            # `for _tmpl_name, _dest in (("preinstall.j2", ...), ...):
+            #      render_template(dir, _tmpl_name, **ctx)`.
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.For):
+                    continue
+                if not _contains_the_template_name(node.iter):
+                    continue
+                if any(
+                    isinstance(n, ast.Call) and getattr(n.func, "id", None) == "render_template"
+                    for n in ast.walk(node)
+                ):
+                    found = True
+                    break
+
+        assert found, (
+            f"{template} is not rendered by any render_template(...) call in "
+            f"src/pcluster_core.py -- it is dead template and no node ever runs it"
         )
 
     @pytest.mark.parametrize("stage", ["preinstall", "postinstall"])
@@ -3715,10 +3880,11 @@ def _vars_file_variables():
 
 
 def _cluster_parameters_keys():
-    """Static keys of make_pcluster.py's cluster_parameters dict."""
+    """Static keys of core_create_cluster's cluster_parameters dict (moved
+    from make_pcluster.py to src/pcluster_core.py in the core/shim split)."""
     import ast
 
-    with open(os.path.join(REPO_ROOT, "make_pcluster.py")) as fh:
+    with open(os.path.join(REPO_ROOT, "src", "pcluster_core.py")) as fh:
         tree = ast.parse(fh.read())
     for node in ast.walk(tree):
         if (
@@ -3726,7 +3892,7 @@ def _cluster_parameters_keys():
             and getattr(node.targets[0], "id", "") == "cluster_parameters"
         ):
             return {k.value for k in node.value.keys if isinstance(k, ast.Constant)}
-    raise AssertionError("cluster_parameters dict not found in make_pcluster.py")
+    raise AssertionError("cluster_parameters dict not found in src/pcluster_core.py")
 
 
 def test_vars_file_variables_are_all_supplied_by_make_pcluster():
@@ -4014,7 +4180,12 @@ def test_collect_templates_matches_what_the_playbooks_render(cluster_params):
                         f"{playbook} renders {resolved} with `template:` but no test "
                         f"renders it -- add it to EXTRA_TEMPLATES"
                     )
-    assert checked >= 5, f"only resolved {checked} template srcs -- walker is blind"
+    # Vacuity guard, not a target -- shrinks with Workstream 2 (see the
+    # matching floor in TestTheTestEnvironmentMatchesAnsible). Since Tier 3's
+    # cutover the preinstall.j2/postinstall.j2 with_items task is gone
+    # entirely (not just skipped), leaving config.pcluster.j2 and the two
+    # SNS report tasks' absolute `src` values to resolve and check here.
+    assert checked >= 3, f"only resolved {checked} template srcs -- walker is blind"
 
 
 class TestTheDefaultSbatchScriptIsShapedByTheCluster:
@@ -6070,14 +6241,16 @@ class TestTheKnownHostsPathIsExpanded:
         assert os.path.isabs(value), f"ssh_known_hosts is not absolute: {value!r}"
 
     def test_the_derivation_uses_expanduser_not_a_literal(self):
-        """An AST walk over make_pcluster.py, so the fixture cannot carry it alone.
+        """An AST walk over src/pcluster_core.py's core_create_cluster (where
+        cluster_parameters has lived since the core/shim split), so the
+        fixture cannot carry it alone.
 
         conftest supplies an absolute value regardless of what production does, so
-        the test above passes with the literal tilde restored in make_pcluster.py.
+        the test above passes with the literal tilde restored in production.
         """
         import ast
 
-        with open(os.path.join(REPO_ROOT, "make_pcluster.py")) as fh:
+        with open(os.path.join(REPO_ROOT, "src", "pcluster_core.py")) as fh:
             tree = ast.parse(fh.read())
         for node in ast.walk(tree):
             if (
@@ -6488,3 +6661,251 @@ class TestBenchmarkResultsOutliveTheCluster:
                     f"hpc-benchmark-results/ prefix"
                 )
 
+
+class TestPreinstallPostinstallByteForByteParity:
+    """Workstream 2 Tier 3's own mandated check, from the plan itself:
+    preinstall.j2/postinstall.j2 are 28KB, the heaviest branching of any
+    template in the repo, and the single largest concentration of
+    CLAUDE.md-pinned bootstrap incidents tied to exact rendered output.
+    Before their Ansible `template:` task is deleted, prove -- across every
+    fixture combination in conftest.py, not just the default -- that
+    core_create_cluster's real context-construction pipeline
+    (cluster_parameters -> render vars_file.j2 -> yaml.safe_load -> merge
+    with cluster_parameters) produces byte-identical output to _make_env's
+    direct fixture render, which the rest of this file's extensive
+    preinstall/postinstall coverage already trusts as correct. A mismatch
+    here would mean core_create_cluster's Python render diverges from what
+    Ansible's template: task actually produced -- exactly the class of bug
+    Tier 1 (missing preinstall_s3_dest) and Tier 2 (missing Deployed_On,
+    the config.pcluster.j2 runtime-value gap) each found once already."""
+
+    _FIXTURES = [
+        "cluster_params",
+        "cluster_params_orphaned_teardown",
+        "cluster_params_retained_teardown",
+        "cluster_params_unconfirmed_delete",
+        "cluster_params_rhel",
+        "cluster_params_rhel_gpu_queue",
+        "cluster_params_al2023",
+        "cluster_params_al2023_gpu_queue",
+        "cluster_params_al2023_monitoring",
+        "cluster_params_custom_ami",
+        "cluster_params_monitoring_enabled",
+        "cluster_params_loginnode_enabled",
+        "cluster_params_loginnode_pool",
+        "cluster_params_gpu_enabled",
+        "cluster_params_gpu_gdr_enabled",
+        "cluster_params_hpc_benchmarks_disabled",
+        "cluster_params_efa_enabled",
+        "cluster_params_multi_instance_cpu",
+        "cluster_params_gpu_queue_enabled",
+        "cluster_params_gpu_no_nvidia",
+    ]
+
+    @staticmethod
+    def _pcluster_core():
+        src = os.path.join(REPO_ROOT, "src")
+        if src not in sys.path:
+            sys.path.insert(0, src)
+        import pcluster_core
+
+        return pcluster_core
+
+    @classmethod
+    def _pipeline_context(cls, params):
+        """The exact context core_create_cluster builds: render vars_file.j2
+        from the raw params, reparse it, and merge with the raw params so
+        neither vars_file.j2-derived names (preinstall_s3_dest, ...) nor
+        cluster_parameters-only names (Deployed_On, debug_mode) are lost."""
+        pcluster_core = cls._pcluster_core()
+        templates_dir = os.path.join(REPO_ROOT, "templates")
+        rendered_vars_file = pcluster_core.render_template(
+            templates_dir, "vars_file.j2", **params
+        )
+        return {**params, **yaml.safe_load(rendered_vars_file)}
+
+    @pytest.mark.parametrize("fixture", _FIXTURES)
+    def test_preinstall_matches_the_established_render(self, fixture, request):
+        params = request.getfixturevalue(fixture)
+        templates_dir = os.path.join(REPO_ROOT, "templates")
+        expected = _make_env(templates_dir).get_template("preinstall.j2").render(**params)
+        context = self._pipeline_context(params)
+        actual = self._pcluster_core().render_template(
+            templates_dir, "preinstall.j2", **context
+        )
+        assert actual == expected, (
+            f"preinstall.j2 diverges from the established render for {fixture}"
+        )
+
+    @pytest.mark.parametrize("fixture", _FIXTURES)
+    def test_postinstall_matches_the_established_render(self, fixture, request):
+        params = request.getfixturevalue(fixture)
+        templates_dir = os.path.join(REPO_ROOT, "templates")
+        expected = _make_env(templates_dir).get_template("postinstall.j2").render(**params)
+        context = self._pipeline_context(params)
+        actual = self._pcluster_core().render_template(
+            templates_dir, "postinstall.j2", **context
+        )
+        assert actual == expected, (
+            f"postinstall.j2 diverges from the established render for {fixture}"
+        )
+
+
+
+class TestMcpLambdaPolicies:
+    """Workstream 5's MCP Lambda execution-role policies get the same
+    structural guards the cluster policies already have.
+
+    They are deliberately NOT added to _POLICY_FILES -- that list is pinned
+    by equality to the five managed cluster policies, and _setup_iam's
+    suffix lists are asserted against it -- so without this class they
+    would sit in templates/ classified but otherwise unchecked: no JSON
+    validity, no size limit, no placeholder sweep. Being newer and
+    undeployed makes that more dangerous, not less; nothing has exercised
+    them yet.
+    """
+
+    def test_the_file_list_matches_what_is_on_disk(self):
+        """Pinned by equality in both directions: a new MCP policy file
+        that nobody adds here would be classified (the ban's
+        directory-equality check passes) yet never validated by anything
+        in this class."""
+        on_disk = {
+            f for f in os.listdir(os.path.join(REPO_ROOT, "templates"))
+            if f.startswith("MCP") and f.endswith(".json_src")
+        }
+        assert on_disk == set(_MCP_LAMBDA_POLICY_FILES)
+
+    @pytest.mark.parametrize("fname", _MCP_LAMBDA_POLICY_FILES)
+    def test_valid_json(self, fname):
+        _load_policy(fname)
+
+    @pytest.mark.parametrize("fname", _MCP_LAMBDA_POLICY_FILES)
+    def test_under_the_managed_policy_size_limit(self, fname):
+        """Measured minified, which is what _render_policy enforces. Worth
+        stating because raw file size misleads here: MCPStackMutation is
+        ~8.7 KB on disk but ~4.8 KB minified, and a reviewer reading the
+        raw size concluded it needed splitting."""
+        minified = json.dumps(_load_policy(fname), separators=(",", ":"))
+        size = len(minified.encode("utf-8"))
+        assert size <= _IAM_POLICY_LIMIT, f"{fname}: {size} > {_IAM_POLICY_LIMIT}"
+
+    @pytest.mark.parametrize("fname", _MCP_LAMBDA_POLICY_FILES)
+    def test_statement_keys_are_valid(self, fname):
+        valid = {
+            "Sid", "Effect", "Action", "NotAction",
+            "Resource", "NotResource", "Condition", "Principal",
+        }
+        for stmt in _load_policy(fname)["Statement"]:
+            unknown = set(stmt) - valid
+            assert not unknown, f"{fname}: statement {stmt.get('Sid')} has {unknown}"
+
+    @pytest.mark.parametrize("fname", _MCP_LAMBDA_POLICY_FILES)
+    def test_sids_are_unique(self, fname):
+        sids = [s.get("Sid") for s in _load_policy(fname)["Statement"]]
+        assert len(sids) == len(set(sids)), f"{fname}: duplicate Sids"
+
+    @pytest.mark.parametrize("fname", _MCP_LAMBDA_POLICY_FILES)
+    def test_no_unsubstituted_placeholders(self, fname):
+        """Catches a placeholder _PLACEHOLDER_SUB does not know about --
+        which is how <MCP_USER_POOL_ID> would otherwise have rendered
+        literally into a live IAM ARN, since it existed in neither the test
+        substitution map nor _render_policy's chain before this round."""
+        rendered = json.dumps(_load_policy(fname))
+        leftover = re.findall(r"<[A-Z_]+>", rendered)
+        assert not leftover, f"{fname}: unsubstituted {sorted(set(leftover))}"
+
+    def test_render_policy_substitutes_every_placeholder_these_files_use(self):
+        """The two substitution sources must agree. _PLACEHOLDER_SUB is the
+        tests' map and _render_policy is production's; a placeholder in one
+        and not the other is exactly the drift that makes a policy pass its
+        tests and then render a literal token into a real ARN."""
+        import inspect
+
+        src = os.path.join(REPO_ROOT, "src")
+        if src not in sys.path:
+            sys.path.insert(0, src)
+        import pcluster_core
+
+        # Comment lines stripped before matching. The comment explaining
+        # this substitution names the placeholder itself, so a whole-source
+        # search matches the prose and passes with the .replace() call
+        # deleted -- verified: that mutation survived the first version of
+        # this test.
+        source = "\n".join(
+            line for line in inspect.getsource(pcluster_core._render_policy).splitlines()
+            if not line.lstrip().startswith("#")
+        )
+        used = set()
+        for fname in _MCP_LAMBDA_POLICY_FILES:
+            raw = open(os.path.join(REPO_ROOT, "templates", fname)).read()
+            used |= set(re.findall(r"<[A-Z_]+>", raw))
+        for token in sorted(used):
+            assert f'"{token}"' in source, (
+                f"_render_policy does not substitute {token}, used by an MCP "
+                f"policy template -- it would render literally into an IAM ARN"
+            )
+
+
+class TestRouterPolicyStaysNearZero:
+    """The Router Lambda is the internet-facing endpoint behind API Gateway.
+    The entire 5-Lambda split exists to keep blast radius off it: it parses
+    a JSON-RPC body, picks a handler, and forwards. It executes no tool
+    logic, so it must carry none of the handlers' permission breadth --
+    if it ever gains PCluster IAM, the split has bought nothing and the
+    most exposed component is also the most privileged.
+
+    The handler function names are pinned here rather than only inside the
+    policy JSON because _setup_mcp_infra has to create functions with
+    exactly these names for the ARNs to match; a rename in one place and
+    not the other produces a router that is denied at runtime, which is a
+    deployment-time failure rather than a test-time one.
+    """
+
+    _FILE = "MCPRouterLambda.json_src"
+    _HANDLERS = [
+        "pclustermaker-mcp-read-only",
+        "pclustermaker-mcp-fleet-toggle",
+        "pclustermaker-mcp-stack-mutation",
+        "pclustermaker-mcp-stack-mutation-node",
+    ]
+
+    def _statements(self):
+        return _load_policy(self._FILE)["Statement"]
+
+    def test_it_grants_exactly_one_action(self):
+        actions = set()
+        for stmt in self._statements():
+            a = stmt["Action"]
+            actions |= set([a] if isinstance(a, str) else a)
+        assert actions == {"lambda:InvokeFunction"}, (
+            f"the router must carry only lambda:InvokeFunction, got {sorted(actions)}"
+        )
+
+    def test_it_names_every_handler_and_nothing_else(self):
+        resources = []
+        for stmt in self._statements():
+            r = stmt["Resource"]
+            resources += [r] if isinstance(r, str) else r
+        suffixes = sorted(r.rsplit(":function:", 1)[-1] for r in resources)
+        assert suffixes == sorted(self._HANDLERS)
+
+    def test_no_resource_is_a_wildcard(self):
+        """A `function:*` (or bare `*`) would let the router invoke any
+        Lambda in the account, which is the one thing scoping it to four
+        ARNs is for."""
+        for stmt in self._statements():
+            r = stmt["Resource"]
+            for res in [r] if isinstance(r, str) else r:
+                assert "*" not in res, f"wildcard resource in router policy: {res}"
+
+    def test_it_carries_no_pcluster_permissions(self):
+        """Vacuity guard against the failure mode this class exists for:
+        someone adding 'just one' EC2 or CloudFormation grant so the router
+        can answer a status question itself instead of forwarding."""
+        services = set()
+        for stmt in self._statements():
+            a = stmt["Action"]
+            for act in [a] if isinstance(a, str) else a:
+                services.add(act.split(":", 1)[0])
+        assert services == {"lambda"}, f"router reaches beyond lambda: {sorted(services)}"

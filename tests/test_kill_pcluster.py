@@ -1,28 +1,169 @@
 """
-Direct tests for kill_pcluster.py's main().
+Direct tests for kill_pcluster.py's main(), now that core_delete_cluster tears
+down clusters via boto3/pcluster.lib instead of shelling out to Ansible.
 
-This is the most destructive script in the toolkit and had no direct coverage —
-only the pure helpers it calls out of src/pcluster_core.py were tested, so
-nothing checked the sequencing that actually makes teardown safe: that the
-Ansible playbook is what deletes AWS resources, that a playbook failure leaves
-the serial and vars files on disk so the operator can retry, and that state
-files are removed only after the playbook succeeds.
+Fakes here stand in for two things: `import pcluster.lib as pc` (installed
+into sys.modules, since that import happens at call time inside
+core_delete_cluster -- see pcluster_core.py's own comment on why) and every
+boto3 client core_delete_cluster constructs (one generic fake class good
+enough for ec2/iam/s3/ssm/secretsmanager/sns, since none of their *other*
+methods are shape-sensitive). The granular per-resource teardown logic is
+already exhaustively unit-tested in test_teardown_steps.py; this file checks
+the integration-level properties that actually make teardown safe: that
+state files are removed only after a clean, confirmed, orphan-free delete,
+that a DELETE_FAILED/unconfirmed/orphaned outcome preserves them and exits
+non-zero, and that the abort window and cluster lock still work.
 """
 
-import json
+import io
 import os
-import subprocess
 import sys
+import types
+from datetime import datetime as DateTime, timezone
 
 import pytest
+from botocore.exceptions import ClientError
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from entrypoint_harness import REPO_ROOT, RecordingRun, load_entrypoint
+from entrypoint_harness import REPO_ROOT, load_entrypoint
+
+sys.path.insert(0, os.path.join(REPO_ROOT, "src"))
+import pcluster_core
+from pcluster.api.errors import BadRequestException, NotFoundException
+
+
+def _client_error(code, op, status=None):
+    response = {"Error": {"Code": code, "Message": ""}}
+    if status is not None:
+        response["ResponseMetadata"] = {"HTTPStatusCode": status}
+    return ClientError(response, op)
 
 AZ = "us-east-1a"
 CLUSTER = "killme"
 OWNER = "testuser"
 SERIAL = "killme-00001220260720"
+
+_VARS_FILE_DEFAULTS = {
+    "cluster_name": CLUSTER,
+    "turbot_account": "disabled",
+    "aws_account_id": "123456789012",
+    "az": AZ,
+    "ec2_iam_policy": f"pclustermaker-policy-{SERIAL}",
+    "ec2_iam_role": f"pclustermaker-role-{SERIAL}",
+    "ec2_keypair": f"{SERIAL}_us-east-1",
+    "ec2_user": "ubuntu",
+    "ec2_user_home": "/home/ubuntu",
+    "enable_external_nfs": "false",
+    "enable_fsx_hydration": "false",
+    "enable_hpc_benchmarks": "false",
+    "enable_monitoring": "false",
+    "fsx_hydration_iam_policy": "UNDEFINED",
+    "s3_bucketname": f"parallelclustermaker-{SERIAL}",
+    "ssh_keypair": "/tmp/does-not-need-to-exist.pem",
+    "ssh_secret_name": f"parallelcluster/{CLUSTER}/{SERIAL}/ssh-private-key",
+}
+
+
+def _vars_yaml(**overrides):
+    merged = {**_VARS_FILE_DEFAULTS, **overrides}
+    return "\n".join(f'{k}: "{v}"' for k, v in merged.items()) + "\n"
+
+
+class _FakePcLib(types.ModuleType):
+    """Stand-in for `import pcluster.lib as pc`. `describe_sequence` is a
+    list of dicts (success) or exceptions, indexed by call count and
+    clamped to the last entry once exhausted -- a single-element sequence
+    models a persistent status, matching test_teardown_steps.py's own
+    _ScriptedDescribeFn."""
+
+    def __init__(self, describe_sequence=None, delete_raises=None):
+        super().__init__("pcluster.lib")
+        self._describe_sequence = list(
+            describe_sequence or [{"clusterStatus": "DELETE_COMPLETE"}]
+        )
+        self.delete_raises = delete_raises
+        self.describe_calls = []
+        self.delete_calls = []
+
+    def describe_cluster(self, cluster_name, region):
+        self.describe_calls.append((cluster_name, region))
+        i = min(len(self.describe_calls) - 1, len(self._describe_sequence) - 1)
+        item = self._describe_sequence[i]
+        if isinstance(item, Exception):
+            raise item
+        return item
+
+    def delete_cluster(self, cluster_name, region):
+        self.delete_calls.append((cluster_name, region))
+        if self.delete_raises:
+            raise self.delete_raises
+
+
+class _FakeAwsClient:
+    """A generic boto3-client stand-in covering every AWS call
+    core_delete_cluster's teardown functions make. Methods whose return
+    shape the code actually inspects get realistic empty results; every
+    other call (the deletes/detaches/publishes, none of which are
+    inspected) is a no-op success. `fail` names one method to raise
+    RuntimeError, for testing the orphan-detection path."""
+
+    _SHAPED = {
+        "list_attached_role_policies": {"AttachedPolicies": []},
+        "list_role_policies": {"PolicyNames": []},
+        "list_instance_profiles_for_role": {"InstanceProfiles": []},
+        "describe_security_groups": {"SecurityGroups": []},
+        "describe_availability_zones": {"AvailabilityZones": [{"RegionName": "us-east-1"}]},
+    }
+
+    def __init__(self, fail=None):
+        self._fail = fail
+        self._objects = {}  # Workstream 4's S3 distributed lock: key -> {"body","etag","last_modified"}
+        self._etag_counter = 0
+
+    def get_paginator(self, name):
+        assert name == "list_object_versions"
+
+        class _Paginator:
+            def paginate(self, Bucket):
+                yield {"Versions": [], "DeleteMarkers": []}
+
+        return _Paginator()
+
+    def _new_etag(self):
+        self._etag_counter += 1
+        return f"etag-{self._etag_counter}"
+
+    def put_object(self, Bucket, Key, Body, IfNoneMatch=None, IfMatch=None):
+        """Workstream 4's S3 distributed lock uses conditional PutObject --
+        modeled here the same way tests/test_s3_cluster_lock.py's own
+        _FakeS3Lock models it, since this file's generic __getattr__
+        fallback (always succeeds) would make a held lock unacquirable to
+        simulate at all."""
+        existing = self._objects.get(Key)
+        if IfNoneMatch == "*" and existing is not None:
+            raise _client_error("PreconditionFailed", "PutObject", status=412)
+        if IfMatch is not None and (existing is None or existing["etag"] != IfMatch):
+            raise _client_error("PreconditionFailed", "PutObject", status=412)
+        etag = self._new_etag()
+        self._objects[Key] = {"body": Body, "etag": etag, "last_modified": DateTime.now(timezone.utc)}
+        return {"ETag": etag}
+
+    def get_object(self, Bucket, Key):
+        obj = self._objects[Key]
+        return {"ETag": obj["etag"], "LastModified": obj["last_modified"], "Body": io.BytesIO(obj["body"])}
+
+    def delete_object(self, Bucket, Key):
+        self._objects.pop(Key, None)
+
+    def __getattr__(self, name):
+        if name == self._fail:
+            def _boom(*a, **k):
+                raise RuntimeError(f"{name} failed")
+            return _boom
+        if name in self._SHAPED:
+            shape = self._SHAPED[name]
+            return lambda *a, **k: shape
+        return lambda *a, **k: {}
 
 
 @pytest.fixture
@@ -32,7 +173,8 @@ def kp():
 
 @pytest.fixture
 def staged(kp, tmp_path, monkeypatch):
-    """A cluster whose serial and vars files exist, with AWS/Ansible stubbed."""
+    """A cluster whose serial and vars files exist, with pcluster.lib and
+    every boto3 client stubbed to a clean, confirmed delete by default."""
     serial_dir = tmp_path / "active_clusters" / CLUSTER
     serial_dir.mkdir(parents=True)
     serial_file = serial_dir / f"{CLUSTER}.serial"
@@ -41,50 +183,57 @@ def staged(kp, tmp_path, monkeypatch):
     vars_dir = tmp_path / "src" / "vars_files"
     vars_dir.mkdir(parents=True)
     vars_file = vars_dir / f"{CLUSTER}.yml"
-    vars_file.write_text('cluster_name: "killme"\nturbot_account: "disabled"\n')
+    vars_file.write_text(_vars_yaml())
+
+    # core_delete_cluster renders sns_destruction_summary_report.j2 out of
+    # <repo_root>/templates -- the real templates, since a stub would drift
+    # from what StrictUndefined actually requires (same reasoning as
+    # test_make_pcluster_main.py's identical symlink).
+    (tmp_path / "templates").symlink_to(os.path.join(REPO_ROOT, "templates"))
 
     monkeypatch.setattr(kp, "_repo_root", str(tmp_path))
     monkeypatch.setattr(kp, "_src_dir", str(tmp_path / "src"))
 
-    class _Ec2:
-        def describe_availability_zones(self, ZoneNames):
-            return {"AvailabilityZones": [{"RegionName": "us-east-1"}]}
+    pc_lib = _FakePcLib()
+    monkeypatch.setitem(sys.modules, "pcluster.lib", pc_lib)
+    # One fake instance per service name, not a fresh one per call: the S3
+    # distributed lock acquires and releases through two separate
+    # boto3.client("s3", ...) calls inside core_delete_cluster (a dedicated
+    # client for the lock, then the teardown code's own later one), and
+    # both need to see the same stored lock object.
+    _clients = {}
 
-    monkeypatch.setattr(kp.boto3, "client", lambda *a, **k: _Ec2())
+    def _boto3_client(name, **kw):
+        return _clients.setdefault(name, _FakeAwsClient())
+
+    monkeypatch.setattr(kp.boto3, "client", _boto3_client)
+    # The wait loop's retry delay is real time.sleep() in production; a
+    # TIMED_OUT scenario iterates the full retry count, so this must be a
+    # no-op for that test to run in well under a second.
+    monkeypatch.setattr(pcluster_core.time, "sleep", lambda s: None)
     # The abort window is a 5-second sleep; tests must not pay for it.
     monkeypatch.setattr(kp, "ctrlC_Abort", lambda *a, **k: None)
 
-    runner = RecordingRun()
-    monkeypatch.setattr(kp.subprocess, "run", runner)
     monkeypatch.setattr(
         sys, "argv",
         ["kill_pcluster.py", "-A", AZ, "-N", CLUSTER, "-O", OWNER],
     )
     return {
         "mod": kp,
-        "runner": runner,
+        "pc_lib": pc_lib,
         "serial_file": serial_file,
         "vars_file": vars_file,
         "root": tmp_path,
+        "clients": _clients,
     }
 
 
-def _extra_vars(runner):
-    cmd = runner.command_containing("--extra-vars")
-    assert cmd is not None, "ansible-playbook was never invoked"
-    return json.loads(cmd[cmd.index("--extra-vars") + 1])
-
-
 class TestTeardownHappyPath:
-    def test_ansible_playbook_is_what_deletes_the_cluster(self, staged):
+    def test_confirmed_delete_exits_zero(self, staged):
         with pytest.raises(SystemExit) as exc:
             staged["mod"].main()
         assert exc.value.code == 0
-        cmd = staged["runner"].command_containing("ansible-playbook")
-        assert cmd is not None
-        assert cmd[-1].endswith("delete_pcluster.yml") or any(
-            c.endswith("delete_pcluster.yml") for c in cmd
-        )
+        assert staged["pc_lib"].delete_calls == [(CLUSTER, "us-east-1")]
 
     def test_serial_and_vars_files_removed_after_success(self, staged):
         with pytest.raises(SystemExit):
@@ -92,94 +241,96 @@ class TestTeardownHappyPath:
         assert not staged["serial_file"].exists()
         assert not staged["vars_file"].exists()
 
-    def test_serial_number_is_passed_to_the_playbook(self, staged):
-        with pytest.raises(SystemExit):
+    def test_a_missing_cluster_stack_still_cleans_up_artifacts(self, staged, monkeypatch, capsys):
+        """A pre-delete describe-cluster that raises NotFoundException means
+        the stack is already gone; teardown must still run to clear IAM, S3,
+        and local state, and must still exit 0."""
+        pc_lib = _FakePcLib(describe_sequence=[NotFoundException("gone")])
+        monkeypatch.setitem(sys.modules, "pcluster.lib", pc_lib)
+        with pytest.raises(SystemExit) as exc:
             staged["mod"].main()
-        assert _extra_vars(staged["runner"])["cluster_serial_number"] == SERIAL
+        assert exc.value.code == 0
+        assert "was not found" in capsys.readouterr().out
+        assert not staged["serial_file"].exists()
+        assert not staged["vars_file"].exists()
 
-    def test_delete_s3_bucketname_defaults_to_true(self, staged):
-        with pytest.raises(SystemExit):
+    def test_a_bad_request_on_delete_is_tolerated(self, staged, monkeypatch):
+        """delete_cluster raising BadRequestException (e.g. an already
+        mid-delete stack) must not abort teardown -- the wait loop is what
+        actually determines the outcome."""
+        pc_lib = _FakePcLib(delete_raises=BadRequestException("already deleting"))
+        monkeypatch.setitem(sys.modules, "pcluster.lib", pc_lib)
+        with pytest.raises(SystemExit) as exc:
             staged["mod"].main()
-        assert _extra_vars(staged["runner"])["delete_s3_bucketname"] == "true"
-
-    def test_delete_s3_bucketname_false_reaches_the_playbook(self, staged, monkeypatch):
-        monkeypatch.setattr(
-            sys, "argv",
-            ["kill_pcluster.py", "-A", AZ, "-N", CLUSTER, "-O", OWNER,
-             "--delete_s3_bucketname=false"],
-        )
-        with pytest.raises(SystemExit):
-            staged["mod"].main()
-        assert _extra_vars(staged["runner"])["delete_s3_bucketname"] == "false"
-
-    def test_debug_mode_raises_ansible_verbosity(self, staged, monkeypatch):
-        monkeypatch.setattr(
-            sys, "argv",
-            ["kill_pcluster.py", "-A", AZ, "-N", CLUSTER, "-O", OWNER, "-D", "true"],
-        )
-        with pytest.raises(SystemExit):
-            staged["mod"].main()
-        cmd = staged["runner"].command_containing("ansible-playbook")
-        assert "-vvv" in cmd
-        assert _extra_vars(staged["runner"])["debug_mode"] == "true"
+        assert exc.value.code == 0
 
 
 class TestTeardownFailureLeavesStateForRetry:
-    """A failed playbook means AWS resources may still exist. Deleting the
-    serial and vars files anyway would strand them: kill_pcluster.py requires
-    both to run at all, so the operator would have no way to retry."""
-
-    def test_state_files_survive_a_failed_playbook(self, staged, monkeypatch):
-        runner = RecordingRun(rc_by_command={"ansible-playbook": 2})
-        monkeypatch.setattr(staged["mod"].subprocess, "run", runner)
+    def test_delete_failed_preserves_state_and_exits_nonzero(self, staged, monkeypatch, capsys):
+        pc_lib = _FakePcLib(describe_sequence=[{"clusterStatus": "DELETE_FAILED"}])
+        monkeypatch.setitem(sys.modules, "pcluster.lib", pc_lib)
         with pytest.raises(SystemExit) as exc:
             staged["mod"].main()
-        assert exc.value.code == 2
+        assert exc.value.code == 1
         assert staged["serial_file"].exists()
         assert staged["vars_file"].exists()
+        out = capsys.readouterr().out
+        assert "DELETE_FAILED" in out
 
-    def test_failure_exit_code_is_the_playbook_exit_code(self, staged, monkeypatch):
-        runner = RecordingRun(rc_by_command={"ansible-playbook": 13})
-        monkeypatch.setattr(staged["mod"].subprocess, "run", runner)
+    def test_unconfirmed_delete_preserves_state_and_exits_nonzero(self, staged, monkeypatch, capsys):
+        """Every describe-cluster call answers DELETE_IN_PROGRESS forever --
+        the wait loop exhausts its retries without a terminal state, exactly
+        the wait-timeout case CLAUDE.md documents. Runs in well under a
+        second because time.sleep is stubbed in the staged fixture."""
+        pc_lib = _FakePcLib(describe_sequence=[{"clusterStatus": "DELETE_IN_PROGRESS"}])
+        monkeypatch.setitem(sys.modules, "pcluster.lib", pc_lib)
         with pytest.raises(SystemExit) as exc:
             staged["mod"].main()
-        assert exc.value.code == 13
-
-    def test_failure_warns_that_aws_resources_may_remain(self, staged, monkeypatch, capsys):
-        runner = RecordingRun(rc_by_command={"ansible-playbook": 1})
-        monkeypatch.setattr(staged["mod"].subprocess, "run", runner)
-        with pytest.raises(SystemExit):
-            staged["mod"].main()
+        assert exc.value.code == 1
+        assert staged["serial_file"].exists()
+        assert staged["vars_file"].exists()
         out = capsys.readouterr().out
-        assert "may not have been deleted" in out
-        assert "CloudFormation" in out
+        assert "was never confirmed" in out
+
+    def test_orphaned_resources_exit_nonzero(self, staged, monkeypatch, capsys):
+        """The stack itself deletes cleanly (cf_delete_confirmed=True, so
+        the credential steps -- including removing cluster_data_dir, which
+        holds the serial file -- do run), but one cleanup step fails. The
+        vars file lives outside cluster_data_dir and survives; the serial
+        file does not, since it was inside the directory the credential
+        steps already removed by the time the orphan is detected."""
+        monkeypatch.setattr(
+            staged["mod"].boto3, "client",
+            lambda *a, **k: _FakeAwsClient(fail="delete_role"),
+        )
+        with pytest.raises(SystemExit) as exc:
+            staged["mod"].main()
+        assert exc.value.code == 1
+        assert not staged["serial_file"].exists()
+        assert staged["vars_file"].exists()
+        out = capsys.readouterr().out
+        assert "resource(s)" in out
 
 
 class TestTeardownPreflight:
-    def test_missing_serial_file_aborts_before_ansible(self, staged):
+    def test_missing_serial_file_aborts_before_any_aws_call(self, staged):
         staged["serial_file"].unlink()
         with pytest.raises(SystemExit) as exc:
             staged["mod"].main()
         assert exc.value.code == 1
-        assert staged["runner"].command_containing("ansible-playbook") is None
+        assert staged["pc_lib"].delete_calls == []
 
-    def test_missing_vars_file_aborts_before_ansible(self, staged):
+    def test_missing_vars_file_aborts_before_any_aws_call(self, staged):
         staged["vars_file"].unlink()
         with pytest.raises(SystemExit) as exc:
             staged["mod"].main()
         assert exc.value.code == 1
-        assert staged["runner"].command_containing("ansible-playbook") is None
+        assert staged["pc_lib"].delete_calls == []
 
-    def test_invalid_cluster_name_aborts_before_ansible(self, staged, monkeypatch):
-        """The serial/vars files are staged under the traversal name too, so the
-        preflight file check cannot stand in for validation — without
-        _validate_cluster_name this run would reach ansible-playbook with a
-        path-traversal cluster name. Asserting on the validator's own message is
-        what pins it; a bare SystemExit passes either way."""
+    def test_invalid_cluster_name_aborts_before_any_aws_call(self, staged, monkeypatch):
         evil = "../../etc/passwd"
         serial_dir = staged["root"] / "active_clusters" / evil
         serial_dir.mkdir(parents=True, exist_ok=True)
-        (serial_dir / f"{evil}.serial").parent.mkdir(parents=True, exist_ok=True)
         (staged["root"] / "active_clusters" / f"{evil}.serial").write_text(SERIAL)
         vars_dir = staged["root"] / "src" / "vars_files"
         (vars_dir / f"{evil}.yml").parent.mkdir(parents=True, exist_ok=True)
@@ -192,9 +343,9 @@ class TestTeardownPreflight:
         with pytest.raises(SystemExit) as exc:
             staged["mod"].main()
         assert "cluster_name must start with a lowercase letter" in str(exc.value.code)
-        assert staged["runner"].command_containing("ansible-playbook") is None
+        assert staged["pc_lib"].delete_calls == []
 
-    def test_invalid_cluster_owner_aborts_before_ansible(self, staged, monkeypatch):
+    def test_invalid_cluster_owner_aborts_before_any_aws_call(self, staged, monkeypatch):
         monkeypatch.setattr(
             sys, "argv",
             ["kill_pcluster.py", "-A", AZ, "-N", CLUSTER, "-O", "Bad Owner!"],
@@ -202,47 +353,33 @@ class TestTeardownPreflight:
         with pytest.raises(SystemExit) as exc:
             staged["mod"].main()
         assert "cluster_owner must contain only lowercase" in str(exc.value.code)
-        assert staged["runner"].command_containing("ansible-playbook") is None
+        assert staged["pc_lib"].delete_calls == []
 
-    def test_unknown_az_aborts_before_ansible(self, staged, monkeypatch):
-        class _Empty:
-            def describe_availability_zones(self, ZoneNames):
-                return {"AvailabilityZones": []}
-
-        monkeypatch.setattr(staged["mod"].boto3, "client", lambda *a, **k: _Empty())
+    def test_unknown_az_aborts_before_any_aws_call(self, staged, monkeypatch):
+        monkeypatch.setattr(
+            staged["mod"].boto3, "client",
+            lambda *a, **k: types.SimpleNamespace(
+                describe_availability_zones=lambda ZoneNames: {"AvailabilityZones": []}
+            ),
+        )
         with pytest.raises(SystemExit) as exc:
             staged["mod"].main()
         assert exc.value.code == 1
-        assert staged["runner"].command_containing("ansible-playbook") is None
-
-    def test_a_missing_cluster_stack_still_cleans_up_artifacts(self, staged, monkeypatch, capsys):
-        """describe-cluster returning nonzero means the stack is already gone;
-        teardown must still run to clear IAM, S3, and local state."""
-        runner = RecordingRun(rc_by_command={"describe-cluster": 1})
-        monkeypatch.setattr(staged["mod"].subprocess, "run", runner)
-        with pytest.raises(SystemExit) as exc:
-            staged["mod"].main()
-        assert exc.value.code == 0
-        assert "was not found" in capsys.readouterr().out
-        assert runner.command_containing("ansible-playbook") is not None
+        assert staged["pc_lib"].delete_calls == []
 
 
 class TestTeardownAbortWindow:
     def test_operator_is_given_an_abort_window_before_deletion(self, staged, monkeypatch):
-        """Ctrl-C during the window must cancel the deletion, so the window has
-        to open before subprocess.run reaches ansible-playbook, not after."""
         seen = {}
 
         def _abort(sleep_time, *args, **kwargs):
             seen["sleep_time"] = sleep_time
-            seen["ansible_ran"] = (
-                staged["runner"].command_containing("ansible-playbook") is not None
-            )
+            seen["delete_ran"] = staged["pc_lib"].delete_calls != []
 
         monkeypatch.setattr(staged["mod"], "ctrlC_Abort", _abort)
         with pytest.raises(SystemExit):
             staged["mod"].main()
-        assert seen["ansible_ran"] is False
+        assert seen["delete_ran"] is False
         assert seen["sleep_time"] == 5
 
     def test_debug_mode_lengthens_the_abort_window(self, staged, monkeypatch):
@@ -260,8 +397,6 @@ class TestTeardownAbortWindow:
         assert seen["sleep_time"] == 15
 
     def test_abort_window_is_passed_no_cleanup_targets(self, staged, monkeypatch):
-        """Ctrl-C in the abort window must not destroy IAM resources or state
-        files — Ansible has not run yet, so there is nothing to clean up."""
         seen = {}
         monkeypatch.setattr(
             staged["mod"], "ctrlC_Abort",
@@ -276,39 +411,94 @@ class TestTeardownAbortWindow:
 
 
 class TestClusterLockDuringTeardown:
-    """The teardown lock (active_clusters/<cluster>/.build.lock -- shared name
-    and mechanism with make_pcluster.py's build lock, since either can hold
-    it) must be released on every exit path, and a lock already held by a
-    concurrent build must stop teardown before it touches AWS at all --
-    exactly the direction that corrupted the osiris build."""
+    """Since Workstream 4's first slice, core_delete_cluster locks via the
+    S3-backed distributed lock (pcluster_core.s3_acquire_cluster_lock), not
+    the old local mkdir lock -- the .build.lock path this class used to
+    check no longer exists at all. staged["clients"]["s3"] is the single
+    fake S3 client every boto3.client("s3", ...) call in main() shares (see
+    the staged fixture's own comment on why), so it is both where
+    core_delete_cluster's own lock lands and the handle these tests use to
+    pre-populate or inspect it."""
 
-    def _lock_path(self, staged):
-        return os.path.join(str(staged["root"]), "active_clusters", CLUSTER, ".build.lock")
+    def _locks_bucket(self):
+        return pcluster_core._derive_locks_bucket(aws_account_id="123456789012", region="us-east-1")
 
     def test_lock_is_released_after_a_successful_teardown(self, staged):
         with pytest.raises(SystemExit) as exc:
             staged["mod"].main()
         assert exc.value.code == 0
-        assert not os.path.exists(self._lock_path(staged))
+        s3 = staged["clients"]["s3"]
+        assert pcluster_core._lock_key(CLUSTER) not in s3._objects
 
-    def test_lock_is_released_after_a_failed_playbook(self, staged, monkeypatch):
-        runner = RecordingRun(rc_by_command={"ansible-playbook": 2})
-        monkeypatch.setattr(staged["mod"].subprocess, "run", runner)
+    def test_lock_is_released_after_a_failed_delete(self, staged, monkeypatch):
+        pc_lib = _FakePcLib(describe_sequence=[{"clusterStatus": "DELETE_FAILED"}])
+        monkeypatch.setitem(sys.modules, "pcluster.lib", pc_lib)
         with pytest.raises(SystemExit):
             staged["mod"].main()
-        assert not os.path.exists(self._lock_path(staged))
+        s3 = staged["clients"]["s3"]
+        assert pcluster_core._lock_key(CLUSTER) not in s3._objects
 
-    def test_a_lock_already_held_by_a_build_aborts_before_ansible(self, staged):
-        """The osiris scenario, from teardown's side this time: a build is in
-        progress (holds the lock) and a concurrent kill_pcluster.py must fail
-        fast rather than delete IAM/vars-file state out from under it."""
-        from pcluster_core import _acquire_cluster_lock
-
-        cluster_dir = os.path.join(str(staged["root"]), "active_clusters", CLUSTER)
-        _acquire_cluster_lock(cluster_dir, "make_pcluster.py -N killme (other process)")
+    def test_a_lock_already_held_by_a_build_aborts_before_any_aws_call(self, staged):
+        s3 = staged["mod"].boto3.client("s3", region_name="us-east-1")
+        pcluster_core.s3_acquire_cluster_lock(
+            s3, locks_bucketname=self._locks_bucket(), cluster_name=CLUSTER,
+            command="make_pcluster.py -N killme (other process)",
+        )
         with pytest.raises(SystemExit) as exc:
             staged["mod"].main()
         assert "already running" in str(exc.value.code)
-        assert staged["runner"].command_containing("ansible-playbook") is None
+        assert staged["pc_lib"].delete_calls == []
         assert staged["serial_file"].exists(), "must not delete state while another process holds the lock"
         assert staged["vars_file"].exists()
+
+
+class TestTeardownWaitFalse:
+    """Workstream 4: core_delete_cluster gained a `wait` parameter
+    (default True, so the CLI shim is unchanged). wait=False initiates
+    the stack delete and returns without waiting -- for a future MCP tool
+    wrapper, since a single tool call cannot block for a 5-10 minute
+    teardown."""
+
+    def _run(self, staged):
+        return pcluster_core.core_delete_cluster(
+            cluster_name=CLUSTER, cluster_owner=OWNER, region="us-east-1",
+            repo_root=str(staged["root"]), delete_s3_bucketname="true",
+            debug_mode=False, wait=False,
+        )
+
+    def test_delete_is_still_initiated(self, staged):
+        self._run(staged)
+        assert staged["pc_lib"].delete_calls == [(CLUSTER, "us-east-1")]
+
+    def test_local_state_is_preserved(self, staged):
+        """The serial and vars files are what a follow-up run needs to
+        finish teardown -- destroying them here would strand a
+        half-deleted cluster with no way to complete the job."""
+        self._run(staged)
+        assert staged["serial_file"].exists()
+        assert staged["vars_file"].exists()
+
+    def test_it_reports_success_because_the_requested_action_succeeded(self, staged):
+        """The caller asked to initiate a delete without waiting, and that
+        is what happened. Reporting failure would make an MCP caller retry
+        a delete that is already correctly in flight."""
+        result = self._run(staged)
+        assert result.success is True
+        assert result.exit_code == 0
+
+    def test_the_operator_is_told_nothing_was_cleaned_up(self, staged, capsys):
+        """The dangerous misreading of a success here is 'teardown done'.
+        The message has to say plainly that it is not."""
+        self._run(staged)
+        out = capsys.readouterr().out
+        assert "NOT waited on" in out
+        assert "Nothing has been cleaned up yet" in out
+        assert "kill_pcluster.py" in out
+
+    def test_wait_defaults_to_true(self, staged):
+        """The CLI shim passes no wait at all, so the default is what
+        preserves today's blocking teardown."""
+        import inspect
+
+        sig = inspect.signature(pcluster_core.core_delete_cluster)
+        assert sig.parameters["wait"].default is True

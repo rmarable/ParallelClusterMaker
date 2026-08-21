@@ -9,7 +9,9 @@ from datetime import date, timezone
 import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src"))
 import cost_pcluster as cp
+import pcluster_core
 
 try:
     from botocore.exceptions import ClientError, BotoCoreError
@@ -53,14 +55,14 @@ class TestSafe:
 class TestDateRange:
     def test_end_is_utc_today(self, monkeypatch):
         fixed = date(2026, 7, 24)
-        monkeypatch.setattr(cp, "_utc_today", lambda: fixed)
+        monkeypatch.setattr(pcluster_core, "_utc_today", lambda: fixed)
         start, end = cp._date_range(30)
         assert end == "2026-07-24"
         assert start == "2026-06-24"
 
     def test_days_1(self, monkeypatch):
         fixed = date(2026, 7, 24)
-        monkeypatch.setattr(cp, "_utc_today", lambda: fixed)
+        monkeypatch.setattr(pcluster_core, "_utc_today", lambda: fixed)
         start, end = cp._date_range(1)
         assert start == "2026-07-23"
         assert end == "2026-07-24"
@@ -206,3 +208,145 @@ class TestFormatTable:
         cp._format_table(rows, "2026-06-24 – 2026-07-24")
         out = capsys.readouterr().out
         assert "unavailable" in out
+
+
+# ---------------------------------------------------------------------------
+# ClusterRecord.from_dict / .unknown
+# ---------------------------------------------------------------------------
+
+_FULL_REC_DICT = {
+    "cluster_name": "mycluster",
+    "cluster_owner": "rmarable",
+    "serial": "202608200001",
+    "region": "us-east-1",
+    "headnode_instance_type": "c5.xlarge",
+    "enable_loginnode": "false",
+    "loginnode_instance_type": "",
+    "loginnode_count": 0,
+    "cpu_instance_types": ["c5.xlarge"],
+    "gpu_instance_types": [],
+    "enable_cpu_queue": "true",
+    "enable_gpu_queue": "false",
+    "initial_cpu_queue_size": 2,
+    "max_cpu_queue_size": 8,
+    "initial_gpu_queue_size": 0,
+    "max_gpu_queue_size": 0,
+    "cluster_type": "ondemand",
+    "deployment_date": "2026-08-20",
+    "ssh_keypair": "/home/rmarable/.ssh/mycluster.pem",
+    "ec2_keypair": "mycluster-keypair",
+    "ec2_user": "ubuntu",
+    "s3_bucketname": "parallelclustermaker-202608200001",
+    "enable_monitoring": "false",
+}
+
+
+class TestClusterRecord:
+    def test_from_dict_matches_read_cluster_record_shape(self):
+        rec = pcluster_core.ClusterRecord.from_dict(_FULL_REC_DICT)
+        assert rec.cluster_name == "mycluster"
+        assert rec.cluster_owner == "rmarable"
+        assert rec.region == "us-east-1"
+        assert rec.cpu_instance_types == ["c5.xlarge"]
+
+    def test_from_dict_is_frozen(self):
+        rec = pcluster_core.ClusterRecord.from_dict(_FULL_REC_DICT)
+        with pytest.raises(Exception):
+            rec.cluster_owner = "someone-else"
+
+    def test_unknown_sets_owner_and_region_unknown(self):
+        rec = pcluster_core.ClusterRecord.unknown("orphaned-cluster")
+        assert rec.cluster_name == "orphaned-cluster"
+        assert rec.cluster_owner == "unknown"
+        assert rec.region == "unknown"
+
+
+# ---------------------------------------------------------------------------
+# core_get_cost_report
+# ---------------------------------------------------------------------------
+
+def _records(*names_owners):
+    return [
+        pcluster_core.ClusterRecord.from_dict(
+            {**_FULL_REC_DICT, "cluster_name": name, "cluster_owner": owner}
+        )
+        for name, owner in names_owners
+    ]
+
+
+class _FakeCEClient:
+    """Fake Cost Explorer client: always reports the tag active, and answers
+    get_cost_and_usage from a fixed list of (amounts, next_token) pages."""
+
+    def __init__(self, pages=()):
+        self._pages = list(pages)
+        self._idx = 0
+
+    def list_cost_allocation_tags(self, **kwargs):
+        return {"CostAllocationTags": [{"TagKey": "ClusterID", "Status": "Active"}]}
+
+    def get_cost_and_usage(self, **kwargs):
+        amounts, token = self._pages[self._idx]
+        self._idx += 1
+        resp = {
+            "ResultsByTime": [
+                {"Total": {"UnblendedCost": {"Amount": str(a)}}} for a in amounts
+            ]
+        }
+        if token:
+            resp["NextPageToken"] = token
+        return resp
+
+
+class TestCoreGetCostReport:
+    def test_days_out_of_range_raises(self):
+        with pytest.raises(pcluster_core.PClusterMakerError, match="--days"):
+            pcluster_core.core_get_cost_report(cluster_records=[], days=0)
+        with pytest.raises(pcluster_core.PClusterMakerError, match="--days"):
+            pcluster_core.core_get_cost_report(cluster_records=[], days=366)
+
+    def test_days_boundaries_accepted(self, monkeypatch):
+        monkeypatch.setattr(pcluster_core.boto3, "client", lambda *a, **k: _FakeCEClient())
+        # boundary values must not raise
+        pcluster_core.core_get_cost_report(cluster_records=[], days=1)
+        pcluster_core.core_get_cost_report(cluster_records=[], days=365)
+
+    def test_returns_one_record_per_cluster(self, monkeypatch):
+        monkeypatch.setattr(
+            pcluster_core.boto3,
+            "client",
+            lambda *a, **k: _FakeCEClient([([12.34], None)]),
+        )
+        records = _records(("mycluster", "rmarable"))
+        result = pcluster_core.core_get_cost_report(cluster_records=records, days=30)
+        assert result.tag_activated is True
+        assert len(result.records) == 1
+        assert result.records[0].cluster_name == "mycluster"
+        assert result.records[0].owner == "rmarable"
+        assert abs(result.records[0].cost_usd - 12.34) < 1e-6
+        assert result.records[0].error is None
+
+    def test_owner_filter_excludes_non_matching_clusters(self, monkeypatch):
+        monkeypatch.setattr(
+            pcluster_core.boto3,
+            "client",
+            lambda *a, **k: _FakeCEClient([([1.00], None), ([2.00], None)]),
+        )
+        records = _records(("a", "rmarable"), ("b", "someone-else"))
+        result = pcluster_core.core_get_cost_report(
+            cluster_records=records, owner_filter="rmarable", days=30
+        )
+        assert len(result.records) == 1
+        assert result.records[0].cluster_name == "a"
+
+    def test_default_days_is_30(self, monkeypatch):
+        captured = {}
+
+        def _fake_date_range(days):
+            captured["days"] = days
+            return "2026-07-21", "2026-08-20"
+
+        monkeypatch.setattr(pcluster_core, "_date_range", _fake_date_range)
+        monkeypatch.setattr(pcluster_core.boto3, "client", lambda *a, **k: _FakeCEClient())
+        pcluster_core.core_get_cost_report(cluster_records=[])
+        assert captured["days"] == 30

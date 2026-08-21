@@ -9,6 +9,34 @@ import pytest
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(REPO_ROOT, "src"))
 
+import pcluster_core
+
+_FULL_REC_DICT = {
+    "cluster_name": "mycluster",
+    "cluster_owner": "rmarable",
+    "serial": "202608200001",
+    "region": "us-east-1",
+    "headnode_instance_type": "c5.xlarge",
+    "enable_loginnode": "false",
+    "loginnode_instance_type": "",
+    "loginnode_count": 0,
+    "cpu_instance_types": ["c5.xlarge"],
+    "gpu_instance_types": [],
+    "enable_cpu_queue": "true",
+    "enable_gpu_queue": "false",
+    "initial_cpu_queue_size": 2,
+    "max_cpu_queue_size": 8,
+    "initial_gpu_queue_size": 0,
+    "max_gpu_queue_size": 0,
+    "cluster_type": "ondemand",
+    "deployment_date": "2026-08-20",
+    "ssh_keypair": "/tmp/mycluster.pem",
+    "ec2_keypair": "mycluster-keypair",
+    "ec2_user": "ubuntu",
+    "s3_bucketname": "my-bucket",
+    "enable_monitoring": "true",
+}
+
 
 def _load():
     import importlib.util
@@ -33,7 +61,7 @@ def _stage(tmp_path, monkeypatch, returncode):
     (script_dir / f"grafana_tunnel.{name}.sh").write_text("#!/bin/bash\nexit 0\n")
     monkeypatch.setattr(mod, "_repo_root", str(tmp_path))
     monkeypatch.setattr(
-        mod, "_read_cluster_record", lambda n, r: {"enable_monitoring": "true"}
+        mod, "_read_cluster_record", lambda n, r: dict(_FULL_REC_DICT)
     )
     monkeypatch.setattr(
         mod.subprocess, "run",
@@ -58,3 +86,88 @@ class TestTunnelExitStatus:
     def test_zero_exit_is_silent_success(self, tmp_path, monkeypatch):
         mod = _stage(tmp_path, monkeypatch, returncode=0)
         mod.main()
+
+
+# ---------------------------------------------------------------------------
+# core_manage_grafana_tunnel -- the core function grafana_tunnel.py's main()
+# now wraps, added in the Workstream 1 migration
+# (docs/parallelclustermaker-mcp-plan.md). Direct tests: main()'s own two
+# tests above only exercise the tunnel-script-failure path end to end.
+# ---------------------------------------------------------------------------
+
+
+def _record(**overrides):
+    return pcluster_core.ClusterRecord(**{**_FULL_REC_DICT, **overrides})
+
+
+class TestCoreManageGrafanaTunnel:
+    def test_monitoring_disabled_raises(self, tmp_path):
+        with pytest.raises(pcluster_core.PClusterMakerError, match="monitoring is not enabled"):
+            pcluster_core.core_manage_grafana_tunnel(
+                cluster_record=_record(enable_monitoring="false"),
+                tunnel_script_path=str(tmp_path / "nope.sh"),
+            )
+
+    def test_missing_tunnel_script_raises(self, tmp_path):
+        with pytest.raises(pcluster_core.PClusterMakerError, match="tunnel script not found"):
+            pcluster_core.core_manage_grafana_tunnel(
+                cluster_record=_record(),
+                tunnel_script_path=str(tmp_path / "nope.sh"),
+            )
+
+    def test_missing_script_checked_even_when_monitoring_enabled(self, tmp_path):
+        """Both preconditions are checked -- monitoring being enabled must not
+        short-circuit the script-existence check."""
+        with pytest.raises(pcluster_core.PClusterMakerError, match="tunnel script not found"):
+            pcluster_core.core_manage_grafana_tunnel(
+                cluster_record=_record(enable_monitoring="true"),
+                tunnel_script_path=str(tmp_path / "nope.sh"),
+            )
+
+    def test_successful_start_returns_result(self, tmp_path, monkeypatch):
+        script = tmp_path / "grafana_tunnel.mycluster.sh"
+        script.write_text("#!/bin/bash\nexit 0\n")
+        monkeypatch.setattr(
+            pcluster_core.subprocess, "run",
+            lambda *a, **k: types.SimpleNamespace(returncode=0),
+        )
+        result = pcluster_core.core_manage_grafana_tunnel(
+            cluster_record=_record(), tunnel_script_path=str(script), port=9000,
+        )
+        assert result.success is True
+        assert result.error is None
+        assert result.action == "start"
+        assert result.port == 9000
+        assert result.cluster_name == "mycluster"
+
+    def test_stop_action_is_passed_through(self, tmp_path, monkeypatch):
+        script = tmp_path / "grafana_tunnel.mycluster.sh"
+        script.write_text("#!/bin/bash\nexit 0\n")
+        seen = {}
+
+        def _fake_run(cmd, **k):
+            seen["cmd"] = cmd
+            return types.SimpleNamespace(returncode=0)
+
+        monkeypatch.setattr(pcluster_core.subprocess, "run", _fake_run)
+        result = pcluster_core.core_manage_grafana_tunnel(
+            cluster_record=_record(), tunnel_script_path=str(script), stop=True,
+        )
+        assert result.action == "stop"
+        assert seen["cmd"][-1] == "stop"
+
+    def test_failed_script_returns_result_not_raise(self, tmp_path, monkeypatch):
+        """A tunnel script that runs but fails to bind the port is a
+        TunnelResult with success=False, not a raised exception -- it's not a
+        precondition failure, it's the operation's own outcome."""
+        script = tmp_path / "grafana_tunnel.mycluster.sh"
+        script.write_text("#!/bin/bash\nexit 1\n")
+        monkeypatch.setattr(
+            pcluster_core.subprocess, "run",
+            lambda *a, **k: types.SimpleNamespace(returncode=1),
+        )
+        result = pcluster_core.core_manage_grafana_tunnel(
+            cluster_record=_record(), tunnel_script_path=str(script),
+        )
+        assert result.success is False
+        assert "exit 1" in result.error

@@ -207,18 +207,304 @@ class TestRemoveOldKeyScript:
 
 
 class TestRotateEntryPointUsesTheSharedScripts:
-    def test_rotate_cluster_key_does_not_carry_its_own_copies(self):
-        """The scripts were duplicated inside the entry point once; a copy there
-        is invisible to every test in this file."""
+    """As of the Workstream 1 migration (docs/parallelclustermaker-mcp-plan.md),
+    the actual key-rotation orchestration -- including the calls to
+    _append_key_script/_remove_old_key_script -- lives entirely in
+    pcluster_core.core_rotate_cluster_key, not in rotate_cluster_key.py
+    itself. The risk this class originally guarded against (a duplicated
+    inline copy of either script, invisible to every test in this file) is
+    now checked one level up: core_rotate_cluster_key must call the real,
+    tested functions, and the CLI shim must delegate to core_rotate_cluster_key
+    rather than carrying its own copy of the orchestration."""
+
+    def test_core_rotate_cluster_key_does_not_carry_its_own_copies(self):
         path = os.path.join(
             os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-            "rotate_cluster_key.py",
+            "src", "pcluster_core.py",
         )
         with open(path) as fh:
             source = fh.read()
         assert "_append_key_script()" in source
         assert "_remove_old_key_script()" in source
         assert "authorized_keys > " not in source, (
-            "rotate_cluster_key.py appears to inline an authorized_keys filter "
-            "again instead of calling the tested pcluster_core version"
+            "pcluster_core.py appears to inline an authorized_keys filter "
+            "again instead of calling the tested _append_key_script/"
+            "_remove_old_key_script versions"
         )
+
+    def test_rotate_cluster_key_delegates_to_the_core_function(self):
+        """The CLI shim must not carry its own copy of the rotation
+        orchestration -- it should just call core_rotate_cluster_key."""
+        path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            "rotate_cluster_key.py",
+        )
+        with open(path) as fh:
+            source = fh.read()
+        assert "core_rotate_cluster_key(" in source
+        assert "_append_key_script" not in source, (
+            "rotate_cluster_key.py appears to call the shared scripts "
+            "directly again instead of going through core_rotate_cluster_key"
+        )
+        assert "authorized_keys > " not in source
+
+
+# ---------------------------------------------------------------------------
+# core_rotate_cluster_key -- the orchestration function added in the
+# Workstream 1 migration. High-consequence (real key material, real AWS
+# mutations in the original script), so covered more thoroughly than most
+# core functions in this series: every raise path, the two non-fatal
+# warning-only failure modes, and the full happy-path call sequence.
+# ---------------------------------------------------------------------------
+
+import types
+
+import pcluster_core
+from pcluster_core import ClusterRecord, PClusterMakerError, core_rotate_cluster_key
+
+_RECORD_KWARGS = {
+    "cluster_name": "keycluster",
+    "cluster_owner": "rmarable",
+    "serial": "202608200001",
+    "region": "us-east-1",
+    "headnode_instance_type": "c5.xlarge",
+    "enable_loginnode": "false",
+    "loginnode_instance_type": "",
+    "loginnode_count": 0,
+    "cpu_instance_types": ["c5.xlarge"],
+    "gpu_instance_types": [],
+    "enable_cpu_queue": "true",
+    "enable_gpu_queue": "false",
+    "initial_cpu_queue_size": 2,
+    "max_cpu_queue_size": 8,
+    "initial_gpu_queue_size": 0,
+    "max_gpu_queue_size": 0,
+    "cluster_type": "ondemand",
+    "deployment_date": "2026-08-20",
+    "ssh_keypair": "",
+    "ec2_keypair": "keycluster-keypair",
+    "ec2_user": "ubuntu",
+    "s3_bucketname": "my-bucket",
+    "enable_monitoring": "false",
+}
+
+
+def _record(**overrides):
+    return ClusterRecord(**{**_RECORD_KWARGS, **overrides})
+
+
+class _FakeEc2:
+    def __init__(self, head_ip="1.2.3.4", describe_raises=None):
+        self.head_ip = head_ip
+        self.describe_raises = describe_raises
+        self.import_calls = []
+        self.delete_calls = []
+        self.duplicate_once_for = None  # keypair name that fails once with Duplicate
+
+    def describe_instances(self, **kwargs):
+        if self.describe_raises:
+            raise self.describe_raises
+        if not self.head_ip:
+            return {"Reservations": []}
+        return {"Reservations": [{"Instances": [{"PublicIpAddress": self.head_ip}]}]}
+
+    def import_key_pair(self, KeyName, PublicKeyMaterial):
+        self.import_calls.append(KeyName)
+        if KeyName == self.duplicate_once_for and self.import_calls.count(KeyName) == 1:
+            from botocore.exceptions import ClientError
+            raise ClientError(
+                {"Error": {"Code": "InvalidKeyPair.Duplicate", "Message": "dup"}}, "ImportKeyPair"
+            )
+
+    def delete_key_pair(self, KeyName):
+        self.delete_calls.append(KeyName)
+
+
+class _FakeSecretsManager:
+    def __init__(self):
+        self.put_calls = []
+
+    def put_secret_value(self, SecretId, SecretString):
+        self.put_calls.append((SecretId, SecretString))
+
+
+class _FakeRotationSubprocess:
+    """Dispatches subprocess.run calls by argv shape and call order. Real
+    ssh-keygen keypair generation is faked by writing placeholder files to
+    the -f path, since core_rotate_cluster_key opens and reads them back.
+    Add/remove authorized_keys steps are distinguished by order (add always
+    precedes the verify step, remove always follows it), not content --
+    both pass an opaque shell script as the remote command."""
+
+    def __init__(self, old_pub_key="ssh-ed25519 OLDKEY old@host",
+                 new_pub_key="ssh-ed25519 NEWKEY new@host",
+                 verify_fails=False, remove_fails=False):
+        self.old_pub_key = old_pub_key
+        self.new_pub_key = new_pub_key
+        self.verify_fails = verify_fails
+        self.remove_fails = remove_fails
+        self.calls = []
+        self._verify_seen = False
+
+    def __call__(self, args, **kwargs):
+        self.calls.append(list(args))
+
+        if args[0] == "which":
+            return types.SimpleNamespace(returncode=0)
+
+        if args[:2] == ["ssh-keygen", "-y"]:
+            return types.SimpleNamespace(returncode=0, stdout=self.old_pub_key + "\n", stderr="")
+
+        if args[:3] == ["ssh-keygen", "-t", "ed25519"]:
+            key_path = args[args.index("-f") + 1]
+            with open(key_path, "w") as f:
+                f.write("FAKE PRIVATE KEY\n")
+            with open(key_path + ".pub", "w") as f:
+                f.write(self.new_pub_key + "\n")
+            return types.SimpleNamespace(returncode=0)
+
+        if args[0] == "ssh":
+            remote_cmd = args[-1]
+            if remote_cmd == "true":
+                self._verify_seen = True
+                if self.verify_fails:
+                    raise subprocess.CalledProcessError(255, args)
+                return types.SimpleNamespace(returncode=0)
+            # add or remove -- distinguished by order
+            if not self._verify_seen:
+                return types.SimpleNamespace(returncode=0)  # add
+            if self.remove_fails:
+                raise subprocess.CalledProcessError(1, args)
+            return types.SimpleNamespace(returncode=0)  # remove
+
+        raise AssertionError(f"unexpected subprocess call: {args}")
+
+
+def _stage(monkeypatch, ec2=None, sm=None, sub=None):
+    ec2 = ec2 or _FakeEc2()
+    sm = sm or _FakeSecretsManager()
+    sub = sub if sub is not None else _FakeRotationSubprocess()
+    monkeypatch.setattr(pcluster_core.boto3, "client", lambda service, **kw: {"ec2": ec2, "secretsmanager": sm}[service])
+    monkeypatch.setattr(pcluster_core.subprocess, "run", sub)
+    return ec2, sm, sub
+
+
+class TestCoreRotateClusterKey:
+    def test_missing_serial_raises(self, monkeypatch):
+        _stage(monkeypatch)
+        with pytest.raises(PClusterMakerError, match="cluster_serial_number or ec2_keypair"):
+            core_rotate_cluster_key(cluster_record=_record(serial=""), region="us-east-1")
+
+    def test_missing_ec2_keypair_raises(self, monkeypatch):
+        _stage(monkeypatch)
+        with pytest.raises(PClusterMakerError, match="cluster_serial_number or ec2_keypair"):
+            core_rotate_cluster_key(cluster_record=_record(ec2_keypair=""), region="us-east-1")
+
+    def test_describe_instances_failure_raises(self, monkeypatch):
+        from botocore.exceptions import ClientError
+        _stage(monkeypatch, ec2=_FakeEc2(describe_raises=ClientError(
+            {"Error": {"Code": "AccessDenied", "Message": "no"}}, "DescribeInstances"
+        )))
+        with pytest.raises(PClusterMakerError, match="Could not describe EC2 instances"):
+            core_rotate_cluster_key(cluster_record=_record(), region="us-east-1")
+
+    def test_no_running_head_node_raises(self, monkeypatch):
+        _stage(monkeypatch, ec2=_FakeEc2(head_ip=""))
+        with pytest.raises(PClusterMakerError, match="No running head node"):
+            core_rotate_cluster_key(cluster_record=_record(), region="us-east-1")
+
+    def test_dry_run_makes_no_mutations(self, monkeypatch):
+        ec2, sm, sub = _stage(monkeypatch)
+        result = core_rotate_cluster_key(cluster_record=_record(), region="us-east-1", dry_run=True)
+        assert result.dry_run is True
+        assert ec2.import_calls == []
+        assert ec2.delete_calls == []
+        assert sm.put_calls == []
+
+    def test_new_key_auth_failure_raises_and_touches_no_aws_resources(self, monkeypatch):
+        ec2, sm, sub = _stage(monkeypatch, sub=_FakeRotationSubprocess(verify_fails=True))
+        with pytest.raises(PClusterMakerError, match="new key failed to authenticate"):
+            core_rotate_cluster_key(cluster_record=_record(), region="us-east-1")
+        assert ec2.import_calls == []
+        assert sm.put_calls == []
+
+    def test_remove_old_key_failure_raises_with_no_aws_changes_message(self, monkeypatch):
+        ec2, sm, sub = _stage(
+            monkeypatch,
+            ec2=_FakeEc2(),
+            sub=_FakeRotationSubprocess(remove_fails=True),
+        )
+        # Need an existing ssh_keypair file so old_pub_key is captured, or
+        # the remove step never runs at all.
+        with pytest.raises(PClusterMakerError, match="could not safely remove the old key"):
+            core_rotate_cluster_key(
+                cluster_record=_record(ssh_keypair=__file__),  # any real file
+                region="us-east-1",
+            )
+        assert ec2.import_calls == []
+        assert sm.put_calls == []
+
+    def test_happy_path_full_sequence(self, monkeypatch):
+        ec2, sm, sub = _stage(monkeypatch)
+        result = core_rotate_cluster_key(cluster_record=_record(), region="us-east-1")
+        assert result.dry_run is False
+        assert result.cluster_name == "keycluster"
+        assert result.head_ip == "1.2.3.4"
+        assert result.old_keypair_deleted is True
+        # No ssh_keypair set in the default record -> nothing to overwrite locally.
+        assert result.local_key_path_updated is False
+        assert ec2.import_calls == ["keycluster-keypair-rotated", "keycluster-keypair"]
+        assert ec2.delete_calls == ["keycluster-keypair", "keycluster-keypair-rotated"]
+        assert sm.put_calls[0][0] == result.secret_name
+
+    def test_local_key_write_failure_does_not_abort_rotation(self, monkeypatch, tmp_path):
+        # A directory in place of the target file makes os.open() raise OSError.
+        bad_path = tmp_path / "not_a_file"
+        bad_path.mkdir()
+        ec2, sm, sub = _stage(monkeypatch)
+        result = core_rotate_cluster_key(
+            cluster_record=_record(ssh_keypair=str(bad_path)), region="us-east-1",
+        )
+        assert result.local_key_path_updated is False
+        # Rotation still completed -- the secret was still updated.
+        assert sm.put_calls
+
+    def test_old_keypair_delete_failure_does_not_abort_rotation(self, monkeypatch):
+        from botocore.exceptions import ClientError
+
+        class _FlakyDeleteEc2(_FakeEc2):
+            def delete_key_pair(self, KeyName):
+                if KeyName == "keycluster-keypair" and "keycluster-keypair" not in self.delete_calls:
+                    self.delete_calls.append(KeyName)
+                    raise ClientError({"Error": {"Code": "Other", "Message": "boom"}}, "DeleteKeyPair")
+                super().delete_key_pair(KeyName)
+
+        ec2, sm, sub = _stage(monkeypatch, ec2=_FlakyDeleteEc2())
+        result = core_rotate_cluster_key(cluster_record=_record(), region="us-east-1")
+        assert result.old_keypair_deleted is False
+        # Rotation still completed the rename step afterward.
+        assert "keycluster-keypair" in ec2.import_calls
+
+
+class TestImportEc2Keypair:
+    def test_success_imports_once(self):
+        ec2 = _FakeEc2()
+        pcluster_core._import_ec2_keypair(ec2, "mykey", "ssh-ed25519 XXX")
+        assert ec2.import_calls == ["mykey"]
+
+    def test_duplicate_name_deletes_then_reimports(self):
+        ec2 = _FakeEc2()
+        ec2.duplicate_once_for = "mykey"
+        pcluster_core._import_ec2_keypair(ec2, "mykey", "ssh-ed25519 XXX")
+        assert ec2.import_calls == ["mykey", "mykey"]
+        assert ec2.delete_calls == ["mykey"]
+
+    def test_other_client_error_propagates(self):
+        from botocore.exceptions import ClientError
+
+        class _FailingEc2(_FakeEc2):
+            def import_key_pair(self, KeyName, PublicKeyMaterial):
+                raise ClientError({"Error": {"Code": "Other", "Message": "boom"}}, "ImportKeyPair")
+
+        with pytest.raises(ClientError):
+            pcluster_core._import_ec2_keypair(_FailingEc2(), "mykey", "ssh-ed25519 XXX")

@@ -10,7 +10,9 @@ import pytest
 
 # Import module-level — venv guard passes when running under .venv/bin/python
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src"))
 import check_pcluster as chk
+import pcluster_core
 
 
 def _proc(rc=0, stdout="", stderr=""):
@@ -23,58 +25,65 @@ def _proc(rc=0, stdout="", stderr=""):
 
 class TestCheckCfnStatus:
     def test_create_complete(self, monkeypatch):
-        payload = json.dumps({
+        monkeypatch.setattr(pcluster_core, "_describe_cluster_json",
+                            lambda c, r: {
             "clusterStatus": "CREATE_COMPLETE",
             "cloudFormationStackStatus": "CREATE_COMPLETE",
             "headNode": {"publicIpAddress": "1.2.3.4"},
         })
-        monkeypatch.setattr(subprocess, "run", lambda *a, **kw: _proc(stdout=payload))
-        ok, msg, ip = chk.check_cfn_status("mycluster", "us-east-1")
+        ok, msg, ip = chk.check_cfn_status("mycluster", "us-east-1", "pcluster")
         assert ok is True
         assert "CREATE_COMPLETE" in msg
         assert ip == "1.2.3.4"
 
     def test_non_create_complete_returns_fail(self, monkeypatch):
-        payload = json.dumps({
+        monkeypatch.setattr(pcluster_core, "_describe_cluster_json",
+                            lambda c, r: {
             "clusterStatus": "UPDATE_FAILED",
             "cloudFormationStackStatus": "UPDATE_ROLLBACK_COMPLETE",
             "headNode": {"publicIpAddress": "1.2.3.4"},
         })
-        monkeypatch.setattr(subprocess, "run", lambda *a, **kw: _proc(stdout=payload))
-        ok, msg, ip = chk.check_cfn_status("mycluster", "us-east-1")
+        ok, msg, ip = chk.check_cfn_status("mycluster", "us-east-1", "pcluster")
         assert ok is False
         assert "UPDATE_FAILED" in msg
 
     def test_private_ip_fallback(self, monkeypatch):
-        payload = json.dumps({
+        monkeypatch.setattr(pcluster_core, "_describe_cluster_json",
+                            lambda c, r: {
             "clusterStatus": "CREATE_COMPLETE",
             "cloudFormationStackStatus": "CREATE_COMPLETE",
             "headNode": {"privateIpAddress": "10.0.0.5"},
         })
-        monkeypatch.setattr(subprocess, "run", lambda *a, **kw: _proc(stdout=payload))
-        ok, msg, ip = chk.check_cfn_status("mycluster", "us-east-1")
+        ok, msg, ip = chk.check_cfn_status("mycluster", "us-east-1", "pcluster")
         assert ok is True
         assert ip == "10.0.0.5"
 
-    def test_timeout(self, monkeypatch):
-        def _raise(*a, **kw):
-            raise subprocess.TimeoutExpired("pcluster", 30)
-        monkeypatch.setattr(subprocess, "run", _raise)
-        ok, msg, ip = chk.check_cfn_status("mycluster", "us-east-1")
+    def test_a_failed_describe_is_reported_not_raised(self, monkeypatch):
+        """check_cfn_status is one section of a health report; a failure
+        here must not abort the others. The exception type changed with
+        the transport (round 48): _describe_cluster_json raises
+        PClusterMakerError where the subprocess form raised
+        TimeoutExpired/SystemExit."""
+        def _raise(c, r):
+            raise pcluster_core.PClusterMakerError("describe-cluster timed out")
+        monkeypatch.setattr(pcluster_core, "_describe_cluster_json", _raise)
+        ok, msg, ip = chk.check_cfn_status("mycluster", "us-east-1", "pcluster")
         assert ok is False
         assert "timed out" in msg
 
-    def test_nonzero_rc(self, monkeypatch):
-        monkeypatch.setattr(subprocess, "run",
-                            lambda *a, **kw: _proc(rc=1, stderr="err"))
-        ok, msg, ip = chk.check_cfn_status("mycluster", "us-east-1")
+    def test_a_describe_failure_is_reported_with_its_cause(self, monkeypatch):
+        """Renamed from test_nonzero_rc: there is no return code any more.
+        The property is unchanged -- a failed describe becomes a FAIL whose
+        message carries the underlying cause, so the operator is not left
+        with a bare "check failed"."""
+        def _raise(c, r):
+            raise pcluster_core.PClusterMakerError(
+                "describe-cluster failed for 'mycluster': AccessDeniedException"
+            )
+        monkeypatch.setattr(pcluster_core, "_describe_cluster_json", _raise)
+        ok, msg, ip = chk.check_cfn_status("mycluster", "us-east-1", "pcluster")
         assert ok is False
-        assert "rc=1" in msg
-
-
-# ---------------------------------------------------------------------------
-# check_head_ip
-# ---------------------------------------------------------------------------
+        assert "AccessDeniedException" in msg
 
 class TestCheckHeadIp:
     def test_present(self):
@@ -176,16 +185,22 @@ class TestCheckSlurmReadsTheNodeStates:
     def test_the_degradation_note_reaches_the_operator(self, monkeypatch, capsys):
         """check_slurm returning the note is only half the fix.
 
-        On the pass path main() has an `err` that is a degradation note rather
-        than a failure, and printing a bare PASS discards it -- which is
-        indistinguishable from never having read stdout at all, the defect this
-        whole class exists for. A unit test on check_slurm cannot see that: it
-        asserts on a return value main() is free to throw away.
+        core_check_cluster_health preserving the note in CheckResult.detail
+        (TestCoreCheckClusterHealth.test_slurm_pass_with_degradation_note_is_not_a_failure)
+        is the other half -- but printing a bare PASS and discarding detail
+        would be indistinguishable from never having read stdout at all, the
+        defect this whole class exists for. That's a property of
+        check_pcluster.py's own _print_report, not of the aggregation logic,
+        so it's exercised here via a report main() receives.
         """
-        _stage_main(
-            monkeypatch,
-            check_slurm=lambda *a: (True, "2 node(s) usable, 3 down/drained"),
+        report = pcluster_core.ClusterHealthReport(
+            cluster_name="mycluster",
+            checks=[
+                pcluster_core.CheckResult("Slurm", "pass", "2 node(s) usable, 3 down/drained"),
+            ],
+            healthy=True,
         )
+        _stage_main(monkeypatch, core_result=report)
         with pytest.raises(SystemExit) as exc:
             chk.main()
         out = capsys.readouterr().out
@@ -385,41 +400,231 @@ class TestCheckS3:
 
 
 # ---------------------------------------------------------------------------
-# main() aggregation
+# core_check_cluster_health -- the aggregation logic itself.
+#
+# This logic moved from check_pcluster.py's main() into pcluster_core.py as
+# part of Workstream 1's core/shim split (docs/parallelclustermaker-mcp-plan.md),
+# so it's tested against pcluster_core directly now, not through chk.main().
+# Monkeypatching chk.check_cfn_status etc. would silently stop affecting
+# anything: core_check_cluster_health resolves those names in pcluster_core's
+# own module globals, not check_pcluster's -- the same class of trap already
+# hit and fixed for _utc_today/_date_range in cost_pcluster.py's migration.
 # ---------------------------------------------------------------------------
 
-_REC = {
+_RECORD_KWARGS = {
+    "cluster_name": "mycluster",
+    "cluster_owner": "rmarable",
+    "serial": "202608200001",
     "region": "us-east-1",
+    "headnode_instance_type": "c5.xlarge",
+    "enable_loginnode": "false",
+    "loginnode_instance_type": "",
+    "loginnode_count": 0,
+    "cpu_instance_types": ["c5.xlarge"],
+    "gpu_instance_types": [],
+    "enable_cpu_queue": "true",
+    "enable_gpu_queue": "false",
+    "initial_cpu_queue_size": 2,
+    "max_cpu_queue_size": 8,
+    "initial_gpu_queue_size": 0,
+    "max_gpu_queue_size": 0,
+    "cluster_type": "ondemand",
+    "deployment_date": "2026-08-20",
     "ssh_keypair": "/tmp/mycluster.pem",
+    "ec2_keypair": "mycluster-keypair",
     "ec2_user": "ubuntu",
     "s3_bucketname": "my-bucket",
     "enable_monitoring": "false",
 }
 
 
-def _stage_main(monkeypatch, argv=("check_pcluster.py", "-N", "mycluster"), **overrides):
-    """Stub every check to pass, then let each test fail exactly one."""
-    rec = dict(_REC)
-    rec.update(overrides.pop("rec", {}))
-    monkeypatch.setattr(chk, "check_vars_file", lambda n: (True, None, rec))
-    monkeypatch.setattr(chk, "check_cfn_status",
-                        lambda n, r: (True, "status=CREATE_COMPLETE", "1.2.3.4"))
-    monkeypatch.setattr(chk, "check_head_ip", lambda ip: (True, None))
-    monkeypatch.setattr(chk, "check_ssh", lambda *a: (True, None))
-    monkeypatch.setattr(chk, "check_slurm", lambda *a: (True, None))
-    monkeypatch.setattr(chk, "check_postinstall", lambda *a: (True, None))
-    monkeypatch.setattr(chk, "check_grafana", lambda *a: (True, None))
-    monkeypatch.setattr(chk, "check_s3", lambda b, r: (True, None))
+def _record(**overrides):
+    return pcluster_core.ClusterRecord(**{**_RECORD_KWARGS, **overrides})
+
+
+def _stage_checks(monkeypatch, **overrides):
+    """Stub every leaf check to pass, then let each test fail exactly one.
+    Patches pcluster_core's own names -- the module core_check_cluster_health
+    actually resolves them against."""
+    monkeypatch.setattr(pcluster_core, "check_cfn_status",
+                        lambda n, r, b: (True, "status=CREATE_COMPLETE", "1.2.3.4"))
+    monkeypatch.setattr(pcluster_core, "check_head_ip", lambda ip: (True, None))
+    monkeypatch.setattr(pcluster_core, "check_ssh", lambda *a: (True, None))
+    monkeypatch.setattr(pcluster_core, "check_slurm", lambda *a: (True, None))
+    monkeypatch.setattr(pcluster_core, "check_postinstall", lambda *a: (True, None))
+    monkeypatch.setattr(pcluster_core, "check_grafana", lambda *a: (True, None))
+    monkeypatch.setattr(pcluster_core, "check_s3", lambda b, r: (True, None))
     for name, value in overrides.items():
-        monkeypatch.setattr(chk, name, value)
+        monkeypatch.setattr(pcluster_core, name, value)
+
+
+def _names(report):
+    return [c.name for c in report.checks]
+
+
+def _statuses(report):
+    return {c.name: c.status for c in report.checks}
+
+
+class TestCoreCheckClusterHealth:
+    """healthy/checks is the whole contract: both the CLI shim and the future
+    MCP wrapper derive everything else from it, so an off-by-one or a
+    swallowed failure would report a broken cluster as healthy."""
+
+    def test_all_checks_passing_is_healthy(self, monkeypatch):
+        _stage_checks(monkeypatch)
+        report = pcluster_core.core_check_cluster_health(
+            cluster_record=_record(), pcluster_bin="pcluster"
+        )
+        assert report.healthy is True
+        assert report.cluster_name == "mycluster"
+        assert all(c.status != "fail" for c in report.checks)
+
+    def test_one_failed_check_is_unhealthy(self, monkeypatch):
+        _stage_checks(monkeypatch, check_s3=lambda b, r: (False, "NoSuchBucket"))
+        report = pcluster_core.core_check_cluster_health(
+            cluster_record=_record(), pcluster_bin="pcluster"
+        )
+        assert report.healthy is False
+        statuses = _statuses(report)
+        assert statuses["S3 bucket: my-bucket"] == "fail"
+
+    def test_failure_count_accumulates(self, monkeypatch):
+        _stage_checks(
+            monkeypatch,
+            check_s3=lambda b, r: (False, "NoSuchBucket"),
+            check_slurm=lambda *a: (False, "sinfo failed"),
+            check_postinstall=lambda *a: (False, "marker missing"),
+        )
+        report = pcluster_core.core_check_cluster_health(
+            cluster_record=_record(), pcluster_bin="pcluster"
+        )
+        failures = [c for c in report.checks if c.status == "fail"]
+        assert len(failures) == 3
+
+    def test_ssh_failure_skips_dependent_checks_without_double_counting(self, monkeypatch):
+        """Slurm, postinstall, and Grafana all require SSH. They must be
+        reported skip, not fail — otherwise one unreachable head node inflates
+        the failure count to four and buries the actual cause."""
+        _stage_checks(monkeypatch, check_ssh=lambda *a: (False, "timed out"))
+        report = pcluster_core.core_check_cluster_health(
+            cluster_record=_record(), pcluster_bin="pcluster"
+        )
+        statuses = _statuses(report)
+        assert statuses["SSH reachability"] == "fail"
+        assert statuses["Slurm"] == "skip"
+        assert statuses["postinstall complete"] == "skip"
+        assert sum(1 for c in report.checks if c.status == "fail") == 1
+
+    def test_cfn_failure_skips_the_entire_ssh_chain(self, monkeypatch):
+        _stage_checks(monkeypatch, check_cfn_status=lambda n, r, b: (False, "rc=1", None))
+        report = pcluster_core.core_check_cluster_health(
+            cluster_record=_record(), pcluster_bin="pcluster"
+        )
+        statuses = _statuses(report)
+        assert statuses["CloudFormation status"] == "fail"
+        assert statuses["head node IP"] == "skip"
+        assert statuses["SSH reachability"] == "skip"
+        assert sum(1 for c in report.checks if c.status == "fail") == 1
+
+    def test_grafana_is_checked_only_when_monitoring_is_enabled(self, monkeypatch):
+        calls = []
+        _stage_checks(monkeypatch, check_grafana=lambda *a: calls.append("grafana") or (True, None))
+        pcluster_core.core_check_cluster_health(
+            cluster_record=_record(enable_monitoring="false"), pcluster_bin="pcluster"
+        )
+        assert calls == []
+
+    def test_grafana_is_checked_when_monitoring_is_enabled(self, monkeypatch):
+        calls = []
+        _stage_checks(monkeypatch, check_grafana=lambda *a: calls.append("grafana") or (True, None))
+        pcluster_core.core_check_cluster_health(
+            cluster_record=_record(enable_monitoring="true"), pcluster_bin="pcluster"
+        )
+        assert calls == ["grafana"]
+
+    def test_grafana_still_skipped_when_monitoring_enabled_but_ssh_unreachable(self, monkeypatch):
+        """Monitoring gating and the SSH-availability gate are independent --
+        Grafana must appear as skip, not silently vanish from the report,
+        when both conditions withhold it."""
+        _stage_checks(monkeypatch, check_ssh=lambda *a: (False, "timed out"))
+        report = pcluster_core.core_check_cluster_health(
+            cluster_record=_record(enable_monitoring="true"), pcluster_bin="pcluster"
+        )
+        assert _statuses(report)["Grafana health"] == "skip"
+
+    def test_ssh_unavailable_skips_every_ssh_dependent_check_without_connecting(self, monkeypatch):
+        """ssh_available=False is the remote-transport path (Workstream 7) --
+        no key material exists there, so no SSH attempt may be made at all."""
+        ssh_called = []
+        _stage_checks(monkeypatch, check_ssh=lambda *a: ssh_called.append(1) or (True, None))
+        report = pcluster_core.core_check_cluster_health(
+            cluster_record=_record(enable_monitoring="true"),
+            pcluster_bin="pcluster",
+            ssh_available=False,
+        )
+        assert ssh_called == []
+        statuses = _statuses(report)
+        assert statuses["SSH reachability"] == "skip"
+        assert statuses["Slurm"] == "skip"
+        assert statuses["postinstall complete"] == "skip"
+        assert statuses["Grafana health"] == "skip"
+        assert report.healthy is True
+
+    def test_slurm_pass_with_degradation_note_is_not_a_failure(self, monkeypatch):
+        """Some nodes usable, some not: check_slurm reports pass with a note,
+        and that note must survive into the report, not just the boolean."""
+        _stage_checks(
+            monkeypatch,
+            check_slurm=lambda *a: (True, "2 node(s) usable, 3 down/drained"),
+        )
+        report = pcluster_core.core_check_cluster_health(
+            cluster_record=_record(), pcluster_bin="pcluster"
+        )
+        slurm = next(c for c in report.checks if c.name == "Slurm")
+        assert slurm.status == "pass"
+        assert slurm.detail == "2 node(s) usable, 3 down/drained"
+        assert report.healthy is True
+
+    def test_timeout_is_passed_through_to_the_ssh_checks_unmodified(self, monkeypatch):
+        """core_check_cluster_health trusts its caller to have already
+        clamped timeout -- it does not reclamp or reject it."""
+        seen = {}
+
+        def _ssh(ip, keypair, user, timeout):
+            seen["timeout"] = timeout
+            return True, None
+
+        _stage_checks(monkeypatch, check_ssh=_ssh)
+        pcluster_core.core_check_cluster_health(
+            cluster_record=_record(), pcluster_bin="pcluster", timeout=42
+        )
+        assert seen["timeout"] == 42
+
+
+# ---------------------------------------------------------------------------
+# check_pcluster.py's main() -- CLI glue only: arg parsing, vars-file
+# resolution, print formatting, exit codes. core_check_cluster_health is
+# mocked as a single unit here, since its own behavior is covered above.
+# ---------------------------------------------------------------------------
+
+_REC = dict(_RECORD_KWARGS)
+
+
+def _stage_main(monkeypatch, argv=("check_pcluster.py", "-N", "mycluster"), rec=None,
+                 core_result=None):
+    full_rec = dict(_REC)
+    full_rec.update(rec or {})
+    monkeypatch.setattr(chk, "_read_cluster_record", lambda n, r: full_rec)
+    if core_result is None:
+        core_result = pcluster_core.ClusterHealthReport(
+            cluster_name="mycluster", checks=[], healthy=True
+        )
+    monkeypatch.setattr(chk, "core_check_cluster_health", lambda **kw: core_result)
     monkeypatch.setattr(sys, "argv", list(argv))
 
 
-class TestCheckPclusterMainAggregation:
-    """The exit code is the whole contract: CI and scripts branch on it. main()
-    counts failures across eight checks and exits 1 if any failed, so an
-    off-by-one or a swallowed failure would report a broken cluster as healthy."""
-
+class TestCheckPclusterMainCliShim:
     def test_all_checks_passing_exits_zero(self, monkeypatch, capsys):
         _stage_main(monkeypatch)
         with pytest.raises(SystemExit) as exc:
@@ -427,95 +632,71 @@ class TestCheckPclusterMainAggregation:
         assert exc.value.code == 0
         assert "All checks passed" in capsys.readouterr().out
 
-    def test_one_failed_check_exits_one(self, monkeypatch, capsys):
-        _stage_main(monkeypatch, check_s3=lambda b, r: (False, "NoSuchBucket"))
-        with pytest.raises(SystemExit) as exc:
-            chk.main()
-        assert exc.value.code == 1
-        assert "1 check(s) failed." in capsys.readouterr().out
-
-    def test_failure_count_accumulates(self, monkeypatch, capsys):
-        _stage_main(
-            monkeypatch,
-            check_s3=lambda b, r: (False, "NoSuchBucket"),
-            check_slurm=lambda *a: (False, "sinfo failed"),
-            check_postinstall=lambda *a: (False, "marker missing"),
+    def test_unhealthy_report_exits_one_with_correct_count(self, monkeypatch, capsys):
+        report = pcluster_core.ClusterHealthReport(
+            cluster_name="mycluster",
+            checks=[
+                pcluster_core.CheckResult("SSH reachability", "fail", "timed out"),
+                pcluster_core.CheckResult("S3 bucket: my-bucket", "fail", "NoSuchBucket"),
+                pcluster_core.CheckResult("Slurm", "skip", "SSH unreachable"),
+            ],
+            healthy=False,
         )
+        _stage_main(monkeypatch, core_result=report)
         with pytest.raises(SystemExit) as exc:
             chk.main()
+        out = capsys.readouterr().out
         assert exc.value.code == 1
-        assert "3 check(s) failed." in capsys.readouterr().out
+        assert "2 check(s) failed." in out
 
     def test_missing_vars_file_exits_immediately(self, monkeypatch, capsys):
-        """No region or keypair is known without the vars file, so every
-        downstream check would be meaningless — main() must stop, not skip."""
-        _stage_main(monkeypatch, check_vars_file=lambda n: (False, "missing", None))
+        """No region or keypair is known without the vars file, so
+        core_check_cluster_health would be meaningless to call at all."""
+        monkeypatch.setattr(chk, "_read_cluster_record", lambda n, r: None)
         called = []
-        monkeypatch.setattr(chk, "check_cfn_status",
-                            lambda *a: called.append("cfn") or (True, "x=y", "1.2.3.4"))
+        monkeypatch.setattr(
+            chk, "core_check_cluster_health", lambda **kw: called.append(1),
+        )
+        monkeypatch.setattr(sys, "argv", ["check_pcluster.py", "-N", "mycluster"])
         with pytest.raises(SystemExit) as exc:
             chk.main()
         assert exc.value.code == 1
         assert called == []
+        assert "1 check(s) failed." in capsys.readouterr().out
 
-    def test_ssh_failure_skips_dependent_checks_without_double_counting(self, monkeypatch, capsys):
-        """Slurm, postinstall, and Grafana all require SSH. They must be
-        reported SKIP, not FAIL — otherwise one unreachable head node inflates
-        the failure count to four and buries the actual cause."""
-        _stage_main(monkeypatch, check_ssh=lambda *a: (False, "timed out"))
-        with pytest.raises(SystemExit) as exc:
-            chk.main()
-        out = capsys.readouterr().out
-        assert exc.value.code == 1
-        assert "1 check(s) failed." in out
-        assert out.count(chk._SKIP) == 2
-
-    def test_cfn_failure_skips_the_entire_ssh_chain(self, monkeypatch, capsys):
-        _stage_main(
-            monkeypatch,
-            check_cfn_status=lambda n, r: (False, "rc=1", None),
-        )
-        with pytest.raises(SystemExit) as exc:
-            chk.main()
-        out = capsys.readouterr().out
-        assert exc.value.code == 1
-        assert "1 check(s) failed." in out
-        assert "head node IP" in out and chk._SKIP in out
-
-    def test_grafana_is_checked_only_when_monitoring_is_enabled(self, monkeypatch):
-        calls = []
-        _stage_main(
-            monkeypatch,
-            rec={"enable_monitoring": "false"},
-            check_grafana=lambda *a: calls.append("grafana") or (True, None),
-        )
-        with pytest.raises(SystemExit):
-            chk.main()
-        assert calls == []
-
-    def test_grafana_is_checked_when_monitoring_is_enabled(self, monkeypatch):
-        calls = []
-        _stage_main(
-            monkeypatch,
-            rec={"enable_monitoring": "true"},
-            check_grafana=lambda *a: calls.append("grafana") or (True, None),
-        )
-        with pytest.raises(SystemExit):
-            chk.main()
-        assert calls == ["grafana"]
-
-    def test_timeout_is_clamped_before_reaching_the_ssh_checks(self, monkeypatch):
+    def test_timeout_is_clamped_before_being_passed_to_the_core_function(self, monkeypatch):
         seen = {}
+        report = pcluster_core.ClusterHealthReport(cluster_name="mycluster", checks=[], healthy=True)
 
-        def _ssh(ip, keypair, user, timeout):
-            seen["timeout"] = timeout
-            return True, None
+        def _core(**kwargs):
+            seen.update(kwargs)
+            return report
 
         _stage_main(
             monkeypatch,
             argv=("check_pcluster.py", "-N", "mycluster", "-T", "9999"),
-            check_ssh=_ssh,
         )
+        monkeypatch.setattr(chk, "core_check_cluster_health", _core)
         with pytest.raises(SystemExit):
             chk.main()
         assert seen["timeout"] == chk._MAX_TIMEOUT
+
+    def test_report_is_printed_with_correct_symbols_and_connectors(self, monkeypatch, capsys):
+        report = pcluster_core.ClusterHealthReport(
+            cluster_name="mycluster",
+            checks=[
+                pcluster_core.CheckResult("CloudFormation status", "pass", "CREATE_COMPLETE"),
+                pcluster_core.CheckResult("head node IP", "pass", "1.2.3.4"),
+                pcluster_core.CheckResult("SSH reachability", "pass", None),
+                pcluster_core.CheckResult("Slurm", "skip", "SSH unreachable"),
+            ],
+            healthy=True,
+        )
+        _stage_main(monkeypatch, core_result=report)
+        with pytest.raises(SystemExit):
+            chk.main()
+        out = capsys.readouterr().out
+        assert "CloudFormation status: CREATE_COMPLETE" in out
+        assert "head node IP: 1.2.3.4" in out
+        assert f"{chk._PASS} SSH reachability\n" in out
+        assert f"{chk._SKIP} Slurm — SSH unreachable" in out

@@ -264,8 +264,9 @@ def test_every_defaults_key_has_a_consumer():
 
 
 def test_requirements_declares_every_third_party_import():
-    """ruamel.yaml was imported by src/pcluster_queue_editor.py but undeclared —
-    a fresh `pip install -r requirements.txt` produced an ImportError at runtime."""
+    """ruamel.yaml is imported by src/pcluster_core.py (queue-config editing)
+    but was once undeclared — a fresh `pip install -r requirements.txt`
+    produced an ImportError at runtime."""
     import re as _re
 
     with open(os.path.join(REPO_ROOT, "requirements.txt")) as fh:
@@ -326,14 +327,21 @@ def test_argparse_help_defaults_match_hardcoded_defaults():
     with open(src_path) as fh:
         src = fh.read()
 
+    # The argparse help text is still in make_pcluster.py (above), but the
+    # defaults it is checked against moved to pcluster_core so an MCP
+    # wrapper could reach them -- they were a local inside main() before.
+    core_path = os.path.join(REPO_ROOT, "src", "pcluster_core.py")
+    with open(core_path) as fh:
+        core_src = fh.read()
+
     hardcoded = None
-    for node in _ast.walk(_ast.parse(src)):
+    for node in _ast.walk(_ast.parse(core_src)):
         if (
             isinstance(node, _ast.Assign)
-            and getattr(node.targets[0], "id", "") == "_HARDCODED_DEFAULTS"
+            and getattr(node.targets[0], "id", "") == "MAKE_CLUSTER_DEFAULTS"
         ):
             hardcoded = _ast.literal_eval(node.value)
-    assert hardcoded, "_HARDCODED_DEFAULTS not found in make_pcluster.py"
+    assert hardcoded, "MAKE_CLUSTER_DEFAULTS not found in src/pcluster_core.py"
 
     # Options that legitimately have no _HARDCODED_DEFAULTS entry, so their help
     # text is free-form. headnode_instance_type is required, not defaulted.

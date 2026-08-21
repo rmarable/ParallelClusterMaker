@@ -133,7 +133,7 @@ def print_TextHeader(cluster_name, header, line_length):
 
 # trn1 (Trainium 1, Intel Xeon) and inf2 (Inferentia 2, Intel Sapphire Rapids)
 # are x86_64 despite the accelerator branding — do not include in ARM families.
-# Single source of truth: src/pcluster_queue_editor.py and the test suite import
+# Single source of truth: src/pcluster_core.py and the test suite import
 # this rather than keeping private copies, which had already drifted (a test-local
 # copy was missing c8g, the repo's own default instance family).
 ARM_FAMILIES = (

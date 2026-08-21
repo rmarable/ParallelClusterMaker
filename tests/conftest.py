@@ -8,6 +8,32 @@ is added, add it here so test_templates.py catches the gap immediately.
 
 import pytest
 
+# Import Ansible's collection loader before anything can import fastmcp.
+#
+# Not cosmetic ordering -- a hard incompatibility, reproduced and traced
+# 2026-08-21. Ansible's collection loader
+# (ansible/utils/collection_loader/_collection_finder.py, module scope)
+# raises `Exception: need exactly one FileFinder import hook (found N)`
+# unless sys.path_hooks holds exactly one FileFinder entry. Importing
+# fastmcp pulls in setuptools' _distutils_hack, which inserts a second
+# FileFinder hook at index 0 -- after which every later `import ansible`
+# in that process fails, including the one
+# TestTheTestEnvironmentMatchesAnsible uses to read Ansible's real
+# trim_blocks/lstrip_blocks defaults out of its own source.
+#
+# The check runs once, at first import of the collection loader, so
+# importing Ansible here (while exactly one hook still exists) makes the
+# whole suite order-independent: it no longer matters whether pytest
+# happens to collect the MCP test modules before tests/test_templates.py.
+# Empirically this also stops fastmcp adding the second hook at all.
+#
+# Deliberately NOT fixed by loosening the Ansible-defaults assertion:
+# that test exists because a mismatch between our Jinja2 env and
+# Ansible's own defaults silently changed rendered output once already,
+# and weakening it to accommodate an unrelated dependency would trade a
+# real guard for an import-order convenience.
+import ansible.plugins.action.template  # noqa: F401,E402
+
 
 @pytest.fixture
 def cluster_params():
@@ -30,6 +56,7 @@ def cluster_params():
         "project_id": "test-project",
         "prod_level": "dev",
         "DEPLOYMENT_DATE": "2026-07-20",
+        "Deployed_On": "July 20, 2026",
         "ANSIBLE_VERSION": "2.16.0",
         # Paths
         "local_workingdir": "/home/testuser/ParallelClusterMaker",

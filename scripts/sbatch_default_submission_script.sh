@@ -5,7 +5,7 @@
 # Author:       Rodney Marable <rodney.marable@gmail.com>
 # Created On:   May 8, 2019
 # Last Changed: May 8, 2019
-# Deployed On:  {{ lookup('pipe','date \"+%B %-d, %Y\"') }}
+# Deployed On:  {{ Deployed_On }}
 # Purpose:      Default sbatch submission script for Slurm-style clusters
 ################################################################################
 

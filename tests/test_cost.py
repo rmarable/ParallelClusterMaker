@@ -220,7 +220,7 @@ class TestCostSummaryLinesTakesKeywordsOnly:
         import ast
 
         repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        with open(os.path.join(repo_root, "make_pcluster.py")) as fh:
+        with open(os.path.join(repo_root, "src", "pcluster_core.py")) as fh:
             tree = ast.parse(fh.read())
         calls = [
             node for node in ast.walk(tree)
@@ -245,7 +245,7 @@ class TestCostSummaryLinesTakesKeywordsOnly:
         import ast
 
         repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        with open(os.path.join(repo_root, "make_pcluster.py")) as fh:
+        with open(os.path.join(repo_root, "src", "pcluster_core.py")) as fh:
             tree = ast.parse(fh.read())
         call = next(
             node for node in ast.walk(tree)

@@ -20,26 +20,22 @@ if os.path.realpath(sys.prefix) != os.path.realpath(os.path.join(_repo_root, ".v
 
 import argparse
 import json
-from datetime import datetime, timedelta, timezone
-
-import boto3
-from botocore.exceptions import BotoCoreError, ClientError
 
 sys.path.insert(0, _src_dir)
-from pcluster_core import _validate_cluster_name, _read_cluster_record, _safe
+from pcluster_core import (
+    ClusterRecord,
+    PClusterMakerError,
+    _check_tag_activated,
+    _date_range,
+    _get_cluster_cost,
+    _read_cluster_record,
+    _safe,
+    _utc_today,
+    _validate_cluster_name,
+    core_get_cost_report,
+)
 
 _ACTIVE_CLUSTERS_DIR = os.path.join(_repo_root, "active_clusters")
-
-
-def _utc_today():
-    return datetime.now(timezone.utc).date()
-
-
-def _date_range(days):
-    """Return (start, end) ISO date strings; end is today UTC (exclusive in CE)."""
-    end = _utc_today()
-    start = end - timedelta(days=days)
-    return start.isoformat(), end.isoformat()
 
 
 def _enumerate_cluster_names():
@@ -59,69 +55,17 @@ def _enumerate_cluster_names():
     return sorted(names)
 
 
-def _check_tag_activated(ce_client):
-    """Return True if ClusterID is an active cost allocation tag, False if not,
-    None if the check could not be performed (permissions or network error)."""
-    try:
-        resp = ce_client.list_cost_allocation_tags(
-            TagKeys=["ClusterID"], Type="UserDefined", MaxResults=1
+def _load_cluster_records(cluster_names):
+    """Read each cluster's local vars file and build a ClusterRecord. A
+    missing/unparseable vars file still gets a row (owner/region "unknown"),
+    matching this script's existing behavior."""
+    records = []
+    for name in cluster_names:
+        rec = _read_cluster_record(name, _repo_root)
+        records.append(
+            ClusterRecord.from_dict(rec) if rec is not None else ClusterRecord.unknown(name)
         )
-        tags = resp.get("CostAllocationTags", [])
-        return any(
-            t.get("TagKey") == "ClusterID" and t.get("Status") == "Active"
-            for t in tags
-        )
-    except ClientError as e:
-        if e.response["Error"]["Code"] in ("AccessDeniedException", "AuthFailure"):
-            return None
-        return None
-    except BotoCoreError:
-        return None
-
-
-def _get_cluster_cost(ce_client, cluster_name, start, end):
-    """Query CE for total UnblendedCost tagged ClusterID=cluster_name.
-
-    Follows NextPageToken to handle ranges spanning >12 months.
-    Returns (total_usd: float, error: str|None).
-    """
-    total = 0.0
-    next_token = None
-    while True:
-        kwargs = dict(
-            TimePeriod={"Start": start, "End": end},
-            Granularity="MONTHLY",
-            Filter={"Tags": {"Key": "ClusterID", "Values": [cluster_name]}},
-            Metrics=["UnblendedCost"],
-        )
-        if next_token:
-            kwargs["NextPageToken"] = next_token
-        try:
-            resp = ce_client.get_cost_and_usage(**kwargs)
-        except ClientError as e:
-            code = e.response["Error"]["Code"]
-            if code in ("AccessDeniedException", "AuthFailure"):
-                return None, "unavailable (needs ce:GetCostAndUsage)"
-            return None, f"CE error: {code}"
-        except BotoCoreError as e:
-            return None, f"network/credential error: {e}"
-
-        for period in resp.get("ResultsByTime", []):
-            amount = (
-                period.get("Total", {})
-                .get("UnblendedCost", {})
-                .get("Amount", "0")
-            )
-            try:
-                total += float(amount)
-            except ValueError:
-                pass
-
-        next_token = resp.get("NextPageToken")
-        if not next_token:
-            break
-
-    return total, None
+    return records
 
 
 def _format_table(rows, period):
@@ -155,9 +99,6 @@ def main():
                         help="Emit JSON array instead of table")
     args = parser.parse_args()
 
-    if args.days < 1 or args.days > 365:
-        sys.exit("ERROR: --days must be between 1 and 365")
-
     if args.cluster_name:
         _validate_cluster_name(args.cluster_name)
         cluster_names = [args.cluster_name]
@@ -166,19 +107,23 @@ def main():
         if not cluster_names:
             sys.exit("No clusters found in active_clusters/")
 
-    start, end = _date_range(args.days)
-    ce_client = boto3.client("ce", region_name="us-east-1")
+    cluster_records = _load_cluster_records(cluster_names)
 
-    # Pre-flight: verify ClusterID tag is activated as a cost allocation tag.
-    tag_active = _check_tag_activated(ce_client)
-    if tag_active is False:
+    try:
+        result = core_get_cost_report(
+            cluster_records=cluster_records, owner_filter=args.owner, days=args.days
+        )
+    except PClusterMakerError as e:
+        sys.exit(str(e))
+
+    if result.tag_activated is False:
         print(
             "WARNING: 'ClusterID' is not an active cost allocation tag — "
             "all results will show $0.00.\n"
             "Activate it at: AWS Console → Billing → Cost allocation tags "
             "→ User-defined tags.\n"
         )
-    elif tag_active is None:
+    elif result.tag_activated is None:
         print(
             "NOTE: could not verify 'ClusterID' tag activation "
             "(needs ce:ListCostAllocationTags). Results may show $0.00 "
@@ -188,27 +133,18 @@ def main():
     rows = []
     tag_warning_shown = False
 
-    for name in cluster_names:
-        rec = _read_cluster_record(name, _repo_root)
-        owner = _safe(rec["cluster_owner"]) if rec else "unknown"
-        region = _safe(rec["region"]) if rec else "unknown"
-
-        if args.owner and owner != args.owner:
-            continue
-
-        total, err = _get_cluster_cost(ce_client, name, start, end)
-
-        if err:
-            cost_str = f"unavailable — {err}"
-        elif total == 0.0:
+    for r in result.records:
+        if r.error:
+            cost_str = f"unavailable — {r.error}"
+        elif r.cost_usd == 0.0:
             cost_str = "$0.00 *"
             tag_warning_shown = True
         else:
-            cost_str = f"${total:.2f}"
+            cost_str = f"${r.cost_usd:.2f}"
 
-        rows.append((name, owner, region, cost_str))
+        rows.append((r.cluster_name, r.owner, r.region, cost_str))
 
-    period = f"{start} – {end}"
+    period = f"{result.period_start} – {result.period_end}"
 
     if args.json:
         out = [

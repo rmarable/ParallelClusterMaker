@@ -38,29 +38,17 @@ if os.path.realpath(sys.prefix) != os.path.realpath(os.path.join(_repo_root, ".v
 
 import argparse
 import boto3
-import subprocess
-import tempfile
-from botocore.exceptions import BotoCoreError, ClientError, NoCredentialsError
 
 sys.path.insert(0, _src_dir)
 from pcluster_core import (
+    ClusterRecord,
+    PClusterMakerError,
     _validate_cluster_name,
     _validate_az_input,
-    _ssh_secret_name,
+    _read_cluster_record,
     _read_turbot_from_vars_file,
-    _append_key_script,
-    _remove_old_key_script,
+    core_rotate_cluster_key,
 )
-
-
-def _require(cmd):
-    """Exit if a CLI tool is not on PATH."""
-    if subprocess.run(["which", cmd], capture_output=True).returncode != 0:
-        sys.exit(f"ERROR: '{cmd}' not found on PATH.")
-
-
-def _run(args, **kwargs):
-    return subprocess.run(args, check=True, **kwargs)
 
 
 def main():
@@ -87,231 +75,38 @@ def main():
     cluster_name = args.cluster_name
     region = args.az[:-1]
 
-    _require("ssh")
-    _require("ssh-keygen")
-    _require("aws")
-
-    # Load vars file to get serial, keypair name, ec2_user, and secret name.
     vars_file_path = os.path.join(_src_dir, "vars_files", cluster_name + ".yml")
-    if not os.path.isfile(vars_file_path):
+    rec = _read_cluster_record(cluster_name, _repo_root)
+    if rec is None:
         sys.exit(f"ERROR: vars file not found: {vars_file_path}\n"
                  f"  Has this cluster been created with make_pcluster.py?")
+    cluster_record = ClusterRecord.from_dict(rec)
 
-    import yaml
-    with open(vars_file_path) as _f:
-        vf = yaml.safe_load(_f) or {}
-
-    serial = vf.get("cluster_serial_number", "")
-    ec2_keypair = vf.get("ec2_keypair", "")
-    ec2_user = vf.get("ec2_user", "ubuntu")
-    ssh_keypair = vf.get("ssh_keypair", "")
-    secret_name = vf.get("ssh_secret_name") or _ssh_secret_name(cluster_name, serial)
-
-    if not serial or not ec2_keypair:
+    if not cluster_record.serial or not cluster_record.ec2_keypair:
         sys.exit("ERROR: vars file is missing cluster_serial_number or ec2_keypair.")
 
-    # Turbot profile — CLI arg wins, then vars file auto-detect.
+    # Turbot profile — CLI arg wins, then vars file auto-detect. This mutates
+    # process-global state (AWS_PROFILE, boto3's default session), which is
+    # exactly why it stays in the CLI shim rather than core_rotate_cluster_key:
+    # a long-lived MCP server calling that function repeatedly for different
+    # clusters must never have one call's profile choice stick for the next
+    # one. The MCP tool has no turbot_account parameter at all for this reason.
     turbot_account = args.turbot_account
     if not turbot_account:
         turbot_account = _read_turbot_from_vars_file(vars_file_path)
     if turbot_account and turbot_account != "disabled":
-        cluster_owner = vf.get("cluster_owner", "")
-        turbot_profile = f"turbot__{turbot_account}__{cluster_owner}"
+        turbot_profile = f"turbot__{turbot_account}__{cluster_record.cluster_owner}"
         os.environ["AWS_PROFILE"] = turbot_profile
         os.environ["AWS_DEFAULT_REGION"] = region
         boto3.setup_default_session(profile_name=turbot_profile)
         print(f"  Using Turbot profile: {turbot_profile}")
 
-    ec2 = boto3.client("ec2", region_name=region)
-    sm = boto3.client("secretsmanager", region_name=region)
-
-    # Resolve live head node IP.
     try:
-        resp = ec2.describe_instances(
-            Filters=[
-                {"Name": "tag:parallelcluster:cluster-name", "Values": [cluster_name]},
-                {"Name": "tag:parallelcluster:node-type", "Values": ["HeadNode"]},
-                {"Name": "instance-state-name", "Values": ["running"]},
-            ]
+        core_rotate_cluster_key(
+            cluster_record=cluster_record, region=region, dry_run=args.dry_run,
         )
-        reservations = resp.get("Reservations", [])
-        instance = reservations[0]["Instances"][0] if reservations else {}
-        head_ip = instance.get("PublicIpAddress") or instance.get("PrivateIpAddress", "")
-    except (BotoCoreError, ClientError, NoCredentialsError) as _e:
-        sys.exit(f"ERROR: Could not describe EC2 instances: {_e}")
-
-    if not head_ip:
-        sys.exit(f"ERROR: No running head node found for cluster '{cluster_name}'.")
-
-    print(f"  Cluster:   {cluster_name}  ({serial})")
-    print(f"  Head node: {head_ip}")
-    print(f"  Secret:    {secret_name}")
-
-    if args.dry_run:
-        print("\n[dry-run] No changes made.")
-        return
-
-    with tempfile.TemporaryDirectory() as tmpdir:
-        new_key_path = os.path.join(tmpdir, "id_ed25519_new")
-        new_pub_path = new_key_path + ".pub"
-
-        # 0. Capture the current public key before any key material changes,
-        #    so it can be revoked from authorized_keys after the new key is
-        #    verified to work.
-        old_pub_key = None
-        if ssh_keypair and os.path.isfile(ssh_keypair):
-            try:
-                old_pub_key = subprocess.run(
-                    ["ssh-keygen", "-y", "-f", ssh_keypair],
-                    check=True, capture_output=True, text=True,
-                ).stdout.strip()
-            except subprocess.CalledProcessError as _e:
-                print(f"  Warning: could not derive the current public key: {_e}")
-                print("  The old key will not be removed from authorized_keys.")
-
-        # 1. Generate new ED25519 keypair.
-        print("\nGenerating new ED25519 keypair...")
-        _run(["ssh-keygen", "-t", "ed25519", "-N", "", "-f", new_key_path])
-        with open(new_pub_path) as _f:
-            new_pub_key = _f.read().strip()
-        with open(new_key_path) as _f:
-            new_priv_key = _f.read()
-
-        # 2. Add new public key to head node authorized_keys via SSH.
-        # Both remote scripts live in pcluster_core so they can be executed
-        # against fixture files under bash by the test suite.
-        print("Adding new public key to head node authorized_keys...")
-        subprocess.run(
-            [
-                "ssh",
-                "-i", ssh_keypair,
-                "-o", "StrictHostKeyChecking=accept-new",
-                "-o", "ConnectTimeout=30",
-                "-o", "BatchMode=yes",
-                f"{ec2_user}@{head_ip}",
-                _append_key_script(),
-            ],
-            input=(new_pub_key + "\n").encode(),
-            check=True,
-        )
-
-        # 2a. Verify the new key logs in successfully, then remove the old
-        #     public key from authorized_keys. This order avoids locking
-        #     ourselves out if the new key doesn't work, and ensures rotation
-        #     actually revokes the old key rather than merely adding a new one.
-        print("Verifying the new key can authenticate...")
-        try:
-            subprocess.run(
-                [
-                    "ssh",
-                    "-i", new_key_path,
-                    "-o", "StrictHostKeyChecking=accept-new",
-                    "-o", "ConnectTimeout=30",
-                    "-o", "BatchMode=yes",
-                    f"{ec2_user}@{head_ip}",
-                    "true",
-                ],
-                check=True,
-            )
-        except subprocess.CalledProcessError as _e:
-            sys.exit(
-                f"ERROR: new key failed to authenticate: {_e}\n"
-                f"  The old key was left in place in authorized_keys. No AWS resources were changed."
-            )
-
-        if old_pub_key:
-            print("Removing old public key from head node authorized_keys...")
-            try:
-                subprocess.run(
-                    [
-                        "ssh",
-                        "-i", new_key_path,
-                        "-o", "StrictHostKeyChecking=accept-new",
-                        "-o", "ConnectTimeout=30",
-                        "-o", "BatchMode=yes",
-                        f"{ec2_user}@{head_ip}",
-                        _remove_old_key_script(),
-                    ],
-                    input=(old_pub_key + "\n" + new_pub_key + "\n").encode(),
-                    check=True,
-                )
-            except subprocess.CalledProcessError as _e:
-                sys.exit(
-                    f"ERROR: could not safely remove the old key from authorized_keys: {_e}\n"
-                    f"  The live authorized_keys file was left untouched — either the old key\n"
-                    f"  is still present, or the candidate replacement did not contain the new\n"
-                    f"  key, so nothing was moved into place.\n"
-                    f"  No AWS resources were changed. Inspect ~/.ssh/authorized_keys on the\n"
-                    f"  head node manually, then re-run this script."
-                )
-
-        # 3. Import new public key as EC2 keypair (rotated name).
-        new_keypair_name = ec2_keypair + "-rotated"
-        print(f"Importing new EC2 keypair: {new_keypair_name}...")
-        try:
-            ec2.import_key_pair(
-                KeyName=new_keypair_name,
-                PublicKeyMaterial=new_pub_key.encode(),
-            )
-        except ClientError as _e:
-            if "InvalidKeyPair.Duplicate" in str(_e):
-                ec2.delete_key_pair(KeyName=new_keypair_name)
-                ec2.import_key_pair(
-                    KeyName=new_keypair_name,
-                    PublicKeyMaterial=new_pub_key.encode(),
-                )
-            else:
-                raise
-
-        # 4. Update Secrets Manager secret.
-        print("Updating Secrets Manager secret...")
-        sm.put_secret_value(SecretId=secret_name, SecretString=new_priv_key)
-
-        # 5. Overwrite local .pem file.
-        if ssh_keypair:
-            print(f"Updating local key file: {ssh_keypair}...")
-            try:
-                fd = os.open(ssh_keypair, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-                with os.fdopen(fd, "w") as _f:
-                    _f.write(new_priv_key)
-            except OSError as _e:
-                print(f"  Warning: could not write local key file: {_e}")
-                print(f"  The new key is safe in Secrets Manager: {secret_name}")
-                print(f"  Retrieve it with: active_clusters/{cluster_name}/retrieve_ssh_key.{cluster_name}.sh")
-
-        # 6. Delete old EC2 keypair.
-        print(f"Deleting old EC2 keypair: {ec2_keypair}...")
-        try:
-            ec2.delete_key_pair(KeyName=ec2_keypair)
-        except ClientError as _e:
-            print(f"  Warning: could not delete old keypair: {_e}")
-
-        # Rename the rotated keypair to the canonical name.
-        print(f"Renaming {new_keypair_name} → {ec2_keypair}...")
-        try:
-            ec2.import_key_pair(
-                KeyName=ec2_keypair,
-                PublicKeyMaterial=new_pub_key.encode(),
-            )
-        except ClientError as _e:
-            if "InvalidKeyPair.Duplicate" in str(_e):
-                ec2.delete_key_pair(KeyName=ec2_keypair)
-                ec2.import_key_pair(
-                    KeyName=ec2_keypair,
-                    PublicKeyMaterial=new_pub_key.encode(),
-                )
-            else:
-                raise
-        ec2.delete_key_pair(KeyName=new_keypair_name)
-
-    print("")
-    print("=" * 66)
-    print("  SSH key rotation complete.")
-    print(f"  New key stored in Secrets Manager: {secret_name}")
-    if ssh_keypair:
-        print(f"  Local .pem updated: {ssh_keypair}")
-    print(f"  Verify access: ssh -i {ssh_keypair} {ec2_user}@{head_ip}")
-    print("=" * 66)
+    except PClusterMakerError as e:
+        sys.exit(str(e))
 
 
 if __name__ == "__main__":

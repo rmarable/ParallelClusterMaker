@@ -94,7 +94,7 @@ class TestArmDetection:
 
         repo = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         offenders = []
-        for rel in ["src/pcluster_aux_data.py", "src/pcluster_queue_editor.py",
+        for rel in ["src/pcluster_aux_data.py", "src/pcluster_core.py",
                     "tests/test_aux_data.py", "make_pcluster.py"]:
             with open(os.path.join(repo, rel)) as fh:
                 body = fh.read()
@@ -813,12 +813,13 @@ class TestDeriveRanksPerNode:
     def test_make_pcluster_derives_both_queues_from_the_same_response(self):
         """Both call sites must read the map the architecture check already built.
         A second describe_instance_types sweep would double the API cost of every
-        build for data already in hand."""
+        build for data already in hand. Both derivations live in
+        pcluster_core.core_create_cluster since the core/shim split."""
         import ast
         import os
 
         repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        with open(os.path.join(repo_root, "make_pcluster.py")) as fh:
+        with open(os.path.join(repo_root, "src", "pcluster_core.py")) as fh:
             tree = ast.parse(fh.read())
         calls = [
             node

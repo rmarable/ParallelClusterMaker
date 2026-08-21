@@ -54,17 +54,17 @@ standing constraints for local development.
   Any new supported OS value must be threaded through: `make_pcluster.py`
   argparse choices, `_EC2_USERS`/`_resolve_ec2_user` in `pcluster_core.py`,
   `ARM_OSES`/`X86_OSES` in `pcluster_aux_data.py`, `_VALID_EC2_USERS` in
-  `diagnose_pcluster.py`, and the `assert` task (must stay task index 0) in
-  `src/create_pcluster.yml`.
+  and `diagnose_pcluster.py`.
 - IAM policy constraints live in `templates/CLAUDE.md` — read before touching
   any `.json_src`.
 - HPC benchmark constraints live in `hpc-benchmark/CLAUDE.md` — read before
   touching `hpc-benchmark/`.
-- The build summary names every filesystem's mount point on three surfaces:
-  `make_pcluster.py`'s printed summary (`_storage_summary_lines` in
-  `pcluster_core.py`), `src/create_pcluster.yml`'s `_build_summary`, and
-  `templates/sns_build_summary_report.j2`. A line added to one must be added
-  to all three. `_storage_summary_lines` is keyword-only (14 same-typed
+- The build summary names every filesystem's mount point on two live
+  surfaces: `make_pcluster.py`'s printed summary (`_storage_summary_lines`
+  in `pcluster_core.py`) and `templates/sns_build_summary_report.j2`. A
+  line added to one must be added to the other.
+  `src/create_pcluster.yml`'s `_build_summary` carries a third copy but no
+  longer executes — update it only to keep the reference spec honest. `_storage_summary_lines` is keyword-only (14 same-typed
   params) — never call it positionally. The mount-point column width is
   derived from the longest active label (`max(len(label)) + 2`), never a
   hardcoded constant — a fixed width of 6 didn't fit the 7-character
@@ -161,13 +161,15 @@ standing constraints for local development.
   vars file that predates the key — teardown derives it via
   `_derive_results_bucket` (same function, not a restated literal) when the
   vars file doesn't define it.
-- `make_pcluster.py` and `kill_pcluster.py` acquire a per-cluster
-  mkdir-based lock (`active_clusters/<cluster>/.build.lock`, same shape as
-  `hpc-benchmark.sh`'s `.osu-cuda.lock`) before the first AWS mutation,
-  held through the whole operation. A second process on the same cluster
-  name fails fast naming the lock's owner, never waits — local-machine
-  scope only, not a distributed lock. This is what would have caught the
-  concurrent-process incident that once corrupted an in-flight build.
+- Cluster create and delete hold a per-cluster **S3** lock
+  (`s3_acquire_cluster_lock`, `PutObject` with `IfNoneMatch`/`IfMatch`)
+  from before the first AWS mutation through the whole operation. A second
+  process fails fast naming the lock's owner, never waits. It replaced an
+  earlier local mkdir lock, which could not see a second *machine* driving
+  the same cluster. `_is_conditional_write_rejection` must keep treating
+  **both** 412 and 409 as "someone else holds it" — a live 8-writer run
+  proved the 409 path is reachable, and handling only 412 crashes a build
+  under contention.
 - `config.pcluster.j2`'s `OnNodeConfigured` block is a shared Jinja2 macro
   called at all four `CustomActions` sites (`HeadNode`, `LoginNodes`, both
   `SlurmQueues`), not four independent copies — that duplication is what

@@ -20,6 +20,7 @@ cluster_serial_datestamp: "{{ cluster_serial_datestamp }}"
 project_id: "{{ project_id }}"
 prod_level: "{{ prod_level }}"
 DEPLOYMENT_DATE: "{{ DEPLOYMENT_DATE }}"
+Deployed_On: "{{ Deployed_On }}"
 
 # HeadNode and Compute instance definitions
 
@@ -154,10 +155,8 @@ s3_cluster_data_dir: "active_clusters"
 
 pre_install_script: "{{ pre_install_script }}"
 post_install_script: "{{ post_install_script }}"
-preinstall_template_orig: "{{ cluster_template_dir }}/preinstall.j2"
 preinstall_rendered: "{{ cluster_data_dir }}/preinstall.{{ cluster_name }}.sh"
 preinstall_s3_dest: "preinstall.{{ cluster_name }}.sh"
-postinstall_template_orig: "{{ cluster_template_dir }}/postinstall.j2"
 postinstall_rendered: "{{ cluster_data_dir }}/postinstall.{{ cluster_name }}.sh"
 postinstall_s3_dest: "postinstall.{{ cluster_name }}.sh"
 user_preinstall_src: "{{ cluster_rootdir }}/{{ pre_install_script }}"

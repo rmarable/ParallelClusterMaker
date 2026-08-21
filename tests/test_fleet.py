@@ -10,15 +10,51 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src"))
 
+import pcluster_core
 from pcluster_core import (
+    ClusterRecord,
+    PClusterMakerError,
     _validate_region,
-    _run_pcluster_cmd,
     _get_fleet_status,
     _fleet_action_plan,
     _poll_fleet,
     _FLEET_POLL_INTERVAL,
     _FLEET_POLL_TIMEOUT,
+    core_stop_fleet,
+    core_start_fleet,
+    core_apply_cluster_update,
+    core_apply_queue_config,
 )
+
+_RECORD_KWARGS = {
+    "cluster_name": "fleetcluster",
+    "cluster_owner": "rmarable",
+    "serial": "202608200001",
+    "region": "us-east-1",
+    "headnode_instance_type": "c5.xlarge",
+    "enable_loginnode": "false",
+    "loginnode_instance_type": "",
+    "loginnode_count": 0,
+    "cpu_instance_types": ["c5.xlarge"],
+    "gpu_instance_types": [],
+    "enable_cpu_queue": "true",
+    "enable_gpu_queue": "false",
+    "initial_cpu_queue_size": 2,
+    "max_cpu_queue_size": 8,
+    "initial_gpu_queue_size": 0,
+    "max_gpu_queue_size": 0,
+    "cluster_type": "ondemand",
+    "deployment_date": "2026-08-20",
+    "ssh_keypair": "/tmp/fleetcluster.pem",
+    "ec2_keypair": "fleetcluster-keypair",
+    "ec2_user": "ubuntu",
+    "s3_bucketname": "my-bucket",
+    "enable_monitoring": "false",
+}
+
+
+def _record(**overrides):
+    return ClusterRecord(**{**_RECORD_KWARGS, **overrides})
 
 
 def _proc(rc=0, stdout="", stderr=""):
@@ -44,43 +80,8 @@ class TestValidateRegion:
 
 
 # ---------------------------------------------------------------------------
-# _run_pcluster_cmd
+# _describe_cluster_json / fleet helpers
 # ---------------------------------------------------------------------------
-
-class TestRunPclusterCmd:
-    def test_success_returns_parsed_json(self, monkeypatch):
-        payload = json.dumps({"computeFleetStatus": "RUNNING"})
-        monkeypatch.setattr(subprocess, "run",
-                            lambda *a, **kw: _proc(stdout=payload))
-        result = _run_pcluster_cmd(["describe-cluster", "--cluster-name", "x"], "/bin/pcluster")
-        assert result["computeFleetStatus"] == "RUNNING"
-
-    def test_binary_not_found_exits(self, monkeypatch):
-        def _raise(*a, **kw):
-            raise FileNotFoundError
-        monkeypatch.setattr(subprocess, "run", _raise)
-        with pytest.raises(SystemExit, match="not found"):
-            _run_pcluster_cmd([], "/bin/pcluster")
-
-    def test_timeout_exits(self, monkeypatch):
-        def _raise(*a, **kw):
-            raise subprocess.TimeoutExpired("pcluster", 120)
-        monkeypatch.setattr(subprocess, "run", _raise)
-        with pytest.raises(SystemExit, match="timed out"):
-            _run_pcluster_cmd([], "/bin/pcluster")
-
-    def test_nonzero_rc_exits(self, monkeypatch):
-        monkeypatch.setattr(subprocess, "run",
-                            lambda *a, **kw: _proc(rc=1, stderr="bad"))
-        with pytest.raises(SystemExit, match="rc=1|exited 1"):
-            _run_pcluster_cmd([], "/bin/pcluster")
-
-    def test_invalid_json_exits(self, monkeypatch):
-        monkeypatch.setattr(subprocess, "run",
-                            lambda *a, **kw: _proc(stdout="not json"))
-        with pytest.raises(SystemExit, match="unexpected"):
-            _run_pcluster_cmd([], "/bin/pcluster")
-
 
 # ---------------------------------------------------------------------------
 # _get_fleet_status
@@ -88,15 +89,13 @@ class TestRunPclusterCmd:
 
 class TestGetFleetStatus:
     def test_returns_status(self, monkeypatch):
-        payload = json.dumps({"computeFleetStatus": "STOPPED"})
-        monkeypatch.setattr(subprocess, "run",
-                            lambda *a, **kw: _proc(stdout=payload))
+        monkeypatch.setattr(pcluster_core, "_describe_cluster_json",
+                            lambda c, r: {"computeFleetStatus": "STOPPED"})
         assert _get_fleet_status("mycluster", "us-east-1", "/bin/pcluster") == "STOPPED"
 
     def test_missing_key_returns_unknown(self, monkeypatch):
-        payload = json.dumps({"clusterStatus": "CREATE_COMPLETE"})
-        monkeypatch.setattr(subprocess, "run",
-                            lambda *a, **kw: _proc(stdout=payload))
+        monkeypatch.setattr(pcluster_core, "_describe_cluster_json",
+                            lambda c, r: {"clusterStatus": "CREATE_COMPLETE"})
         assert _get_fleet_status("mycluster", "us-east-1", "/bin/pcluster") == "UNKNOWN"
 
 
@@ -106,24 +105,21 @@ class TestGetFleetStatus:
 
 class TestPollFleet:
     def test_returns_when_target_reached(self, monkeypatch):
-        payload = json.dumps({"computeFleetStatus": "STOPPED"})
-        monkeypatch.setattr(subprocess, "run",
-                            lambda *a, **kw: _proc(stdout=payload))
+        monkeypatch.setattr(pcluster_core, "_describe_cluster_json",
+                            lambda c, r: {"computeFleetStatus": "STOPPED"})
         monkeypatch.setattr("pcluster_core.time.sleep", lambda _: None)
         _poll_fleet("mycluster", "us-east-1", "STOPPED", "fleet stop", "/bin/pcluster")
 
     def test_protected_state_exits(self, monkeypatch):
-        payload = json.dumps({"computeFleetStatus": "PROTECTED"})
-        monkeypatch.setattr(subprocess, "run",
-                            lambda *a, **kw: _proc(stdout=payload))
+        monkeypatch.setattr(pcluster_core, "_describe_cluster_json",
+                            lambda c, r: {"computeFleetStatus": "PROTECTED"})
         monkeypatch.setattr("pcluster_core.time.sleep", lambda _: None)
         with pytest.raises(SystemExit, match="PROTECTED"):
             _poll_fleet("mycluster", "us-east-1", "STOPPED", "fleet stop", "/bin/pcluster")
 
     def test_timeout_exits(self, monkeypatch):
-        payload = json.dumps({"computeFleetStatus": "STOP_REQUESTED"})
-        monkeypatch.setattr(subprocess, "run",
-                            lambda *a, **kw: _proc(stdout=payload))
+        monkeypatch.setattr(pcluster_core, "_describe_cluster_json",
+                            lambda c, r: {"computeFleetStatus": "STOP_REQUESTED"})
         monkeypatch.setattr("pcluster_core.time.sleep", lambda _: None)
         with pytest.raises(SystemExit, match="timed out"):
             _poll_fleet("mycluster", "us-east-1", "STOPPED", "fleet stop", "/bin/pcluster")
@@ -131,14 +127,14 @@ class TestPollFleet:
     def test_keyboard_interrupt_exits(self, monkeypatch, capsys):
         call_count = [0]
 
-        def _run(*a, **kw):
+        def _describe(c, r):
             call_count[0] += 1
-            return _proc(stdout=json.dumps({"computeFleetStatus": "STOP_REQUESTED"}))
+            return {"computeFleetStatus": "STOP_REQUESTED"}
 
         def _sleep(_):
             raise KeyboardInterrupt
 
-        monkeypatch.setattr(subprocess, "run", _run)
+        monkeypatch.setattr(pcluster_core, "_describe_cluster_json", _describe)
         monkeypatch.setattr("pcluster_core.time.sleep", _sleep)
         with pytest.raises(SystemExit):
             _poll_fleet("mycluster", "us-east-1", "STOPPED", "fleet stop", "/bin/pcluster")
@@ -146,15 +142,16 @@ class TestPollFleet:
         assert "Interrupted" in out
 
     def test_keyboard_interrupt_during_describe_call_exits_cleanly(self, monkeypatch, capsys):
-        """Ctrl-C most often lands in the describe-cluster subprocess, not in
-        time.sleep() — that call plus its JSON parse is where the wall clock
-        actually goes. When only sleep() was guarded, an interrupt there escaped
-        as a raw traceback and never told the user the fleet operation was still
-        running in AWS."""
-        def _run(*a, **kw):
+        """Ctrl-C most often lands in the describe-cluster call, not in
+        time.sleep() — that call is where the wall clock actually goes. When
+        only sleep() was guarded, an interrupt there escaped as a raw
+        traceback and never told the user the fleet operation was still
+        running in AWS. (The call is pcluster.lib rather than a subprocess
+        since round 48; the interrupt window is the same.)"""
+        def _describe(c, r):
             raise KeyboardInterrupt
 
-        monkeypatch.setattr(subprocess, "run", _run)
+        monkeypatch.setattr(pcluster_core, "_describe_cluster_json", _describe)
         monkeypatch.setattr("pcluster_core.time.sleep", lambda _: None)
         with pytest.raises(SystemExit):
             _poll_fleet("mycluster", "us-east-1", "STOPPED", "fleet stop", "/bin/pcluster")
@@ -206,3 +203,321 @@ class TestFleetActionPlan:
     def test_unknown_action_raises(self):
         with pytest.raises(ValueError):
             _fleet_action_plan("RUNNING", "restart")
+
+
+# ---------------------------------------------------------------------------
+# core_stop_fleet / core_start_fleet -- the orchestration layer added in
+# Workstream 1's migration (docs/parallelclustermaker-mcp-plan.md), replacing
+# what used to be duplicated inline across stop_pcluster.py/start_pcluster.py.
+# Both entry points now call the same _core_fleet_action, so one shared test
+# suite exercised through both public names is what actually guards against
+# the copy-paste risk tests/test_fleet_entrypoints.py was written for --
+# there is only one implementation left to get wrong.
+# ---------------------------------------------------------------------------
+
+def _stage_core(monkeypatch, status, run_calls=None, poll_calls=None):
+    run_calls = run_calls if run_calls is not None else []
+    poll_calls = poll_calls if poll_calls is not None else []
+    monkeypatch.setattr(pcluster_core, "_get_fleet_status", lambda *a, **k: status)
+    # The fleet path calls pcluster.lib now, not the pcluster binary. Recorded
+    # in the same CLI-ish shape the assertions already expect, so they keep
+    # reading as "what was requested" rather than "which kwargs were passed".
+    monkeypatch.setattr(
+        pcluster_core, "_update_compute_fleet_lib",
+        lambda cluster, region, status: run_calls.append(
+            ["update-compute-fleet", "--cluster-name", cluster,
+             "--region", region, "--status", status]
+        ),
+    )
+    monkeypatch.setattr(
+        pcluster_core, "_poll_fleet",
+        lambda cluster, region, target, label, binary: poll_calls.append(target),
+    )
+    return run_calls, poll_calls
+
+
+class TestCoreStopFleet:
+    def test_running_fleet_gets_stop_requested(self, monkeypatch):
+        run_calls, _ = _stage_core(monkeypatch, "RUNNING")
+        result = core_stop_fleet(cluster_record=_record(), region="us-east-1", pcluster_bin="pcluster")
+        assert "update-compute-fleet" in run_calls[0]
+        assert "STOP_REQUESTED" in run_calls[0]
+        assert "START_REQUESTED" not in run_calls[0]
+        assert result.plan == "request"
+        assert result.status_before == "RUNNING"
+        assert result.status_after is None
+
+    def test_already_stopped_fleet_makes_no_api_call(self, monkeypatch):
+        run_calls, _ = _stage_core(monkeypatch, "STOPPED")
+        result = core_stop_fleet(cluster_record=_record(), region="us-east-1", pcluster_bin="pcluster")
+        assert run_calls == []
+        assert result.plan == "done"
+        assert result.status_after == "STOPPED"
+
+    def test_protected_fleet_raises_without_an_api_call(self, monkeypatch):
+        run_calls, _ = _stage_core(monkeypatch, "PROTECTED")
+        with pytest.raises(PClusterMakerError, match="PROTECTED"):
+            core_stop_fleet(cluster_record=_record(), region="us-east-1", pcluster_bin="pcluster")
+        assert run_calls == []
+
+    def test_stop_in_progress_makes_no_duplicate_api_call(self, monkeypatch):
+        run_calls, _ = _stage_core(monkeypatch, "STOP_REQUESTED")
+        result = core_stop_fleet(cluster_record=_record(), region="us-east-1", pcluster_bin="pcluster")
+        assert run_calls == []
+        assert result.plan == "wait"
+
+    def test_wait_polls_for_stopped_not_running(self, monkeypatch):
+        _, poll_calls = _stage_core(monkeypatch, "RUNNING")
+        result = core_stop_fleet(
+            cluster_record=_record(), region="us-east-1", pcluster_bin="pcluster", wait=True,
+        )
+        assert poll_calls == ["STOPPED"]
+        assert result.status_after == "STOPPED"
+
+    def test_no_wait_does_not_poll(self, monkeypatch):
+        _, poll_calls = _stage_core(monkeypatch, "RUNNING")
+        core_stop_fleet(cluster_record=_record(), region="us-east-1", pcluster_bin="pcluster")
+        assert poll_calls == []
+
+    def test_wait_still_polls_when_a_stop_is_already_in_progress(self, monkeypatch):
+        run_calls, poll_calls = _stage_core(monkeypatch, "STOPPING")
+        result = core_stop_fleet(
+            cluster_record=_record(), region="us-east-1", pcluster_bin="pcluster", wait=True,
+        )
+        assert poll_calls == ["STOPPED"]
+        assert run_calls == []
+        assert result.plan == "wait"
+
+    def test_region_argument_is_what_gets_used_not_the_record(self, monkeypatch):
+        seen = {}
+        monkeypatch.setattr(pcluster_core, "_get_fleet_status", lambda n, r, b: seen.setdefault("region", r) or "RUNNING")
+        monkeypatch.setattr(
+            pcluster_core, "_update_compute_fleet_lib", lambda c, r, status: None
+        )
+        core_stop_fleet(
+            cluster_record=_record(region="us-east-1"), region="eu-west-1", pcluster_bin="pcluster",
+        )
+        assert seen["region"] == "eu-west-1"
+
+
+class TestCoreStartFleet:
+    def test_stopped_fleet_gets_start_requested(self, monkeypatch):
+        run_calls, _ = _stage_core(monkeypatch, "STOPPED")
+        result = core_start_fleet(cluster_record=_record(), region="us-east-1", pcluster_bin="pcluster")
+        assert "update-compute-fleet" in run_calls[0]
+        assert "START_REQUESTED" in run_calls[0]
+        assert "STOP_REQUESTED" not in run_calls[0]
+        assert result.plan == "request"
+
+    def test_already_running_fleet_makes_no_api_call(self, monkeypatch):
+        run_calls, _ = _stage_core(monkeypatch, "RUNNING")
+        result = core_start_fleet(cluster_record=_record(), region="us-east-1", pcluster_bin="pcluster")
+        assert run_calls == []
+        assert result.plan == "done"
+
+    def test_protected_fleet_raises_without_an_api_call(self, monkeypatch):
+        run_calls, _ = _stage_core(monkeypatch, "PROTECTED")
+        with pytest.raises(PClusterMakerError, match="PROTECTED"):
+            core_start_fleet(cluster_record=_record(), region="us-east-1", pcluster_bin="pcluster")
+        assert run_calls == []
+
+    def test_wait_polls_for_running_not_stopped(self, monkeypatch):
+        _, poll_calls = _stage_core(monkeypatch, "STOPPED")
+        core_start_fleet(
+            cluster_record=_record(), region="us-east-1", pcluster_bin="pcluster", wait=True,
+        )
+        assert poll_calls == ["RUNNING"]
+
+
+class TestCoreApplyClusterUpdate:
+    """Workstream 4 extracted phase 2 of the three-phase queue-config
+    update (stop fleet -> apply config -> start fleet) into its own
+    callable core function. Phases 1 and 3 already had one
+    (core_stop_fleet/core_start_fleet); this is the one that did not, and
+    without it the MCP tool surface could only expose the whole sequence
+    as a single opaque blocking tool.
+
+    Note this whole area had ZERO test coverage before this round --
+    core_apply_queue_config and _poll_cluster_update were both entirely
+    untested, despite core_apply_queue_config being what
+    manage_pcluster_queue.py's -W flag runs."""
+
+    def _stage(self, monkeypatch, run_calls=None, poll_calls=None):
+        run_calls = run_calls if run_calls is not None else []
+        poll_calls = poll_calls if poll_calls is not None else []
+        monkeypatch.setattr(
+            pcluster_core, "_update_cluster_lib",
+            lambda cluster, region, config_path: (
+                run_calls.append(
+                    ["update-cluster", "--cluster-name", cluster,
+                     "--cluster-configuration", config_path, "--region", region]
+                ),
+                {"ok": True},
+            )[1],
+        )
+        monkeypatch.setattr(
+            pcluster_core, "_poll_cluster_update",
+            lambda cluster, region, binary: poll_calls.append(cluster),
+        )
+        return run_calls, poll_calls
+
+    def test_issues_update_cluster_with_the_config_path(self, monkeypatch):
+        run_calls, _ = self._stage(monkeypatch)
+        core_apply_cluster_update(
+            cluster_name="foo", config_path="/tmp/cfg.yaml",
+            region="us-east-1", pcluster_bin="pcluster",
+        )
+        assert run_calls[0][0] == "update-cluster"
+        assert "/tmp/cfg.yaml" in run_calls[0]
+        assert "foo" in run_calls[0]
+
+    def test_wait_true_polls_to_a_terminal_update_state(self, monkeypatch):
+        _, poll_calls = self._stage(monkeypatch)
+        core_apply_cluster_update(
+            cluster_name="foo", config_path="/tmp/cfg.yaml",
+            region="us-east-1", pcluster_bin="pcluster", wait=True,
+        )
+        assert poll_calls == ["foo"]
+
+    def test_wait_false_returns_without_polling(self, monkeypatch):
+        run_calls, poll_calls = self._stage(monkeypatch)
+        core_apply_cluster_update(
+            cluster_name="foo", config_path="/tmp/cfg.yaml",
+            region="us-east-1", pcluster_bin="pcluster", wait=False,
+        )
+        assert run_calls, "the update must still be requested"
+        assert poll_calls == [], "wait=False must not poll"
+
+    def test_wait_defaults_to_true(self, monkeypatch):
+        """The composite path depends on this: core_apply_queue_config
+        cannot restart the fleet until the update has actually finished."""
+        _, poll_calls = self._stage(monkeypatch)
+        core_apply_cluster_update(
+            cluster_name="foo", config_path="/tmp/cfg.yaml",
+            region="us-east-1", pcluster_bin="pcluster",
+        )
+        assert poll_calls == ["foo"]
+
+
+class TestApplyQueueConfigStaysBlocking:
+    """The composite deliberately takes NO wait parameter, unlike every
+    other core function Workstream 4 touched -- and that is a correctness
+    property, not a style choice. Its three phases are causally
+    dependent: update-cluster requires an already-stopped fleet, and the
+    restart requires a finished update. A wait=False that fired all three
+    in sequence would apply the config to a still-running fleet and fail.
+    An async caller uses the three phases separately instead, polling
+    between them."""
+
+    def test_it_accepts_no_wait_parameter(self):
+        import inspect
+
+        params = inspect.signature(core_apply_queue_config).parameters
+        assert "wait" not in params, (
+            "core_apply_queue_config must not take a wait parameter -- its "
+            "phases are causally dependent and cannot be fired without "
+            "waiting between them"
+        )
+
+    def test_every_phase_is_awaited(self, monkeypatch):
+        """All three phases must block. Pins the actual call kwargs, since
+        a wait=False leaking into any one of them is silent at runtime and
+        only shows up as a failed update against a live fleet."""
+        seen = []
+        monkeypatch.setattr(
+            pcluster_core, "core_stop_fleet",
+            lambda **kw: seen.append(("stop", kw.get("wait"))),
+        )
+        monkeypatch.setattr(
+            pcluster_core, "core_apply_cluster_update",
+            lambda **kw: seen.append(("update", kw.get("wait"))),
+        )
+        monkeypatch.setattr(
+            pcluster_core, "core_start_fleet",
+            lambda **kw: seen.append(("start", kw.get("wait"))),
+        )
+        core_apply_queue_config(
+            cluster_record=_record(), config_path="/tmp/cfg.yaml",
+            region="us-east-1", pcluster_bin="pcluster",
+        )
+        assert seen == [("stop", True), ("update", True), ("start", True)]
+
+
+class TestTheDescribeHelperFailsCatchably:
+    """The property that motivated moving off the pcluster binary at all,
+    and the one a mutation showed nothing was pinning.
+
+    `_describe_cluster_json` must raise something an `except Exception`
+    can catch. The subprocess form it replaced raised SystemExit on a
+    missing binary or a non-zero rc -- and SystemExit is a BaseException,
+    which the MCP handler's deliberately-narrow `except Exception` does
+    not catch (narrow on purpose, so a Lambda timeout is not reported as a
+    tool failure). A Lambda package has no `.venv/bin/pcluster`, so every
+    fleet/health/diagnose tool on the remote transport would have killed
+    its own container instead of returning an error.
+
+    Reverting the helper to `raise SystemExit` passed the entire suite
+    before this class existed.
+    """
+
+    def _boom_lib(self, monkeypatch, exc):
+        import types as _types
+
+        fake = _types.ModuleType("pcluster.lib")
+
+        def _describe(cluster_name, region):
+            raise exc
+
+        fake.describe_cluster = _describe
+        monkeypatch.setitem(sys.modules, "pcluster.lib", fake)
+
+    def test_a_library_failure_raises_a_catchable_exception(self, monkeypatch):
+        self._boom_lib(monkeypatch, RuntimeError("boom"))
+        with pytest.raises(Exception) as exc:
+            pcluster_core._describe_cluster_json("mycluster", "us-east-1")
+        assert isinstance(exc.value, Exception), "must not be a bare BaseException"
+
+    def test_it_is_not_a_systemexit(self, monkeypatch):
+        """The specific regression: SystemExit escapes `except Exception`
+        and takes the whole server process with it."""
+        self._boom_lib(monkeypatch, RuntimeError("boom"))
+        try:
+            pcluster_core._describe_cluster_json("mycluster", "us-east-1")
+        except BaseException as e:
+            assert not isinstance(e, SystemExit), (
+                "SystemExit here kills a long-lived MCP server rather than "
+                "failing one tool call"
+            )
+        else:
+            pytest.fail("expected the failure to propagate")
+
+    def test_it_is_a_pcluster_maker_error(self, monkeypatch):
+        """Specifically PClusterMakerError, so CLI shims keep converting it
+        to sys.exit and their behavior is unchanged."""
+        self._boom_lib(monkeypatch, RuntimeError("boom"))
+        with pytest.raises(pcluster_core.PClusterMakerError):
+            pcluster_core._describe_cluster_json("mycluster", "us-east-1")
+
+    def test_the_message_names_the_cluster_and_the_cause(self, monkeypatch):
+        self._boom_lib(monkeypatch, RuntimeError("AccessDenied"))
+        with pytest.raises(pcluster_core.PClusterMakerError) as exc:
+            pcluster_core._describe_cluster_json("mycluster", "eu-west-1")
+        text = str(exc.value)
+        assert "mycluster" in text and "eu-west-1" in text
+        assert "AccessDenied" in text
+
+    def test_no_pcluster_binary_is_ever_invoked(self, monkeypatch):
+        """The transport itself: a subprocess here means the `.venv` path
+        dependency is back."""
+        called = []
+        monkeypatch.setattr(
+            pcluster_core.subprocess, "run",
+            lambda *a, **kw: called.append(a) or _proc(),
+        )
+        import types as _types
+
+        fake = _types.ModuleType("pcluster.lib")
+        fake.describe_cluster = lambda cluster_name, region: {"clusterStatus": "X"}
+        monkeypatch.setitem(sys.modules, "pcluster.lib", fake)
+        assert pcluster_core._describe_cluster_json("c", "r") == {"clusterStatus": "X"}
+        assert called == [], "describe-cluster must not shell out"

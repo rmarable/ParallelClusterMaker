@@ -22,13 +22,14 @@ import argparse
 
 sys.path.insert(0, _src_dir)
 from pcluster_core import (
+    ClusterRecord,
+    PClusterMakerError,
     _validate_cluster_name,
     _validate_region,
     _read_cluster_record,
-    _run_pcluster_cmd,
     _get_fleet_status,
     _fleet_action_plan,
-    _poll_fleet,
+    core_stop_fleet,
 )
 from pcluster_aux_data import ctrlC_Abort
 
@@ -58,6 +59,13 @@ def main():
         sys.exit(f"ERROR: no region found for cluster {cluster_name!r} — pass -R/--region")
     _validate_region(region)
 
+    # Preflight, purely to decide whether the destructive-action confirmation
+    # gate below fires and to print the "already in progress" message at the
+    # right point in the sequence -- core_stop_fleet re-derives status/plan
+    # itself right before acting, so a race in the few-second window between
+    # this check and that one is safe either way (today's script has the
+    # same latent window during the 5-second ctrlC_Abort wait, with no
+    # recheck at all).
     status = _get_fleet_status(cluster_name, region, _PCLUSTER_BIN)
     print(f"Cluster:              {cluster_name}")
     print(f"Region:               {region}")
@@ -73,34 +81,23 @@ def main():
         sys.exit(0)
     if plan == "wait":
         print(f"Fleet is already {status} — a stop is already in progress.")
-        if args.wait:
-            print("Waiting for fleet to reach STOPPED...")
-            _poll_fleet(cluster_name, region, "STOPPED", "fleet stop", _PCLUSTER_BIN)
-            print("Fleet is STOPPED.")
-        else:
-            print(
-                f"Check status: pcluster describe-cluster --cluster-name {cluster_name} --region {region}"
-            )
-        sys.exit(0)
+    if plan == "request":
+        print(
+            "\n*** WARNING: stopping the fleet terminates all compute nodes immediately.\n"
+            "    In-flight Slurm jobs will be killed. ***\n"
+        )
+        ctrlC_Abort(5, 80, None, None, None, "false")
 
-    print(
-        "\n*** WARNING: stopping the fleet terminates all compute nodes immediately.\n"
-        "    In-flight Slurm jobs will be killed. ***\n"
-    )
-    ctrlC_Abort(5, 80, None, None, None, "false")
-    print("Requesting fleet stop...")
-    _run_pcluster_cmd(
-        ["update-compute-fleet", "--cluster-name", cluster_name,
-         "--region", region, "--status", "STOP_REQUESTED"],
-        _PCLUSTER_BIN,
-    )
-    print("Stop requested.")
+    cluster_record = ClusterRecord.from_dict(rec)
+    try:
+        core_stop_fleet(
+            cluster_record=cluster_record, region=region, pcluster_bin=_PCLUSTER_BIN,
+            wait=args.wait,
+        )
+    except PClusterMakerError as e:
+        sys.exit(str(e))
 
-    if args.wait:
-        print("Waiting for fleet to reach STOPPED...")
-        _poll_fleet(cluster_name, region, "STOPPED", "fleet stop", _PCLUSTER_BIN)
-        print("Fleet is STOPPED.")
-    else:
+    if not args.wait:
         print(
             f"Check status: pcluster describe-cluster --cluster-name {cluster_name} --region {region}"
         )

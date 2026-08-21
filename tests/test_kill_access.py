@@ -14,13 +14,13 @@ REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(REPO_ROOT, "src"))
 
 from pcluster_core import (
+    PClusterMakerError,
     _read_serial_first_line,
     _extract_rebuild_command,
     _resolve_access_script_path,
     _resolve_access_node_type,
     _read_turbot_from_vars_file,
-    _acquire_cluster_lock,
-    _release_cluster_lock,
+    core_resolve_access_node_type,
 )
 
 # ---------------------------------------------------------------------------
@@ -469,71 +469,48 @@ class TestResolveAccessNodeType:
 
 
 # ---------------------------------------------------------------------------
-# _acquire_cluster_lock / _release_cluster_lock
+# core_resolve_access_node_type -- the MCP-ready wrapper around
+# _resolve_access_node_type, added in access_cluster.py's Workstream 1
+# migration (docs/parallelclustermaker-mcp-plan.md). Reuses that function's
+# already-thoroughly-tested decision logic entirely, so only the wrapper's
+# own added behavior is covered here: exception-based error signaling, the
+# AccessInfo return shape, and the both-flags-set defensive check that
+# argparse's mutually-exclusive group makes unreachable from the CLI but
+# which a future MCP caller has no such guard against.
 # ---------------------------------------------------------------------------
 
 
-class TestClusterLock:
-    """mkdir-based lock guarding two processes from touching the same cluster
-    at once -- same shape as hpc-benchmark.sh's .osu-cuda.lock (mkdir is the
-    atomic primitive; a check-then-create with os.path.exists is a race).
-    This is what would have caught the osiris incident: a concurrent
-    kill_pcluster.py deleting an in-flight make_pcluster.py build's state."""
-
-    def test_acquire_creates_the_lock_and_an_owner_file(self, tmp_path):
-        cluster_dir = tmp_path / "active_clusters" / "mycluster"
-        lock_path = _acquire_cluster_lock(str(cluster_dir), "make_pcluster.py -N mycluster")
-        assert os.path.isdir(lock_path)
-        assert lock_path == os.path.join(str(cluster_dir), ".build.lock")
-        with open(os.path.join(lock_path, "owner")) as fh:
-            owner = fh.read()
-        assert f"pid={os.getpid()}" in owner
-        assert "make_pcluster.py -N mycluster" in owner
-
-    def test_acquire_creates_cluster_data_dir_if_missing(self, tmp_path):
-        cluster_dir = tmp_path / "active_clusters" / "mycluster"
-        assert not cluster_dir.exists()
-        _acquire_cluster_lock(str(cluster_dir), "make_pcluster.py")
-        assert cluster_dir.is_dir()
-
-    def test_second_acquire_fails_fast_naming_the_owner(self, tmp_path):
-        cluster_dir = tmp_path / "active_clusters" / "mycluster"
-        _acquire_cluster_lock(str(cluster_dir), "make_pcluster.py -N mycluster")
-        with pytest.raises(SystemExit) as exc:
-            _acquire_cluster_lock(str(cluster_dir), "kill_pcluster.py -N mycluster")
-        message = str(exc.value.code)
-        assert "already running" in message
-        assert "make_pcluster.py -N mycluster" in message, (
-            "the error must name what actually holds the lock, not just that "
-            "something does"
+class TestCoreResolveAccessNodeType:
+    def test_success_returns_access_info(self):
+        info = core_resolve_access_node_type(
+            {"enable_loginnode": "true", "loginnode_count": 1},
+            "mycluster",
+            login_node_requested=True,
         )
-        assert "rm -rf" in message and ".build.lock" in message, (
-            "must tell the operator how to recover from a killed process's "
-            "stale lock"
-        )
+        assert info.cluster_name == "mycluster"
+        assert info.node_type == "LoginNode"
+        assert info.node_label == "login node"
 
-    def test_release_removes_the_lock_directory(self, tmp_path):
-        cluster_dir = tmp_path / "active_clusters" / "mycluster"
-        lock_path = _acquire_cluster_lock(str(cluster_dir), "make_pcluster.py")
-        _release_cluster_lock(lock_path)
-        assert not os.path.exists(lock_path)
+    def test_default_selection_returns_head_node_label(self):
+        info = core_resolve_access_node_type({}, "mycluster")
+        assert info.node_type == "HeadNode"
+        assert info.node_label == "head node"
 
-    def test_release_after_acquire_allows_a_fresh_acquire(self, tmp_path):
-        cluster_dir = tmp_path / "active_clusters" / "mycluster"
-        lock_path = _acquire_cluster_lock(str(cluster_dir), "make_pcluster.py")
-        _release_cluster_lock(lock_path)
-        # Must not raise -- the whole point of releasing.
-        lock_path2 = _acquire_cluster_lock(str(cluster_dir), "make_pcluster.py")
-        assert os.path.isdir(lock_path2)
+    def test_error_from_resolve_access_node_type_becomes_pcluster_maker_error(self):
+        with pytest.raises(PClusterMakerError, match="no login node is configured"):
+            core_resolve_access_node_type(
+                {"enable_loginnode": "false"}, "mycluster", login_node_requested=True,
+            )
 
-    def test_release_is_safe_when_the_lock_is_already_gone(self, tmp_path):
-        cluster_dir = tmp_path / "active_clusters" / "mycluster"
-        lock_path = os.path.join(str(cluster_dir), ".build.lock")
-        _release_cluster_lock(lock_path)  # must not raise
-
-    def test_release_is_safe_when_only_the_owner_file_is_gone(self, tmp_path):
-        cluster_dir = tmp_path / "active_clusters" / "mycluster"
-        lock_path = _acquire_cluster_lock(str(cluster_dir), "make_pcluster.py")
-        os.remove(os.path.join(lock_path, "owner"))
-        _release_cluster_lock(lock_path)  # must not raise
-        assert not os.path.exists(lock_path)
+    def test_both_flags_set_raises_even_though_argparse_would_normally_prevent_it(self):
+        """Unreachable from the CLI (argparse's mutually-exclusive group
+        exits first), but a future MCP caller has no such guard -- this is
+        the one behavior core_resolve_access_node_type adds that
+        _resolve_access_node_type itself doesn't have."""
+        with pytest.raises(PClusterMakerError, match="mutually exclusive"):
+            core_resolve_access_node_type(
+                {"enable_loginnode": "true", "loginnode_count": 1},
+                "mycluster",
+                login_node_requested=True,
+                head_node_requested=True,
+            )

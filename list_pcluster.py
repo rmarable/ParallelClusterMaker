@@ -19,12 +19,17 @@ if os.path.realpath(sys.prefix) != os.path.realpath(os.path.join(_repo_root, ".v
     )
 
 import argparse
+import dataclasses
 import json
-import subprocess
-from datetime import datetime, timezone
 
 sys.path.insert(0, _src_dir)
-from pcluster_core import _read_cluster_record, _validate_cluster_name
+from pcluster_core import (
+    ClusterRecord,
+    _age_str,
+    _read_cluster_record,
+    _validate_cluster_name,
+    core_list_clusters,
+)
 
 _PCLUSTER_BIN = os.path.join(_repo_root, ".venv", "bin", "pcluster")
 _ACTIVE_CLUSTERS_DIR = os.path.join(_repo_root, "active_clusters")
@@ -35,42 +40,6 @@ def _truncate(s, width):
     if len(s) <= width:
         return s
     return s[: width - 1] + "…"
-
-
-def _age_str(deployment_date):
-    # DEPLOYMENT_DATE_TAG format: D-Month-YYYY e.g. "24-July-2026"
-    try:
-        dt = datetime.strptime(deployment_date, "%d-%B-%Y").replace(tzinfo=timezone.utc)
-        delta = datetime.now(timezone.utc) - dt
-        total_minutes = int(delta.total_seconds() // 60)
-        if total_minutes < 60:
-            return f"{total_minutes}m"
-        total_hours = total_minutes // 60
-        if total_hours < 48:
-            return f"{total_hours}h"
-        return f"{total_hours // 24}d"
-    except (ValueError, TypeError):
-        return "?"
-
-
-def _live_status(cluster_name, region):
-    try:
-        result = subprocess.run(
-            [_PCLUSTER_BIN, "describe-cluster",
-             "--cluster-name", cluster_name,
-             "--region", region],
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
-        if result.returncode != 0:
-            return "ERR"
-        data = json.loads(result.stdout)
-        cs = data.get("clusterStatus", "?")
-        cfs = data.get("cloudFormationStackStatus", "?")
-        return f"{cs} / {cfs}"
-    except (subprocess.TimeoutExpired, json.JSONDecodeError, OSError):
-        return "ERR"
 
 
 def _enumerate_clusters():
@@ -170,7 +139,7 @@ def main():
     args = parser.parse_args()
 
     names = _enumerate_clusters()
-    records = []
+    cluster_records = []
     for name in names:
         rec = _read_cluster_record(name, _repo_root)
         if rec is None:
@@ -179,15 +148,16 @@ def main():
                 file=sys.stderr,
             )
             continue
-        if args.region and rec["region"] != args.region:
-            continue
-        if args.owner and rec["cluster_owner"] != args.owner:
-            continue
-        rec["age"] = _age_str(rec["deployment_date"])
-        rec["status"] = (
-            _live_status(rec["cluster_name"], rec["region"]) if args.live else "LOCAL"
-        )
-        records.append(rec)
+        cluster_records.append(ClusterRecord.from_dict(rec))
+
+    entries = core_list_clusters(
+        cluster_records=cluster_records,
+        pcluster_bin=_PCLUSTER_BIN,
+        region_filter=args.region,
+        owner_filter=args.owner,
+        live=args.live,
+    )
+    records = [dataclasses.asdict(e) for e in entries]
 
     if args.json:
         print(json.dumps(records, indent=2))

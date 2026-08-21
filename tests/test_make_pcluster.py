@@ -19,6 +19,10 @@ sys.path.insert(
 )
 
 from pcluster_core import (
+    PClusterMakerError,
+    MAKE_CLUSTER_DEFAULTS,
+    build_make_cluster_params as _build_make_cluster_params,
+    _derive_az_list,
     _b,
     _validate_az_input,
     _validate_cluster_name,
@@ -521,9 +525,10 @@ class TestAnEmptyExportPrefixIsNotAnError:
         """Which call site got the flag is the whole fix. Both take the same four
         positional arguments and differ only in the label, so a flag on the
         import call reads as plausible and silently stops validating the one
-        path that has to hold data."""
+        path that has to hold data. Both call sites live in
+        pcluster_core.core_create_cluster since the core/shim split."""
         repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        with open(os.path.join(repo_root, "make_pcluster.py")) as fh:
+        with open(os.path.join(repo_root, "src", "pcluster_core.py")) as fh:
             tree = ast.parse(fh.read())
         relaxed = {}
         for node in ast.walk(tree):
@@ -813,18 +818,19 @@ class TestStorageSummaryLinesTakesKeywordsOnly:
 
     def test_the_make_pcluster_call_site_names_every_argument(self):
         """A keyword-only signature is only half of it: the call site has to pass
-        names, and `f(**locals())` or a stray positional would defeat the guard."""
+        names, and `f(**locals())` or a stray positional would defeat the guard.
+        Lives in pcluster_core.core_create_cluster since the core/shim split."""
         import ast
 
         repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        with open(os.path.join(repo_root, "make_pcluster.py")) as fh:
+        with open(os.path.join(repo_root, "src", "pcluster_core.py")) as fh:
             tree = ast.parse(fh.read())
         calls = [
             node for node in ast.walk(tree)
             if isinstance(node, ast.Call)
             and getattr(node.func, "id", None) == "_storage_summary_lines"
         ]
-        assert calls, "no _storage_summary_lines call found in make_pcluster.py"
+        assert calls, "no _storage_summary_lines call found in src/pcluster_core.py"
         expected = set(_STORAGE_DEFAULTS)
         for call in calls:
             assert not call.args, "call site passes a positional argument"
@@ -878,12 +884,12 @@ class TestValidateNetworkTakesKeywordsOnly:
     def test_the_make_pcluster_call_site_names_every_argument(self):
         """A keyword-only signature is only half of it: the call site has to
         pass names, and f(**locals()) or a stray positional would defeat the
-        guard. make_pcluster.py calls this via ThreadPoolExecutor.submit(
-        _validate_network, ...), so the function reference itself is a
-        legitimate positional argument to submit() -- everything else must
-        still be a keyword."""
+        guard. core_create_cluster (pcluster_core.py, since the core/shim
+        split) calls this via ThreadPoolExecutor.submit(_validate_network,
+        ...), so the function reference itself is a legitimate positional
+        argument to submit() -- everything else must still be a keyword."""
         repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        with open(os.path.join(repo_root, "make_pcluster.py")) as fh:
+        with open(os.path.join(repo_root, "src", "pcluster_core.py")) as fh:
             tree = ast.parse(fh.read())
         calls = [
             node for node in ast.walk(tree)
@@ -893,7 +899,7 @@ class TestValidateNetworkTakesKeywordsOnly:
                 for a in node.args
             )
         ]
-        assert calls, "no _validate_network call found in make_pcluster.py"
+        assert calls, "no _validate_network call found in src/pcluster_core.py"
         expected = set(_VALIDATE_NETWORK_DEFAULTS)
         for call in calls:
             other_positional = [
@@ -1231,18 +1237,23 @@ class TestDownloadChecksumsAreValidatedBeforeAnythingIsCreated:
     def _hardcoded_defaults():
         import ast
 
+        # Read from pcluster_core, not make_pcluster: the dict moved to
+        # module scope in the core layer so an MCP create_cluster wrapper
+        # could reach it (it was a local inside main() before, unreachable
+        # by anything else). make_pcluster.py now just aliases it.
         path = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "make_pcluster.py"
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            "src", "pcluster_core.py",
         )
         with open(path) as fh:
             tree = ast.parse(fh.read())
         for node in ast.walk(tree):
             if (
                 isinstance(node, ast.Assign)
-                and getattr(node.targets[0], "id", "") == "_HARDCODED_DEFAULTS"
+                and getattr(node.targets[0], "id", "") == "MAKE_CLUSTER_DEFAULTS"
             ):
                 return ast.literal_eval(node.value)
-        raise AssertionError("_HARDCODED_DEFAULTS not found in make_pcluster.py")
+        raise AssertionError("MAKE_CLUSTER_DEFAULTS not found in src/pcluster_core.py")
 
     @staticmethod
     def _toolkit_defaults():
@@ -1303,30 +1314,49 @@ class TestDownloadChecksumsAreValidatedBeforeAnythingIsCreated:
         five managed policies and a role behind on the failing path, which is the
         entire cost this check exists to avoid.
 
-        Anchored on the IAM setup call rather than on a line number so that
-        reordering unrelated code does not fail it."""
+        Since the core/shim split, checksum validation (during CLI param
+        resolution) and _setup_iam (inside core_create_cluster) no longer live
+        in the same file, and the property this test pins is now even
+        stronger: validation must complete, in the CLI shim, before
+        core_create_cluster -- the only caller of _setup_iam -- is ever
+        invoked at all. Anchored on the core_create_cluster call site rather
+        than on a line number so that reordering unrelated code does not fail
+        it."""
         import ast
 
         root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         with open(os.path.join(root, "make_pcluster.py")) as fh:
-            src = fh.read()
-        tree = ast.parse(src)
+            shim_src = fh.read()
+        shim_tree = ast.parse(shim_src)
 
-        validate_lines, iam_lines = [], []
-        for node in ast.walk(tree):
+        validate_lines, core_call_lines = [], []
+        for node in ast.walk(shim_tree):
             if not isinstance(node, ast.Call):
                 continue
             name = getattr(node.func, "id", None) or getattr(node.func, "attr", None)
             if name == "_validate_download_checksum":
                 validate_lines.append(node.lineno)
-            elif name == "_setup_iam":
-                iam_lines.append(node.lineno)
+            elif name == "core_create_cluster":
+                core_call_lines.append(node.lineno)
 
         assert len(validate_lines) >= 2, (
             "expected the monitoring tarball and the compose plugin checksums to "
             f"be validated; found {len(validate_lines)} call(s)"
         )
-        assert iam_lines, "vacuity guard: _setup_iam call not found in make_pcluster.py"
+        assert core_call_lines, "vacuity guard: core_create_cluster call not found in make_pcluster.py"
+        assert max(validate_lines) < min(core_call_lines), (
+            "checksum validation must complete before core_create_cluster -- the "
+            "only caller of _setup_iam -- is ever invoked"
+        )
+
+        with open(os.path.join(root, "src", "pcluster_core.py")) as fh:
+            core_tree = ast.parse(fh.read())
+        iam_lines = [
+            node.lineno for node in ast.walk(core_tree)
+            if isinstance(node, ast.Call)
+            and getattr(node.func, "id", None) == "_setup_iam"
+        ]
+        assert iam_lines, "vacuity guard: _setup_iam call not found in src/pcluster_core.py"
         assert max(validate_lines) < min(iam_lines), (
             "checksums are validated after IAM resources are created; a bad "
             "checksum then leaves five policies and a role to clean up"
@@ -1408,3 +1438,286 @@ class TestDeriveResultsBucket:
         """A 63-character overrun is an opaque S3 error mid-build otherwise."""
         with pytest.raises(SystemExit):
             _derive_results_bucket(aws_account_id="1" * 40, region="ap-southeast-4")
+
+
+class TestDeriveAzList:
+    """The last genuinely shim-local derivation, extracted to core so an
+    MCP create_cluster wrapper can build a MakeClusterParams without
+    reimplementing it (round 43).
+
+    The asymmetric fallback is the whole point of the signature: compute
+    falls back to the head node's AZ, GPU falls back to None. Collapsing
+    them to one internal default would give a GPU-less cluster a GPU AZ
+    list, which is why the fallback is a required keyword rather than a
+    default.
+    """
+
+    def test_a_single_az_parses(self):
+        assert _derive_az_list("us-east-1a", fallback=["x"]) == ["us-east-1a"]
+
+    def test_several_azs_parse_in_order(self):
+        assert _derive_az_list("us-east-1a,us-east-1b", fallback=None) == [
+            "us-east-1a", "us-east-1b"
+        ]
+
+    def test_whitespace_is_stripped(self):
+        assert _derive_az_list(" us-east-1a , us-east-1b ", fallback=None) == [
+            "us-east-1a", "us-east-1b"
+        ]
+
+    def test_a_trailing_comma_does_not_yield_an_empty_az(self):
+        """'us-east-1a,' is what an operator actually types. An empty-string
+        AZ would survive all the way to cluster creation before failing."""
+        assert _derive_az_list("us-east-1a,", fallback=None) == ["us-east-1a"]
+
+    def test_empty_input_returns_the_fallback(self):
+        assert _derive_az_list("", fallback=["us-east-1a"]) == ["us-east-1a"]
+
+    def test_none_input_returns_the_fallback(self):
+        assert _derive_az_list(None, fallback=None) is None
+
+    def test_an_all_separator_string_returns_the_fallback(self):
+        """',,,' parses to zero AZs; returning [] would be a queue pinned
+        to no AZ at all, which fails obscurely at creation. The fallback is
+        the right answer."""
+        assert _derive_az_list(",,,", fallback=["us-east-1a"]) == ["us-east-1a"]
+
+    def test_the_two_fallbacks_are_genuinely_different(self):
+        """Pins the asymmetry rather than the implementation: a GPU-less
+        cluster must get None, not a list."""
+        assert _derive_az_list("", fallback=["us-east-1a"]) == ["us-east-1a"]
+        assert _derive_az_list("", fallback=None) is None
+
+    def test_the_fallback_is_required(self):
+        """A default would let a caller silently get the wrong one."""
+        import inspect
+
+        sig = inspect.signature(_derive_az_list)
+        assert sig.parameters["fallback"].kind == inspect.Parameter.KEYWORD_ONLY
+        assert sig.parameters["fallback"].default is inspect.Parameter.empty
+
+    def test_both_call_sites_pass_the_right_fallback(self):
+        """The asymmetry is only correct if the call sites preserve it, and
+        a swap renders a plausible cluster rather than an error."""
+        import ast
+
+        path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            "make_pcluster.py",
+        )
+        with open(path) as fh:
+            tree = ast.parse(fh.read())
+        found = {}
+        for node in ast.walk(tree):
+            if not (isinstance(node, ast.Assign) and isinstance(node.value, ast.Call)):
+                continue
+            if getattr(node.value.func, "id", "") != "_derive_az_list":
+                continue
+            target = node.targets[0].id
+            fb = next(k.value for k in node.value.keywords if k.arg == "fallback")
+            found[target] = "list" if isinstance(fb, ast.List) else "none"
+        assert found == {"compute_az_list": "list", "gpu_az_list": "none"}, found
+
+
+class TestBuildMakeClusterParams:
+    """The bridge that lets a non-argparse caller construct a
+    MakeClusterParams (round 44). 84 fields, none with a default:
+    MAKE_CLUSTER_DEFAULTS supplies 70, four are required inputs, and the
+    remaining ten are derived here through the same core helpers
+    make_pcluster.py's main() calls -- not reimplemented, so a change to
+    any of them reaches both callers.
+    """
+
+    _REQUIRED = dict(
+        cluster_name="osiris", cluster_owner="testuser",
+        cluster_owner_email="testuser@example.com", az="us-east-2a",
+        headnode_instance_type="c5.xlarge",
+    )
+    # Both instance-type defaults are "", and a cluster with neither queue
+    # is refused (see TestAtLeastOneQueue), so every build here needs one.
+    _QUEUE = {"compute_instance_type": "c5.2xlarge"}
+
+    def _build(self, **kw):
+        merged = dict(self._REQUIRED)
+        overrides = dict(self._QUEUE)
+        overrides.update(kw.pop("overrides", None) or {})
+        merged.update(kw)
+        merged["overrides"] = overrides
+        return _build_make_cluster_params(**merged)
+
+    def test_it_produces_a_complete_params_object(self):
+        """Every field populated -- the point of the exercise, since
+        MakeClusterParams has no defaults of its own."""
+        import dataclasses
+
+        params = self._build()
+        for f in dataclasses.fields(params):
+            getattr(params, f.name)  # must not raise
+
+    def test_the_required_inputs_land_where_they_belong(self):
+        params = self._build()
+        assert params.cluster_name == "osiris"
+        assert params.cluster_owner == "testuser"
+        assert params.cluster_owner_email == "testuser@example.com"
+        assert params.az == "us-east-2a"
+        assert params.headnode_instance_type == "c5.xlarge"
+
+    def test_headnode_instance_type_is_required(self):
+        """An earlier draft defaulted it to the *login node* default --
+        a plausible value from the wrong knob, which would have silently
+        built head nodes sized for a login node."""
+        import inspect
+
+        sig = inspect.signature(_build_make_cluster_params)
+        p = sig.parameters["headnode_instance_type"]
+        assert p.default is inspect.Parameter.empty
+        assert p.kind == inspect.Parameter.KEYWORD_ONLY
+
+    def test_defaults_fill_everything_not_overridden(self):
+        params = self._build()
+        assert params.base_os == MAKE_CLUSTER_DEFAULTS["base_os"]
+        assert params.scheduler == MAKE_CLUSTER_DEFAULTS["scheduler"]
+
+    def test_overrides_win_over_defaults(self):
+        params = self._build(overrides={"base_os": "rhel9arm", "enable_fsx": "true"})
+        assert params.base_os == "rhel9arm"
+        assert params.enable_fsx == "true"
+
+    def test_an_unknown_override_is_rejected(self):
+        """Silently ignoring a typo is the worst outcome: an operator who
+        asked for FSx and did not get it, with no error anywhere."""
+        with pytest.raises(PClusterMakerError, match="unknown cluster parameter"):
+            self._build(overrides={"enable_fsxx": "true"})
+
+    def test_the_rejection_names_the_offending_key(self):
+        with pytest.raises(PClusterMakerError, match="enable_fsxx"):
+            self._build(overrides={"enable_fsxx": "true"})
+
+    def test_the_az_list_derivation_is_used(self):
+        """Not reimplemented -- the same _derive_az_list the CLI calls,
+        including its asymmetric fallbacks."""
+        params = self._build()
+        assert params.compute_az_list == ["us-east-2a"]
+        assert params.gpu_az_list is None
+
+    def test_an_explicit_compute_az_overrides_the_fallback(self):
+        params = self._build(overrides={"compute_az": "us-east-2b,us-east-2c"})
+        assert params.compute_az_list == ["us-east-2b", "us-east-2c"]
+
+    def test_the_docker_compose_arch_follows_base_os(self):
+        """Graviton base_os must select the aarch64 checksum; getting this
+        wrong makes every node fetch a wrong-architecture binary."""
+        x86 = self._build()
+        arm = self._build(overrides={"base_os": "rhel9arm"})
+        assert x86.docker_compose_arch == "x86_64"
+        assert arm.docker_compose_arch == "aarch64"
+
+    def test_the_checksum_matches_the_derived_arch(self):
+        arm = self._build(overrides={"base_os": "rhel9arm"})
+        assert arm.docker_compose_checksum == \
+            MAKE_CLUSTER_DEFAULTS["docker_compose_checksum_aarch64"]
+
+    def test_the_bootstrap_timeout_is_bumped_for_shared_filesystems(self):
+        """FSx provisioning runs on the head node's critical path with the
+        wait-condition clock already running."""
+        plain = self._build()
+        fsx = self._build(overrides={"enable_fsx": "true"})
+        assert fsx.head_node_bootstrap_timeout > plain.head_node_bootstrap_timeout
+        assert plain.configured_head_node_bootstrap_timeout == 2100
+
+    def test_the_loginnode_type_falls_back_by_architecture(self):
+        """The architecture-aware fallback, not a flat literal: a Graviton
+        default on an x86 cluster fails preflight."""
+        x86 = self._build()
+        arm = self._build(overrides={"base_os": "ubuntu2404arm"})
+        assert x86.loginnode_instance_type != arm.loginnode_instance_type
+
+    def test_an_explicit_loginnode_type_is_kept(self):
+        params = self._build(overrides={"loginnode_instance_type": "c8g.4xlarge"})
+        assert params.loginnode_instance_type == "c8g.4xlarge"
+
+
+class TestAtLeastOneQueue:
+    """A cluster with neither a CPU nor a GPU queue has a head node and
+    nothing to run jobs on.
+
+    Both instance-type defaults are "" and both queue flags are derived
+    purely from whether their string is non-empty, so this is what a
+    defaults-only cluster is. config.pcluster.j2 renders `SlurmQueues:
+    None` and PCluster's schema rejects it -- but only after
+    core_create_cluster has created the IAM role, S3 bucket, keypair and
+    SSH secret, which the late-stage failure handler then deliberately
+    preserves. A full provisioning cycle plus a manual kill_pcluster.py,
+    for an input error visible before anything is spent.
+
+    core_remove_queue already enforces the same invariant from the other
+    direction ("A cluster must have at least one queue"); creation simply
+    never did.
+    """
+
+    _REQ = dict(
+        cluster_name="osiris", cluster_owner="testuser",
+        cluster_owner_email="testuser@example.com", az="us-east-2a",
+        headnode_instance_type="c5.xlarge",
+    )
+
+    def _build(self, **overrides):
+        return _build_make_cluster_params(**self._REQ, overrides=overrides or None)
+
+    def test_defaults_alone_are_rejected(self):
+        """The default cluster is the broken one, which is what makes this
+        worth guarding rather than assuming nobody would ask for it."""
+        with pytest.raises(PClusterMakerError, match="no compute queue"):
+            self._build()
+
+    def test_a_cpu_queue_alone_is_fine(self):
+        assert self._build(compute_instance_type="c5.xlarge").compute_instance_type
+
+    def test_a_gpu_queue_alone_is_fine(self):
+        """GPU-only clusters are a supported shape -- the benchmark job
+        template has a whole branch for them."""
+        assert self._build(gpu_instance_type="g5.xlarge").gpu_instance_type
+
+    def test_both_together_are_fine(self):
+        params = self._build(
+            compute_instance_type="c5.xlarge", gpu_instance_type="g5.xlarge"
+        )
+        assert params.compute_instance_type and params.gpu_instance_type
+
+    def test_the_message_names_both_parameters_and_a_concrete_value(self):
+        """A caller told only "no compute queue" has to go read the source
+        to find out which knob to turn."""
+        with pytest.raises(PClusterMakerError) as exc:
+            self._build()
+        text = str(exc.value)
+        assert "compute_instance_type" in text
+        assert "gpu_instance_type" in text
+        assert "c5.xlarge" in text
+
+    def test_the_message_says_what_it_saves(self):
+        """The reason this is worth failing early rather than letting
+        PCluster reject it: the expensive state is already created."""
+        with pytest.raises(PClusterMakerError) as exc:
+            self._build()
+        assert "keypair" in str(exc.value)
+
+    def test_the_config_template_really_renders_no_queues(self):
+        """Grounds the whole guard: without it, this is what gets built."""
+        import yaml
+
+        import conftest
+        from pcluster_core import render_template
+
+        ctx = dict(conftest.cluster_params.__wrapped__())
+        ctx.update({
+            "enable_cpu_queue": "false", "enable_gpu_queue": "false",
+            "cpu_instance_types": [], "gpu_instance_types": [],
+            "external_nfs_sg": {"group_id": "sg-0"},
+        })
+        rendered = yaml.safe_load(render_template(
+            os.path.join(
+                os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "templates"
+            ),
+            "config.pcluster.j2", **ctx,
+        ))
+        assert rendered["Scheduling"]["SlurmQueues"] is None

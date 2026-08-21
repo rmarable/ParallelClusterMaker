@@ -22,13 +22,14 @@ import argparse
 
 sys.path.insert(0, _src_dir)
 from pcluster_core import (
+    ClusterRecord,
+    PClusterMakerError,
     _validate_cluster_name,
     _validate_region,
     _read_cluster_record,
-    _run_pcluster_cmd,
     _get_fleet_status,
     _fleet_action_plan,
-    _poll_fleet,
+    core_start_fleet,
 )
 
 _PCLUSTER_BIN = os.path.join(_repo_root, ".venv", "bin", "pcluster")
@@ -57,6 +58,10 @@ def main():
         sys.exit(f"ERROR: no region found for cluster {cluster_name!r} — pass -R/--region")
     _validate_region(region)
 
+    # Preflight, purely to print the "already in progress" message at the
+    # right point in the sequence -- core_start_fleet re-derives status/plan
+    # itself right before acting, so a race in the small window between
+    # this check and that one is safe either way.
     status = _get_fleet_status(cluster_name, region, _PCLUSTER_BIN)
     print(f"Cluster:              {cluster_name}")
     print(f"Region:               {region}")
@@ -72,29 +77,17 @@ def main():
         sys.exit(0)
     if plan == "wait":
         print(f"Fleet is already {status} — a start is already in progress.")
-        if args.wait:
-            print("Waiting for fleet to reach RUNNING...")
-            _poll_fleet(cluster_name, region, "RUNNING", "fleet start", _PCLUSTER_BIN)
-            print("Fleet is RUNNING.")
-        else:
-            print(
-                f"Check status: pcluster describe-cluster --cluster-name {cluster_name} --region {region}"
-            )
-        sys.exit(0)
 
-    print("Requesting fleet start...")
-    _run_pcluster_cmd(
-        ["update-compute-fleet", "--cluster-name", cluster_name,
-         "--region", region, "--status", "START_REQUESTED"],
-        _PCLUSTER_BIN,
-    )
-    print("Start requested.")
+    cluster_record = ClusterRecord.from_dict(rec)
+    try:
+        core_start_fleet(
+            cluster_record=cluster_record, region=region, pcluster_bin=_PCLUSTER_BIN,
+            wait=args.wait,
+        )
+    except PClusterMakerError as e:
+        sys.exit(str(e))
 
-    if args.wait:
-        print("Waiting for fleet to reach RUNNING...")
-        _poll_fleet(cluster_name, region, "RUNNING", "fleet start", _PCLUSTER_BIN)
-        print("Fleet is RUNNING.")
-    else:
+    if not args.wait:
         print(
             f"Check status: pcluster describe-cluster --cluster-name {cluster_name} --region {region}"
         )

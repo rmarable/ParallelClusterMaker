@@ -242,20 +242,17 @@
         - "{{ stage_dir }}"
         - "{{ performance_stage_dir }}"
 
+    # Not moved to Python's render_template like the rest of Tier 1
+    # (Workstream 2): when enable_external_nfs is true this template
+    # references {{ external_nfs_sg.group_id }}, the result of the
+    # `amazon.aws.ec2_security_group` task below, which does not exist
+    # until this playbook actually runs. See core_create_cluster's own
+    # comment in src/pcluster_core.py for the full explanation.
     - name: Template the cluster config
       template:
         src: "{{ cluster_config_template_orig }}"
         dest: "{{ cluster_config_template }}"
         mode: "0755"
-
-    - name: Template the toolkit pre/postinstall scripts
-      template:
-        src: "{{ item.src }}"
-        dest: "{{ item.dest }}"
-        mode: "0755"
-      with_items:
-        - {src: '{{ preinstall_template_orig }}', dest: '{{ preinstall_rendered }}'}
-        - {src: '{{ postinstall_template_orig }}', dest: '{{ postinstall_rendered }}'}
 
     - name: Copy the operator pre/post-deployment hooks to the cluster data directory
       copy:
@@ -324,11 +321,6 @@
             encrypt: true
             mode: put
 
-        - name: Template the monitoring post-install wrapper script
-          template:
-            src: "{{ monitoring_wrapper_src }}"
-            dest: "{{ monitoring_wrapper_dest }}"
-            mode: "0755"
         - name: Upload monitoring wrapper script to S3
           amazon.aws.s3_object:
             bucket: "{{ s3_bucketname }}"
@@ -339,31 +331,9 @@
             encrypt: true
             mode: put
 
-        - name: Template the Grafana SSH tunnel script to stage_dir
-          template:
-            src: "{{ grafana_tunnel_src }}"
-            dest: "{{ grafana_tunnel_dest }}"
-            mode: "0755"
-
-    - name: Template the kill_pcluster script to stage_dir
-      template:
-        src: "{{ cluster_template_dir }}/kill_pcluster.j2"
-        dest: "{{ stage_dir }}/kill_pcluster.{{ cluster_name }}.sh"
-        mode: "0755"
-
     - name: Stage and upload external NFS mount list
       when: 'enable_external_nfs == "true"'
       block:
-        - name: Template the external NFS mount list to the cluster state directory
-          template:
-            src: "{{ external_nfs_mount_list_template_orig }}"
-            dest: "{{ external_nfs_mount_list_template_src }}"
-            mode: "0644"
-        - name: Template the external NFS mount list to the staging directory
-          template:
-            src: "{{ external_nfs_mount_list_template_orig }}"
-            dest: "{{ stage_dir }}/{{ external_nfs_mount_list_template_dest }}"
-            mode: "0755"
         - name: PUT the external NFS mount list into s3_bucketname
           amazon.aws.s3_object:
             bucket: "{{ s3_bucketname }}"
@@ -386,14 +356,6 @@
             mode: "0755"
           with_items:
             - hpc-benchmark.sh
-        - name: Render personalized cluster scripts to stage_dir
-          ansible.builtin.template:
-            src: "{{ performance_rootdir }}/{{ item.src }}"
-            dest: "{{ performance_stage_dir }}/{{ item.dest }}"
-            mode: "0755"
-          with_items:
-            - {src: "job_hpc-benchmark.sh.j2", dest: "job_hpc-benchmark.sh"}
-            - {src: "README-PERFORMANCE.md.j2", dest: "README-PERFORMANCE.md"}
         # Allowlist, not a blocklist: this sync exists only so a head node whose EBS
         # root was replaced can restore the driver.  Everything else in the source
         # tree is either internal (CLAUDE.md), a raw Jinja2 template the operator must
@@ -551,18 +513,6 @@
             or (cluster_status.stdout | from_json).get('headNode', {}).get('privateIpAddress', '')
           }}
 
-    - name: Template the cluster SSH access script to stage_dir
-      template:
-        src: "{{ cluster_template_dir }}/access_cluster.j2"
-        dest: "{{ stage_dir }}/access_cluster.{{ cluster_name }}.sh"
-        mode: "0755"
-
-    - name: Template the SSH key retrieval script to stage_dir
-      template:
-        src: "{{ cluster_template_dir }}/retrieve_ssh_key.j2"
-        dest: "{{ stage_dir }}/retrieve_ssh_key.{{ cluster_name }}.sh"
-        mode: "0755"
-
     - name: Wait for SSH port to be reachable on the head node
       wait_for:
         host: "{{ head_node_public_ip }}"
@@ -629,12 +579,6 @@
         scp -o BatchMode=yes -o ConnectTimeout=30 -o StrictHostKeyChecking=accept-new -i "{{ ssh_keypair }}" -r "{{ stage_dir }}"
         "{{ ec2_user }}@{{ head_node_public_ip }}:$(dirname '{{ stage_dir }}')"/
       when: head_node_public_ip != ''
-
-    - name: Render the default Slurm submission script template
-      template:
-        src: "{{ local_workingdir }}/scripts/sbatch_default_submission_script.sh"
-        dest: "{{ stage_dir }}/sbatch_default_submission_script.sh"
-        mode: "0755"
 
     - name: Transfer the default Slurm submission script to the head node
       shell: >

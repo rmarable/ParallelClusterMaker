@@ -415,10 +415,12 @@ class TestEbsValidationTakesKeywordsOnly:
             )
 
     def test_the_call_site_passes_no_positional_arguments(self):
-        """An AST walk over make_pcluster.py, so the signature cannot drift alone."""
+        """An AST walk over src/pcluster_core.py's core_create_cluster (where
+        this call has lived since the core/shim split), so the signature
+        cannot drift alone."""
         import ast
 
-        src = os.path.join(REPO_ROOT, "make_pcluster.py")
+        src = os.path.join(REPO_ROOT, "src", "pcluster_core.py")
         with open(src) as fh:
             tree = ast.parse(fh.read())
         calls = [
@@ -428,7 +430,7 @@ class TestEbsValidationTakesKeywordsOnly:
             and isinstance(n.func, ast.Name)
             and n.func.id == "_validate_ebs_config"
         ]
-        assert calls, "make_pcluster.py no longer calls _validate_ebs_config"
+        assert calls, "src/pcluster_core.py no longer calls _validate_ebs_config"
         for call in calls:
             assert not call.args, "_validate_ebs_config called with positional args"
             assert not any(

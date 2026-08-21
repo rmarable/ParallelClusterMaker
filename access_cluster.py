@@ -20,14 +20,17 @@ if os.path.realpath(sys.prefix) != os.path.realpath(os.path.join(_repo_root, ".v
     )
 
 import argparse
-import subprocess
+import subprocess  # noqa: F401 -- tests/test_kill_access.py patches mod.subprocess.run
 
 sys.path.insert(0, _src_dir)
 from pcluster_core import (
+    PClusterMakerError,
     _resolve_access_script_path,
     _resolve_access_node_type,
     _validate_cluster_name,
     _read_cluster_record,
+    core_exec_access_script,
+    core_resolve_access_node_type,
 )
 
 
@@ -69,24 +72,24 @@ def main():
         )
 
     rec = _read_cluster_record(cluster_name, _repo_root) or {}
-    node_type, error = _resolve_access_node_type(
-        rec,
-        cluster_name,
-        login_node_requested=args.login_node,
-        head_node_requested=args.head_node,
-    )
-    if error:
-        sys.exit(error)
-
-    node_label = "login node" if node_type == "LoginNode" else "head node"
-    print(f"Connecting to {node_label} of {cluster_name}...")
-    env = dict(os.environ, ACCESS_NODE_TYPE=node_type)
-    result = subprocess.run(["bash", access_script], env=env)
-    if result.returncode != 0:
-        print(
-            f"ERROR: SSH session exited with code {result.returncode}.", file=sys.stderr
+    try:
+        info = core_resolve_access_node_type(
+            rec, cluster_name,
+            login_node_requested=args.login_node,
+            head_node_requested=args.head_node,
         )
-    sys.exit(result.returncode)
+    except PClusterMakerError as e:
+        sys.exit(str(e))
+
+    print(f"Connecting to {info.node_label} of {cluster_name}...")
+    returncode = core_exec_access_script(
+        cluster_data_root=_cluster_data_root,
+        cluster_name=cluster_name,
+        node_type=info.node_type,
+    )
+    if returncode != 0:
+        print(f"ERROR: SSH session exited with code {returncode}.", file=sys.stderr)
+    sys.exit(returncode)
 
 
 if __name__ == "__main__":

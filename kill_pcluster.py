@@ -23,20 +23,21 @@ if os.path.realpath(sys.prefix) != os.path.realpath(os.path.join(_repo_root, ".v
 
 import argparse
 import boto3
-import contextlib
+import subprocess  # noqa: F401 -- unused directly; core_delete_cluster's
+# results-sync step does the real subprocess.run call (an ssh invocation),
+# but `import subprocess` binds this module's name to the same process-wide
+# module object pcluster_core.py's own `subprocess` name binds to, so tests
+# that patch kill_pcluster.subprocess.run still intercept it there too.
+# Kept purely so that monkeypatch target exists.
 from botocore.exceptions import (
     BotoCoreError,
     ClientError,
     EndpointConnectionError,
     NoCredentialsError,
 )
-import json
-import subprocess
 
 sys.path.insert(0, _src_dir)
 from pcluster_core import (
-    _read_serial_first_line,
-    _extract_rebuild_command,
     _validate_az_input,
     _validate_cluster_name,
     _validate_cluster_owner,
@@ -44,8 +45,7 @@ from pcluster_core import (
     _read_turbot_from_vars_file,
     _resolve as _pcore_resolve,
     _resolve_bool as _pcore_resolve_bool,
-    _acquire_cluster_lock,
-    _release_cluster_lock,
+    core_delete_cluster,
 )
 from pcluster_aux_data import p_val
 from pcluster_aux_data import ctrlC_Abort
@@ -202,28 +202,18 @@ def main():
 
     cluster_destroy_command = " ".join(sys.argv)
 
-    _describe = subprocess.run(
-        [
-            "pcluster",
-            "describe-cluster",
-            "--cluster-name",
-            cluster_name,
-            "--region",
-            region,
-        ],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
-    if _describe.returncode != 0:
-        print("")
-        print("*** WARNING ***")
-        print('Cluster stack "' + cluster_name + '" was not found in ' + region + "!")
-        print("")
-        print("Continuing with stack artifact destruction...")
-    else:
-        p_val("cluster_name", debug_mode)
+    if ansible_verbosity:
+        print(
+            "Note: --ansible_verbosity/-V has no effect -- teardown no longer "
+            "shells out to Ansible."
+        )
 
-    # Validate cluster_name and cluster_owner before touching any state files.
+    # Preflight, purely to display what's about to happen before the Ctrl-C
+    # abort window opens -- core_delete_cluster independently re-derives and
+    # re-runs all of this after the window closes, so a race in the few-
+    # second gap is safe either way (same tradeoff already accepted for
+    # stop_pcluster.py/start_pcluster.py's preflight checks).
+
     _validate_cluster_name(cluster_name)
     _validate_cluster_owner(cluster_owner)
 
@@ -252,122 +242,42 @@ def main():
         print("Aborting...")
         sys.exit(1)
 
-    # Acquired here, right before the first AWS mutation -- same placement
-    # and purpose as make_pcluster.py's build lock. Guards against a second
-    # process (e.g. a concurrent make_pcluster.py build) touching this
-    # cluster name's state mid-teardown; see _acquire_cluster_lock's own
-    # docstring.
-    _lock_path = _acquire_cluster_lock(cluster_data_dir, "kill_pcluster.py " + " ".join(sys.argv[1:]))
-
-    # Parse cluster_serial_number from cluser_serial_number_file.
-    # Strip any trailing newlines that would otherwise break the Ansible destroy
-    # command string.
-
-    cluster_serial_number = _read_serial_first_line(cluster_serial_number_file)
-
-    # Parse the Python3 interpreter path to ensure ParallelCluster stacks can be
-    # created from either OSX or an EC2 jumphost.
-
-    python3_path = sys.executable
-
-    # Increase Ansible verbosity when debug_mode is enabled.
-
     if debug_mode:
-        ansible_verbosity = "-vvv"
-
-    # Generate the command string that will delete the cluster stack.
-
-    _destroy_extra_vars_str = json.dumps(
-        {
-            "cluster_name": cluster_name,
-            "cluster_serial_number": cluster_serial_number,
-            "delete_s3_bucketname": delete_s3_bucketname,
-            "debug_mode": "true" if debug_mode else "false",
-            "ansible_python_interpreter": python3_path,
-        }
-    )
-    _delete_playbook = os.path.join(_src_dir, "delete_pcluster.yml")
-    _ansible_cmd = [
-        "ansible-playbook",
-        "--extra-vars",
-        _destroy_extra_vars_str,
-        _delete_playbook,
-    ]
-    if ansible_verbosity:
-        _ansible_cmd.append(ansible_verbosity)
-
-    ansible_destroy_cmd_string = " ".join(_ansible_cmd)
-
-    # Print the cluster destroy commands to the console.
-
-    if ansible_verbosity:
-        if debug_mode:
-            print("debug_mode = enabled")
-            print("")
-        print('Setting Ansible verbosity to "' + ansible_verbosity + '"')
+        print("debug_mode = enabled")
+        print("")
     print("")
     print("Ready to execute:")
     print(cluster_destroy_command)
     print("")
-    print('Preparing to delete cluster "' + cluster_name + '" using this command:')
-    print(ansible_destroy_cmd_string)
+    print(
+        f'Preparing to delete cluster "{cluster_name}" in {region} '
+        f"(delete_s3_bucketname={delete_s3_bucketname})."
+    )
 
     # Exit the script if the operator types 'CTRL-C' within 5 seconds after the
     # abort header is displayed.
     # If debug_mode is enabled, set the timer to 15 seconds.
 
-    line_length = 80
     # Pass None for all cleanup params: Ctrl-C during the abort window should
-    # just cancel the deletion, not destroy IAM resources or serial files before
-    # Ansible has run. Actual cleanup happens after Ansible succeeds below.
+    # just cancel the deletion, not destroy IAM resources or serial files
+    # before core_delete_cluster has run. Actual cleanup happens after it
+    # succeeds below.
     if debug_mode:
         ctrlC_Abort(15, 80, None, None, None, "false")
     else:
         ctrlC_Abort(5, 80, None, None, None, "false")
 
-    # Delete the cluster stack using the delete_pcluster Ansible playbook.
+    # Delete the cluster stack via boto3/pcluster.lib.
 
-    try:
-        subprocess.run(_ansible_cmd, cwd=_src_dir, check=True, shell=False)
-    except subprocess.CalledProcessError as e:
-        print(
-            f"\nERROR: Ansible teardown failed (exit {e.returncode}). AWS resources may not have been deleted."
-        )
-        print(
-            "Check the output above and the CloudFormation console before assuming the cluster is gone."
-        )
-        _release_cluster_lock(_lock_path)
-        sys.exit(e.returncode)
-
-    # Print a friendly banner to the console and include the command used to
-    # spawn the cluster stack.
-
-    line_length = 80
-    print("".center(line_length, "="))
-    _rebuild_cmd = _extract_rebuild_command(cluster_serial_number_file)
-    if _rebuild_cmd:
-        print("To rebuild the cluster:")
-        print("")
-        print(_rebuild_cmd)
-
-    # Delete cluster_serial_number_file and vars_file_path.
-
-    print("".center(line_length, "="))
-    print("")
-    with contextlib.suppress(FileNotFoundError):
-        os.remove(cluster_serial_number_file)
-        print("Removed  ===> " + cluster_serial_number_file)
-    with contextlib.suppress(FileNotFoundError):
-        os.remove(vars_file_path)
-        print("Removed  ===> " + vars_file_path)
-
-    # Cleanup and exit.
-
-    print("")
-    print("Finished deleting cluster stack " + cluster_name + "!")
-    print("Exiting...")
-    _release_cluster_lock(_lock_path)
-    sys.exit(0)
+    result = core_delete_cluster(
+        cluster_name=cluster_name,
+        cluster_owner=cluster_owner,
+        region=region,
+        repo_root=_repo_root,
+        delete_s3_bucketname=delete_s3_bucketname,
+        debug_mode=debug_mode,
+    )
+    sys.exit(result.exit_code)
 
 
 if __name__ == "__main__":
