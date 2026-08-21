@@ -1,0 +1,15 @@
+# Generated from mcp_server/packaging.py for the 'stack-mutation-node' tier.
+# Do not edit by hand -- regenerate with:
+#   python -c "import sys; sys.path.insert(0,'.'); from mcp_server.packaging import render_requirements_file as r; print(r('stack-mutation-node'), end='')" > requirements-lambda.txt
+#
+# Deliberately NOT requirements.txt: that is the development set and
+# pulls ansible (~408 MB of collections) plus the plotting stack,
+# which together exceed Lambda's 250 MB unzipped limit on their own.
+aws-parallelcluster>=3.15
+boto3
+botocore
+Jinja2
+PyYAML
+ruamel.yaml
+jmespath
+fastmcp

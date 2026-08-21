@@ -1,0 +1,53 @@
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Sid": "MCPEC2Read",
+            "Action": [
+                "ec2:Describe*"
+            ],
+            "Effect": "Allow",
+            "Resource": "*"
+        },
+        {
+            "Sid": "MCPCloudFormationDescribeOnly",
+            "Action": [
+                "cloudformation:DescribeStacks",
+                "cloudformation:DescribeStackResources",
+                "cloudformation:DescribeStackEvents"
+            ],
+            "Effect": "Allow",
+            "Resource": "*"
+        },
+        {
+            "Sid": "MCPCloudWatchLogsDescribeGlobal",
+            "Action": [
+                "logs:DescribeLogGroups"
+            ],
+            "Effect": "Allow",
+            "Resource": "*"
+        },
+        {
+            "Sid": "MCPCloudWatchLogsDiagnose",
+            "Action": [
+                "logs:DescribeLogStreams",
+                "logs:GetLogEvents",
+                "logs:FilterLogEvents"
+            ],
+            "Effect": "Allow",
+            "Resource": [
+                "arn:aws:logs:*:<AWS_ACCOUNT_ID>:log-group:/aws/parallelcluster/*",
+                "arn:aws:logs:*:<AWS_ACCOUNT_ID>:log-group:/aws/parallelcluster/*:log-stream:*"
+            ]
+        },
+        {
+            "Sid": "MCPCostExplorer",
+            "Action": [
+                "ce:GetCostAndUsage",
+                "ce:ListCostAllocationTags"
+            ],
+            "Effect": "Allow",
+            "Resource": "*"
+        }
+    ]
+}

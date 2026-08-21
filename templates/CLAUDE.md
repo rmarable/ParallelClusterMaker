@@ -29,9 +29,34 @@ and deletes the five managed policies.
   grants it — the API call carries no log-group ARN at the IAM level. Keep
   it in its own statement, separate from scoped stream-level actions.
 - **No policy an instance carries (the five managed ones or the inline
-  Lustre-hydration policy) may grant `logs:DeleteLogGroup`.** Retained log
-  groups are the only surviving record of a failed build. Match with
-  `fnmatch`, not string equality, when testing this (`logs:*` also grants it).
+  Lustre-hydration policy) may grant `logs:DeleteLogGroup`** — and neither
+  may the MCP Lambda execution-role policies (`templates/MCP*.json_src`).
+  Retained log groups are the only surviving record of a failed build, which
+  turns on what the log group is worth, not on whether the principal is an
+  EC2 instance. Match with `fnmatch`, not string equality, when testing this
+  (`logs:*` also grants it). `OperatorPolicy` stays exempt: purging by hand
+  under operator credentials is what the retain rule expects.
+- **`templates/MCP*.json_src` are a third policy category**, neither
+  instance-reachable nor the operator's own: Lambda execution roles for the
+  MCP remote transport (Workstream 5). They are listed in
+  `_MCP_LAMBDA_POLICY_FILES` (`tests/test_templates.py`), not
+  `_POLICY_FILES` — that one is pinned by equality to the five managed
+  cluster policies. `TestMcpLambdaPolicies` gives them the same structural
+  guards (valid JSON, the 6,144-byte limit **measured minified**, unique
+  Sids, no unsubstituted placeholders) plus a cross-check that every
+  placeholder they use is actually substituted by `_render_policy`.
+  `<MCP_USER_POOL_ID>` is theirs alone.
+- **`MCPRouterLambda.json_src` must stay near-zero: one action
+  (`lambda:InvokeFunction`), four explicit handler ARNs, no wildcard, and
+  nothing outside the `lambda:` service.** The router is the
+  internet-facing endpoint behind API Gateway and executes no tool logic;
+  the whole 5-Lambda split exists to keep blast radius off it, so a single
+  PCluster grant there defeats the design. The handler names it encodes
+  (`pclustermaker-mcp-read-only`, `-fleet-toggle`, `-stack-mutation`,
+  `-stack-mutation-node`) must match what `_setup_mcp_infra` creates —
+  `TestRouterPolicyStaysNearZero` pins them. Execution logging for every
+  MCP Lambda comes from the AWS-managed `AWSLambdaBasicExecutionRole`,
+  attached separately, not from these documents.
 - **`HeadNode-IAM` must never grant `iam:PutRolePolicy`.** Combined with
   `IAMCreateRole` and `IAMPassRoleInstanceProfile` it's a privilege-escalation
   chain to account admin. The toolkit's only `put_role_policy` call (FSx-S3

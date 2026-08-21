@@ -1,0 +1,37 @@
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Sid": "MCPStateBucketList",
+            "Action": [
+                "s3:ListBucket"
+            ],
+            "Effect": "Allow",
+            "Resource": [
+                "arn:aws:s3:::parallelclustermaker-locks-<AWS_ACCOUNT_ID>-<AWS_REGION>"
+            ]
+        },
+        {
+            "Sid": "MCPClusterMetadataRead",
+            "Action": [
+                "s3:GetObject"
+            ],
+            "Effect": "Allow",
+            "Resource": [
+                "arn:aws:s3:::parallelclustermaker-locks-<AWS_ACCOUNT_ID>-<AWS_REGION>/vars/*"
+            ]
+        },
+        {
+            "Sid": "MCPLockObjects",
+            "Action": [
+                "s3:GetObject",
+                "s3:PutObject",
+                "s3:DeleteObject"
+            ],
+            "Effect": "Allow",
+            "Resource": [
+                "arn:aws:s3:::parallelclustermaker-locks-<AWS_ACCOUNT_ID>-<AWS_REGION>/locks/*"
+            ]
+        }
+    ]
+}

@@ -170,6 +170,34 @@ standing constraints for local development.
   **both** 412 and 409 as "someone else holds it" — a live 8-writer run
   proved the 409 path is reachable, and handling only 412 crashes a build
   under contention.
+- The MCP server (`mcp_server/`) exposes `pcluster_core`'s `core_*`
+  functions as tools on two FastMCP instances: `build_local()` (stdio,
+  full set) and `build_remote()` (restricted). The exclusions are data in
+  `_LOCAL_ONLY`, never a second registration list.
+- **Lambda's function timeout is a hard 900s ceiling**, so no tool in
+  `TOOL_TIERS` may block on a cluster operation — past it the function is
+  killed mid-mutation, with the fleet stopped, an update in flight and the
+  S3 lock held by a dead process. `apply_queue_config` is local-only for
+  this reason; remote callers drive `stop_fleet` → `apply_cluster_update`
+  → `start_fleet`. Decompose such a tool, never delete the capability.
+- **Cognito access tokens carry no `aud` claim** — they carry `client_id`;
+  only ID tokens have `aud`. `mcp_server/auth/authorizer_lambda.py`
+  validates `client_id` and pins `token_use == "access"` so an ID token
+  cannot authorize a tool call. Never add an `aud` fallback. Every auth
+  failure raises `Unauthorized` (401, which prompts re-auth), never a Deny
+  policy (403, which does not).
+- The remote transport is a router plus four handler Lambdas split by IAM
+  blast radius, one policy per tier in `templates/MCP*.json_src` — a third
+  policy category, neither instance-reachable nor the operator's own. The
+  router must import no third-party package.
+- **`requirements.txt` is the development set and must never be installed
+  into a Lambda artifact** — `ansible` alone is ~408 MB of collections for
+  playbooks nothing executes. `mcp_server/packaging.py` holds the per-tier
+  sets and generates `requirements-lambda.txt`.
+- **When a test stubs the object under test, at least one test must drive
+  the real one.** `handlers/base.py` called a FastMCP method that does not
+  exist; every stub defined the same wrong name, so the whole remote
+  `tools/call` path was broken and every test passed.
 - `config.pcluster.j2`'s `OnNodeConfigured` block is a shared Jinja2 macro
   called at all four `CustomActions` sites (`HeadNode`, `LoginNodes`, both
   `SlurmQueues`), not four independent copies — that duplication is what

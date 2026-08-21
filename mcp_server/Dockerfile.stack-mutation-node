@@ -1,0 +1,34 @@
+# Container image for the stack-mutation-node Lambda tier.
+#
+# A container rather than a zip for one reason, and it is not size:
+# pcluster's create_cluster() and update_cluster() call
+# assert_valid_node_js() as their first line, which does shutil.which("node")
+# and fails loudly without it. AWS's Python Lambda runtimes ship no Node,
+# and a zip artifact cannot add one. The CDK construct library is used only
+# for in-process template synthesis via the jsii bridge -- no `cdk` CLI, no
+# bootstrap, no subprocess -- so Node is needed as a runtime for jsii, not
+# as a deployment tool.
+FROM public.ecr.aws/lambda/python:3.12
+
+# Node.js for jsii. Pinned major version: jsii is sensitive to the runtime
+# it bridges to, and "whatever is newest" is not a property to inherit
+# silently on every rebuild.
+RUN dnf install -y nodejs npm && dnf clean all && node --version
+
+COPY requirements-lambda.txt ${LAMBDA_TASK_ROOT}/
+RUN pip install --no-cache-dir -r ${LAMBDA_TASK_ROOT}/requirements-lambda.txt
+
+COPY mcp_server/ ${LAMBDA_TASK_ROOT}/mcp_server/
+COPY src/pcluster_core.py src/pcluster_aux_data.py ${LAMBDA_TASK_ROOT}/src/
+COPY templates/ ${LAMBDA_TASK_ROOT}/templates/
+COPY scripts/ ${LAMBDA_TASK_ROOT}/scripts/
+
+# pcluster_core lives under src/ and is imported as a top-level module.
+ENV PYTHONPATH="${LAMBDA_TASK_ROOT}:${LAMBDA_TASK_ROOT}/src"
+
+# Fail the build rather than the first invocation if Node is missing --
+# assert_valid_node_js() would otherwise surface it 20 minutes into an
+# operator's first create_cluster call.
+RUN node --version && python -c "import shutil,sys; sys.exit(0 if shutil.which('node') else 1)"
+
+CMD ["mcp_server.handlers.stack_mutation_node.lambda_handler"]

@@ -1,0 +1,15 @@
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Sid": "MCPRegisterCognitoAppClient",
+            "Action": [
+                "cognito-idp:CreateUserPoolClient"
+            ],
+            "Effect": "Allow",
+            "Resource": [
+                "arn:aws:cognito-idp:<AWS_REGION>:<AWS_ACCOUNT_ID>:userpool/<MCP_USER_POOL_ID>"
+            ]
+        }
+    ]
+}

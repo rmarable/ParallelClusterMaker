@@ -10,6 +10,21 @@ ansible-lint
 # json_query in src/create_pcluster.yml needs this; it only arrived
 # transitively via botocore.
 jmespath
+# MCP server (Workstream 5). The standalone `fastmcp` package, deliberately
+# not the official `mcp` SDK's raw low-level API -- the SDK vendors an older
+# copy of the same decorator API internally, and nothing in this tool surface
+# needs the SDK's low-level protocol control. `fastmcp` depends on `mcp`
+# anyway, so the SDK arrives transitively. pytest-asyncio is required by the
+# in-memory FastMCP `Client` tests.
+fastmcp
+pytest-asyncio
+# Workstream 6: the Lambda authorizer verifies Cognito's RS256 access
+# tokens against its JWKS. PyJWT arrives transitively via `mcp`, but the
+# authorizer's Lambda artifact carries neither `mcp` nor `fastmcp` -- so
+# it is named directly rather than relied on as a transitive.
+PyJWT
+cryptography
+
 # hpc-benchmark/ script dependencies
 numpy
 scipy
