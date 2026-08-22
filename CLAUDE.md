@@ -100,6 +100,15 @@ standing constraints for local development.
 - FSx hydration uses one S3 bucket with two prefixes (import and export must
   name the same bucket) — enforced by `_normalize_fsx_buckets` in
   `pcluster_core.py`.
+- **Every regional boto3 client must be built with
+  `region_name=region`.** An unbound client resolves its endpoint from
+  `AWS_DEFAULT_REGION`/`AWS_REGION`/the active profile, which need not be
+  the region the build targets — so resources land in the wrong region
+  while the build reports success. `iam` and `sts` are global and
+  deliberately exempt.
+  `TestEveryRegionalBotoClientIsBoundToTheTargetRegion` enforces this by
+  AST; a stubbed client has no endpoint to be wrong about, so no
+  behavioral test can see it.
 - Every download checksum (monitoring tarball, Docker Compose plugin) is
   validated in `make_pcluster.py` via `_validate_download_checksum` *before*
   the first AWS mutation (`_setup_iam`). No `_HARDCODED_DEFAULTS` entry may

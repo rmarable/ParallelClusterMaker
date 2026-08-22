@@ -7260,9 +7260,18 @@ def core_create_cluster(*, params, repo_root, region, cluster_build_command, ans
     # Turbot profile was activated earlier (after AZ verification) so all boto3
     # clients from this point already use the correct cross-account credentials.
 
-    # Instantiate S3 resource/client — Turbot profile already active if applicable.
-    s3 = boto3.resource("s3")
-    s3_client = boto3.client("s3")
+    # Instantiate the S3 client — Turbot profile already active if applicable.
+    #
+    # region_name is load-bearing, not tidiness: S3 is regional, and an
+    # unbound client resolves its endpoint from the ambient environment
+    # (AWS_DEFAULT_REGION/AWS_REGION/profile), which need not be the region
+    # this build targets. CreateBucket then correctly omits
+    # LocationConstraint for a us-east-1 target while sending the request to
+    # some other region's endpoint, and S3 rejects it with
+    # IllegalLocationConstraintException -- after the IAM roles exist.
+    # Every regional client here must be bound the same way; iam and sts are
+    # global and deliberately are not.
+    s3_client = boto3.client("s3", region_name=region)
 
     # Check s3_bucketname using the correct (post-Turbot) credentials.
     try:

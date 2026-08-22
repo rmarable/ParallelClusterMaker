@@ -1227,3 +1227,110 @@ class TestSshSecretName:
         assert "hpc-cluster-99999911072026" in result
         assert result.startswith("parallelcluster/")
         assert result.endswith("/ssh-private-key")
+
+
+class TestEveryRegionalBotoClientIsBoundToTheTargetRegion:
+    """A regional boto3 client built without `region_name` resolves its
+    endpoint from the ambient environment -- AWS_DEFAULT_REGION, AWS_REGION,
+    or the active profile -- which need not be the region the build targets.
+
+    That is not a latent tidiness issue. It shipped: `s3_client =
+    boto3.client("s3")` in core_create_cluster sent CreateBucket to the
+    operator's ambient region while the build targeted us-east-1, so the
+    call correctly omitted LocationConstraint (right for us-east-1) and was
+    rejected by the other region's endpoint with
+    IllegalLocationConstraintException -- *after* four IAM policies and a
+    role had been created, forcing the rollback path.
+
+    Worse than the failure is the near-miss: the very next calls on that
+    path create an EC2 keypair and a Secrets Manager secret. Had S3 not
+    failed first, those would have been created in the wrong region and
+    the build would have continued.
+
+    iam and sts are global services and are deliberately exempt -- binding
+    them to a region is meaningless, and requiring it would be cargo cult.
+    """
+
+    # Services whose endpoint is regional, so a client must say which one.
+    _REGIONAL = {
+        "s3", "ec2", "cloudformation", "logs", "secretsmanager", "lambda",
+        "cognito-idp", "ce", "pricing", "fsx", "efs", "sns", "ssm",
+        "resourcegroupstaggingapi", "application-autoscaling",
+    }
+    # Global services: one endpoint, no region to bind.
+    _GLOBAL = {"iam", "sts"}
+
+    @staticmethod
+    def _client_calls(path):
+        import ast
+
+        with open(path) as fh:
+            tree = ast.parse(fh.read())
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            fn = node.func
+            if not isinstance(fn, ast.Attribute):
+                continue
+            if fn.attr not in ("client", "resource"):
+                continue
+            if not (isinstance(fn.value, ast.Name) and fn.value.id == "boto3"):
+                continue
+            if not node.args or not isinstance(node.args[0], ast.Constant):
+                continue
+            service = node.args[0].value
+            bound = any(k.arg == "region_name" for k in node.keywords)
+            yield node.lineno, service, bound
+
+    def _sources(self):
+        import glob
+
+        return sorted(
+            glob.glob(os.path.join(REPO_ROOT, "src", "*.py"))
+            + glob.glob(os.path.join(REPO_ROOT, "*.py"))
+        )
+
+    def test_no_regional_client_is_left_unbound(self):
+        offenders = []
+        for path in self._sources():
+            for lineno, service, bound in self._client_calls(path):
+                if service in self._REGIONAL and not bound:
+                    offenders.append(
+                        f"{os.path.relpath(path, REPO_ROOT)}:{lineno} "
+                        f"boto3 {service} client has no region_name"
+                    )
+        assert offenders == [], offenders
+
+    def test_the_service_lists_cover_every_client_actually_built(self):
+        """Vacuity guard. A service in neither list is unchecked, and the
+        obvious way to silence a failure above is to build a client for a
+        name the check has never heard of."""
+        unknown = set()
+        for path in self._sources():
+            for _lineno, service, _bound in self._client_calls(path):
+                if service not in self._REGIONAL and service not in self._GLOBAL:
+                    unknown.add(service)
+        assert unknown == set(), (
+            f"classify these services as regional or global: {sorted(unknown)}"
+        )
+
+    def test_the_scan_finds_the_clients_that_are_there(self):
+        """Second vacuity guard: an AST walk that matched nothing would
+        pass both checks above in silence."""
+        found = [
+            (svc, bound)
+            for path in self._sources()
+            for _l, svc, bound in self._client_calls(path)
+        ]
+        assert len(found) >= 10, found
+        assert any(svc == "s3" and bound for svc, bound in found)
+
+    def test_global_services_are_not_required_to_be_bound(self):
+        """The exemption is real, not an oversight -- iam and sts clients
+        exist unbound on purpose."""
+        seen = [
+            svc for path in self._sources()
+            for _l, svc, bound in self._client_calls(path)
+            if svc in self._GLOBAL and not bound
+        ]
+        assert seen, "expected at least one deliberately unbound global client"
