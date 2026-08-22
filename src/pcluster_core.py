@@ -671,6 +671,29 @@ def _create_locks_bucket(s3, *, locks_bucketname, region):
     )
 
 
+# Poll intervals for the two long waits. Each is the single source for
+# both the wait's own cadence and the elapsed time its progress line
+# prints: the printers used to hardcode 30 and 60 independently of the
+# delay_seconds they were paired with, so changing either default made the
+# reported elapsed time silently wrong with nothing to catch it.
+_CREATE_POLL_SECONDS = 60
+_DELETE_POLL_SECONDS = 30
+
+
+def _elapsed_str(seconds):
+    """Fixed-width elapsed time for a progress line: 02m30s.
+
+    Zero-padded on both fields so the column after it never moves. Neither
+    wait can reach 100 minutes (create is 60 polls x 60s, delete 80 x 30s),
+    so two digits of minutes is enough for the life of any run.
+
+    The delete wait polls twice a minute, so whole-minute resolution
+    printed every label twice and read as a stuck loop.
+    """
+    minutes, secs = divmod(int(seconds), 60)
+    return f"{minutes:02d}m{secs:02d}s"
+
+
 _UPSTREAM_LOGGER = "pcluster.aws.common"
 
 # PCluster logs every AWSClientError at ERROR before raising it, including
@@ -5050,7 +5073,7 @@ def core_delete_cluster(
         print(f"Destroying: {cluster_name} in {az}")
         print(f"Start Time: {start_ts}")
         print("")
-        print("This process will take approximately 5-10 minutes to complete.")
+        print("This process will take approximately 15-20 minutes to complete.")
         print("=" * 65)
         print("")
 
@@ -5076,8 +5099,9 @@ def core_delete_cluster(
             """Same scoped, disclosed exception as the create side's own
             progress printer: this wait was previously entirely silent."""
             detail = f" (CloudFormation: {cfn_status})" if cfn_status else ""
+            elapsed = _elapsed_str((attempt + 1) * _DELETE_POLL_SECONDS)
             print(
-                f"  [ {(attempt + 1) * 30 // 60}m ] {cluster_name}: "
+                f"  [ {elapsed} ] {cluster_name}: "
                 f"{status or 'status unavailable'}{detail}"
             )
 
@@ -5085,6 +5109,7 @@ def core_delete_cluster(
             outcome = run_cluster_delete_and_classify(
                 pc.delete_cluster, pc.describe_cluster, cluster_name, region,
                 progress_fn=_print_teardown_progress, wait=wait,
+                delay_seconds=_DELETE_POLL_SECONDS,
             )
 
         if outcome.terminal_state == _KICKED_OFF:
@@ -5847,7 +5872,7 @@ class ClusterCreateOutcome:
 
 
 def _wait_for_cluster_create(
-    describe_fn, cluster_name, region, *, retries=60, delay_seconds=60, sleep_fn=None,
+    describe_fn, cluster_name, region, *, retries=60, delay_seconds=_CREATE_POLL_SECONDS, sleep_fn=None,
     progress_fn=None,
 ):
     """boto3/pcluster.lib twin of "Wait for the cluster head node to reach
@@ -5964,7 +5989,7 @@ def _classify_cluster_create_outcome(terminal_state, cluster_name, describe_resp
 def run_cluster_create_and_classify(
     create_fn, describe_fn, cluster_name, region, *,
     cluster_configuration_path, rollback_on_failure=False,
-    retries=60, delay_seconds=60, sleep_fn=None,
+    retries=60, delay_seconds=_CREATE_POLL_SECONDS, sleep_fn=None,
     wait=True, progress_fn=None,
 ):
     """The single entry point a future core_create_cluster wiring calls:
@@ -8203,15 +8228,16 @@ def core_create_cluster(*, params, repo_root, region, cluster_build_command, ans
         an operator had no way to tell a healthy slow build from a hung
         one without opening the CloudFormation console. The final build
         summary after it is still byte-identical."""
-        elapsed = (attempt + 1) * 60
+        elapsed = _elapsed_str((attempt + 1) * _CREATE_POLL_SECONDS)
         detail = f" (CloudFormation: {cfn_status})" if cfn_status else ""
         print(
-            f"  [ {elapsed // 60}m ] {cluster_name}: {status or 'status unavailable'}{detail}"
+            f"  [ {elapsed} ] {cluster_name}: {status or 'status unavailable'}{detail}"
         )
 
     try:
         outcome = run_cluster_create_and_classify(
             pc.create_cluster, pc.describe_cluster, cluster_name, region,
+            delay_seconds=_CREATE_POLL_SECONDS,
             cluster_configuration_path=_vars_file_context["cluster_config_template"],
             progress_fn=_print_build_progress, wait=wait,
         )
@@ -8284,7 +8310,14 @@ def core_create_cluster(*, params, repo_root, region, cluster_build_command, ans
     cluster_serial_number_object = "cluster_serial_number/" + cluster_name + ".serial"
     try:
         with open(cluster_serial_number_file, "rb") as _snf:
-            s3.Object(s3_bucketname, cluster_serial_number_object).put(Body=_snf)
+            # The region-bound client, not a boto3.resource: an unbound
+            # resource is the same wrong-endpoint hazard the client fix
+            # addressed, and there is no reason for two S3 handles here.
+            s3_client.put_object(
+                Bucket=s3_bucketname,
+                Key=cluster_serial_number_object,
+                Body=_snf,
+            )
     except Exception as _s3e:
         print(f"WARNING: could not upload serial number to S3: {_s3e}")
 
@@ -8884,7 +8917,7 @@ def _initiate_cluster_delete(delete_fn, cluster_name, region):
 
 
 def _wait_for_cluster_delete(
-    describe_fn, cluster_name, region, *, retries=80, delay_seconds=30, sleep_fn=None,
+    describe_fn, cluster_name, region, *, retries=80, delay_seconds=_DELETE_POLL_SECONDS, sleep_fn=None,
     progress_fn=None,
 ):
     """boto3/pcluster.lib twin of "Wait for the cluster to finish deleting"
@@ -8953,7 +8986,8 @@ def _classify_cluster_delete_outcome(terminal_state, cluster_name):
 
 
 def run_cluster_delete_and_classify(
-    delete_fn, describe_fn, cluster_name, region, *, retries=80, delay_seconds=30, sleep_fn=None,
+    delete_fn, describe_fn, cluster_name, region, *, retries=80,
+    delay_seconds=_DELETE_POLL_SECONDS, sleep_fn=None,
     wait=True, progress_fn=None,
 ):
     """The single entry point a future core_delete_cluster rewrite calls:

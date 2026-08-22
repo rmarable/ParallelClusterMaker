@@ -7096,12 +7096,16 @@ class TestTheWaitProgressLineSpacing:
             tree = ast.parse(fh.read())
         found = []
         for node in ast.walk(tree):
-            if isinstance(node, ast.JoinedStr):
-                text = "".join(
-                    p.value for p in node.values if isinstance(p, ast.Constant)
-                )
-                if "m ] " in text or "m] " in text:
-                    found.append(text)
+            if not isinstance(node, ast.JoinedStr):
+                continue
+            # The ordered constant parts, NOT their concatenation: joining
+            # them turns "  [ " + <elapsed> + " ] " into "  [  ] ", which
+            # cannot be told apart from two literal spaces.
+            parts = [p.value for p in node.values if isinstance(p, ast.Constant)]
+            if any(p.endswith("[ ") for p in parts) and any(
+                p.startswith(" ] ") for p in parts
+            ):
+                found.append(parts)
         return found
 
     def test_both_printers_were_found(self):
@@ -7110,24 +7114,72 @@ class TestTheWaitProgressLineSpacing:
         assert len(self._printers()) == 2, self._printers()
 
     def test_the_time_element_has_one_space_on_each_side(self):
-        for text in self._printers():
-            assert "[ " in text, f"no space after the opening bracket: {text!r}"
-            assert "m ]" in text, f"no space before the closing bracket: {text!r}"
+        """Exactly one space inside each bracket, checked on the format
+        string's parts so an interpolation is not mistaken for padding."""
+        for parts in self._printers():
+            opening = [p for p in parts if p.endswith("[ ")]
+            closing = [p for p in parts if p.startswith(" ] ")]
+            assert opening, parts
+            assert closing, parts
+            assert not any(p.endswith("[  ") for p in parts), parts
+            assert not any(p.startswith("  ] ") for p in parts), parts
 
     def test_no_printer_pads_the_number_inside_the_brackets(self):
-        """`:>3d` is what produced `[  1m]`; padding and a single space are
-        mutually exclusive."""
+        """`:>3d` is what produced `[  1m]`; the padding now lives inside
+        _elapsed_str's zero-filled fields, not in the bracket format."""
         with open(os.path.join(REPO_ROOT, "src", "pcluster_core.py")) as fh:
             body = fh.read()
         assert ":>3d}m]" not in body
         assert ":>3d}m ]" not in body
 
-    def test_the_rendered_line_matches_the_agreed_shape(self):
-        import re
+    def test_the_elapsed_field_is_fixed_width(self):
+        """The delete wait polls twice a minute, so whole-minute resolution
+        printed every label twice and read as a stuck loop. Seconds fix
+        that, but only if the field stays one width -- otherwise the column
+        after it jitters, which is the sloppiness the minutes hid."""
+        src = os.path.join(REPO_ROOT, "src")
+        if src not in sys.path:
+            sys.path.insert(0, src)
+        import pcluster_core
 
-        for minutes in (1, 9, 10, 100):
-            line = f"  [ {minutes}m ] osiris: CREATE_IN_PROGRESS"
-            assert re.match(r"^  \[ \d+m \] \S+: ", line), line
+        widths = {len(pcluster_core._elapsed_str(t)) for t in (0, 30, 90, 600, 2400, 3600)}
+        assert widths == {6}, widths
+
+    def test_every_poll_of_a_delete_gets_a_distinct_label(self):
+        """The reported symptom, stated directly."""
+        src = os.path.join(REPO_ROOT, "src")
+        if src not in sys.path:
+            sys.path.insert(0, src)
+        import pcluster_core
+
+        interval = pcluster_core._DELETE_POLL_SECONDS
+        labels = [pcluster_core._elapsed_str((a + 1) * interval) for a in range(12)]
+        assert len(set(labels)) == len(labels), labels
+
+    def test_the_printers_cannot_disagree_with_their_own_wait(self):
+        """Both printers used to hardcode an interval (30 and 60) beside a
+        delay_seconds they did not read, so changing either default made
+        the elapsed time silently wrong. One constant now drives both the
+        wait's default and the label."""
+        import inspect
+
+        src = os.path.join(REPO_ROOT, "src")
+        if src not in sys.path:
+            sys.path.insert(0, src)
+        import pcluster_core
+
+        for fn, const in (
+            (pcluster_core.run_cluster_create_and_classify, "_CREATE_POLL_SECONDS"),
+            (pcluster_core.run_cluster_delete_and_classify, "_DELETE_POLL_SECONDS"),
+        ):
+            default = inspect.signature(fn).parameters["delay_seconds"].default
+            assert default == getattr(pcluster_core, const), fn.__name__
+
+    def test_no_printer_reintroduces_a_literal_interval(self):
+        with open(os.path.join(REPO_ROOT, "src", "pcluster_core.py")) as fh:
+            body = fh.read()
+        assert "(attempt + 1) * 30" not in body
+        assert "(attempt + 1) * 60" not in body
 
 
 class TestTheStagingDirectoryIsValidOnBothMachines:

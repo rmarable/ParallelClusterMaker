@@ -582,7 +582,7 @@ def register_tools(mcp, *, remote, tier=None):
         mcp_server/confirmation_token.py -- it is a guard against acting
         without having shown the operator what would be destroyed.
 
-        Kicked off without waiting: teardown takes 5-10 minutes and a single
+        Kicked off without waiting: teardown takes 15-20 minutes and a single
         MCP call cannot block for it. Nothing local is cleaned up on this
         path; poll list_clusters and re-run once the stack is gone.
         """

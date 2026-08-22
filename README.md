@@ -274,7 +274,7 @@ If the cluster has a [login node](#login-nodes) (`--enable_loginnode=true`), `ac
 ./kill_pcluster.py -N CLUSTER_NAME -O OWNER -A AZ
 ```
 
-Teardown takes 5–10 minutes.  The cluster's EFS and FSx filesystems are deleted by CloudFormation, which ParallelCluster configures with a `Delete` deletion policy at *creation* time — teardown cannot preserve them.  The cluster's own S3 bucket (`parallelclustermaker-<serial>`) is the one resource teardown controls, and it holds the rendered cluster config and the bootstrap scripts.  Benchmark results do **not** live there — they are synced to the long-lived `parallelclustermaker-results-<account-id>-<region>` bucket, which teardown never touches — so keeping the per-cluster bucket is only useful for inspecting what a build actually deployed:
+Teardown takes 15–20 minutes.  The cluster's EFS and FSx filesystems are deleted by CloudFormation, which ParallelCluster configures with a `Delete` deletion policy at *creation* time — teardown cannot preserve them.  The cluster's own S3 bucket (`parallelclustermaker-<serial>`) is the one resource teardown controls, and it holds the rendered cluster config and the bootstrap scripts.  Benchmark results do **not** live there — they are synced to the long-lived `parallelclustermaker-results-<account-id>-<region>` bucket, which teardown never touches — so keeping the per-cluster bucket is only useful for inspecting what a build actually deployed:
 
 ```
 ./kill_pcluster.py -N pcluster-test-01 -O rmarable -A us-east-1a \
@@ -1005,6 +1005,90 @@ Rotation: generates a new ED25519 keypair locally, appends the public key to `~/
 | `secretsmanager:DeleteSecret` | Remove key on teardown |
 | `ec2:ImportKeyPair` | Register new public key during rotation |
 | `ec2:DeleteKeyPair` | Remove old keypair after rotation |
+
+---
+
+## MCP Server
+
+`mcp_server/` exposes this toolkit over the [Model Context
+Protocol](https://modelcontextprotocol.io), so an AI agent can list,
+inspect, cost, build and tear down clusters through the same
+`core_*` functions the CLI drives. There is no second implementation: the
+MCP tools are thin wrappers, so anything the CLI can do the agent does
+identically, and a fix lands in both at once.
+
+A remote transport also exists in `mcp_server/` (a router plus tiered
+Lambda handlers behind API Gateway and Cognito). **It has not been
+deployed or exercised against AWS**, so it is deliberately not documented
+here yet. Everything below is the local stdio server.
+
+### Installing into Claude Code
+
+```bash
+claude mcp add parallelclustermaker \
+  -e PYTHONPATH=/absolute/path/to/ParallelClusterMaker \
+  -- /absolute/path/to/ParallelClusterMaker/.venv/bin/python -m mcp_server.server
+```
+
+Verify with `claude mcp list` (look for `✔ Connected`) or `/mcp` inside a
+session to see the tool list.
+
+Both paths must be absolute, and **`PYTHONPATH` is required, not
+optional**. Claude Code does not run the server from your project
+directory, and `-m mcp_server.server` needs the repo root on `sys.path`;
+without it the server fails with `No module named 'mcp_server'`.
+
+You do **not** need the venv activated — `mcp_server/` carries no venv
+guard and puts `src/` on the path itself — but you must use
+`.venv/bin/python`, since `fastmcp`, `boto3` and `aws-parallelcluster`
+live only there.
+
+### Three things that will waste your time
+
+- **Do not invoke the script directly.** `python mcp_server/server.py`
+  fails with `ImportError: FastMCP server support is not installed`, which
+  is misleading — `fastmcp` is installed. Running the file directly puts
+  `mcp_server/` at the front of `sys.path` and shadows its own imports.
+  Use `-m`.
+- **Do not use `--scope project`.** That writes `.mcp.json` into the repo
+  root, which is committed. On a public fork you would publish your own
+  absolute paths. The default `local` scope is correct; use `user` if you
+  want the server in every project.
+- **AWS credentials are not inherited from your shell.** Profiles
+  configured in `~/.aws/credentials` and `~/.aws/config` work normally
+  because they are files. But if you rely on exported variables, pass them
+  explicitly:
+
+  ```bash
+    -e AWS_PROFILE=your-profile -e AWS_REGION=us-east-1
+  ```
+
+### What this grants
+
+The local server registers the full tool set, including `create_cluster`
+and `delete_cluster`. **These make real AWS changes and cost real money.**
+
+`delete_cluster` requires a confirmation token minted by
+`preview_cluster_delete`, so a teardown cannot happen without the agent
+first showing you what would be destroyed. `create_cluster` has no such
+gate — it validates parameters and builds.
+
+Read-only tools (`list_clusters`, `check_cluster_health`,
+`get_cost_report`, `diagnose_cluster`, `list_queues`,
+`resolve_access_info`) are safe to hand to an agent freely.
+
+### Node.js
+
+`create_cluster` needs Node.js on `PATH` for the same reason the CLI does
+— ParallelCluster shells out to the AWS CDK to synthesize CloudFormation.
+If it is missing you will see `Unable to find node executable`. See
+[INSTALL.md](INSTALL.md).
+
+### Removing it
+
+```bash
+claude mcp remove parallelclustermaker
+```
 
 ---
 

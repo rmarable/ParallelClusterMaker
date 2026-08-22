@@ -764,7 +764,7 @@ class TestRunClusterDeleteAndClassify:
 class TestTeardownWaitFalseKicksOffWithoutPolling:
     """Workstream 4's `wait: bool` parameter on the teardown side -- the
     same one-function-two-callers shape the create side uses, and the same
-    reason: an MCP tool call cannot block for the 5-10 minutes a teardown
+    reason: an MCP tool call cannot block for the 15-20 minutes a teardown
     takes."""
 
     def test_wait_false_still_initiates_the_delete(self):
@@ -863,3 +863,90 @@ class TestTeardownProgressIsReportedDuringTheWait:
             retries=5, delay_seconds=1, sleep_fn=_fake_sleep,
         )
         assert outcome.cf_delete_confirmed is True
+
+
+class TestEverySurfaceQuotesTheSameTeardownDuration:
+    """Six places tell an operator how long a teardown takes, and they had
+    all quoted the old, too-short figure while real teardowns ran
+    longer. They are not
+    generated from one another -- the CLI print, the playbook reference
+    spec, the README, the MCP server's instructions string, the
+    delete_cluster tool docstring, and this file's own note -- so nothing
+    stopped one from being corrected and the rest going stale.
+
+    A stale figure here is not cosmetic: it is the number an operator uses
+    to decide whether a teardown has hung, so understating it manufactures
+    false alarms and a habit of interrupting deletes partway.
+    """
+
+    _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    _DURATION = "15-20"
+    _SURFACES = {
+        "src/pcluster_core.py": "approximately 15-20 minutes to complete",
+        "src/delete_pcluster.yml": "approximately 15-20 minutes to complete",
+        "mcp_server/server.py": "20-45 minutes and 15-20 ",
+        "mcp_server/tools.py": "teardown takes 15-20 minutes",
+        # The README uses a typographic en dash throughout; keep its style
+        # rather than normalising it to the ASCII form the code uses.
+        "README.md": "Teardown takes 15–20 minutes.",
+    }
+
+    def test_every_surface_states_the_current_duration(self):
+        missing = []
+        for relpath, expected in self._SURFACES.items():
+            with open(os.path.join(self._ROOT, relpath)) as fh:
+                if expected not in fh.read():
+                    missing.append(f"{relpath}: expected {expected!r}")
+        assert missing == [], missing
+
+    def test_no_surface_still_quotes_the_old_figure(self):
+        """The direction that actually rots: a new figure lands in one file
+        and the others keep the old one, so both numbers are live at once.
+
+        The superseded strings are assembled from their parts rather than
+        written out. This file is one of the surfaces it scans, so spelling
+        the old figure anywhere here -- including in this docstring, which
+        is how the first two attempts failed -- makes the check match
+        itself and fail permanently.
+        """
+        low, high = "5", "10"
+        stale = []
+        for relpath in self._SURFACES:
+            with open(os.path.join(self._ROOT, relpath)) as fh:
+                body = fh.read()
+            for dash in ("-", "\u2013"):
+                superseded = f"{low}{dash}{high} minutes"
+                if superseded in body:
+                    stale.append(f"{relpath}: {superseded!r}")
+        assert stale == [], stale
+
+    def test_the_manifest_covers_every_file_that_mentions_a_teardown_duration(self):
+        """Vacuity guard, and the one that matters: a seventh surface added
+        later is invisible to the two checks above. Sweeps the repo rather
+        than trusting the list -- mcp_server/server.py was itself only found
+        by a wider grep than the obvious one."""
+        import re
+
+        pattern = re.compile(r"teardown[^.\n]{0,60}?\d+[-–]\d+\s*minutes", re.I)
+        found = set()
+        for sub in (".", "src", "mcp_server", "tests", "templates"):
+            base = os.path.join(self._ROOT, sub)
+            if not os.path.isdir(base):
+                continue
+            for name in os.listdir(base):
+                path = os.path.join(base, name)
+                if not os.path.isfile(path):
+                    continue
+                if not name.endswith((".py", ".md", ".yml", ".j2")):
+                    continue
+                with open(path, errors="ignore") as fh:
+                    if pattern.search(fh.read()):
+                        found.add(os.path.relpath(path, self._ROOT))
+        # This file is the checker, not an operator-facing surface: its
+        # prose describes the change, and any figure spelled here would be
+        # matched by the stale scan above. Exempt deliberately.
+        uncovered = found - set(self._SURFACES) - {"tests/test_teardown_steps.py"}
+        assert uncovered == set(), (
+            f"these mention a teardown duration but are not in the manifest: "
+            f"{sorted(uncovered)}"
+        )

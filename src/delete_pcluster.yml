@@ -31,7 +31,7 @@
           - "Destroying: {{ cluster_name }} in {{ az }}"
           - "Start Time: {{ start_delete_timer.stdout }}"
           - ""
-          - "This process will take approximately 5-10 minutes to complete."
+          - "This process will take approximately 15-20 minutes to complete."
           - "================================================================="
           - ""
 

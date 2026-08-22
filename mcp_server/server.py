@@ -29,7 +29,7 @@ from mcp_server.tools import register_tools  # noqa: E402
 
 _INSTRUCTIONS = (
     "Provision and operate AWS ParallelCluster HPC clusters. Cluster "
-    "creation and teardown are long-running (20-45 minutes and 5-10 "
+    "creation and teardown are long-running (20-45 minutes and 15-20 "
     "minutes respectively) and are kicked off without blocking -- poll "
     "list_clusters(live=True) or check_cluster_health() for progress "
     "rather than expecting the launch call to return a finished cluster."
