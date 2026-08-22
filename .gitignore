@@ -10,7 +10,9 @@
 *.pyo
 *.retry
 .serverless
-.swp
+*.swp
+*.swo
+*.swn
 TODO
 __pycache__/
 deprecated/
