@@ -1074,10 +1074,12 @@ live only there.
 The local server registers the full tool set, including `create_cluster`
 and `delete_cluster`. **These make real AWS changes and cost real money.**
 
-`delete_cluster` requires a confirmation token minted by
-`preview_cluster_delete`, so a teardown cannot happen without the agent
-first showing you what would be destroyed. `create_cluster` has no such
-gate — it validates parameters and builds.
+**Both are gated by a confirmation token**, so neither can happen without
+the agent first showing you what it is about to do: `delete_cluster`
+requires a token minted by `preview_cluster_delete`, and `create_cluster`
+one minted by `preview_cluster_config`. The token binds the *parameters*,
+not just the operation, so a preview of a small cluster cannot authorize a
+large one, and the tokens expire.
 
 Read-only tools (`list_clusters`, `check_cluster_health`,
 `get_cost_report`, `diagnose_cluster`, `list_queues`,

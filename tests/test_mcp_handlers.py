@@ -16,6 +16,7 @@ than four times. What actually needs pinning:
 import json
 import os
 import sys
+import types
 
 import pytest
 
@@ -534,3 +535,115 @@ class TestTheHandlerDrivesTheRealFastmcpApi:
             "the type is the one piece a caller can act on, and on this "
             "path it is FastMCP's wrapper type rather than the tool's own"
         )
+
+
+class TestTheCreateWrapperActuallyCallsTheGate:
+    """The delete wrapper got this guard after a mutation showed its
+    verify() call could be deleted silently. create_cluster carried the
+    same gate and none of the guard -- deleting its verify() call passed
+    all 2,777 tests.
+
+    The asymmetry mattered more than it looks. A create is the one
+    operation that commits ongoing spend: it is kicked off without waiting,
+    so an ungated build starts, the call returns, and nothing surfaces
+    until someone reads a bill. Destruction is at least a discrete act on a
+    named cluster.
+    """
+
+    def _create_tool(self):
+        import asyncio
+
+        from fastmcp import FastMCP
+
+        from mcp_server.server import _INSTRUCTIONS
+        from mcp_server.tools import register_tools
+
+        mcp = FastMCP(name="t", instructions=_INSTRUCTIONS)
+        register_tools(mcp, remote=True)
+        tools = {t.name: t for t in asyncio.run(mcp.list_tools())}
+        return tools["create_cluster"].fn
+
+    _ARGS = dict(
+        cluster_name="osiris", cluster_owner="rmarable",
+        cluster_owner_email="rmarable@gmail.com", az="us-east-1a",
+        headnode_instance_type="c8g.large",
+    )
+
+    def test_a_bad_token_is_rejected_by_the_wrapper(self):
+        from mcp_server.confirmation_token import ConfirmationTokenError
+
+        with pytest.raises(ConfirmationTokenError):
+            self._create_tool()(confirmation_token="not-a-token", **self._ARGS)
+
+    def test_the_gate_runs_before_anything_that_could_build(self):
+        """verify() sits above _reject_denied and build_make_cluster_params
+        on purpose: a tokenless caller must be refused as tokenless, not be
+        told which parameter it got wrong -- otherwise the gate is
+        reachable-around by fixing whatever the later error names."""
+        from mcp_server.confirmation_token import ConfirmationTokenError
+
+        with pytest.raises(ConfirmationTokenError):
+            self._create_tool()(
+                confirmation_token="v1.1.deadbeef",
+                overrides={"pre_install_script": "/tmp/evil.sh"},
+                **self._ARGS,
+            )
+
+    def test_an_expired_token_is_rejected_by_the_wrapper(self):
+        from mcp_server.confirmation_token import ExpiredToken, mint
+
+        params = dict(self._ARGS)
+        params["overrides"] = {}
+        stale = mint("create_cluster", params, issued_at=1)
+        with pytest.raises(ExpiredToken):
+            self._create_tool()(confirmation_token=stale, **self._ARGS)
+
+    def test_a_token_minted_for_a_different_cluster_is_rejected(self):
+        """The token binds the parameters, not just the operation -- a
+        preview of a small cluster must not authorize a large one."""
+        from mcp_server.confirmation_token import ConfirmationTokenError, mint
+
+        other = dict(self._ARGS)
+        other["headnode_instance_type"] = "c8g.24xlarge"
+        other["overrides"] = {}
+        token = mint("create_cluster", other)
+        with pytest.raises(ConfirmationTokenError):
+            self._create_tool()(confirmation_token=token, **self._ARGS)
+
+    def test_a_delete_token_cannot_authorize_a_create(self):
+        """The operation name is part of what is signed."""
+        from mcp_server.confirmation_token import ConfirmationTokenError, mint
+
+        params = dict(self._ARGS)
+        params["overrides"] = {}
+        token = mint("delete_cluster", params)
+        with pytest.raises(ConfirmationTokenError):
+            self._create_tool()(confirmation_token=token, **self._ARGS)
+
+    def test_a_correctly_minted_token_is_accepted(self, monkeypatch):
+        """Vacuity guard, and it caught a real gap: the five rejection
+        tests above all passed with `token_params` replaced by `{}`, which
+        unbinds the token from the parameters entirely. Only asserting that
+        the *right* token still works can see that -- a gate that rejects
+        everything satisfies every negative test ever written.
+        """
+        import mcp_server.tools as tools_mod
+        from mcp_server.confirmation_token import mint
+
+        seen = {}
+        monkeypatch.setattr(
+            tools_mod, "core_create_cluster",
+            lambda **kw: seen.update(kw) or {"status": "kicked off"},
+        )
+        monkeypatch.setattr(
+            tools_mod, "build_make_cluster_params",
+            lambda **kw: types.SimpleNamespace(region="us-east-1"),
+        )
+
+        params = dict(self._ARGS)
+        params["overrides"] = {}
+        token = mint("create_cluster", params)
+        result = self._create_tool()(confirmation_token=token, **self._ARGS)
+
+        assert seen, "the build was never reached with a valid token"
+        assert result["status"] == "kicked off"
