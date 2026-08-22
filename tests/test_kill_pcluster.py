@@ -535,7 +535,7 @@ class TestTheDeleteWaitDropsOneKnownBenignUpstreamError:
         import pcluster_core
 
         def emit():
-            with pcluster_core.quiet_upstream_delete_noise():
+            with pcluster_core.quiet_missing_config_version_noise():
                 self._logger().error(
                     "Encountered error when performing boto3 call in %s: %s",
                     "get_object", self._NOISE + ".",
@@ -549,7 +549,7 @@ class TestTheDeleteWaitDropsOneKnownBenignUpstreamError:
         import pcluster_core
 
         def emit():
-            with pcluster_core.quiet_upstream_delete_noise():
+            with pcluster_core.quiet_missing_config_version_noise():
                 self._logger().error(
                     "Encountered error when performing boto3 call in %s: %s",
                     "delete_stack", "AccessDenied",
@@ -561,7 +561,7 @@ class TestTheDeleteWaitDropsOneKnownBenignUpstreamError:
         import pcluster_core
 
         def emit():
-            with pcluster_core.quiet_upstream_delete_noise():
+            with pcluster_core.quiet_missing_config_version_noise():
                 pass
             self._logger().error(
                 "Encountered error when performing boto3 call in %s: %s",
@@ -577,7 +577,7 @@ class TestTheDeleteWaitDropsOneKnownBenignUpstreamError:
 
         before = list(self._logger().filters)
         with pytest.raises(RuntimeError):
-            with pcluster_core.quiet_upstream_delete_noise():
+            with pcluster_core.quiet_missing_config_version_noise():
                 raise RuntimeError("delete blew up")
         assert list(self._logger().filters) == before
 
@@ -590,7 +590,7 @@ class TestTheDeleteWaitDropsOneKnownBenignUpstreamError:
 
         other = logging.getLogger("pcluster.api.something_else")
         with caplog.at_level(logging.ERROR):
-            with pcluster_core.quiet_upstream_delete_noise():
+            with pcluster_core.quiet_missing_config_version_noise():
                 other.error("boto3 call failed: %s", self._NOISE + ".")
         assert any(self._NOISE in r.getMessage() for r in caplog.records)
 
@@ -608,11 +608,35 @@ class TestTheDeleteWaitDropsOneKnownBenignUpstreamError:
         for node in ast.walk(tree):
             if not isinstance(node, ast.With):
                 continue
-            if "quiet_upstream_delete_noise" not in ast.dump(node.items[0]):
+            if "quiet_missing_config_version_noise" not in ast.dump(node.items[0]):
                 continue
             if "run_cluster_delete_and_classify" in ast.dump(node):
                 wrapped = True
         assert wrapped, (
             "run_cluster_delete_and_classify must run inside "
-            "quiet_upstream_delete_noise()"
+            "quiet_missing_config_version_noise()"
+        )
+
+    def test_the_live_listing_is_covered_too(self):
+        """Scoping the filter to the delete wait alone was narrower than
+        the problem: `list_pcluster.py --live` describes a cluster that is
+        mid-delete and hits the same missing config version, printing the
+        error above the table. Observed."""
+        import ast
+        import inspect
+
+        import pcluster_core
+
+        src = inspect.getsource(pcluster_core._live_status)
+        tree = ast.parse(src.lstrip())
+        wrapped = False
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.With):
+                continue
+            if "quiet_missing_config_version_noise" not in ast.dump(node.items[0]):
+                continue
+            if "_describe_cluster_json" in ast.dump(node):
+                wrapped = True
+        assert wrapped, (
+            "_live_status must describe inside quiet_missing_config_version_noise()"
         )

@@ -687,9 +687,12 @@ class _DropUpstreamDeleteNoise(logging.Filter):
 
 
 @contextlib.contextmanager
-def quiet_upstream_delete_noise():
-    """Drop one known-benign upstream ERROR line for the duration of a
-    delete wait.
+def quiet_missing_config_version_noise():
+    """Drop one known-benign upstream ERROR line around a describe call.
+
+    Used by the delete wait and by the live listing: both describe a
+    cluster that may be mid-delete, and by then the config object version
+    is gone.
 
     Deliberately narrow on three axes, because silencing someone else's
     error stream is how a real failure gets hidden:
@@ -3175,10 +3178,50 @@ def core_check_cluster_health(*, cluster_record, pcluster_bin, timeout=15, ssh_a
 # ---------------------------------------------------------------------------
 
 
-def _age_str(deployment_date):
-    # DEPLOYMENT_DATE_TAG format: D-Month-YYYY e.g. "24-July-2026"
+_SERIAL_DATESTAMP = re.compile(r"(\d{14})$")
+
+
+def _serial_launch_time(serial):
+    """The exact UTC launch time encoded in a cluster serial number.
+
+    The serial ends in a 14-digit `%S%M%H%d%m%Y` stamp generated with
+    DateTime.now(timezone.utc), so it is second-precision and already
+    UTC -- unlike DEPLOYMENT_DATE, which is a *local* calendar date with
+    no time at all. Returns None if the serial does not carry one.
+    """
+    if not serial:
+        return None
+    match = _SERIAL_DATESTAMP.search(serial)
+    if not match:
+        return None
     try:
-        dt = DateTime.strptime(deployment_date, "%d-%B-%Y").replace(tzinfo=timezone.utc)
+        return DateTime.strptime(match.group(1), "%S%M%H%d%m%Y").replace(
+            tzinfo=timezone.utc
+        )
+    except ValueError:
+        return None
+
+
+def _age_str(deployment_date, *, serial=None):
+    """Prefer the serial's timestamp; fall back to the deployment date.
+
+    DEPLOYMENT_DATE is a local calendar date parsed as midnight UTC, which
+    overstates age by up to a full day: a cluster built at 22:12 EDT on the
+    21st is 02:12 UTC on the 22nd, so the date "21-August" makes it read as
+    26 hours old the moment it exists. Observed exactly that on a live
+    38-minute-old cluster. Age is what an operator uses to judge whether a
+    cluster is stale enough to delete, so overstating it by a day is not
+    cosmetic.
+
+    The fallback is kept rather than replaced: a cluster built by an older
+    toolkit may have a serial without a parseable stamp, and a wrong-but-
+    approximate age beats "?".
+    """
+    launched = _serial_launch_time(serial)
+    try:
+        dt = launched or DateTime.strptime(
+            deployment_date, "%d-%B-%Y"
+        ).replace(tzinfo=timezone.utc)
         delta = DateTime.now(timezone.utc) - dt
         total_minutes = int(delta.total_seconds() // 60)
         if total_minutes < 60:
@@ -3192,8 +3235,14 @@ def _age_str(deployment_date):
 
 
 def _live_status(cluster_name, region, pcluster_bin):
+    # Same suppression as the delete wait, and for the same reason: a
+    # cluster mid-delete has already lost the config object version
+    # describe_cluster fetches, so listing one prints upstream's ERROR line
+    # above the table. Scoping this to the delete wait alone was narrower
+    # than the problem -- any describe of a deleting cluster hits it.
     try:
-        data = _describe_cluster_json(cluster_name, region)
+        with quiet_missing_config_version_noise():
+            data = _describe_cluster_json(cluster_name, region)
         cs = data.get("clusterStatus", "?")
         cfs = data.get("cloudFormationStackStatus", "?")
         return f"{cs} / {cfs}"
@@ -3252,7 +3301,7 @@ def core_list_clusters(*, cluster_records, pcluster_bin, region_filter=None,
             continue
         if owner_filter and rec.cluster_owner != owner_filter:
             continue
-        age = _age_str(rec.deployment_date)
+        age = _age_str(rec.deployment_date, serial=rec.serial)
         status = _live_status(rec.cluster_name, rec.region, pcluster_bin) if live else "LOCAL"
         entries.append(ClusterListEntry(
             cluster_name=rec.cluster_name,
@@ -5032,7 +5081,7 @@ def core_delete_cluster(
                 f"{status or 'status unavailable'}{detail}"
             )
 
-        with quiet_upstream_delete_noise():
+        with quiet_missing_config_version_noise():
             outcome = run_cluster_delete_and_classify(
                 pc.delete_cluster, pc.describe_cluster, cluster_name, region,
                 progress_fn=_print_teardown_progress, wait=wait,

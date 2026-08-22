@@ -570,3 +570,93 @@ class TestCostSummaryLinesLoginNode:
         )
         login_line = next(l for l in lines if "Login node" in l)
         assert "unavailable" in login_line
+
+
+class TestClusterAgeComesFromTheSerialNotTheCalendarDate:
+    """DEPLOYMENT_DATE is a *local* calendar date with no time, parsed as
+    midnight UTC. A cluster built at 22:12 EDT on the 21st exists at 02:12
+    UTC on the 22nd, so the date "21-August-2026" makes it read as 26 hours
+    old the moment it is created -- observed on a live 38-minute-old
+    cluster.
+
+    That is not cosmetic: age is what an operator uses to decide whether a
+    cluster is stale enough to tear down, and this overstates it by up to a
+    full day for any evening build west of UTC.
+
+    The serial carries the real thing: a 14-digit `%S%M%H%d%m%Y` stamp
+    generated with DateTime.now(timezone.utc) -- already UTC, precise to
+    the second.
+    """
+
+    _SERIAL = "osiris-10120222082026"  # 2026-08-22T02:12:10Z
+
+    def test_the_serial_decodes_to_the_launch_instant(self):
+        from datetime import timezone
+
+        import pcluster_core
+
+        dt = pcluster_core._serial_launch_time(self._SERIAL)
+        assert dt is not None
+        assert dt.tzinfo is timezone.utc
+        assert (dt.year, dt.month, dt.day) == (2026, 8, 22)
+        assert (dt.hour, dt.minute, dt.second) == (2, 12, 10)
+
+    def test_a_fresh_cluster_does_not_read_as_a_day_old(self, monkeypatch):
+        """The regression, stated as the operator saw it."""
+        from datetime import datetime, timedelta, timezone
+
+        import pcluster_core
+
+        launched = pcluster_core._serial_launch_time(self._SERIAL)
+        fixed_now = launched + timedelta(minutes=38)
+
+        class _Now(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return fixed_now
+
+        monkeypatch.setattr(pcluster_core, "DateTime", _Now)
+        assert pcluster_core._age_str("21-August-2026", serial=self._SERIAL) == "38m"
+
+    def test_the_date_only_fallback_still_works(self):
+        """Kept, not replaced: a cluster from an older toolkit may have no
+        parseable stamp, and an approximate age beats "?"."""
+        import pcluster_core
+
+        assert pcluster_core._age_str("21-August-2026", serial=None).endswith("h")
+        assert pcluster_core._age_str("21-August-2026", serial="osiris-nope").endswith("h")
+
+    def test_an_unparseable_pair_still_degrades_to_a_question_mark(self):
+        import pcluster_core
+
+        assert pcluster_core._age_str("garbage", serial=None) == "?"
+
+    def test_a_serial_without_fourteen_digits_is_not_misread(self):
+        """A shorter or longer run of digits must not be parsed as a
+        timestamp -- that would produce a confidently wrong age."""
+        import pcluster_core
+
+        assert pcluster_core._serial_launch_time("osiris-1234567890") is None
+        assert pcluster_core._serial_launch_time("") is None
+        assert pcluster_core._serial_launch_time(None) is None
+
+    def test_the_listing_passes_the_serial_through(self):
+        """The fix is inert unless the caller supplies it, and the old call
+        site read fine without it."""
+        import ast
+        import inspect
+
+        import pcluster_core
+
+        src = inspect.getsource(pcluster_core.core_list_clusters)
+        tree = ast.parse(src.lstrip())
+        calls = [
+            n for n in ast.walk(tree)
+            if isinstance(n, ast.Call) and getattr(n.func, "id", "") == "_age_str"
+        ]
+        assert calls, "core_list_clusters no longer computes an age"
+        for call in calls:
+            assert any(k.arg == "serial" for k in call.keywords), (
+                "_age_str must be given the serial, or it falls back to the "
+                "calendar date for every cluster"
+            )
