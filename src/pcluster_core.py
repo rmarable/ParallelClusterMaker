@@ -6538,6 +6538,63 @@ def print_fsx_hydration_helper_locations(ctx):
         print(line)
 
 
+def existing_vars_file_guidance(
+    *, cluster_name, cluster_owner, az, repo_root, vars_file_path,
+    cluster_build_command,
+):
+    """The abort message for a build that finds a vars file already there.
+
+    Returns lines rather than printing, so the branch below is reachable by
+    a test -- as a string literal inside core_create_cluster it was not.
+
+    The two ways to reach this look identical from the vars file alone and
+    have opposite remedies: a running cluster must be torn down, while a
+    build that died before launching its stack created nothing in AWS to
+    tear down. Telling an operator in the second case to run
+    kill_pcluster.py sends them after a cluster that never existed, which
+    is what shipped.
+
+    The serial file discriminates. It is written once a build commits to a
+    cluster identity, and the pre-launch rollback removes it -- so its
+    absence beside a vars file means the rollback ran and no stack exists.
+    """
+    cluster_data_dir = os.path.join(repo_root, "active_clusters", cluster_name)
+    serial_file = os.path.join(cluster_data_dir, cluster_name + ".serial")
+
+    def _rel(path):
+        return os.path.relpath(path, repo_root)
+
+    lines = [
+        "",
+        "*** WARNING ***",
+        f'An existing vars_file for cluster "{cluster_name}" was found:',
+        "  " + _rel(vars_file_path),
+        "",
+    ]
+    if os.path.isfile(serial_file):
+        lines += [
+            "A serial file accompanies it, so this cluster may still be",
+            "running. Delete it properly, then retry the build:",
+            f"  ./kill_pcluster.py -N {cluster_name} -O {cluster_owner} -A {az}",
+        ]
+    else:
+        lines += [
+            "No serial file accompanies it, so an earlier build failed before",
+            "launching the stack and there is no cluster to tear down. Remove",
+            "the leftover state, then retry the build:",
+            "  rm -f " + _rel(vars_file_path),
+            "  rm -rf " + _rel(cluster_data_dir),
+        ]
+    lines += [
+        "  " + cluster_build_command,
+        "",
+        "Not sure which? ./list_pcluster.py --live",
+        "",
+        "Aborting...",
+    ]
+    return lines
+
+
 def core_create_cluster(*, params, repo_root, region, cluster_build_command, ansible_version, wait=True):
     """Validate, provision IAM, render the vars file, and build a cluster.
 
@@ -6698,22 +6755,23 @@ def core_create_cluster(*, params, repo_root, region, cluster_build_command, ans
     os.makedirs(os.path.join(src_dir, "vars_files"), exist_ok=True)
 
     # Check for an existing vars_file before making any API calls.
+    #
+    # The two ways to reach this look identical from the vars file alone, and
+    # the remedies are opposite: a running cluster must be torn down, while a
+    # build that died before launching its stack left nothing in AWS to tear
+    # down at all. Telling an operator in the second case to run
+    # kill_pcluster.py sends them to delete a cluster that was never created.
+    #
+    # The serial file discriminates. It is written once a build commits to a
+    # cluster identity and is removed by the pre-launch rollback, so its
+    # absence beside a vars file means the rollback ran -- no stack exists.
     if os.path.isfile(vars_file_path):
-        print("\n*** WARNING ***")
-        print('An existing vars_file for cluster "' + cluster_name + '" was found!')
-        print("")
-        print("Please delete this cluster properly and retry the build:")
-        print(
-            "./kill_pcluster.py -N "
-            + cluster_name
-            + " -O "
-            + cluster_owner
-            + " -A "
-            + az
-        )
-        print(cluster_build_command)
-        print("")
-        print("Aborting...")
+        for _line in existing_vars_file_guidance(
+            cluster_name=cluster_name, cluster_owner=cluster_owner, az=az,
+            repo_root=repo_root, vars_file_path=vars_file_path,
+            cluster_build_command=cluster_build_command,
+        ):
+            print(_line)
         sys.exit(1)
     else:
         p_val("vars_file_path", debug_mode)
@@ -7971,6 +8029,15 @@ def core_create_cluster(*, params, repo_root, region, cluster_build_command, ans
         _rollback_pre_launch_resources()
         with contextlib.suppress(FileNotFoundError):
             os.remove(cluster_serial_number_file)
+        # The local state this build wrote goes too, or the next run aborts
+        # on a vars file describing a cluster that was never created. This
+        # is safe precisely here: the vars-file check above refuses to start
+        # when either already exists, so anything present now was written by
+        # this build and no stack was ever launched.
+        with contextlib.suppress(FileNotFoundError):
+            os.remove(vars_file_path)
+        shutil.rmtree(cluster_data_dir, ignore_errors=True)
+        print(f"  Removed local state: {os.path.relpath(vars_file_path, repo_root)}")
         s3_release_cluster_lock(_lock_s3, locks_bucketname=locks_bucketname, cluster_name=cluster_name)
         sys.exit(1)
 

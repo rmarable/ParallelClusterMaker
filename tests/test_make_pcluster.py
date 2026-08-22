@@ -1721,3 +1721,143 @@ class TestAtLeastOneQueue:
             "config.pcluster.j2", **ctx,
         ))
         assert rendered["Scheduling"]["SlurmQueues"] is None
+
+
+class TestTheExistingVarsFileAbortNamesTheRightRemedy:
+    """Two ways to reach this abort look identical from the vars file alone
+    and have opposite remedies. A running cluster must be torn down; a build
+    that died before launching its stack created nothing in AWS, so
+    kill_pcluster.py sends the operator after a cluster that never existed.
+
+    That is what shipped, and it was reached by a real build: the S3
+    region-binding bug failed after the vars file was written, and the
+    rollback removed the serial file but left the vars file -- so the next
+    run hit this abort and was told to tear down a cluster that had never
+    been created.
+
+    The serial file is the discriminator: written once a build commits to a
+    cluster identity, removed by the pre-launch rollback.
+    """
+
+    _ARGS = dict(
+        cluster_name="osiris", cluster_owner="rmarable", az="us-east-1a",
+        cluster_build_command="./make_pcluster.py -N osiris ...",
+    )
+
+    def _lines(self, tmp_path, *, serial):
+        repo = tmp_path
+        vf = repo / "src" / "vars_files" / "osiris.yml"
+        vf.parent.mkdir(parents=True)
+        vf.write_text("---\n")
+        data = repo / "active_clusters" / "osiris"
+        data.mkdir(parents=True)
+        if serial:
+            (data / "osiris.serial").write_text("123\n")
+        import pcluster_core
+
+        return pcluster_core.existing_vars_file_guidance(
+            repo_root=str(repo), vars_file_path=str(vf), **self._ARGS
+        )
+
+    def test_a_serial_file_means_teardown(self, tmp_path):
+        text = "\n".join(self._lines(tmp_path, serial=True))
+        assert "./kill_pcluster.py -N osiris -O rmarable -A us-east-1a" in text
+        assert "rm -rf" not in text
+
+    def test_no_serial_file_means_remove_local_state(self, tmp_path):
+        """The case the shipped message got wrong."""
+        text = "\n".join(self._lines(tmp_path, serial=False))
+        assert "rm -f src/vars_files/osiris.yml" in text
+        assert "rm -rf active_clusters/osiris" in text
+        assert "kill_pcluster.py" not in text, (
+            "there is no cluster to tear down on this branch"
+        )
+
+    def test_the_vars_file_is_named_not_merely_alluded_to(self, tmp_path):
+        """The original said a vars file 'was found' without saying where,
+        which is the whole complaint."""
+        for serial in (True, False):
+            text = "\n".join(self._lines(tmp_path / str(serial), serial=serial))
+            assert "src/vars_files/osiris.yml" in text
+
+    def test_paths_are_repo_relative_not_absolute(self, tmp_path):
+        """An absolute path built from tmp_path (or a developer's home) is
+        not something an operator can paste."""
+        text = "\n".join(self._lines(tmp_path, serial=False))
+        assert str(tmp_path) not in text
+
+    def test_both_branches_offer_the_rebuild_command(self, tmp_path):
+        for serial in (True, False):
+            text = "\n".join(self._lines(tmp_path / f"r{serial}", serial=serial))
+            assert self._ARGS["cluster_build_command"] in text
+
+    def test_the_two_branches_are_distinguishable(self, tmp_path):
+        """Vacuity guard: one hedged message mentioning both remedies would
+        satisfy every individually-worded assertion above."""
+        a = "\n".join(self._lines(tmp_path / "a", serial=True))
+        b = "\n".join(self._lines(tmp_path / "b", serial=False))
+        assert a != b
+        assert ("kill_pcluster.py" in a) and ("kill_pcluster.py" not in b)
+
+
+class TestAFailedPreLaunchBuildLeavesNoLocalState:
+    """The root cause of the abort above. The pre-launch rollback removed
+    the serial file and released the lock but left the vars file and the
+    rendered artifacts in active_clusters/, so every failed build armed the
+    next run's abort.
+
+    Safe to remove precisely here: the vars-file check refuses to start when
+    either already exists, so anything present at rollback was written by
+    this build, and no stack was ever launched.
+    """
+
+    def test_the_rollback_removes_the_vars_file_and_the_data_dir(self):
+        import ast
+
+        src = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            "src", "pcluster_core.py",
+        )
+        with open(src) as fh:
+            tree = ast.parse(fh.read())
+        fn = next(
+            n for n in ast.walk(tree)
+            if isinstance(n, ast.FunctionDef) and n.name == "core_create_cluster"
+        )
+        # The rollback handler is the except: block that prints the
+        # "Cleaning up" banner.
+        bodies = [
+            h for h in ast.walk(fn)
+            if isinstance(h, ast.ExceptHandler)
+            and "Cleaning up everything this build" in ast.dump(h)
+        ]
+        assert bodies, "the pre-launch rollback handler moved or was renamed"
+        handler = bodies[0]
+
+        # Structural, not substring: vars_file_path also appears in the
+        # "Removed local state" print on the same block, so `"vars_file_path"
+        # in ast.dump(...)` stays true with the os.remove deleted -- that
+        # mutation survived the first version of this test.
+        removed = set()
+        rmtree_targets = set()
+        for node in ast.walk(handler):
+            if not isinstance(node, ast.Call):
+                continue
+            fn = node.func
+            if not isinstance(fn, ast.Attribute) or not node.args:
+                continue
+            target = node.args[0]
+            name = target.id if isinstance(target, ast.Name) else None
+            if fn.attr == "remove" and name:
+                removed.add(name)
+            if fn.attr == "rmtree" and name:
+                rmtree_targets.add(name)
+
+        assert "vars_file_path" in removed, (
+            "rollback leaves the vars file behind, so the next build aborts "
+            "on state this build created"
+        )
+        assert "cluster_serial_number_file" in removed, "serial removal was dropped"
+        assert "cluster_data_dir" in rmtree_targets, (
+            "rollback leaves active_clusters/<name> behind"
+        )
