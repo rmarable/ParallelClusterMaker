@@ -7,6 +7,10 @@ PyYAML
 ruamel.yaml
 pytest
 ansible-lint
+# Undefined-name gate (tests/test_undefined_names.py). Nothing else in the
+# toolchain checks Python for undefined names, and a NameError inside a
+# broad `except Exception` reads as a benign runtime warning.
+pyflakes
 # json_query in src/create_pcluster.yml needs this; it only arrived
 # transitively via botocore.
 jmespath

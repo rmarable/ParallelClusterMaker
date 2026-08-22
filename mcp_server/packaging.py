@@ -38,6 +38,7 @@ EXCLUDED_FROM_LAMBDA = {
     "ansible": "playbooks are no longer executed; ~408 MB of collections",
     "ansible-lint": "development lint gate only",
     "pytest": "test-only",
+    "pyflakes": "lint-only",
     "pytest-asyncio": "test-only",
     "numpy": "hpc-benchmark plotting only",
     "scipy": "hpc-benchmark plotting only",
