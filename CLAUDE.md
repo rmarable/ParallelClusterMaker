@@ -100,6 +100,20 @@ standing constraints for local development.
 - FSx hydration uses one S3 bucket with two prefixes (import and export must
   name the same bucket) — enforced by `_normalize_fsx_buckets` in
   `pcluster_core.py`.
+- **An undefined name must never reach a commit.** Nothing else checks
+  Python for one: `make lint` runs ansible-lint on the two playbooks only,
+  every AWS call is stubbed in tests, and a `NameError` inside a broad
+  `except Exception` prints as a warning while the build reports success —
+  all three failed together once, on a live build. `tests/test_undefined_names.py`
+  gates it with pyflakes. Scoped to that one class on purpose; do not widen
+  it to general linting without deciding to clear the backlog.
+- **A duration, path or label stated on more than one surface needs a
+  guard that they agree.** The teardown estimate lived in six places and
+  drifted; `stage_dir` had two definitions that disagreed. The pattern is
+  the same as the build summary's three surfaces: when a value cannot be
+  generated from one source, pin the copies by test — and include a sweep
+  that fails when a *new* surface appears, since the copy nobody knows
+  about is the one that rots.
 - **Every regional boto3 client must be built with
   `region_name=region`.** An unbound client resolves its endpoint from
   `AWS_DEFAULT_REGION`/`AWS_REGION`/the active profile, which need not be
