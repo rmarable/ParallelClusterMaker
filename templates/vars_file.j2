@@ -100,7 +100,7 @@ ec2_iam_role: "{{ ec2_iam_role }}"
 cluster_rootdir: "{{ local_workingdir }}"
 cluster_data_dir: "{{ cluster_rootdir }}/active_clusters/{{ cluster_name }}"
 cluster_template_dir: "{{ cluster_rootdir }}/templates"
-stage_dir: "/tmp/_ParallelClusterMaker_stage/{{ cluster_serial_number }}"
+stage_dir: "{{ stage_dir }}"
 
 # SNS templates
 
@@ -126,6 +126,7 @@ scaledown_idletime: {{ scaledown_idletime }}
 # Scheduler parameters
 
 scheduler: "{{ scheduler }}"
+pcluster_version: "{{ pcluster_version }}"
 initial_cpu_queue_size: {{ initial_cpu_queue_size }}
 maintain_cpu_initial_size: "{{ maintain_cpu_initial_size }}"
 max_cpu_queue_size: {{ max_cpu_queue_size }}

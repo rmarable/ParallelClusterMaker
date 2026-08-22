@@ -502,3 +502,117 @@ class TestTeardownWaitFalse:
 
         sig = inspect.signature(pcluster_core.core_delete_cluster)
         assert sig.parameters["wait"].default is True
+
+
+class TestTheDeleteWaitDropsOneKnownBenignUpstreamError:
+    """PCluster logs every AWSClientError at ERROR before raising it, even
+    the ones its own caller handles. During a teardown, describe_cluster
+    fetches the cluster config from S3 by object version; once the bucket's
+    objects are going away that get_object fails, so a *working* delete
+    printed "Encountered error when performing boto3 call in get_object:
+    The specified version does not exist." on every poll and looked broken.
+
+    Silencing someone else's error stream is how a real failure gets
+    hidden, so the suppression is narrow on three axes and each is pinned
+    below: one logger, one message, the wait's duration only.
+    """
+
+    _NOISE = "The specified version does not exist"
+
+    def _logger(self):
+        import logging
+
+        return logging.getLogger("pcluster.aws.common")
+
+    def _records(self, caplog, fn):
+        import logging
+
+        with caplog.at_level(logging.ERROR, logger="pcluster.aws.common"):
+            fn()
+        return [r.getMessage() for r in caplog.records]
+
+    def test_the_benign_message_is_dropped_inside_the_wait(self, caplog):
+        import pcluster_core
+
+        def emit():
+            with pcluster_core.quiet_upstream_delete_noise():
+                self._logger().error(
+                    "Encountered error when performing boto3 call in %s: %s",
+                    "get_object", self._NOISE + ".",
+                )
+
+        assert self._records(caplog, emit) == []
+
+    def test_every_other_error_from_that_logger_still_prints(self, caplog):
+        """The axis that matters most: a different get_object failure, or a
+        denied delete_stack, must not be swallowed with it."""
+        import pcluster_core
+
+        def emit():
+            with pcluster_core.quiet_upstream_delete_noise():
+                self._logger().error(
+                    "Encountered error when performing boto3 call in %s: %s",
+                    "delete_stack", "AccessDenied",
+                )
+
+        assert any("AccessDenied" in m for m in self._records(caplog, emit))
+
+    def test_the_filter_is_removed_when_the_wait_ends(self, caplog):
+        import pcluster_core
+
+        def emit():
+            with pcluster_core.quiet_upstream_delete_noise():
+                pass
+            self._logger().error(
+                "Encountered error when performing boto3 call in %s: %s",
+                "get_object", self._NOISE + ".",
+            )
+
+        assert any(self._NOISE in m for m in self._records(caplog, emit))
+
+    def test_the_filter_is_removed_even_when_the_wait_raises(self):
+        """A delete that fails mid-wait must not leave the operator's
+        process permanently deaf to this message."""
+        import pcluster_core
+
+        before = list(self._logger().filters)
+        with pytest.raises(RuntimeError):
+            with pcluster_core.quiet_upstream_delete_noise():
+                raise RuntimeError("delete blew up")
+        assert list(self._logger().filters) == before
+
+    def test_no_other_logger_is_touched(self, caplog):
+        """Scoped to pcluster.aws.common, not the root -- a root filter
+        would silence this string from anywhere, including our own code."""
+        import logging
+
+        import pcluster_core
+
+        other = logging.getLogger("pcluster.api.something_else")
+        with caplog.at_level(logging.ERROR):
+            with pcluster_core.quiet_upstream_delete_noise():
+                other.error("boto3 call failed: %s", self._NOISE + ".")
+        assert any(self._NOISE in r.getMessage() for r in caplog.records)
+
+    def test_the_delete_wait_is_actually_wrapped(self):
+        """The filter is worthless if the wait does not use it, and that is
+        invisible at runtime -- the noise simply keeps printing."""
+        import ast
+        import inspect
+
+        import pcluster_core
+
+        src = inspect.getsource(pcluster_core.core_delete_cluster)
+        tree = ast.parse(src.lstrip())
+        wrapped = False
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.With):
+                continue
+            if "quiet_upstream_delete_noise" not in ast.dump(node.items[0]):
+                continue
+            if "run_cluster_delete_and_classify" in ast.dump(node):
+                wrapped = True
+        assert wrapped, (
+            "run_cluster_delete_and_classify must run inside "
+            "quiet_upstream_delete_noise()"
+        )

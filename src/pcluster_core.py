@@ -11,6 +11,7 @@ import copy
 import glob
 import hashlib
 import json
+import logging
 import os
 import re
 import shlex
@@ -668,6 +669,48 @@ def _create_locks_bucket(s3, *, locks_bucketname, region):
             "BlockPublicPolicy": True, "RestrictPublicBuckets": True,
         },
     )
+
+
+_UPSTREAM_LOGGER = "pcluster.aws.common"
+
+# PCluster logs every AWSClientError at ERROR before raising it, including
+# ones its own caller then handles. During a teardown, describe_cluster
+# fetches the cluster config from S3 by object version; once the bucket's
+# objects are going away that get_object fails, so a working delete prints
+# this line on every poll and looks broken.
+_UPSTREAM_DELETE_NOISE = "The specified version does not exist"
+
+
+class _DropUpstreamDeleteNoise(logging.Filter):
+    def filter(self, record):
+        return _UPSTREAM_DELETE_NOISE not in record.getMessage()
+
+
+@contextlib.contextmanager
+def quiet_upstream_delete_noise():
+    """Drop one known-benign upstream ERROR line for the duration of a
+    delete wait.
+
+    Deliberately narrow on three axes, because silencing someone else's
+    error stream is how a real failure gets hidden:
+
+      * one logger (`pcluster.aws.common`), not the root;
+      * one message substring, so every other error from that logger still
+        prints -- including a different get_object failure;
+      * the length of the wait only, restored in a finally.
+
+    Safe because the delete's outcome does not depend on this stream at
+    all: run_cluster_delete_and_classify reads describe_cluster's result,
+    and the credential-destroying steps fire only on a positive
+    confirmation that the stack is gone -- never on the absence of errors.
+    """
+    logger = logging.getLogger(_UPSTREAM_LOGGER)
+    noise_filter = _DropUpstreamDeleteNoise()
+    logger.addFilter(noise_filter)
+    try:
+        yield
+    finally:
+        logger.removeFilter(noise_filter)
 
 
 def _lock_key(cluster_name):
@@ -4985,14 +5028,15 @@ def core_delete_cluster(
             progress printer: this wait was previously entirely silent."""
             detail = f" (CloudFormation: {cfn_status})" if cfn_status else ""
             print(
-                f"  [{(attempt + 1) * 30 // 60:>3d}m] {cluster_name}: "
+                f"  [ {(attempt + 1) * 30 // 60}m ] {cluster_name}: "
                 f"{status or 'status unavailable'}{detail}"
             )
 
-        outcome = run_cluster_delete_and_classify(
-            pc.delete_cluster, pc.describe_cluster, cluster_name, region,
-            progress_fn=_print_teardown_progress, wait=wait,
-        )
+        with quiet_upstream_delete_noise():
+            outcome = run_cluster_delete_and_classify(
+                pc.delete_cluster, pc.describe_cluster, cluster_name, region,
+                progress_fn=_print_teardown_progress, wait=wait,
+            )
 
         if outcome.terminal_state == _KICKED_OFF:
             # Workstream 4: the caller asked to initiate the delete without
@@ -6402,6 +6446,27 @@ def stage_and_upload_hpc_benchmark_driver(s3, *, ctx, region):
     _create_hpc_results_bucket(s3, results_bucketname=ctx["results_bucketname"], region=region)
 
 
+def installed_pcluster_version():
+    """The aws-parallelcluster version this build is driving.
+
+    PCluster's own accessor, not `importlib.metadata` directly and not a
+    `pcluster version` subprocess: `get_installed_version` is a thin wrapper
+    over the same metadata lookup, so using it means the summary reports
+    exactly what PCluster reports about itself if that ever changes. The
+    subprocess form is also banned outright -- the binary is absent on
+    Lambda.
+
+    Returns "unknown" rather than raising: this is a summary line, and a
+    metadata lookup failing must not abort a build that is otherwise fine.
+    """
+    try:
+        from pcluster.utils import get_installed_version
+
+        return get_installed_version()
+    except Exception:
+        return "unknown"
+
+
 def print_cluster_launch_summary(ctx, *, launch_timestamp):
     """boto3/Python twin of "Print cluster launch summary" -- the
     pre-launch informational print, distinct from the comprehensive
@@ -6417,9 +6482,14 @@ def print_cluster_launch_summary(ctx, *, launch_timestamp):
         f"Launch Timestamp:  {launch_timestamp}",
         f"Operating System:  {ctx['base_os']}",
         f"HPC Scheduler:     {ctx['scheduler']}",
-        f"Head Node:         {ctx['headnode_instance_type']}",
+        f"PCluster Version:  {ctx.get('pcluster_version', 'unknown')}",
         f"VPC Name:          {ctx['vpc_name']}",
         f"Availability Zone: {ctx['az']}",
+        # Head Node sits immediately above Login Node so the node lines read
+        # as one group -- head, login, then the queues -- matching the build
+        # summary's own order. It was separated from them by the two network
+        # lines.
+        f"Head Node:         {ctx['headnode_instance_type']}",
     ]
     if ctx.get("enable_loginnode") == "true":
         lines.append(
@@ -7489,8 +7559,17 @@ def core_create_cluster(*, params, repo_root, region, cluster_build_command, ans
         # supplied explicitly in the render context.
         "cluster_data_dir": os.path.join(repo_root, "active_clusters", cluster_name),
         "cluster_template_dir": os.path.join(repo_root, "templates"),
+        # "/tmp", not tempfile.gettempdir(): this path is created and
+        # written on BOTH machines. The operator's box stages files into it,
+        # then _transfer_staging_dir ssh's `mkdir -p` for its parent on the
+        # head node and scp's it across -- so it has to be a path that
+        # exists on a Linux node, not one that merely exists locally.
+        # gettempdir() on macOS is /var/folders/<...>/T, which the head node
+        # cannot create (Permission denied on /var/folders) and which means
+        # nothing there anyway. vars_file.j2 echoes this value rather than
+        # restating the literal, so the two cannot drift apart again.
         "stage_dir": os.path.join(
-            tempfile.gettempdir(), "_ParallelClusterMaker_stage", cluster_serial_number
+            "/tmp", "_ParallelClusterMaker_stage", cluster_serial_number
         ),
         "ec2_keypair": cluster_serial_number + "_" + region,
         "ssh_secret_name": _ssh_secret_name(cluster_name, cluster_serial_number),
@@ -7601,6 +7680,7 @@ def core_create_cluster(*, params, repo_root, region, cluster_build_command, ans
         "pcluster_create_timeout": pcluster_create_timeout,
         "scaledown_idletime": scaledown_idletime,
         "scheduler": scheduler,
+        "pcluster_version": installed_pcluster_version(),
         "subnet_id": subnet_id,
         "vpc_cidr": vpc_cidr,
         "vpc_id": vpc_id,
@@ -8077,7 +8157,7 @@ def core_create_cluster(*, params, repo_root, region, cluster_build_command, ans
         elapsed = (attempt + 1) * 60
         detail = f" (CloudFormation: {cfn_status})" if cfn_status else ""
         print(
-            f"  [{elapsed // 60:>3d}m] {cluster_name}: {status or 'status unavailable'}{detail}"
+            f"  [ {elapsed // 60}m ] {cluster_name}: {status or 'status unavailable'}{detail}"
         )
 
     try:
@@ -8196,6 +8276,7 @@ def core_create_cluster(*, params, repo_root, region, cluster_build_command, ans
         print(f"  GPU Queue:         {', '.join(gpu_instance_types)}")
     print(f"  OS:                {base_os}")
     print(f"  Scheduler:         {scheduler}")
+    print(f"  PCluster Version:  {installed_pcluster_version()}")
     if _enabled:
         print(f"  Options:           {', '.join(_enabled)}")
     for _cost_line in _cost_summary_lines(

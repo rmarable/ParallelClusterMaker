@@ -409,9 +409,10 @@
               "Launch Timestamp:  " + start_stack_creation_timer.stdout,
               "Operating System:  " + base_os,
               "HPC Scheduler:     " + scheduler,
-              "Head Node:         " + headnode_instance_type,
+              "PCluster Version:  " + pcluster_version,
               "VPC Name:          " + vpc_name,
               "Availability Zone: " + az,
+              "Head Node:         " + headnode_instance_type,
             ]
             + (["Login Node:        " + loginnode_instance_type + " (x" + loginnode_count | string + ")"] if enable_loginnode | bool else [])
             + (["CPU Queue:         " + (cpu_instance_types | join(", ")) + "  (min: " + initial_cpu_queue_size | string + "  max: " + max_cpu_queue_size | string + ")"] if enable_cpu_queue | bool else [])
@@ -700,9 +701,10 @@
               "Serial Datestamp:  " + cluster_serial_datestamp,
               "Availability Zone: " + az,
               "VPC:               " + vpc_name,
-              "Head Node:         " + headnode_instance_type,
               "OS:                " + base_os,
               "Scheduler:         " + scheduler,
+              "PCluster Version:  " + pcluster_version,
+              "Head Node:         " + headnode_instance_type,
             ]
             + (["Login Node:        " + loginnode_instance_type + " (x" + loginnode_count | string + ")"] if enable_loginnode | bool else [])
             + (["CPU Queue:         " + (cpu_instance_types | join(", "))] if enable_cpu_queue | bool else [])

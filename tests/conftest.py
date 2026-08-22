@@ -116,6 +116,7 @@ def cluster_params():
         "enable_gpu": "false",
         # Scheduling
         "scheduler": "slurm",
+        "pcluster_version": "3.15.1",
         "cluster_type": "spot",
         "initial_cpu_queue_size": 2,
         "max_cpu_queue_size": 8,

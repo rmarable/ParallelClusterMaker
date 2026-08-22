@@ -6909,3 +6909,277 @@ class TestRouterPolicyStaysNearZero:
             for act in [a] if isinstance(a, str) else a:
                 services.add(act.split(":", 1)[0])
         assert services == {"lambda"}, f"router reaches beyond lambda: {sorted(services)}"
+
+
+class TestTheNodeLinesReadAsOneGroup:
+    """Head Node, Login Node and the queues are one logical group -- what
+    the cluster is made of -- and the launch summary split the head node
+    away from the rest with VPC Name and Availability Zone in between,
+    while the build summary already grouped them. An operator comparing the
+    two saw the same facts in two orders.
+
+    Order is asserted by line index, not by presence: the existing login
+    node tests check only that the line appears, so nothing pinned where.
+    """
+
+    def _index(self, text, label):
+        lines = [l.strip() for l in text.splitlines()]
+        for i, line in enumerate(lines):
+            if line.startswith(label):
+                return i
+        raise AssertionError(f"{label!r} not in:\n{text}")
+
+    def test_the_launch_summary_puts_head_node_directly_above_login_node(
+        self, cluster_params_loginnode_enabled
+    ):
+        text = _rendered_launch_summary({}, cluster_params_loginnode_enabled)
+        head = self._index(text, "Head Node:")
+        login = self._index(text, "Login Node:")
+        assert login == head + 1, (
+            "the node lines must be adjacent, head first -- they were split "
+            "by VPC Name and Availability Zone"
+        )
+
+    def test_the_build_summary_does_too(self, cluster_params_loginnode_enabled):
+        """The surface that was already right; pinned so it stays that way
+        and so the two cannot drift apart again."""
+        text = _rendered_summary({}, cluster_params_loginnode_enabled)
+        head = self._index(text, "Head Node:")
+        login = self._index(text, "Login Node:")
+        assert login == head + 1
+
+    def test_the_network_lines_still_come_before_the_nodes(
+        self, cluster_params_loginnode_enabled
+    ):
+        """Vacuity guard on the fix's direction: moving Login Node *up*
+        instead would also make them adjacent, but would leave the network
+        context stranded below the hardware."""
+        text = _rendered_launch_summary({}, cluster_params_loginnode_enabled)
+        assert self._index(text, "Availability Zone:") < self._index(text, "Head Node:")
+        assert self._index(text, "VPC Name:") < self._index(text, "Head Node:")
+
+    def test_the_queues_follow_the_nodes(self, cluster_params_loginnode_enabled):
+        text = _rendered_launch_summary({}, cluster_params_loginnode_enabled)
+        if "CPU Queue:" in text:
+            assert self._index(text, "CPU Queue:") > self._index(text, "Login Node:")
+
+    def test_the_python_launch_summary_is_the_one_the_operator_sees(self, capsys):
+        """The surface the other tests in this class do not reach.
+
+        `_rendered_launch_summary` evaluates `create_pcluster.yml`'s
+        expression -- the unexecuted reference spec. What actually prints
+        during a build is `print_cluster_launch_summary` in
+        `pcluster_core.py`, and reverting *its* order left every assertion
+        above green. Driving the real function is the only thing that sees
+        it.
+        """
+        src = os.path.join(REPO_ROOT, "src")
+        if src not in sys.path:
+            sys.path.insert(0, src)
+        import pcluster_core
+
+        ctx = {
+            "cluster_name": "osiris", "cluster_serial_datestamp": "202608212212",
+            "region": "us-east-1",
+            "base_os": "ubuntu2404arm", "scheduler": "slurm",
+            "headnode_instance_type": "c8g.large",
+            "vpc_name": "vpc_default", "az": "us-east-1a",
+            "enable_loginnode": "true", "loginnode_instance_type": "c8g.large",
+            "loginnode_count": 1,
+            "enable_cpu_queue": "true",
+            "cpu_instance_types": ["c8g.xlarge"],
+            "initial_cpu_queue_size": 1, "max_cpu_queue_size": 8,
+        }
+        pcluster_core.print_cluster_launch_summary(ctx, launch_timestamp="now")
+        text = capsys.readouterr().out
+
+        head = self._index(text, "Head Node:")
+        login = self._index(text, "Login Node:")
+        assert login == head + 1, (
+            "Head Node must sit directly above Login Node in the summary an "
+            f"operator actually reads:\n{text}"
+        )
+        assert self._index(text, "Availability Zone:") < head
+        assert self._index(text, "CPU Queue:") > login
+
+
+class TestTheSummariesReportThePClusterVersion:
+    """Which aws-parallelcluster drove a build is the first thing anyone
+    asks when a cluster behaves differently from the last one, and it was
+    on none of the summaries. Threaded through the full pipeline the repo
+    requires: Python vars dict -> vars_file.j2 -> template, plus conftest.
+    """
+
+    def _index(self, text, label):
+        for i, line in enumerate(l.strip() for l in text.splitlines()):
+            if line.startswith(label):
+                return i
+        raise AssertionError(f"{label!r} not in:\n{text}")
+
+    def test_the_version_is_read_from_pclusters_own_accessor(self):
+        """Not a `pcluster version` subprocess -- that binary is absent on
+        Lambda and every shell-out to it was deliberately removed."""
+        src = os.path.join(REPO_ROOT, "src")
+        if src not in sys.path:
+            sys.path.insert(0, src)
+        import pcluster_core
+
+        assert pcluster_core.installed_pcluster_version() != "unknown"
+        from pcluster.utils import get_installed_version
+
+        assert pcluster_core.installed_pcluster_version() == get_installed_version()
+
+    def test_a_lookup_failure_does_not_abort_the_build(self, monkeypatch):
+        """A summary line must never be the thing that fails a build."""
+        src = os.path.join(REPO_ROOT, "src")
+        if src not in sys.path:
+            sys.path.insert(0, src)
+        import pcluster_core
+
+        import builtins
+
+        real_import = builtins.__import__
+
+        def boom(name, *a, **kw):
+            if name == "pcluster.utils":
+                raise ImportError("simulated")
+            return real_import(name, *a, **kw)
+
+        monkeypatch.setattr(builtins, "__import__", boom)
+        assert pcluster_core.installed_pcluster_version() == "unknown"
+
+    def test_the_launch_summary_reports_it_under_the_scheduler(self, capsys):
+        src = os.path.join(REPO_ROOT, "src")
+        if src not in sys.path:
+            sys.path.insert(0, src)
+        import pcluster_core
+
+        ctx = {
+            "cluster_name": "osiris", "cluster_serial_datestamp": "202608212212",
+            "region": "us-east-1", "base_os": "ubuntu2404arm", "scheduler": "slurm",
+            "pcluster_version": "3.15.1",
+            "headnode_instance_type": "c8g.large", "vpc_name": "vpc_default",
+            "az": "us-east-1a",
+        }
+        pcluster_core.print_cluster_launch_summary(ctx, launch_timestamp="now")
+        text = capsys.readouterr().out
+        assert "PCluster Version:  3.15.1" in text
+        assert self._index(text, "PCluster Version:") == (
+            self._index(text, "HPC Scheduler:") + 1
+        )
+
+    def test_the_vars_file_carries_it(self, cluster_params):
+        """vars_file.j2 renders under StrictUndefined, so a template
+        referencing it without the Python side defining it raises."""
+        assert _vars_for({}, cluster_params).get("pcluster_version")
+
+    def test_conftest_supplies_it(self, cluster_params):
+        """The repo's rule: a new template variable must reach
+        tests/conftest.py or every template test renders without it."""
+        assert "pcluster_version" in cluster_params
+
+
+class TestTheWaitProgressLineSpacing:
+    """Both long waits print a per-attempt progress line, and they must
+    agree on its shape -- an operator watching a build then a teardown sees
+    the same format, not two.
+
+    The time element carries exactly one space on each side. The previous
+    form right-aligned the number inside the brackets (`[  1m]`), which put
+    two spaces after the opening bracket and none before the closing one.
+    """
+
+    def _printers(self):
+        import ast
+
+        with open(os.path.join(REPO_ROOT, "src", "pcluster_core.py")) as fh:
+            tree = ast.parse(fh.read())
+        found = []
+        for node in ast.walk(tree):
+            if isinstance(node, ast.JoinedStr):
+                text = "".join(
+                    p.value for p in node.values if isinstance(p, ast.Constant)
+                )
+                if "m ] " in text or "m] " in text:
+                    found.append(text)
+        return found
+
+    def test_both_printers_were_found(self):
+        """Vacuity guard: a scan matching nothing passes the checks below
+        in silence. There are two -- create and teardown."""
+        assert len(self._printers()) == 2, self._printers()
+
+    def test_the_time_element_has_one_space_on_each_side(self):
+        for text in self._printers():
+            assert "[ " in text, f"no space after the opening bracket: {text!r}"
+            assert "m ]" in text, f"no space before the closing bracket: {text!r}"
+
+    def test_no_printer_pads_the_number_inside_the_brackets(self):
+        """`:>3d` is what produced `[  1m]`; padding and a single space are
+        mutually exclusive."""
+        with open(os.path.join(REPO_ROOT, "src", "pcluster_core.py")) as fh:
+            body = fh.read()
+        assert ":>3d}m]" not in body
+        assert ":>3d}m ]" not in body
+
+    def test_the_rendered_line_matches_the_agreed_shape(self):
+        import re
+
+        for minutes in (1, 9, 10, 100):
+            line = f"  [ {minutes}m ] osiris: CREATE_IN_PROGRESS"
+            assert re.match(r"^  \[ \d+m \] \S+: ", line), line
+
+
+class TestTheStagingDirectoryIsValidOnBothMachines:
+    """stage_dir is created and written on the operator's box *and* on the
+    head node: _transfer_staging_dir ssh's `mkdir -p` for its parent and
+    scp's the tree across. So it has to be a path that exists on a Linux
+    node, not merely one that exists locally.
+
+    The migration replaced the playbook's `/tmp/...` literal with
+    `tempfile.gettempdir()`, which is correct for a local scratch directory
+    and wrong for this one: on macOS it is /var/folders/<...>/T, which the
+    head node cannot create (Permission denied) and which means nothing
+    there. It failed a live build 15 minutes in, after the stack was
+    already up -- the same shape as the S3 region bug, a local-context
+    value used in a remote context.
+    """
+
+    def test_the_staging_root_is_not_the_local_temp_directory(self):
+        """The specific regression. On Linux gettempdir() *is* /tmp, so a
+        developer on Linux would never see this -- which is why it is
+        asserted against the source rather than against a rendered value."""
+        with open(os.path.join(REPO_ROOT, "src", "pcluster_core.py")) as fh:
+            body = fh.read()
+        assert "tempfile.gettempdir(), \"_ParallelClusterMaker_stage\"" not in body
+        assert 'os.path.join(\n            "/tmp", "_ParallelClusterMaker_stage"' in body
+
+    def test_the_rendered_value_is_an_absolute_posix_path(self, cluster_params):
+        stage = _vars_for({}, cluster_params)["stage_dir"]
+        assert stage.startswith("/tmp/"), stage
+        assert "\\" not in stage
+
+    def test_the_vars_file_does_not_restate_the_literal(self):
+        """Two sources for one path is how they came to disagree: the
+        template still said /tmp while Python had moved to gettempdir(),
+        so the rendered vars file and the running code named different
+        directories."""
+        with open(os.path.join(REPO_ROOT, "templates", "vars_file.j2")) as fh:
+            body = fh.read()
+        assert 'stage_dir: "{{ stage_dir }}"' in body
+        assert "/tmp/_ParallelClusterMaker_stage/{{ cluster_serial_number }}" not in body
+
+    def test_the_transfer_uses_the_parent_of_that_path(self):
+        """Guards the shape the fix depends on: the remote mkdir targets
+        dirname(stage_dir), so a relative or bare-name stage_dir would
+        mkdir something unexpected on the head node."""
+        src = os.path.join(REPO_ROOT, "src")
+        if src not in sys.path:
+            sys.path.insert(0, src)
+        import inspect
+
+        import pcluster_core
+
+        body = inspect.getsource(pcluster_core._transfer_staging_dir)
+        assert "os.path.dirname(stage_dir" in body
+        assert "mkdir -p" in body
