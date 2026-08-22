@@ -1024,19 +1024,25 @@ here yet. Everything below is the local stdio server.
 
 ### Installing into Claude Code
 
+Run this **from the repo root** — the shell expands `$(pwd)` before Claude
+Code ever sees it, so what gets stored is a fixed absolute path:
+
 ```bash
 claude mcp add parallelclustermaker \
-  -e PYTHONPATH=/absolute/path/to/ParallelClusterMaker \
-  -- /absolute/path/to/ParallelClusterMaker/.venv/bin/python -m mcp_server.server
+  -e PYTHONPATH="$(pwd)" \
+  -- "$(pwd)/.venv/bin/python" -m mcp_server.server
 ```
 
 Verify with `claude mcp list` (look for `✔ Connected`) or `/mcp` inside a
 session to see the tool list.
 
-Both paths must be absolute, and **`PYTHONPATH` is required, not
-optional**. Claude Code does not run the server from your project
-directory, and `-m mcp_server.server` needs the repo root on `sys.path`;
-without it the server fails with `No module named 'mcp_server'`.
+Both paths must end up absolute — which is why they are expanded at the
+shell rather than written as `./.venv/bin/python`, a relative path Claude
+Code would resolve against its own working directory, not the repo. And
+**`PYTHONPATH` is required, not optional**. Claude Code does not run the
+server from your project directory, and `-m mcp_server.server` needs the
+repo root on `sys.path`; without it the server fails with `No module named
+'mcp_server'`.
 
 You do **not** need the venv activated — `mcp_server/` carries no venv
 guard and puts `src/` on the path itself — but you must use
