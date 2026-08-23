@@ -1036,6 +1036,28 @@ claude mcp add parallelclustermaker \
 Verify with `claude mcp list` (look for `✔ Connected`) or `/mcp` inside a
 session to see the tool list.
 
+#### Adding it from inside a running session
+
+`/mcp` cannot add a server. It manages ones that already exist: the status
+panel, `reconnect <server>`, `enable`, and `disable`.
+
+You can still configure it without leaving the session — the `!` prefix
+runs a shell command and puts the output in the transcript:
+
+```
+! claude mcp add parallelclustermaker -e PYTHONPATH="$(pwd)" -- "$(pwd)/.venv/bin/python" -m mcp_server.server
+```
+
+**Then restart Claude Code.** A newly added stdio server is not picked up
+by the session that added it, and there is no reload for one:
+`/mcp reconnect` applies to HTTP/SSE servers, and only those configured
+before the session started. The same holds for editing `.mcp.json` or
+`~/.claude.json` by hand — both are read at startup.
+
+After restarting, run `/mcp` and confirm the tools are listed. That is a
+stronger check than `claude mcp list` showing `✔ Connected`: the process
+starting and its tools being callable are different claims.
+
 Both paths must end up absolute — which is why they are expanded at the
 shell rather than written as `./.venv/bin/python`, a relative path Claude
 Code would resolve against its own working directory, not the repo. And
