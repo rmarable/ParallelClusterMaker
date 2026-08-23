@@ -455,9 +455,13 @@ class TestLoadClusterConfig:
         config_file.write_text(SAMPLE_CONFIG)
 
         with patch("pcluster_core._queue_config_path", return_value=str(config_file)):
-            config, path = _load_cluster_config(cluster_name, str(tmp_path))
+            config, path, etag = _load_cluster_config(
+                cluster_name, str(tmp_path)
+            )
 
         assert config["Region"] == "us-east-2"
+        assert path.endswith(f"config.{cluster_name}")
+        assert etag is None, "a locally-sourced config has no remote version"
 
     def test_missing_file_raises(self, tmp_path):
         with patch(
@@ -604,8 +608,9 @@ def _declared_flags(source):
 
 class TestQueueAddCallsTheArchGuard:
     def test_core_add_queue_checks_arch_before_writing_the_config(self):
-        """The architecture guard is only useful if it runs before
-        _write_cluster_config mutates the live cluster's only config file.
+        """The architecture guard is only useful if it runs before the
+        edit is persisted -- _save_cluster_config now writes the live
+        cluster's only config file and mirrors it to the shared store.
 
         manage_pcluster_queue.py's own _do_add no longer contains this logic
         -- it now delegates to core_add_queue in pcluster_core.py, which is
@@ -622,7 +627,7 @@ class TestQueueAddCallsTheArchGuard:
             "core_add_queue does not call the architecture guard"
         )
         assert called.index("_check_queue_arch_matches_cluster") < called.index(
-            "_write_cluster_config"
+            "_save_cluster_config"
         ), "the arch guard must run before the config is rewritten"
 
 

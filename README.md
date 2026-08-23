@@ -108,7 +108,7 @@ All optional parameters have hardcoded defaults and can also be persisted in a Y
 | `enable_gpu` | derived from `gpu_instance_type` — not user-settable |
 | `head_node_bootstrap_timeout` | 2100 s, raised automatically when `enable_efs` or `enable_fsx` is true |
 
-Use `--use_defaults=FILE` to load values from your own defaults file; CLI arguments always take precedence.
+Name a file `<cluster_name>_defaults.yml` and it is loaded automatically — no flag needed, by `make_pcluster.py` and by the MCP server alike. Use `--use_defaults=FILE` to load a differently-named file instead. CLI arguments always take precedence over either.
 
 ```
 # Copy the template and customize it for your cluster
@@ -118,7 +118,7 @@ cp pcluster_defaults.yml my-cluster_defaults.yml
     --use_defaults=my-cluster_defaults.yml
 ```
 
-Name the file `<cluster_name>_defaults.yml` to keep cluster namespaces scoped.  `make_pcluster.py` detects a matching file that was not loaded and prints a `*** WARNING ***` suggesting the flag.  Loading `pcluster_defaults.yml` directly is allowed but also warns.
+Naming the file `<cluster_name>_defaults.yml` keeps cluster namespaces scoped and is what makes the automatic load work — the example above only needs `--use_defaults` because the file is named for a different cluster.  Keys the build does not use (`delete_s3_bucketname`, which `kill_pcluster.py` reads) are ignored rather than rejected, so one file can serve both.  Loading `pcluster_defaults.yml` directly is allowed but warns.
 
 ---
 

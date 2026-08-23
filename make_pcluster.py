@@ -49,6 +49,7 @@ from pcluster_core import (
     _validate_cluster_owner,
     _validate_queue_sizes,
     _load_defaults_file,
+    load_cluster_defaults,
     _resolve as _pcore_resolve,
     _resolve_bool as _pcore_resolve_bool,
     _default_loginnode_instance_type,
@@ -668,9 +669,10 @@ def main():
 
     cluster_build_command = " ".join(sys.argv)
 
-    # Parse CLI args, then overlay pcluster_defaults.yml if --use_defaults was
-    # passed, then apply hardcoded fallbacks for anything still unset.
-    # Precedence: CLI arg > pcluster_defaults.yml > hardcoded default.
+    # Parse CLI args, then overlay a defaults file -- the one --use_defaults
+    # names, or `<cluster_name>_defaults.yml` if the operator wrote one --
+    # then apply hardcoded fallbacks for anything still unset.
+    # Precedence: CLI arg > defaults file > hardcoded default.
 
     args = parser.parse_args()
 
@@ -687,13 +689,19 @@ def main():
         )
         print(f"Defaults: loaded from {args.use_defaults}")
     else:
-        _candidate = os.path.join(_repo_root, f"{args.cluster_name}_defaults.yml")
-        if os.path.exists(_candidate):
-            print(
-                f"*** WARNING ***\n"
-                f"  '{args.cluster_name}_defaults.yml' exists but was not loaded.\n"
-                f"  If you meant to use it, re-run with: --use_defaults={args.cluster_name}_defaults.yml"
-            )
+        # A defaults file the operator wrote for this cluster is applied
+        # without being asked for. It used to only warn that the file
+        # existed, which left the operator's own description of the cluster
+        # sitting unused unless they remembered a flag -- and left the MCP
+        # server, which has no flags, unable to honor it at all.
+        # --use_defaults survives as the override for a differently-named
+        # file, and still wins over this one.
+        _auto_path, _auto_defaults = load_cluster_defaults(
+            args.cluster_name, repo_root=_repo_root
+        )
+        if _auto_path:
+            _file_defaults = _auto_defaults
+            print(f"Defaults: loaded from {os.path.basename(_auto_path)}")
 
     def _resolve(name, cast=None):
         return _pcore_resolve(name, args, _file_defaults, _HARDCODED_DEFAULTS, cast)

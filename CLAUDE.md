@@ -213,6 +213,25 @@ standing constraints for local development.
   blast radius, one policy per tier in `templates/MCP*.json_src` — a third
   policy category, neither instance-reachable nor the operator's own. The
   router must import no third-party package.
+- Cluster records are published to `s3://parallelclustermaker-locks-<acct>-<region>/vars/<name>.json`
+  so a machine that did not build a cluster can still see it. Local files
+  win: `_read_cluster_record` reads `active_clusters/` + `src/vars_files/`
+  first and only falls back to the store. The `vars/` prefix is fixed by
+  the `MCPStateAccess*` IAM policies, which granted it long before any code
+  used it. Published after a successful build, deleted on teardown under
+  the same `cf_delete_confirmed` gate as the credentials. The cluster
+  config rides the same bucket under `configs/`, where writes are
+  conditional on the ETag the read returned — `add_queue`/`remove_queue`
+  take no cluster lock, so concurrent edits are an ordinary lost-update
+  race and `ClusterConfigConflict` is what makes one visible.
+- **`MakeClusterParams` carries no `region`** — the CLI resolves it from
+  the AZ-verification call and passes it to `core_create_cluster`
+  separately, so every shim must too. MCP's `create_cluster` read
+  `params.region` and raised `AttributeError` on every call; the one test
+  reaching it asserted an error and got one from the earlier denied-param
+  check. `resolve_region_from_az` (`pcluster_core.py`) is the shared
+  resolution: it asks EC2 rather than trimming `az[:-1]`, which also proves
+  the AZ exists.
 - **`requirements.txt` is the development set and must never be installed
   into a Lambda artifact** — `ansible` alone is ~408 MB of collections for
   playbooks nothing executes. `mcp_server/packaging.py` holds the per-tier
@@ -238,8 +257,15 @@ standing constraints for local development.
   macOS bypasses the active venv.
 - Ansible deprecation warnings are suppressed globally via `ansible.cfg`
   (`deprecation_warnings = False`). Do not re-enable or work around per-task.
-- If `<cluster_name>_defaults.yml` exists but `--use_defaults` was not
-  passed, `make_pcluster.py` prints a `*** WARNING ***` — never suppress it.
+- `<cluster_name>_defaults.yml` is applied automatically when it exists,
+  by the CLI and the MCP server both — `load_cluster_defaults`
+  (`pcluster_core.py`) is the one loader. Precedence: explicit input >
+  file > `MAKE_CLUSTER_DEFAULTS`. `--use_defaults` overrides it with a
+  differently-named file. Non-build keys (`delete_s3_bucketname`) are
+  ignored, not rejected. It is also the one path that may set the three
+  `_REMOTE_DENIED_PARAMS` — that denial is scoped to `overrides`, since it
+  exists to stop a network caller choosing what runs on the nodes, and the
+  file is the operator's own.
 - **Node.js (>= 10.13.0) must be on `PATH` locally.** `pcluster
   create-cluster`/`update-cluster` shell out to the AWS CDK library
   ParallelCluster uses to synthesize CloudFormation — on the operator's
@@ -277,11 +303,13 @@ three gates; see the `Makefile`.
   plausible-sounding details.
 - **Don't guess silently.** If something is uncertain, say it is uncertain.
   A wrong confident answer is worse than an honest "I don't know."
-- **Ask before assuming.** If a request is ambiguous, ask a focused
+- **Ask before assuming.** If a request is ambiguous — scope unclear, two
+  readings exist, or a destructive action is implied — ask a focused
   clarifying question before proceeding.
 - **No inline multi-line `python3 -c`.** Never run a `python3 -c '...'`
   block containing a newline followed by `#`. Write the script to
-  `$CLAUDE_JOB_DIR/tmp/` first and invoke `python3 <path>` instead.
+  `$CLAUDE_JOB_DIR/tmp/` first and invoke `python3 <path>` instead — this
+  keeps Claude Code's argument-injection scanner from firing on every audit.
 
 ## Code style
 
@@ -290,6 +318,11 @@ three gates; see the `Makefile`.
 - No backwards-compatibility shims.
 - Prefer editing existing files over creating new ones.
 - No emojis.
-- **American English everywhere**, except where a spelling is part of an
-  external contract (e.g. Slurm's `CANCELLED` job state, passed verbatim to
-  `sacct --state=`).
+- **American English everywhere** — docs, comments, docstrings, CLI help,
+  error strings, Ansible `name:` fields ("personalize", "normalize",
+  "analog", "behavior", "honor", "signaling", "neighboring", "defense",
+  "unlabeled"). Exception: never "correct" a spelling that is part of an
+  external contract — Slurm's `CANCELLED` job state is passed verbatim to
+  `sacct --state=` in `diagnose_pcluster.py` and
+  `tests/integration/run_integration_test.sh`, and Americanizing it breaks
+  the query.

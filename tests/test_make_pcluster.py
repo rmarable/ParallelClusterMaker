@@ -1861,3 +1861,775 @@ class TestAFailedPreLaunchBuildLeavesNoLocalState:
         assert "cluster_data_dir" in rmtree_targets, (
             "rollback leaves active_clusters/<name> behind"
         )
+
+
+class TestTheDefaultsFileIsAppliedWhenItExists:
+    """`<cluster_name>_defaults.yml` is the operator's description of a
+    cluster. It is applied automatically now, by both entry points -- the
+    CLI used to require --use_defaults and merely warn that the file
+    existed, and the MCP server, which has no flags to pass, could not
+    honor it at all. Same cluster name, same cluster, whichever surface
+    asks.
+
+    The file sits between explicit input and MAKE_CLUSTER_DEFAULTS, which
+    is the precedence `_resolve` already gave the CLI.
+    """
+
+    _REQUIRED = dict(
+        cluster_name="osiris", cluster_owner="testuser",
+        cluster_owner_email="testuser@example.com", az="us-east-2a",
+        headnode_instance_type="c5.xlarge",
+    )
+
+    def _write(self, tmp_path, monkeypatch, contents, name="osiris"):
+        import yaml as _yaml
+
+        path = tmp_path / f"{name}_defaults.yml"
+        path.write_text(_yaml.safe_dump(contents))
+        monkeypatch.setattr(
+            "pcluster_core._default_repo_root", lambda: str(tmp_path)
+        )
+        return path
+
+    def _build(self, **kw):
+        from pcluster_core import build_make_cluster_params
+
+        return build_make_cluster_params(**dict(self._REQUIRED, **kw))
+
+    def test_a_value_in_the_file_reaches_the_built_cluster(
+        self, tmp_path, monkeypatch
+    ):
+        self._write(tmp_path, monkeypatch, {
+            "compute_instance_type": "c6g.8xlarge", "base_os": "rhel9arm",
+        })
+        params = self._build()
+        assert params.compute_instance_type == "c6g.8xlarge"
+        assert params.base_os == "rhel9arm"
+
+    def test_the_file_beats_the_hardcoded_default(self, tmp_path, monkeypatch):
+        from pcluster_core import MAKE_CLUSTER_DEFAULTS
+
+        other = (
+            "ondemand" if MAKE_CLUSTER_DEFAULTS["cluster_type"] == "spot"
+            else "spot"
+        )
+        self._write(tmp_path, monkeypatch, {
+            "compute_instance_type": "c5.2xlarge", "cluster_type": other,
+        })
+        assert self._build().cluster_type == other
+
+    def test_an_explicit_override_beats_the_file(self, tmp_path, monkeypatch):
+        """Precedence, and the half an operator notices: a parameter typed
+        at the tool must not be silently overruled by a file on disk."""
+        self._write(tmp_path, monkeypatch, {
+            "compute_instance_type": "c6g.8xlarge",
+        })
+        params = self._build(overrides={"compute_instance_type": "c5.9xlarge"})
+        assert params.compute_instance_type == "c5.9xlarge"
+
+    def test_a_teardown_key_in_the_file_is_ignored_not_rejected(
+        self, tmp_path, monkeypatch
+    ):
+        """One file serves make_pcluster.py and kill_pcluster.py both, so
+        `delete_s3_bucketname` is legitimately in there and is not a build
+        parameter. Rejecting it -- which is right for a typo'd override --
+        would make every real operator's file unusable. This exact key
+        bounced a real preview call before the file was wired up at all.
+
+        What makes it true is the field filter on the MakeClusterParams
+        construction, not a second filter on the file: a mutation removing
+        one at the merge passed this whole class, because the other still
+        drops the key.
+        """
+        self._write(tmp_path, monkeypatch, {
+            "compute_instance_type": "c5.2xlarge",
+            "delete_s3_bucketname": "true",
+        })
+        assert self._build().compute_instance_type == "c5.2xlarge"
+
+    def test_a_typo_in_an_override_is_still_rejected(
+        self, tmp_path, monkeypatch
+    ):
+        """The tolerance above is scoped to the file. An override is
+        something a caller just typed, and silently ignoring it builds a
+        cluster that differs from the one asked for."""
+        from pcluster_core import PClusterMakerError
+
+        self._write(tmp_path, monkeypatch, {})
+        with pytest.raises(PClusterMakerError, match="unknown cluster parameter"):
+            self._build(overrides={
+                "compute_instance_type": "c5.2xlarge", "enable_fsxx": "true",
+            })
+
+    def test_another_clusters_file_is_not_applied(self, tmp_path, monkeypatch):
+        """Discovery is keyed on the cluster name. A prefix or glob match
+        would let `osiris-test` inherit `osiris`'s cluster."""
+        self._write(tmp_path, monkeypatch, {
+            "compute_instance_type": "c6g.8xlarge",
+        }, name="something-else")
+        params = self._build(overrides={"compute_instance_type": "c5.2xlarge"})
+        assert params.compute_instance_type == "c5.2xlarge"
+
+    def test_no_file_leaves_the_hardcoded_defaults_in_charge(
+        self, tmp_path, monkeypatch
+    ):
+        """Absence is the ordinary case, not an error -- unlike the
+        --use_defaults path, which exits when the named file is missing."""
+        from pcluster_core import MAKE_CLUSTER_DEFAULTS
+
+        monkeypatch.setattr(
+            "pcluster_core._default_repo_root", lambda: str(tmp_path)
+        )
+        params = self._build(overrides={"compute_instance_type": "c5.2xlarge"})
+        assert params.cluster_type == MAKE_CLUSTER_DEFAULTS["cluster_type"]
+
+    def test_a_file_that_is_not_valid_yaml_names_itself(
+        self, tmp_path, monkeypatch
+    ):
+        from pcluster_core import PClusterMakerError
+
+        (tmp_path / "osiris_defaults.yml").write_text("compute: [unclosed\n")
+        monkeypatch.setattr(
+            "pcluster_core._default_repo_root", lambda: str(tmp_path)
+        )
+        with pytest.raises(PClusterMakerError, match="osiris_defaults.yml"):
+            self._build(overrides={"compute_instance_type": "c5.2xlarge"})
+
+    def test_a_key_with_no_value_falls_through_to_the_default(
+        self, tmp_path, monkeypatch
+    ):
+        """`gpu_instance_type:` with nothing after it is None once YAML
+        parses it. Every reader treats a present key as an explicit
+        setting, so None overwrote the default and reached a field typed
+        `str` -- where `.split(",")` raises AttributeError. A bare key
+        reads as "leave this alone".
+
+        This predates the automatic load (`_resolve` returns a file's None
+        unchanged on the --use_defaults path too) but was unreachable
+        without the flag; auto-applying the file put it in front of every
+        operator who has one.
+        """
+        from pcluster_core import MAKE_CLUSTER_DEFAULTS
+
+        self._write(tmp_path, monkeypatch, {
+            "compute_instance_type": "c5.2xlarge", "gpu_instance_type": None,
+        })
+        params = self._build()
+        assert params.gpu_instance_type == MAKE_CLUSTER_DEFAULTS["gpu_instance_type"]
+        assert params.gpu_instance_type.split(",") == [""]
+
+    def test_the_use_defaults_path_drops_unset_keys_too(self, tmp_path):
+        """Both loaders, or the same file behaves differently depending on
+        whether it was named on the command line."""
+        import yaml as _yaml
+
+        from pcluster_core import _load_defaults_file
+
+        path = tmp_path / "named.yml"
+        path.write_text(_yaml.safe_dump({"gpu_instance_type": None, "base_os": "rhel9"}))
+        loaded = _load_defaults_file(
+            str(path), str(tmp_path / "toolkit.yml"), "osiris"
+        )
+        assert loaded == {"base_os": "rhel9"}
+
+
+class TestTheClusterRecordStore:
+    """Phase 1 of the records store: the S3 object that lets a machine
+    other than the one that built a cluster see that it exists.
+
+    The bucket and its `vars/` prefix are not new -- every
+    `templates/MCPStateAccess*.json_src` has granted them since the
+    Workstream 5 split, with no code behind them. The prefix name is
+    therefore fixed by IAM, not chosen here.
+    """
+
+    _RECORD = {
+        "cluster_name": "osiris", "cluster_owner": "rmarable",
+        "serial": "osiris-202608221200", "region": "us-east-2",
+        "headnode_instance_type": "c8g.large", "enable_loginnode": "false",
+        "loginnode_instance_type": "", "loginnode_count": 0,
+        "cpu_instance_types": ["c8g.xlarge"], "gpu_instance_types": [],
+        "enable_cpu_queue": "true", "enable_gpu_queue": "false",
+        "initial_cpu_queue_size": 1, "max_cpu_queue_size": 8,
+        "initial_gpu_queue_size": 0, "max_gpu_queue_size": 0,
+        "cluster_type": "spot", "deployment_date": "2026-08-22",
+        "ssh_keypair": "osiris.pem", "ec2_keypair": "osiris-key",
+        "ec2_user": "ubuntu", "s3_bucketname": "parallelclustermaker-osiris",
+        "enable_monitoring": "false",
+    }
+
+    class _S3:
+        """Enough of an S3 client for the four primitives, and no more."""
+
+        def __init__(self, objects=None):
+            self.objects = dict(objects or {})
+            self.calls = []
+
+        def put_object(self, Bucket=None, Key=None, Body=None, **kw):
+            self.calls.append(("put", Key))
+            self.objects[Key] = Body
+
+        def get_object(self, Bucket=None, Key=None, **kw):
+            self.calls.append(("get", Key))
+            if Key not in self.objects:
+                # What S3 actually raises. A bare KeyError would leave the
+                # production except clause unexercised and pass anyway.
+                from botocore.exceptions import ClientError
+
+                raise ClientError(
+                    {"Error": {"Code": "NoSuchKey", "Message": "not found"}},
+                    "GetObject",
+                )
+            import io as _io
+
+            return {"Body": _io.BytesIO(self.objects[Key])}
+
+        def delete_object(self, Bucket=None, Key=None, **kw):
+            self.calls.append(("delete", Key))
+            self.objects.pop(Key, None)
+
+        def list_objects_v2(self, Bucket=None, Prefix="", **kw):
+            self.calls.append(("list", Prefix))
+            keys = sorted(k for k in self.objects if k.startswith(Prefix))
+            return {"Contents": [{"Key": k} for k in keys], "IsTruncated": False}
+
+    def test_the_key_lives_under_the_prefix_the_iam_grants(self):
+        """The one property nothing else can catch: a `records/` prefix
+        reads perfectly and is AccessDenied on every deployed call, because
+        the policies name `vars/*`."""
+        import glob
+        import os
+
+        from pcluster_core import _records_key
+
+        assert _records_key("osiris") == "vars/osiris.json"
+        repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        policies = glob.glob(
+            os.path.join(repo_root, "templates", "MCPStateAccess*.json_src")
+        )
+        assert policies
+        for path in policies:
+            assert "/vars/*" in open(path).read(), path
+
+    def test_a_record_round_trips(self):
+        from pcluster_core import get_cluster_record, put_cluster_record
+
+        s3 = self._S3()
+        put_cluster_record(
+            s3, locks_bucketname="b", cluster_name="osiris", record=self._RECORD
+        )
+        assert get_cluster_record(
+            s3, locks_bucketname="b", cluster_name="osiris"
+        ) == self._RECORD
+
+    def test_a_cluster_record_dataclass_is_accepted_directly(self):
+        """The wire format and the in-process type stay pinned to each
+        other: a second serializer is a second thing to keep in step."""
+        from pcluster_core import (ClusterRecord, get_cluster_record,
+                                   put_cluster_record)
+
+        s3 = self._S3()
+        put_cluster_record(
+            s3, locks_bucketname="b", cluster_name="osiris",
+            record=ClusterRecord.from_dict(self._RECORD),
+        )
+        assert get_cluster_record(
+            s3, locks_bucketname="b", cluster_name="osiris"
+        ) == self._RECORD
+
+    def test_an_absent_record_is_none_not_an_error(self):
+        from pcluster_core import get_cluster_record
+
+        assert get_cluster_record(
+            self._S3(), locks_bucketname="b", cluster_name="nope"
+        ) is None
+
+    def test_delete_is_idempotent(self):
+        """A re-run teardown must not fail on a record already gone."""
+        from pcluster_core import delete_cluster_record
+
+        s3 = self._S3()
+        delete_cluster_record(s3, locks_bucketname="b", cluster_name="osiris")
+        delete_cluster_record(s3, locks_bucketname="b", cluster_name="osiris")
+
+    def test_listing_returns_cluster_names_not_keys(self):
+        from pcluster_core import list_cluster_records, put_cluster_record
+
+        s3 = self._S3()
+        for name in ("osiris", "iris"):
+            put_cluster_record(
+                s3, locks_bucketname="b", cluster_name=name,
+                record=dict(self._RECORD, cluster_name=name),
+            )
+        s3.objects["locks/osiris.lock"] = b"{}"
+        assert list_cluster_records(s3, locks_bucketname="b") == ["iris", "osiris"]
+
+    def test_a_local_record_wins_over_a_divergent_stored_one(self, tmp_path):
+        """Order is the property, and a test with only one source present
+        cannot see it. On the operator's machine the vars file is
+        authoritative: a stale record from another machine must never
+        shadow a fresh local build."""
+        import os
+
+        from pcluster_core import _read_cluster_record, put_cluster_record
+
+        root = tmp_path
+        os.makedirs(root / "active_clusters" / "osiris")
+        os.makedirs(root / "src" / "vars_files")
+        (root / "src" / "vars_files" / "osiris.yml").write_text(
+            "cluster_name: osiris\nregion: us-east-2\n"
+            "cluster_serial_number: local-serial\n"
+        )
+        s3 = self._S3()
+        put_cluster_record(
+            s3, locks_bucketname="b", cluster_name="osiris",
+            record=dict(self._RECORD, serial="stored-serial"),
+        )
+
+        rec = _read_cluster_record(
+            "osiris", str(root), s3=s3, locks_bucketname="b"
+        )
+
+        assert rec["serial"] == "local-serial"
+        assert ("get", "vars/osiris.json") not in s3.calls, (
+            "the store must not even be consulted when a local record exists"
+        )
+
+    def test_the_store_answers_when_there_is_no_local_record(self, tmp_path):
+        from pcluster_core import _read_cluster_record, put_cluster_record
+
+        s3 = self._S3()
+        put_cluster_record(
+            s3, locks_bucketname="b", cluster_name="osiris", record=self._RECORD
+        )
+
+        rec = _read_cluster_record(
+            "osiris", str(tmp_path), s3=s3, locks_bucketname="b"
+        )
+
+        assert rec["serial"] == "osiris-202608221200"
+        assert rec["deployment_date"] == "2026-08-22"
+
+    def test_the_two_renamed_fields_survive_a_round_trip(self, tmp_path):
+        """`serial` and `deployment_date` are the only names that differ
+        between the vars file and the record, and re-projecting a stored
+        record would blank exactly those two while keeping everything else
+        -- a record that looks right and has lost two fields.
+
+        What makes this pass is the resolver's shape (the store path skips
+        _project_vars_file entirely), not a fallback inside the projection:
+        a mutation adding record-key fallbacks there changed nothing here,
+        which is how they were found to be unreachable."""
+        from pcluster_core import _read_cluster_record, put_cluster_record
+
+        s3 = self._S3()
+        put_cluster_record(
+            s3, locks_bucketname="b", cluster_name="osiris", record=self._RECORD
+        )
+        rec = _read_cluster_record(
+            "osiris", str(tmp_path), s3=s3, locks_bucketname="b"
+        )
+        assert rec["serial"] and rec["deployment_date"]
+
+    def test_a_stored_record_is_sanitized_like_a_local_one(self, tmp_path):
+        """The sanitizer stays at the single read point. An S3 object is
+        more exposed to a corrupted write than a local file, not less, and
+        an escape sequence reaching list_pcluster.py's output is what
+        _safe exists to stop."""
+        from pcluster_core import _read_cluster_record, put_cluster_record
+
+        s3 = self._S3()
+        put_cluster_record(
+            s3, locks_bucketname="b", cluster_name="osiris",
+            record=dict(self._RECORD, cluster_owner="rmarable\n\x1b[31mEVIL"),
+        )
+
+        rec = _read_cluster_record(
+            "osiris", str(tmp_path), s3=s3, locks_bucketname="b"
+        )
+
+        assert "\n" not in rec["cluster_owner"]
+        assert "\x1b" not in rec["cluster_owner"]
+
+    def test_without_a_client_nothing_changes(self, tmp_path):
+        """The CLI's behavior when the store is unreachable, not yet
+        created, or simply not wired in must be exactly what it was."""
+        from pcluster_core import _read_cluster_record
+
+        assert _read_cluster_record("osiris", str(tmp_path)) is None
+
+    def test_the_record_is_deleted_only_on_a_confirmed_delete(self):
+        """Same rule as the four credential steps, and for the same
+        reason one step removed: a wait timeout is neither confirmed nor
+        DELETE_FAILED, and deleting the record then hides a cluster that
+        may still be running and billing from every other machine."""
+        from pcluster_core import delete_cluster_record_step, put_cluster_record
+
+        s3 = self._S3()
+        put_cluster_record(
+            s3, locks_bucketname="b", cluster_name="osiris", record=self._RECORD
+        )
+
+        skipped = delete_cluster_record_step(
+            s3, cf_delete_confirmed=False, locks_bucketname="b",
+            cluster_name="osiris",
+        )
+
+        assert skipped.succeeded
+        assert "not confirmed" in skipped.detail
+        assert "vars/osiris.json" in s3.objects, "the record must survive"
+
+        done = delete_cluster_record_step(
+            s3, cf_delete_confirmed=True, locks_bucketname="b",
+            cluster_name="osiris",
+        )
+
+        assert done.succeeded and not done.detail
+        assert "vars/osiris.json" not in s3.objects
+
+    def test_a_failed_delete_is_reported_as_a_step_failure(self):
+        """It has to reach _collect_orphaned_resources like every other
+        cleanup step -- a record left behind is a resource left behind."""
+        from botocore.exceptions import ClientError
+
+        from pcluster_core import delete_cluster_record_step
+
+        class _Denied(self._S3):
+            def delete_object(self, **kw):
+                raise ClientError(
+                    {"Error": {"Code": "AccessDenied", "Message": "nope"}},
+                    "DeleteObject",
+                )
+
+        result = delete_cluster_record_step(
+            _Denied(), cf_delete_confirmed=True, locks_bucketname="b",
+            cluster_name="osiris",
+        )
+
+        assert not result.succeeded
+        assert "AccessDenied" in result.detail
+
+    def test_publishing_never_fails_the_build(self, tmp_path, capsys):
+        """The cluster exists and is billing by the time this runs. A
+        store the operator cannot write is a discoverability problem, not
+        a reason to abandon a live cluster."""
+        import os
+
+        from botocore.exceptions import ClientError
+
+        from pcluster_core import _publish_cluster_record
+
+        root = tmp_path
+        os.makedirs(root / "active_clusters" / "osiris")
+        os.makedirs(root / "src" / "vars_files")
+        (root / "src" / "vars_files" / "osiris.yml").write_text(
+            "cluster_name: osiris\nregion: us-east-2\n"
+        )
+
+        class _Denied(self._S3):
+            def put_object(self, **kw):
+                raise ClientError(
+                    {"Error": {"Code": "AccessDenied", "Message": "nope"}},
+                    "PutObject",
+                )
+
+        assert _publish_cluster_record(
+            _Denied(), locks_bucketname="b", cluster_name="osiris",
+            repo_root=str(root),
+        ) is False
+        out = capsys.readouterr().out
+        assert "WARNING" in out
+        assert "The cluster is fine" in out
+
+    def test_what_is_published_is_what_the_readers_read(self, tmp_path):
+        """The stored projection comes from _read_cluster_record itself, so
+        there is no second projection to drift from the one every consumer
+        already goes through."""
+        import os
+
+        from pcluster_core import _publish_cluster_record, get_cluster_record
+
+        root = tmp_path
+        os.makedirs(root / "active_clusters" / "osiris")
+        os.makedirs(root / "src" / "vars_files")
+        (root / "src" / "vars_files" / "osiris.yml").write_text(
+            "cluster_name: osiris\nregion: us-east-2\n"
+            "cluster_serial_number: osiris-42\nDEPLOYMENT_DATE: 2026-08-22\n"
+        )
+        s3 = self._S3()
+
+        assert _publish_cluster_record(
+            s3, locks_bucketname="b", cluster_name="osiris", repo_root=str(root)
+        )
+
+        stored = get_cluster_record(s3, locks_bucketname="b", cluster_name="osiris")
+        assert stored["serial"] == "osiris-42"
+        assert stored["deployment_date"] == "2026-08-22"
+        assert stored["region"] == "us-east-2"
+
+
+class TestTheClusterConfigStore:
+    """Phase 2: the `configs/` prefix, the other half of the bucket's IAM
+    that had no code behind it.
+
+    Unlike the record, a config is *edited* -- by add_queue and
+    remove_queue, which take no cluster lock because they are edits rather
+    than cluster mutations. That makes concurrent edits an ordinary
+    read-modify-write race, and the conditional write is what turns a lost
+    edit into an error.
+    """
+
+    _CONFIG = "Region: us-east-2\nImage:\n  Os: ubuntu2404\n"
+
+    class _S3(TestTheClusterRecordStore._S3):
+        """Adds ETags and IfMatch, which the record store does not need."""
+
+        def __init__(self, objects=None):
+            super().__init__(objects)
+            self.etags = {}
+            self._seq = 0
+
+        def put_object(self, Bucket=None, Key=None, Body=None, IfMatch=None, **kw):
+            if IfMatch is not None and self.etags.get(Key) != IfMatch:
+                from botocore.exceptions import ClientError
+
+                raise ClientError(
+                    {"Error": {"Code": "PreconditionFailed", "Message": "etag"},
+                     "ResponseMetadata": {"HTTPStatusCode": 412}},
+                    "PutObject",
+                )
+            self._seq += 1
+            self.etags[Key] = f'"etag-{self._seq}"'
+            super().put_object(Bucket=Bucket, Key=Key, Body=Body)
+
+        def get_object(self, Bucket=None, Key=None, **kw):
+            out = super().get_object(Bucket=Bucket, Key=Key)
+            out["ETag"] = self.etags.get(Key)
+            return out
+
+    def _seeded(self):
+        from pcluster_core import put_cluster_config_object
+
+        s3 = self._S3()
+        put_cluster_config_object(
+            s3, locks_bucketname="b", cluster_name="osiris", text=self._CONFIG
+        )
+        return s3
+
+    def test_the_key_lives_under_the_prefix_the_iam_grants(self):
+        import glob
+        import os
+
+        from pcluster_core import _config_key
+
+        assert _config_key("osiris") == "configs/osiris.yaml"
+        repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        for path in glob.glob(
+            os.path.join(repo_root, "templates", "MCPStateAccess*.json_src")
+        ):
+            text = open(path).read()
+            if "configs/" in text:
+                assert "/configs/*" in text, path
+
+    def test_a_losing_edit_is_refused_not_swallowed(self, tmp_path):
+        """The whole reason for the ETag. Both callers read the same
+        config, both add a queue; without IfMatch the second write wins and
+        the first queue is gone with nothing raised anywhere."""
+        from pcluster_core import (ClusterConfigConflict, _load_cluster_config,
+                                   _save_cluster_config)
+
+        s3 = self._seeded()
+        first, _, etag_a = _load_cluster_config(
+            "osiris", str(tmp_path), s3=s3, locks_bucketname="b"
+        )
+        second, _, etag_b = _load_cluster_config(
+            "osiris", str(tmp_path), s3=s3, locks_bucketname="b"
+        )
+        assert etag_a == etag_b
+
+        first["Region"] = "us-west-2"
+        _save_cluster_config(
+            first, config_path=None, etag=etag_a, s3=s3,
+            locks_bucketname="b", cluster_name="osiris",
+        )
+
+        second["Region"] = "eu-west-1"
+        with pytest.raises(ClusterConfigConflict, match="Re-read"):
+            _save_cluster_config(
+                second, config_path=None, etag=etag_b, s3=s3,
+                locks_bucketname="b", cluster_name="osiris",
+            )
+
+        winner, _, _ = _load_cluster_config(
+            "osiris", str(tmp_path), s3=s3, locks_bucketname="b"
+        )
+        assert winner["Region"] == "us-west-2", "the first edit must survive"
+
+    @pytest.mark.parametrize("code,status", [
+        ("PreconditionFailed", 412), ("ConditionalRequestConflict", 409),
+    ])
+    def test_both_rejection_shapes_are_a_conflict(self, code, status):
+        """S3 reports a same-instant race as 409 rather than 412 and its own
+        documentation says to treat them identically. Handling only 412
+        crashed a build under contention once already."""
+        from botocore.exceptions import ClientError
+
+        from pcluster_core import ClusterConfigConflict, put_cluster_config_object
+
+        class _Rejects(self._S3):
+            def put_object(self, **kw):
+                raise ClientError(
+                    {"Error": {"Code": code, "Message": "x"},
+                     "ResponseMetadata": {"HTTPStatusCode": status}},
+                    "PutObject",
+                )
+
+        with pytest.raises(ClusterConfigConflict):
+            put_cluster_config_object(
+                _Rejects(), locks_bucketname="b", cluster_name="osiris",
+                text="Region: x\n", etag='"stale"',
+            )
+
+    def test_a_local_config_wins_and_is_mirrored_up(self, tmp_path):
+        """Local is authoritative on the machine that has one, and the
+        stored copy would go stale the moment an operator edited locally."""
+        import os
+
+        from pcluster_core import (_load_cluster_config, _save_cluster_config,
+                                   get_cluster_config_object)
+
+        os.makedirs(tmp_path / "active_clusters" / "osiris")
+        local = tmp_path / "active_clusters" / "osiris" / "config.osiris"
+        local.write_text("Region: us-east-1\n")
+        s3 = self._seeded()
+
+        config, path, etag = _load_cluster_config(
+            "osiris", str(tmp_path), s3=s3, locks_bucketname="b"
+        )
+        assert config["Region"] == "us-east-1", "local must win"
+        assert path and etag is None
+
+        _save_cluster_config(
+            config, config_path=path, etag=etag, s3=s3,
+            locks_bucketname="b", cluster_name="osiris",
+        )
+        text, _ = get_cluster_config_object(
+            s3, locks_bucketname="b", cluster_name="osiris"
+        )
+        assert "us-east-1" in text, "the mirror must follow the local edit"
+
+    def test_apply_gets_a_path_that_exists_and_cleans_it_up(self, tmp_path,
+                                                            monkeypatch):
+        """pcluster.lib's cluster_configuration must be a PATH -- the CLI
+        model tags it "file" and the dispatcher calls read_file() on it, so
+        YAML content in its place does not work."""
+        import pcluster_core
+
+        seen = {}
+
+        def _fake_update(cluster_name, region, config_path):
+            seen["path"] = config_path
+            seen["existed"] = os.path.isfile(config_path)
+            seen["text"] = open(config_path).read()
+            return {"cluster": {"clusterStatus": "UPDATE_IN_PROGRESS"}}
+
+        import os
+
+        monkeypatch.setattr(pcluster_core, "_update_cluster_lib", _fake_update)
+        monkeypatch.setattr(
+            pcluster_core, "_poll_cluster_update", lambda *a, **kw: None
+        )
+
+        pcluster_core.core_apply_cluster_update(
+            cluster_name="osiris", region="us-east-2", pcluster_bin="pcluster",
+            wait=False, s3=self._seeded(), locks_bucketname="b",
+        )
+
+        assert seen["existed"], "a path that does not exist is not a config"
+        assert "us-east-2" in seen["text"]
+        assert not os.path.exists(seen["path"]), (
+            "the temp copy must not outlive the call -- a reused container "
+            "would apply it on behalf of the next caller"
+        )
+
+    def test_apply_without_a_config_anywhere_says_so(self, tmp_path):
+        from pcluster_core import PClusterMakerError, core_apply_cluster_update
+
+        with pytest.raises(PClusterMakerError, match="no stored configuration"):
+            core_apply_cluster_update(
+                cluster_name="osiris", region="us-east-2",
+                pcluster_bin="pcluster", wait=False, s3=self._S3(),
+                locks_bucketname="b",
+            )
+
+    def test_the_config_is_deleted_only_on_a_confirmed_delete(self):
+        from pcluster_core import delete_cluster_config_step
+
+        s3 = self._seeded()
+        skipped = delete_cluster_config_step(
+            s3, cf_delete_confirmed=False, locks_bucketname="b",
+            cluster_name="osiris",
+        )
+        assert skipped.succeeded and "not confirmed" in skipped.detail
+        assert "configs/osiris.yaml" in s3.objects
+
+        done = delete_cluster_config_step(
+            s3, cf_delete_confirmed=True, locks_bucketname="b",
+            cluster_name="osiris",
+        )
+        assert done.succeeded
+        assert "configs/osiris.yaml" not in s3.objects
+
+    def test_an_explicit_path_is_used_as_given(self, monkeypatch):
+        """Regression: an earlier draft fell back to the store whenever the
+        supplied path did not exist on disk, which silently changed what
+        this function did with a path it was handed and broke four
+        TestCoreApplyClusterUpdate tests. pcluster's own error on a bad
+        path is clearer than one invented here."""
+        import pcluster_core
+
+        seen = {}
+        monkeypatch.setattr(
+            pcluster_core, "_update_cluster_lib",
+            lambda cluster, region, config_path: seen.update(path=config_path)
+            or {"cluster": {"clusterStatus": "UPDATE_IN_PROGRESS"}},
+        )
+        monkeypatch.setattr(
+            pcluster_core, "_poll_cluster_update", lambda *a, **kw: None
+        )
+
+        pcluster_core.core_apply_cluster_update(
+            cluster_name="osiris", config_path="/nowhere/cfg.yaml",
+            region="us-east-2", pcluster_bin="pcluster", wait=False,
+            s3=self._seeded(), locks_bucketname="b",
+        )
+
+        assert seen["path"] == "/nowhere/cfg.yaml", (
+            "an explicit path must not be second-guessed against the store"
+        )
+
+    def test_every_config_reader_reaches_the_store(self, tmp_path):
+        """list_queues read the config through the same loader as
+        add_queue but was never handed the store, so on a machine with no
+        local file one worked and the other reported the config missing.
+        Asserted over the signatures rather than by calling each one: the
+        next reader added is the one that will be forgotten."""
+        import inspect
+
+        import pcluster_core
+
+        for name in ("core_list_queues", "core_add_queue", "core_remove_queue",
+                     "core_apply_cluster_update"):
+            params = inspect.signature(getattr(pcluster_core, name)).parameters
+            assert "s3" in params and "locks_bucketname" in params, (
+                f"{name} cannot reach the shared config store"
+            )
+
+    def test_list_queues_reads_a_stored_config(self, tmp_path):
+        from pcluster_core import core_list_queues
+
+        result = core_list_queues(
+            cluster_name="osiris", repo_root=str(tmp_path),
+            s3=self._seeded(), locks_bucketname="b",
+        )
+        assert result is not None

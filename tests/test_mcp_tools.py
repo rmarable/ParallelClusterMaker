@@ -38,6 +38,27 @@ def _text(result):
     return "".join(getattr(b, "text", "") for b in result.content)
 
 
+def _stub_az(monkeypatch, zones=({"RegionName": "us-east-2"},), seen=None):
+    """Keep the AZ verification off the network.
+
+    preview_cluster_config and create_cluster both resolve the region from
+    a real describe_availability_zones call. Patch pcluster_core's boto3
+    rather than the resolver: the resolver is what these tests are for, and
+    stubbing it would leave the whole path unexercised. Without this the
+    suite passes locally against live AWS and fails in CI, which is exactly
+    how it behaved before the stub was added.
+    """
+    class _Client:
+        def describe_availability_zones(self, ZoneNames=None, **kw):
+            if seen is not None:
+                seen.append(ZoneNames)
+            return {"AvailabilityZones": list(zones)}
+
+    import pcluster_core
+
+    monkeypatch.setattr(pcluster_core.boto3, "client", lambda *a, **kw: _Client())
+
+
 class TestTheServerAnswersAClient:
     @pytest.mark.asyncio
     async def test_a_client_can_connect_and_list_tools(self):
@@ -316,6 +337,10 @@ class TestCreateClusterOverrides:
     parameters held back to the CLI at the operator's direction.
     """
 
+    @pytest.fixture(autouse=True)
+    def _offline_az(self, monkeypatch):
+        _stub_az(monkeypatch)
+
     _REQ = dict(
         cluster_name="osiris", cluster_owner="testuser",
         cluster_owner_email="testuser@example.com", az="us-east-2a",
@@ -466,7 +491,9 @@ class TestTheCliOnlyParameters:
         from mcp_server.confirmation_token import mint
 
         params = dict(self._REQ)
-        token_params = dict(params, overrides={"custom_ami": "ami-0abc"})
+        token_params = dict(
+            params, overrides={"custom_ami": "ami-0abc"}, defaults=None
+        )
         args = dict(params, confirmation_token=mint("create_cluster", token_params),
                     overrides={"custom_ami": "ami-0abc"})
         async with Client(build_local()) as client:
@@ -480,6 +507,10 @@ class TestTheNoQueueClusterIsRefusedRemotely:
     remote path is where that is easiest to reach by accident -- a model
     asked for "a cluster" supplies the five required parameters and
     nothing else. Refused at preview, before a token is even minted."""
+
+    @pytest.fixture(autouse=True)
+    def _offline_az(self, monkeypatch):
+        _stub_az(monkeypatch)
 
     _REQ = dict(
         cluster_name="osiris", cluster_owner="testuser",
@@ -516,3 +547,380 @@ class TestTheNoQueueClusterIsRefusedRemotely:
                 "preview_cluster_config", args, raise_on_error=False
             )
         assert not result.is_error
+
+
+class TestCreateClusterResolvesTheRegionItBuildsIn:
+    """MakeClusterParams carries no region field -- deliberately, per its
+    own docstring: the CLI resolves region from the AZ-verification call
+    and hands it to core_create_cluster separately. The MCP tool is a
+    second shim and skipped that step, reading `params.region` off an
+    object that has no such attribute. Every create_cluster call raised
+    AttributeError after the token verified and before any AWS mutation.
+
+    Nothing caught it because the only test that called create_cluster
+    asserted an *error*, and got one from the denied-parameter check --
+    which returns before the region line is ever reached. CLAUDE.md's
+    "when a test stubs the object under test, at least one test must drive
+    the real one" again: these drive the real tool and the real resolver,
+    stubbing only the EC2 client and the core function.
+    """
+
+    _REQ = dict(
+        cluster_name="osiris", cluster_owner="testuser",
+        cluster_owner_email="testuser@example.com", az="us-east-2a",
+        headnode_instance_type="c5.xlarge",
+    )
+    _QUEUE = {"compute_instance_type": "c5.2xlarge"}
+
+    def _stub_ec2(self, monkeypatch, zones, seen=None):
+        _stub_az(monkeypatch, zones=zones, seen=seen)
+
+    def _stub_core(self, monkeypatch, calls):
+        def _fake(**kwargs):
+            calls.append(kwargs)
+            return {"cluster_name": kwargs["params"].cluster_name}
+
+        monkeypatch.setattr(tools_mod, "core_create_cluster", _fake)
+
+    def _args(self):
+        from mcp_server.confirmation_token import mint
+
+        overrides = dict(self._QUEUE)
+        # `defaults` is part of what the token binds now: the auto-applied
+        # <cluster>_defaults.yml has to be covered, or a file edited inside
+        # the 15-minute window builds something else. None here because the
+        # conftest isolation fixture guarantees no such file.
+        token_params = dict(
+            self._REQ, overrides=dict(sorted(overrides.items())), defaults=None
+        )
+        return dict(
+            self._REQ, overrides=overrides,
+            confirmation_token=mint("create_cluster", token_params),
+        )
+
+    @pytest.mark.asyncio
+    async def test_a_real_region_reaches_the_core_function(self, monkeypatch):
+        """The regression: this raised AttributeError before the fix."""
+        calls, seen = [], []
+        self._stub_ec2(monkeypatch, [{"RegionName": "us-east-2"}], seen)
+        self._stub_core(monkeypatch, calls)
+
+        async with Client(build_local()) as client:
+            result = await client.call_tool(
+                "create_cluster", self._args(), raise_on_error=False
+            )
+
+        assert not result.is_error, _text(result)
+        assert len(calls) == 1
+        assert calls[0]["region"] == "us-east-2"
+        assert seen == [["us-east-2a"]], "the AZ actually asked about"
+
+    @pytest.mark.asyncio
+    async def test_the_region_comes_from_ec2_not_from_trimming_the_az(
+        self, monkeypatch
+    ):
+        """az[:-1] is right for every AZ _validate_az_input accepts, so a
+        string trim passes the test above and still skips the call that
+        proves the AZ exists. Only a divergent answer separates them."""
+        calls = []
+        self._stub_ec2(monkeypatch, [{"RegionName": "eu-west-1"}])
+        self._stub_core(monkeypatch, calls)
+
+        async with Client(build_local()) as client:
+            result = await client.call_tool(
+                "create_cluster", self._args(), raise_on_error=False
+            )
+
+        assert not result.is_error, _text(result)
+        assert calls[0]["region"] == "eu-west-1" != "us-east-2"
+
+    @pytest.mark.asyncio
+    async def test_an_unknown_az_stops_the_build(self, monkeypatch):
+        """A well-formed typo passes _validate_az_input's regex. If it also
+        passes here, every regional client binds to a region the operator
+        never named."""
+        calls = []
+        self._stub_ec2(monkeypatch, [])
+        self._stub_core(monkeypatch, calls)
+
+        async with Client(build_local()) as client:
+            result = await client.call_tool(
+                "create_cluster", self._args(), raise_on_error=False
+            )
+
+        assert result.is_error
+        assert "us-east-2a" in _text(result)
+        assert calls == [], "the build must not start on an unverified AZ"
+
+    def test_the_params_object_still_carries_no_region(self):
+        """The wrong repair. MakeClusterParams' docstring explains why the
+        region cannot be folded into it -- the AZ check, the Ansible check
+        and the Turbot profile switch all have to run first, in order.
+        Adding the field would make `params.region` compile and put the
+        resolution back where it cannot happen."""
+        import dataclasses as _dc
+
+        from pcluster_core import MakeClusterParams
+
+        assert "region" not in {f.name for f in _dc.fields(MakeClusterParams)}
+
+
+class TestThePreviewVerifiesTheAzBeforeMintingAToken:
+    """A token asserts that this configuration was previewed. A preview
+    that never checked whether the AZ exists cannot make that assertion --
+    it mints a token for a cluster that create_cluster will refuse, or
+    worse, for one that builds in a region nobody named.
+
+    This is the same argument TestTheNoQueueClusterIsRefusedRemotely makes
+    about a cluster with no compute queue, applied to the other input that
+    is well-formed by regex and still wrong.
+
+    The ordering matters as much as the check: parameter resolution stays
+    offline, so an unbuildable config still fails without an AWS call at
+    all, and only a config worth building costs a round trip.
+    """
+
+    _REQ = dict(
+        cluster_name="osiris", cluster_owner="testuser",
+        cluster_owner_email="testuser@example.com", az="us-east-2a",
+        headnode_instance_type="c5.xlarge",
+    )
+    _QUEUE = {"compute_instance_type": "c5.2xlarge"}
+
+    async def _preview(self, overrides=None):
+        # `or` would swallow the empty dict, which is the whole input of
+        # the unbuildable case below.
+        if overrides is None:
+            overrides = self._QUEUE
+        args = dict(self._REQ, overrides=dict(overrides))
+        async with Client(build_local()) as client:
+            return await client.call_tool(
+                "preview_cluster_config", args, raise_on_error=False
+            )
+
+    @pytest.mark.asyncio
+    async def test_the_preview_reports_the_region_it_verified(
+        self, monkeypatch
+    ):
+        """The key shipped as `resolved.get("region", "")` against a
+        dataclass with no region field, so it was always the empty string.
+        A caller cannot tell an unknown region from a missing one."""
+        seen = []
+        _stub_az(monkeypatch, zones=[{"RegionName": "eu-west-1"}], seen=seen)
+
+        payload = json.loads(_text(await self._preview()))
+
+        assert payload["region"] == "eu-west-1"
+        assert seen == [["us-east-2a"]], "the AZ actually asked about"
+
+    @pytest.mark.asyncio
+    async def test_an_unknown_az_mints_no_token(self, monkeypatch):
+        """`us-east-2z` passes _validate_az_input's regex. Before this the
+        preview handed back a token for it and create_cluster was the first
+        thing to notice."""
+        _stub_az(monkeypatch, zones=[])
+
+        result = await self._preview()
+
+        assert result.is_error
+        assert "confirmation_token" not in _text(result)
+
+    @pytest.mark.asyncio
+    async def test_an_unbuildable_config_never_reaches_aws(self, monkeypatch):
+        """Ordering guard. Resolving parameters first keeps the offline
+        failure offline -- moving the AZ check above it would bill a round
+        trip on every malformed request, and would make the no-queue
+        refusal depend on having credentials."""
+        import pcluster_core
+
+        def _explode(*a, **kw):
+            raise AssertionError("no AWS call may precede parameter resolution")
+
+        monkeypatch.setattr(pcluster_core.boto3, "client", _explode)
+
+        result = await self._preview(overrides={})
+
+        assert result.is_error
+        assert "no compute queue" in _text(result)
+
+
+class TestTheDefaultsFileReachesTheMcpSurface:
+    """The operator writes `<cluster>_defaults.yml` and expects that
+    cluster, whichever surface asks for it. The MCP server has no flags, so
+    the file is applied automatically -- which makes it an input to the
+    build that nobody typed, and the token has to cover it.
+    """
+
+    _REQ = dict(
+        cluster_name="osiris", cluster_owner="testuser",
+        cluster_owner_email="testuser@example.com", az="us-east-2a",
+        headnode_instance_type="c5.xlarge",
+    )
+
+    @pytest.fixture(autouse=True)
+    def _offline_az(self, monkeypatch):
+        _stub_az(monkeypatch)
+
+    def _write(self, tmp_path, monkeypatch, contents):
+        import yaml as _yaml
+
+        (tmp_path / "osiris_defaults.yml").write_text(_yaml.safe_dump(contents))
+        monkeypatch.setattr(
+            "pcluster_core._default_repo_root", lambda: str(tmp_path)
+        )
+
+    async def _preview(self):
+        async with Client(build_local()) as client:
+            return await client.call_tool(
+                "preview_cluster_config", dict(self._REQ), raise_on_error=False
+            )
+
+    async def _create(self, token):
+        args = dict(self._REQ, confirmation_token=token)
+        async with Client(build_local()) as client:
+            return await client.call_tool(
+                "create_cluster", args, raise_on_error=False
+            )
+
+    @pytest.mark.asyncio
+    async def test_the_preview_applies_the_file_and_names_it(
+        self, tmp_path, monkeypatch
+    ):
+        """No overrides are passed at all here -- the compute queue comes
+        from the file. Before this, the same call was refused for having no
+        queue, with the operator's own file sitting unread beside it."""
+        self._write(tmp_path, monkeypatch, {
+            "compute_instance_type": "c6g.8xlarge", "cluster_type": "spot",
+        })
+
+        payload = json.loads(_text(await self._preview()))
+
+        assert payload["resolved_config"]["compute_instance_type"] == "c6g.8xlarge"
+        assert payload["defaults_file"] == "osiris_defaults.yml"
+
+    @pytest.mark.asyncio
+    async def test_a_file_edited_after_the_preview_invalidates_the_token(
+        self, tmp_path, monkeypatch
+    ):
+        """The reason the token binds the file. A token asserts that this
+        configuration was previewed; an input that can change underneath it
+        in the 15-minute window would make that assertion false while the
+        token still verified."""
+        calls = []
+        monkeypatch.setattr(
+            tools_mod, "core_create_cluster",
+            lambda **kw: calls.append(kw) or {"status": "kicked off"},
+        )
+        self._write(tmp_path, monkeypatch, {"compute_instance_type": "c6g.8xlarge"})
+        token = json.loads(_text(await self._preview()))["confirmation_token"]
+
+        self._write(tmp_path, monkeypatch, {"compute_instance_type": "c5.24xlarge"})
+        result = await self._create(token)
+
+        assert result.is_error
+        assert calls == [], "a build must not start on a stale preview"
+
+    @pytest.mark.asyncio
+    async def test_an_untouched_file_still_authorizes_the_build(
+        self, tmp_path, monkeypatch
+    ):
+        """Vacuity guard. A binding that rejected every token would satisfy
+        the test above and break the tool."""
+        calls = []
+        monkeypatch.setattr(
+            tools_mod, "core_create_cluster",
+            lambda **kw: calls.append(kw) or {"status": "kicked off"},
+        )
+        self._write(tmp_path, monkeypatch, {"compute_instance_type": "c6g.8xlarge"})
+        token = json.loads(_text(await self._preview()))["confirmation_token"]
+
+        result = await self._create(token)
+
+        assert not result.is_error, _text(result)
+        assert calls[0]["params"].compute_instance_type == "c6g.8xlarge"
+
+    @pytest.mark.asyncio
+    async def test_the_preview_does_not_call_a_file_value_a_default(
+        self, tmp_path, monkeypatch
+    ):
+        """notable_defaults filtered on `overrides` alone, so a file that
+        set base_os=ubuntu2404arm still had the preview reporting
+        base_os=ubuntu2404 -- the wrong OS, stated to the operator who is
+        about to approve the build."""
+        from pcluster_core import MAKE_CLUSTER_DEFAULTS
+
+        assert MAKE_CLUSTER_DEFAULTS["base_os"] != "ubuntu2404arm"
+        self._write(tmp_path, monkeypatch, {
+            "compute_instance_type": "c6g.8xlarge", "base_os": "ubuntu2404arm",
+        })
+
+        payload = json.loads(_text(await self._preview()))
+
+        assert payload["resolved_config"]["base_os"] == "ubuntu2404arm"
+        assert "base_os" not in payload["notable_defaults"]
+        assert payload["defaults_file_settings"]["base_os"] == "ubuntu2404arm"
+
+    @pytest.mark.asyncio
+    async def test_a_default_the_file_leaves_alone_is_still_reported(
+        self, tmp_path, monkeypatch
+    ):
+        """Vacuity guard: emptying notable_defaults would satisfy the test
+        above and destroy the block's purpose."""
+        self._write(tmp_path, monkeypatch, {"compute_instance_type": "c6g.8xlarge"})
+
+        payload = json.loads(_text(await self._preview()))
+
+        assert "base_os" in payload["notable_defaults"]
+        assert "compute_instance_type" not in payload["notable_defaults"]
+
+    @pytest.mark.asyncio
+    async def test_a_non_build_key_is_not_reported_as_a_setting(
+        self, tmp_path, monkeypatch
+    ):
+        """delete_s3_bucketname is in the file for kill_pcluster.py. The
+        build ignores it, so reporting it as something this cluster was
+        configured with would be a third wrong claim in the same block."""
+        self._write(tmp_path, monkeypatch, {
+            "compute_instance_type": "c6g.8xlarge", "delete_s3_bucketname": "true",
+        })
+
+        payload = json.loads(_text(await self._preview()))
+
+        assert "delete_s3_bucketname" not in payload["defaults_file_settings"]
+        assert payload["defaults_file_settings"]["compute_instance_type"] == "c6g.8xlarge"
+
+    @pytest.mark.asyncio
+    async def test_a_defaults_file_may_set_what_an_override_may_not(
+        self, tmp_path, monkeypatch
+    ):
+        """A decision, not an oversight, so it is pinned rather than left
+        to be rediscovered as a bug.
+
+        `_reject_denied` inspects `overrides` only. The denial stops a
+        caller -- a model, over the network -- from choosing what code runs
+        on the nodes; a defaults file is the operator's own artifact on
+        their own disk, the same trust level as the CLI, where these three
+        are allowed. Extending the check to the file would refuse every
+        real operator's file: `pcluster_defaults.yml` itself sets
+        pre_install_script and post_install_script.
+        """
+        self._write(tmp_path, monkeypatch, {
+            "compute_instance_type": "c6g.8xlarge",
+            "post_install_script": "scripts/post-deployment.sh",
+        })
+
+        payload = json.loads(_text(await self._preview()))
+        assert payload["resolved_config"]["post_install_script"] == (
+            "scripts/post-deployment.sh"
+        )
+
+        args = dict(self._REQ, overrides={
+            "compute_instance_type": "c6g.8xlarge",
+            "post_install_script": "scripts/post-deployment.sh",
+        })
+        async with Client(build_local()) as client:
+            refused = await client.call_tool(
+                "preview_cluster_config", args, raise_on_error=False
+            )
+        assert refused.is_error, "the same value as an override is still refused"
+        assert "post_install_script" in _text(refused)

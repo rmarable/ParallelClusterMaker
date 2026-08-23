@@ -24,7 +24,9 @@ import time
 import urllib.request
 import yaml
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass, fields as _dc_fields
+from dataclasses import (asdict as _dc_asdict, dataclass,
+                         fields as _dc_fields,
+                         is_dataclass as _dc_is_dataclass)
 from datetime import datetime as DateTime, timedelta, timezone
 from io import StringIO
 
@@ -136,6 +138,39 @@ def _validate_az_input(az):
             f"ERROR: '{az}' is not a valid Availability Zone.\n"
             f"  Pass an AZ (e.g. us-east-1a), not a region (e.g. us-east-1)."
         )
+
+
+def resolve_region_from_az(az, *, ec2_client=None):
+    """The region an AZ belongs to, and proof that the AZ exists.
+
+    MakeClusterParams deliberately carries no region field -- the CLI
+    resolves it here, from the AZ-verification call, and hands it to
+    core_create_cluster as a separate parameter. Any second shim (the MCP
+    create_cluster tool) has to do the same thing, so the resolution lives
+    here rather than inline in one of them.
+
+    Read from EC2 rather than trimmed off the AZ name: az[:-1] happens to
+    be right for every AZ _validate_az_input accepts, but it proves nothing
+    about whether that AZ exists, and a well-formed typo would otherwise
+    reach core_create_cluster and bind every regional client to a region
+    the operator did not name.
+    """
+    client = ec2_client if ec2_client is not None else boto3.client(
+        "ec2", region_name=az[:-1]
+    )
+    try:
+        zones = client.describe_availability_zones(ZoneNames=[az]).get(
+            "AvailabilityZones"
+        )
+    except (ValueError, BotoCoreError, NoCredentialsError, _ClientError) as e:
+        raise PClusterMakerError(
+            f"ERROR: Could not verify availability zone '{az}': {e}"
+        )
+    if not zones:
+        raise PClusterMakerError(
+            f"ERROR: '{az}' is not an availability zone in this account."
+        )
+    return zones[0]["RegionName"]
 
 
 def _validate_cluster_name(name):
@@ -435,6 +470,21 @@ def _extract_rebuild_command(serial_file_path):
         return None
 
 
+def _drop_unset(mapping):
+    """Drop keys a defaults file left with no value.
+
+    `gpu_instance_type:` with nothing after it is None once YAML parses it,
+    and every reader here treats a present key as an explicit setting -- so
+    None overwrote a real default and landed in a field typed `str`, where
+    `.split(",")` raises AttributeError. A bare key reads as "leave this
+    alone", not "set it to null", so it falls through to the hardcoded
+    default instead. Applied in both loaders: the --use_defaults path and
+    the automatic one have to agree, or the same file behaves differently
+    depending on how it was named.
+    """
+    return {k: v for k, v in mapping.items() if v is not None}
+
+
 def _load_defaults_file(defaults_path, toolkit_defaults_path, cluster_name):
     """Load a YAML defaults file and return its contents as a dict.
 
@@ -461,9 +511,46 @@ def _load_defaults_file(defaults_path, toolkit_defaults_path, cluster_name):
         )
     try:
         with open(defaults_path) as fh:
-            return yaml.safe_load(fh) or {}
+            return _drop_unset(yaml.safe_load(fh) or {})
     except yaml.YAMLError as _e:
         sys.exit(f"ERROR: defaults file is not valid YAML: {defaults_path}\n  {_e}")
+
+
+def _default_repo_root():
+    return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def discover_defaults_file(cluster_name, *, repo_root=None):
+    """Path to `<cluster_name>_defaults.yml` if the operator wrote one.
+
+    The file is per-cluster, gitignored, and lives next to the entry-point
+    scripts. Both the CLI and the MCP server consult it: a cluster the
+    operator has already described should build the same way whichever
+    surface asks for it.
+    """
+    root = repo_root or _default_repo_root()
+    path = os.path.join(root, f"{cluster_name}_defaults.yml")
+    return path if os.path.isfile(path) else None
+
+
+def load_cluster_defaults(cluster_name, *, repo_root=None):
+    """(path, contents) for the cluster's defaults file, or (None, {}).
+
+    One loader for both entry points, so the two cannot drift about what a
+    given cluster's defaults are. Unlike the CLI's `--use_defaults` path
+    this never exits when the file is absent -- absence is the ordinary
+    case, not an error.
+    """
+    path = discover_defaults_file(cluster_name, repo_root=repo_root)
+    if not path:
+        return None, {}
+    try:
+        with open(path) as fh:
+            return path, _drop_unset(yaml.safe_load(fh) or {})
+    except yaml.YAMLError as e:
+        raise PClusterMakerError(
+            f"ERROR: defaults file is not valid YAML: {path}\n  {e}"
+        )
 
 
 def _resolve(name, args, file_defaults, hardcoded_defaults, cast=None):
@@ -741,6 +828,203 @@ def quiet_missing_config_version_noise():
 
 def _lock_key(cluster_name):
     return f"locks/{cluster_name}.lock"
+
+
+# The prefix is "vars/" because that is what every MCPStateAccess*.json_src
+# grants; what it holds is the record projection, not a vars file. Renaming
+# it means redeploying four Lambda policies in lockstep with the code, so
+# the name stays and this comment explains it.
+class ClusterConfigConflict(PClusterMakerError):
+    """Someone else wrote this cluster's config since it was read.
+
+    Its own type because the caller's correct response is specific and not
+    shared with other failures: re-read the config, re-apply the edit, and
+    write again. Never retry the same body -- that is how the losing edit
+    silently wins on the second attempt.
+    """
+
+
+# "configs/" for the same reason "vars/" is: every MCPStateAccess*.json_src
+# already grants this exact prefix.
+def _config_key(cluster_name):
+    return f"configs/{cluster_name}.yaml"
+
+
+def get_cluster_config_object(s3, *, locks_bucketname, cluster_name):
+    """(text, etag) for the stored config, or (None, None).
+
+    The ETag is half the point: it is what the write-back is conditional
+    on, so a caller that reads through this function is the only one that
+    can write safely.
+    """
+    try:
+        obj = s3.get_object(
+            Bucket=locks_bucketname, Key=_config_key(cluster_name)
+        )
+        return obj["Body"].read().decode(), obj.get("ETag")
+    except (_ClientError, BotoCoreError, NoCredentialsError, UnicodeDecodeError):
+        return None, None
+
+
+def put_cluster_config_object(s3, *, locks_bucketname, cluster_name, text,
+                              etag=None):
+    """Write the config back, conditionally when an ETag is supplied.
+
+    add_queue and remove_queue take no cluster lock -- they are edits, not
+    cluster mutations, and the lock is held across whole cluster operations
+    (an edit blocking behind a 30-minute update is worse than a retry). So
+    two concurrent edits are an ordinary read-modify-write race: both read,
+    both add a queue, the second write wins and the first queue is gone
+    with nothing raised anywhere. IfMatch is what turns that into an error
+    the caller can act on.
+
+    No ETag means there is nothing to be conditional against -- a config
+    being mirrored up from an authoritative local file, where this machine
+    is the writer of record.
+    """
+    kwargs = {
+        "Bucket": locks_bucketname, "Key": _config_key(cluster_name),
+        "Body": text.encode(),
+    }
+    if etag:
+        kwargs["IfMatch"] = etag
+    try:
+        s3.put_object(**kwargs)
+    except _ClientError as e:
+        if etag and _is_conditional_write_rejection(e):
+            raise ClusterConfigConflict(
+                f"The configuration for '{cluster_name}' changed while this "
+                f"edit was being made. Nothing was written. Re-read it and "
+                f"apply the edit again."
+            )
+        raise
+
+
+def delete_cluster_config_object(s3, *, locks_bucketname, cluster_name):
+    """Idempotent, like the record's delete."""
+    s3.delete_object(Bucket=locks_bucketname, Key=_config_key(cluster_name))
+
+
+def delete_cluster_config_step(s3, *, cf_delete_confirmed, locks_bucketname,
+                               cluster_name):
+    """The config's half of teardown, under the record's own gate."""
+    name = "Delete the shared cluster config"
+    if not cf_delete_confirmed:
+        return TeardownStepResult(
+            name, True, "skipped: cluster deletion not confirmed"
+        )
+    try:
+        delete_cluster_config_object(
+            s3, locks_bucketname=locks_bucketname, cluster_name=cluster_name
+        )
+        return TeardownStepResult(name, True)
+    except (_ClientError, BotoCoreError, NoCredentialsError) as e:
+        return TeardownStepResult(name, False, str(e))
+
+
+def _publish_cluster_record(s3, *, locks_bucketname, cluster_name, repo_root):
+    """Publish the record a build just produced, warning on failure.
+
+    Never raises. At this point the cluster exists, is running and is
+    billing; a store the operator cannot write is a discoverability
+    problem, and turning it into a build failure would abandon a live
+    cluster over a bookkeeping step. The record is read back through
+    _read_cluster_record so the stored projection comes from the same
+    function every consumer reads, rather than a second one built here.
+    """
+    record = _read_cluster_record(cluster_name, repo_root)
+    if record is None:
+        print(
+            "*** WARNING ***\n"
+            f"  No vars file to publish for '{cluster_name}'; other machines "
+            f"will not see this cluster."
+        )
+        return False
+    try:
+        put_cluster_record(
+            s3, locks_bucketname=locks_bucketname,
+            cluster_name=cluster_name, record=record,
+        )
+        return True
+    except (_ClientError, BotoCoreError, NoCredentialsError) as e:
+        print(
+            "*** WARNING ***\n"
+            f"  Could not publish the cluster record to "
+            f"s3://{locks_bucketname}/{_records_key(cluster_name)}: {e}\n"
+            f"  The cluster is fine. Tools on other machines will not see it."
+        )
+        return False
+
+
+def _records_key(cluster_name):
+    return f"vars/{cluster_name}.json"
+
+
+def put_cluster_record(s3, *, locks_bucketname, cluster_name, record):
+    """Publish a cluster's metadata so every machine can see it.
+
+    `record` is a ClusterRecord or the dict one is built from. What is
+    stored is the projection, never the vars file itself: that file is the
+    playbook's input and carries bucket names, checksums and paths
+    meaningful only on the operator's machine, while the projection is the
+    22 fields every consumer actually reads.
+    """
+    if _dc_is_dataclass(record) and not isinstance(record, type):
+        record = _dc_asdict(record)
+    body = json.dumps(record, sort_keys=True, default=str).encode()
+    s3.put_object(
+        Bucket=locks_bucketname, Key=_records_key(cluster_name), Body=body
+    )
+
+
+def get_cluster_record(s3, *, locks_bucketname, cluster_name):
+    """The stored record as a dict, or None if there is not one.
+
+    An absent record and an unreadable one are both None: this is a
+    fallback behind the local files, and a caller that cannot see the
+    store should report the cluster as untracked rather than fail. A
+    permissions problem surfaces as "not tracked", which is why the
+    read-only tier's policy grants this prefix explicitly.
+    """
+    try:
+        obj = s3.get_object(
+            Bucket=locks_bucketname, Key=_records_key(cluster_name)
+        )
+        data = json.loads(obj["Body"].read())
+    except (_ClientError, BotoCoreError, NoCredentialsError, ValueError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def delete_cluster_record(s3, *, locks_bucketname, cluster_name):
+    """Remove a cluster's record. Idempotent -- S3 DeleteObject succeeds on
+    a key that is not there, which is what a re-run teardown needs."""
+    s3.delete_object(Bucket=locks_bucketname, Key=_records_key(cluster_name))
+
+
+def list_cluster_records(s3, *, locks_bucketname):
+    """Every cluster name the store knows about.
+
+    Paginated by hand rather than with a paginator so the function takes
+    the same plain stubbed client the other three do."""
+    names, token = [], None
+    while True:
+        kwargs = {"Bucket": locks_bucketname, "Prefix": "vars/"}
+        if token:
+            kwargs["ContinuationToken"] = token
+        try:
+            resp = s3.list_objects_v2(**kwargs)
+        except (_ClientError, BotoCoreError, NoCredentialsError):
+            return []
+        for item in resp.get("Contents") or []:
+            key = item.get("Key", "")
+            if key.startswith("vars/") and key.endswith(".json"):
+                names.append(key[len("vars/"):-len(".json")])
+        if not resp.get("IsTruncated"):
+            return sorted(set(names))
+        token = resp.get("NextContinuationToken")
+        if not token:
+            return sorted(set(names))
 
 
 def _lock_owner_body(*, command):
@@ -1339,7 +1623,7 @@ def _validate_override_types(overrides):
 
 def build_make_cluster_params(
     *, cluster_name, cluster_owner, cluster_owner_email, az,
-    headnode_instance_type, overrides=None,
+    headnode_instance_type, overrides=None, repo_root=None,
 ):
     """Build a MakeClusterParams from defaults plus a small override set.
 
@@ -1355,6 +1639,22 @@ def build_make_cluster_params(
     ignored and the cluster built with the default, which is the worst
     outcome -- an operator who asked for FSx and did not get it, with no
     error anywhere.
+
+    `<cluster_name>_defaults.yml` is layered in when it exists, below
+    `overrides` and above MAKE_CLUSTER_DEFAULTS -- the same three-tier
+    precedence `_resolve` gives the CLI (explicit input > defaults file >
+    hardcoded). An operator who has described a cluster in that file gets
+    that cluster from either surface.
+
+    Keys in the file that are not build parameters are ignored rather than
+    rejected -- the final construction below already keeps only dataclass
+    fields, so nothing extra needs filtering here. One file serves
+    make_pcluster.py and kill_pcluster.py both, so `delete_s3_bucketname`
+    is legitimately in there and is not something this function can build
+    with. That is the opposite of how `overrides` treats an unknown key,
+    and deliberately so -- an override is something a caller just typed,
+    while the file is a standing document that outlives any one entry
+    point.
 
     This does NOT decide which parameters a remote caller may set. That is
     the tool wrapper's job and a policy question; this function will build
@@ -1379,7 +1679,10 @@ def build_make_cluster_params(
         )
     _validate_override_types(overrides)
 
+    _, file_defaults = load_cluster_defaults(cluster_name, repo_root=repo_root)
+
     values = dict(MAKE_CLUSTER_DEFAULTS)
+    values.update(file_defaults)
     values.update(overrides)
     values.update({
         "cluster_name": cluster_name,
@@ -2577,11 +2880,14 @@ def _safe(s):
     return _SAFE_STR_RE.sub("", s)
 
 
-def _read_cluster_record(cluster_name, repo_root):
-    """Read cluster metadata from src/vars_files/<cluster_name>.yml.
+def _read_local_vars_file(cluster_name, repo_root):
+    """The cluster's vars file as a dict, or None if it is not tracked here.
 
-    Returns a dict, or None if the vars file is missing or unparseable.
-    Defense-in-depth path check protects callers that bypass _enumerate_clusters.
+    Tracked needs both halves a build leaves behind: the
+    active_clusters/<cluster_name>/ directory and a readable
+    src/vars_files/<cluster_name>.yml. A vars file whose directory is gone
+    reads as untracked, which is what teardown leaves. Defense-in-depth
+    path check protects callers that bypass _enumerate_clusters.
     """
     cluster_dir = os.path.realpath(
         os.path.join(repo_root, "active_clusters", cluster_name)
@@ -2598,9 +2904,27 @@ def _read_cluster_record(cluster_name, repo_root):
             data = yaml.safe_load(fh)
     except (OSError, yaml.YAMLError):
         return None
-    if not isinstance(data, dict):
-        return None
+    return data if isinstance(data, dict) else None
 
+
+def _project_vars_file(data, cluster_name):
+    """Vars-file keys -> record keys. Renames only; no sanitizing.
+
+    Two names differ between the two shapes (`serial`,
+    `deployment_date`), and separating this step from _sanitize_record is
+    what lets a stored record -- already in record shape -- skip it. Do
+    not add record-key fallbacks here as belt and braces: they are
+    unreachable, since the only caller is the local path, and no test can
+    tell them from nothing.
+    """
+    out = dict(data)
+    out.setdefault("cluster_name", cluster_name)
+    out["serial"] = data.get("cluster_serial_number")
+    out["deployment_date"] = data.get("DEPLOYMENT_DATE")
+    return out
+
+
+def _sanitize_record(data, cluster_name):
     # Every string leaves here sanitized. The vars file is operator-authored, but
     # a hand-edit or a corrupted write can embed a newline or ANSI escape, which
     # then breaks column alignment in list_pcluster.py and injects control
@@ -2627,7 +2951,7 @@ def _read_cluster_record(cluster_name, repo_root):
     return {
         "cluster_name":           _str("cluster_name", cluster_name),
         "cluster_owner":          _str("cluster_owner"),
-        "serial":                 _str("cluster_serial_number"),
+        "serial":                 _str("serial"),
         "region":                 _str("region"),
         "headnode_instance_type": _str("headnode_instance_type"),
         "enable_loginnode":       _str("enable_loginnode", "false"),
@@ -2642,13 +2966,35 @@ def _read_cluster_record(cluster_name, repo_root):
         "initial_gpu_queue_size": _int("initial_gpu_queue_size"),
         "max_gpu_queue_size":     _int("max_gpu_queue_size"),
         "cluster_type":           _str("cluster_type", "ondemand"),
-        "deployment_date":        _str("DEPLOYMENT_DATE"),
+        "deployment_date":        _str("deployment_date"),
         "ssh_keypair":            _str("ssh_keypair"),
         "ec2_keypair":            _str("ec2_keypair"),
         "ec2_user":               _str("ec2_user", "ubuntu"),
         "s3_bucketname":          _str("s3_bucketname"),
         "enable_monitoring":      _str("enable_monitoring", "false"),
     }
+
+
+def _read_cluster_record(cluster_name, repo_root, *, s3=None,
+                         locks_bucketname=None):
+    """A tracked cluster's metadata, local first, then the shared store.
+
+    Local wins deliberately. On the operator's machine the vars file is
+    authoritative and free, an S3-first order would put a network round
+    trip in front of every `list_pcluster.py`, and a stale remote record
+    must never shadow a fresh local build. Without an s3 client this
+    behaves exactly as it did before the store existed.
+    """
+    data = _read_local_vars_file(cluster_name, repo_root)
+    if data is not None:
+        data = _project_vars_file(data, cluster_name)
+    elif s3 is not None and locks_bucketname:
+        data = get_cluster_record(
+            s3, locks_bucketname=locks_bucketname, cluster_name=cluster_name
+        )
+    if not isinstance(data, dict):
+        return None
+    return _sanitize_record(data, cluster_name)
 
 
 # ---------------------------------------------------------------------------
@@ -4155,16 +4501,93 @@ def _queue_config_path(cluster_name, repo_root):
     )
 
 
-def _load_cluster_config(cluster_name, repo_root):
+def _load_cluster_config(cluster_name, repo_root, *, s3=None,
+                        locks_bucketname=None):
+    """(config, local_path_or_None, etag_or_None), local file first.
+
+    Same ordering as the record store, for the same reasons: the local file
+    is authoritative on the machine that has one, and an S3-first read puts
+    a round trip in front of every queue listing. `etag` is non-None only
+    when the config came from the store, and is what the write-back is
+    conditional on -- a locally-sourced config has no remote version to be
+    conditional against.
+    """
     path = _queue_config_path(cluster_name, repo_root)
-    if not os.path.isfile(path):
-        raise PClusterMakerError(f"ERROR: cluster config not found: {path}")
-    try:
-        with open(path) as fh:
-            config = _make_yaml().load(fh)
-    except Exception as exc:
-        raise PClusterMakerError(f"ERROR: failed to parse {path}: {exc}")
-    return config, path
+    if os.path.isfile(path):
+        try:
+            with open(path) as fh:
+                config = _make_yaml().load(fh)
+        except Exception as exc:
+            raise PClusterMakerError(f"ERROR: failed to parse {path}: {exc}")
+        return config, path, None
+
+    if s3 is not None and locks_bucketname:
+        text, etag = get_cluster_config_object(
+            s3, locks_bucketname=locks_bucketname, cluster_name=cluster_name
+        )
+        if text is not None:
+            try:
+                config = _make_yaml().load(text)
+            except Exception as exc:
+                raise PClusterMakerError(
+                    f"ERROR: failed to parse the stored config for "
+                    f"'{cluster_name}': {exc}"
+                )
+            return config, None, etag
+
+    raise PClusterMakerError(f"ERROR: cluster config not found: {path}")
+
+
+def _dump_cluster_config(config_dict):
+    """The exact text _write_cluster_config would put on disk.
+
+    Shared so the stored copy and the local file are byte-identical: the
+    SharedStorage spacing fixups below are not cosmetic to PCluster, but
+    two renderers would still be two things to keep in step.
+    """
+    buf = StringIO()
+    _make_yaml().dump(config_dict, buf)
+    result = buf.getvalue()
+    result = re.sub(r'\n(SharedStorage:)', r'\n\n\1', result)
+    result = re.sub(r'\n{3,}(SharedStorage:)', r'\n\n\1', result)
+    result = re.sub(r'\n+(\n  - Name:)', r'\1', result)
+    return result
+
+
+def _save_cluster_config(config_dict, *, config_path, etag, s3=None,
+                         locks_bucketname=None, cluster_name=None):
+    """Persist an edited config to wherever it came from.
+
+    A locally-sourced config is written to disk and then mirrored up
+    unconditionally: this machine holds the authoritative copy, and the
+    stored one is a mirror that would otherwise go stale the moment an
+    operator edits locally. A store-sourced config has no local file and is
+    written back conditionally on the ETag it was read with.
+
+    Returns the path or URI the edit landed at, for the result objects.
+    """
+    if config_path:
+        _write_cluster_config(config_path, config_dict)
+        if s3 is not None and locks_bucketname and cluster_name:
+            try:
+                put_cluster_config_object(
+                    s3, locks_bucketname=locks_bucketname,
+                    cluster_name=cluster_name,
+                    text=_dump_cluster_config(config_dict),
+                )
+            except (_ClientError, BotoCoreError, NoCredentialsError) as e:
+                print(
+                    "*** WARNING ***\n"
+                    f"  Config saved locally but not mirrored to "
+                    f"s3://{locks_bucketname}/{_config_key(cluster_name)}: {e}"
+                )
+        return config_path
+
+    put_cluster_config_object(
+        s3, locks_bucketname=locks_bucketname, cluster_name=cluster_name,
+        text=_dump_cluster_config(config_dict), etag=etag,
+    )
+    return f"s3://{locks_bucketname}/{_config_key(cluster_name)}"
 
 
 def _write_cluster_config(config_path, config_dict):
@@ -4181,13 +4604,7 @@ def _write_cluster_config(config_path, config_dict):
             mode="w", dir=dir_, delete=False, suffix=".tmp"
         ) as tmp:
             tmp_path = tmp.name
-            buf = StringIO()
-            _make_yaml().dump(config_dict, buf)
-            result = buf.getvalue()
-            result = re.sub(r'\n(SharedStorage:)', r'\n\n\1', result)
-            result = re.sub(r'\n{3,}(SharedStorage:)', r'\n\n\1', result)
-            result = re.sub(r'\n+(\n  - Name:)', r'\1', result)
-            tmp.write(result)
+            tmp.write(_dump_cluster_config(config_dict))
         os.replace(tmp_path, config_path)
     except Exception:
         if tmp_path and os.path.exists(tmp_path):
@@ -4480,10 +4897,13 @@ class QueueSummary:
     instance_types: list
 
 
-def core_list_queues(*, cluster_name, repo_root):
+def core_list_queues(*, cluster_name, repo_root, s3=None,
+                     locks_bucketname=None):
     from pcluster_aux_data import is_gpu_instance
 
-    config, _ = _load_cluster_config(cluster_name, repo_root)
+    config, _, _ = _load_cluster_config(
+        cluster_name, repo_root, s3=s3, locks_bucketname=locks_bucketname
+    )
     queues = config.get("Scheduling", {}).get("SlurmQueues", [])
     out = []
     for q in queues:
@@ -4518,7 +4938,7 @@ def core_add_queue(
     *, cluster_name, repo_root, queue_type, ec2_instance_type, queue_name=None,
     capacity_type="spot", initial_size=2, max_size=8, maintain_initial_size=False,
     root_volume_size=250, root_volume_type="gp3", root_volume_iops=3000,
-    root_volume_throughput=125,
+    root_volume_throughput=125, s3=None, locks_bucketname=None,
 ):
     # Month-day-hour-minute, not %Y%m%d-%H%M: "compute-20260725-1430" is 21
     # chars, so the derived "-resource" name overflowed PCluster's 25-char
@@ -4539,7 +4959,9 @@ def core_add_queue(
         print("      Enabled: true")
         print("      GdrSupport: true")
 
-    config, config_path = _load_cluster_config(cluster_name, repo_root)
+    config, config_path, _config_etag = _load_cluster_config(
+        cluster_name, repo_root, s3=s3, locks_bucketname=locks_bucketname
+    )
     queues = config["Scheduling"]["SlurmQueues"]
 
     _check_queue_arch_matches_cluster(config, instance_types)
@@ -4607,7 +5029,10 @@ ComputeResources:
 
     new_queue = _make_yaml().load(stanza_yaml)
     queues.append(new_queue)
-    _write_cluster_config(config_path, config)
+    config_path = _save_cluster_config(
+        config, config_path=config_path, etag=_config_etag, s3=s3,
+        locks_bucketname=locks_bucketname, cluster_name=cluster_name,
+    )
 
     return QueueAddResult(
         cluster_name=cluster_name, queue_name=queue_name, region=region,
@@ -4623,8 +5048,11 @@ class QueueRemoveResult:
     config_path: str
 
 
-def core_remove_queue(*, cluster_name, repo_root, queue_name):
-    config, config_path = _load_cluster_config(cluster_name, repo_root)
+def core_remove_queue(*, cluster_name, repo_root, queue_name, s3=None,
+                      locks_bucketname=None):
+    config, config_path, _config_etag = _load_cluster_config(
+        cluster_name, repo_root, s3=s3, locks_bucketname=locks_bucketname
+    )
     queues = config["Scheduling"]["SlurmQueues"]
     region = config["Region"]
 
@@ -4640,7 +5068,10 @@ def core_remove_queue(*, cluster_name, repo_root, queue_name):
 
     filtered = [q for q in queues if q.get("Name") != queue_name]
     config["Scheduling"]["SlurmQueues"] = filtered
-    _write_cluster_config(config_path, config)
+    config_path = _save_cluster_config(
+        config, config_path=config_path, etag=_config_etag, s3=s3,
+        locks_bucketname=locks_bucketname, cluster_name=cluster_name,
+    )
 
     return QueueRemoveResult(
         cluster_name=cluster_name, queue_name=queue_name, region=region, config_path=config_path,
@@ -4695,7 +5126,9 @@ class QueueApplyResult:
     config_path: str
 
 
-def core_apply_cluster_update(*, cluster_name, config_path, region, pcluster_bin, wait=True):
+def core_apply_cluster_update(*, cluster_name, config_path=None, region,
+                              pcluster_bin, wait=True, s3=None,
+                              locks_bucketname=None):
     """Phase 2 of the three-phase queue-config update: apply an updated
     cluster configuration to an existing cluster.
 
@@ -4716,8 +5149,45 @@ def core_apply_cluster_update(*, cluster_name, config_path, region, pcluster_bin
     (kept local rather than forwarding wait= to the library, matching the
     create/delete precedent -- the library's own polling is opaque, with
     no progress output). wait=False returns straight after the update is
-    accepted, for a caller that will poll itself."""
-    result = _update_cluster_lib(cluster_name, region, config_path)
+    accepted, for a caller that will poll itself.
+
+    config_path is optional because a remote caller has no filesystem to
+    name one on: omitted (or naming a path that is not there), the config
+    is fetched from the shared store and written to a temp file, since
+    pcluster.lib's cluster_configuration must be a PATH -- the CLI model
+    tags it "type": "file" and the dispatcher hands the string to
+    read_file(). The temp file is written fresh on every call and removed
+    after: a Lambda container is reused, and a cached copy would apply one
+    caller's config on behalf of the next."""
+    fetched = None
+    # An explicitly supplied path is used exactly as it always was, existing
+    # or not -- pcluster's own error on a bad path is clearer than one
+    # invented here, and second-guessing the caller silently changed what
+    # this function did with a path it was handed.
+    if not config_path:
+        if s3 is None or not locks_bucketname:
+            raise PClusterMakerError(
+                f"ERROR: no configuration to apply for '{cluster_name}': "
+                f"no config_path was given and no shared store is available."
+            )
+        text, _ = get_cluster_config_object(
+            s3, locks_bucketname=locks_bucketname, cluster_name=cluster_name
+        )
+        if text is None:
+            raise PClusterMakerError(
+                f"ERROR: no stored configuration for '{cluster_name}' at "
+                f"s3://{locks_bucketname}/{_config_key(cluster_name)}."
+            )
+        fd, fetched = tempfile.mkstemp(prefix=f"{cluster_name}-", suffix=".yaml")
+        with os.fdopen(fd, "w") as fh:
+            fh.write(text)
+        config_path = fetched
+
+    try:
+        result = _update_cluster_lib(cluster_name, region, config_path)
+    finally:
+        if fetched and os.path.exists(fetched):
+            os.unlink(fetched)
     print(json.dumps(result, indent=2))
     if not wait:
         return result
@@ -5167,6 +5637,14 @@ def core_delete_cluster(
             ec2_keypair=ec2_keypair, ssh_keypair=ssh_keypair,
             ssh_secret_name=ssh_secret_name, cluster_data_dir=cluster_data_dir,
         )
+        credential_results.append(delete_cluster_record_step(
+            _lock_s3, cf_delete_confirmed=outcome.cf_delete_confirmed,
+            locks_bucketname=locks_bucketname, cluster_name=cluster_name,
+        ))
+        credential_results.append(delete_cluster_config_step(
+            _lock_s3, cf_delete_confirmed=outcome.cf_delete_confirmed,
+            locks_bucketname=locks_bucketname, cluster_name=cluster_name,
+        ))
         resource_results = run_resource_teardown_steps(
             s3=s3, iam=iam, ssm=ssm, ec2=ec2, cluster_name=cluster_name,
             ec2_iam_role=ec2_iam_role, ec2_iam_policy=ec2_iam_policy,
@@ -8451,6 +8929,10 @@ def core_create_cluster(*, params, repo_root, region, cluster_build_command, ans
     print("")
     print("Finished creating ParallelCluster stack " + cluster_name + "!")
     print("Exiting...")
+    _publish_cluster_record(
+        _lock_s3, locks_bucketname=locks_bucketname,
+        cluster_name=cluster_name, repo_root=repo_root,
+    )
     s3_release_cluster_lock(_lock_s3, locks_bucketname=locks_bucketname, cluster_name=cluster_name)
     sys.exit(0)
 
@@ -8635,6 +9117,36 @@ def run_credential_teardown_steps(
         _delete_secrets_manager_secret_step(secretsmanager, ssh_secret_name),
         _delete_cluster_data_dir_step(cluster_data_dir),
     ]
+
+
+def delete_cluster_record_step(s3, *, cf_delete_confirmed, locks_bucketname,
+                               cluster_name):
+    """Remove the shared record, under the same positive confirmation the
+    four credential steps share.
+
+    The gate lives inside this function rather than at the call site so
+    there is one statement of it, not two that can drift: a wait timeout
+    is neither confirmed nor DELETE_FAILED, and deleting the record then
+    would hide a cluster that may still be running and billing from every
+    tool on every other machine -- the same failure the credential gate
+    exists to prevent, one step removed.
+
+    Kept out of run_credential_teardown_steps deliberately: that function
+    mirrors the playbook's four tasks exactly, and a record is not a
+    credential.
+    """
+    name = "Delete the shared cluster record"
+    if not cf_delete_confirmed:
+        return TeardownStepResult(
+            name, True, "skipped: cluster deletion not confirmed"
+        )
+    try:
+        delete_cluster_record(
+            s3, locks_bucketname=locks_bucketname, cluster_name=cluster_name
+        )
+        return TeardownStepResult(name, True)
+    except (_ClientError, BotoCoreError, NoCredentialsError) as e:
+        return TeardownStepResult(name, False, str(e))
 
 
 # ---------------------------------------------------------------------------

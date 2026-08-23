@@ -39,6 +39,8 @@ here because it is the sort of thing that reads as arbitrary later:
 import contextlib
 import dataclasses
 import functools
+import hashlib
+import json
 import os
 
 from pcluster_core import (
@@ -62,11 +64,15 @@ from pcluster_core import (
     core_remove_queue,
     core_resolve_access_node_type,
     core_rotate_cluster_key,
+    list_cluster_records,
+    load_cluster_defaults,
+    resolve_region_from_az,
     core_start_fleet,
     core_stop_fleet,
 )
 
 from pcluster_core import (
+    _derive_locks_bucket,
     _acquire_distributed_cluster_lock,
     _derive_locks_bucket,
     s3_release_cluster_lock,
@@ -128,13 +134,65 @@ def _enumerate_cluster_names():
     return sorted(names)
 
 
+def _store_region():
+    """The region whose lock/record bucket this server reads.
+
+    Lambda always sets AWS_REGION; locally it comes from the environment
+    or the active profile. The bucket is per account+region because the
+    lock already is, so a server sees the clusters built in its own
+    region -- one built in another region is visible to a server there.
+    Not a limitation to work around silently: cross-region discovery would
+    mean scanning every region's bucket on every listing.
+    """
+    import boto3
+
+    return (
+        os.environ.get("AWS_REGION")
+        or os.environ.get("AWS_DEFAULT_REGION")
+        or boto3.Session().region_name
+    )
+
+
+def _record_store():
+    """(s3 client, bucket) for the shared record store, or (None, None).
+
+    Returns (None, None) rather than raising whenever the store cannot be
+    addressed -- no region, no credentials, an STS call that fails. Every
+    caller treats that as "no store", which degrades to exactly the local
+    behavior that existed before it.
+    """
+    import boto3
+
+    region = _store_region()
+    if not region:
+        return None, None
+    try:
+        bucket = _derive_locks_bucket(
+            aws_account_id=_aws_account_id(), region=region
+        )
+        return boto3.client("s3", region_name=region), bucket
+    except Exception:
+        return None, None
+
+
 def _load_records():
-    """Every readable cluster record. A cluster whose vars file is missing
-    or unreadable is skipped, matching list_pcluster.py -- one broken
-    cluster must not fail a listing of all the others."""
+    """Every readable cluster record, local and shared.
+
+    A cluster whose vars file is missing or unreadable is skipped, matching
+    list_pcluster.py -- one broken cluster must not fail a listing of all
+    the others. Names from the shared store are unioned in, which is what
+    lets a handler with no filesystem see anything at all; a store that
+    cannot be reached contributes nothing and is not an error.
+    """
+    s3, bucket = _record_store()
+    names = list(_enumerate_cluster_names())
+    if s3 is not None:
+        names += list_cluster_records(s3, locks_bucketname=bucket)
     records = []
-    for name in _enumerate_cluster_names():
-        rec = _read_cluster_record(name, _repo_root())
+    for name in sorted(set(names)):
+        rec = _read_cluster_record(
+            name, _repo_root(), s3=s3, locks_bucketname=bucket
+        )
         if rec is None:
             continue
         records.append(ClusterRecord.from_dict(rec))
@@ -194,6 +252,29 @@ def _cluster_lock(cluster_name, region, command):
         s3_release_cluster_lock(s3, locks_bucketname=bucket, cluster_name=cluster_name)
 
 
+def _defaults_fingerprint(cluster_name):
+    """Digest of the defaults file this build would apply, or None.
+
+    `<cluster_name>_defaults.yml` is applied automatically, so the token
+    has to cover it: resolution is a pure function of the explicit
+    arguments and this file's contents, and a file edited inside the
+    token's 15-minute window would otherwise build something other than
+    what was previewed while the token still verified.
+
+    Hashing the resolution's *input* rather than its output is deliberate.
+    Binding the resolved MakeClusterParams would say the same thing, but
+    only by building it -- and verify() must run before
+    build_make_cluster_params so that a tokenless caller is refused as
+    tokenless rather than told which parameter it got wrong, which is what
+    makes the gate unreachable-around.
+    """
+    _, contents = load_cluster_defaults(cluster_name)
+    if not contents:
+        return None
+    payload = json.dumps(contents, sort_keys=True, default=str).encode()
+    return hashlib.sha256(payload).hexdigest()
+
+
 def _plain(result):
     """Coerce a core function's return value into something JSON-safe.
 
@@ -207,11 +288,15 @@ def _plain(result):
 
 def _require_record(cluster_name):
     _validate_cluster_name(cluster_name)
-    rec = _read_cluster_record(cluster_name, _repo_root())
+    s3, bucket = _record_store()
+    rec = _read_cluster_record(
+        cluster_name, _repo_root(), s3=s3, locks_bucketname=bucket
+    )
     if rec is None:
         raise PClusterMakerError(
-            f"No cluster named {cluster_name!r} is tracked in this checkout "
-            f"(no readable vars file under active_clusters/)."
+            f"No cluster named {cluster_name!r} is tracked here: no vars file "
+            f"under active_clusters/, and no record in the shared store for "
+            f"{_store_region() or 'an unresolved region'}."
         )
     return ClusterRecord.from_dict(rec)
 
@@ -290,7 +375,11 @@ def register_tools(mcp, *, remote, tier=None):
     def list_queues(cluster_name: str) -> dict:
         """List the Slurm queues defined in a cluster's config."""
         _validate_cluster_name(cluster_name)
-        result = core_list_queues(cluster_name=cluster_name, repo_root=_repo_root())
+        _s3, _bucket = _record_store()
+        result = core_list_queues(
+            cluster_name=cluster_name, repo_root=_repo_root(),
+            s3=_s3, locks_bucketname=_bucket,
+        )
         return _plain(result)
 
     @tool
@@ -341,8 +430,10 @@ def register_tools(mcp, *, remote, tier=None):
         separate step that does (stop fleet, update, restart).
         """
         _validate_cluster_name(cluster_name)
+        _s3, _bucket = _record_store()
         return _plain(core_add_queue(
             cluster_name=cluster_name, repo_root=_repo_root(),
+            s3=_s3, locks_bucketname=_bucket,
             queue_type=queue_type, ec2_instance_type=ec2_instance_type,
             queue_name=queue_name, capacity_type=capacity_type,
             initial_size=initial_size, max_size=max_size,
@@ -354,8 +445,10 @@ def register_tools(mcp, *, remote, tier=None):
         """Remove a Slurm queue from a cluster's config. Config-only, like
         add_queue -- apply_queue_config is what reaches the cluster."""
         _validate_cluster_name(cluster_name)
+        _s3, _bucket = _record_store()
         return _plain(core_remove_queue(
-            cluster_name=cluster_name, repo_root=_repo_root(), queue_name=queue_name,
+            cluster_name=cluster_name, repo_root=_repo_root(),
+            s3=_s3, locks_bucketname=_bucket, queue_name=queue_name,
         ))
 
     @tool
@@ -384,7 +477,8 @@ def register_tools(mcp, *, remote, tier=None):
             ))
 
     @tool
-    def apply_cluster_update(cluster_name: str, config_path: str) -> dict:
+    def apply_cluster_update(cluster_name: str,
+                             config_path: str | None = None) -> dict:
         """Apply an updated configuration to a cluster whose fleet is
         already stopped. Phase 2 of three; see apply_queue_config.
 
@@ -392,16 +486,23 @@ def register_tools(mcp, *, remote, tier=None):
         an update runs well past any single call's budget. Poll
         check_cluster_health, then call start_fleet once it is done.
 
+        config_path is optional: omit it and the configuration comes from
+        the shared store, which is the only thing a remote caller can name
+        -- it has no filesystem to hold a path on, and a path returned by
+        an earlier add_queue call belonged to a different container.
+
         The fleet must be stopped first -- pcluster rejects the update
         otherwise. That ordering is the caller's to enforce here, which is
         the point of exposing the phases separately: a failed apply must
         not be followed by a blind restart.
         """
         rec = _require_record(cluster_name)
+        s3, bucket = _record_store()
         with _cluster_lock(cluster_name, rec.region, "mcp apply_cluster_update"):
             return _plain(core_apply_cluster_update(
                 cluster_name=cluster_name, config_path=config_path,
                 region=rec.region, pcluster_bin=_pcluster_bin(), wait=False,
+                s3=s3, locks_bucketname=bucket,
             ))
 
     @tool
@@ -426,7 +527,22 @@ def register_tools(mcp, *, remote, tier=None):
             ))
 
     def _reject_denied(overrides):
-        """Refuse the CLI-only parameters with an actionable message."""
+        """Refuse the CLI-only parameters with an actionable message.
+
+        Scoped to `overrides` on purpose, and a `<cluster>_defaults.yml`
+        that sets the same three is applied without complaint. The denial
+        exists to stop a *caller* -- a model, over the network -- from
+        choosing what code runs on the nodes; the defaults file is the
+        operator's own artifact on the operator's own disk, the same trust
+        level as the CLI, which is precisely where these three are allowed.
+        Extending the check to file-sourced values would refuse every real
+        operator's file, since `pre_install_script`/`post_install_script`
+        are in `pcluster_defaults.yml` itself.
+
+        Nothing reaches a handler this way: the file is gitignored and in no
+        tier's `sources` list in packaging.py. If that ever changes, this is
+        the decision to revisit first.
+        """
         denied = sorted(set(overrides or {}) & set(_REMOTE_DENIED_PARAMS))
         if not denied:
             return
@@ -460,7 +576,12 @@ def register_tools(mcp, *, remote, tier=None):
         "true"/"false", so a real bool would otherwise be accepted and then
         do nothing). Three parameters are CLI-only; see _REMOTE_DENIED_PARAMS.
 
-        No AWS mutation -- it resolves parameters and returns them.
+        No AWS mutation. It does make one read-only EC2 call, to verify the
+        AZ and resolve the region before minting a token -- a token is an
+        assertion that this config was previewed, and a preview that cannot
+        say which region it previewed is not one. The parameter resolution
+        above it stays offline, so an unbuildable config still fails without
+        reaching AWS at all.
         """
         _reject_denied(overrides)
         params = build_make_cluster_params(
@@ -470,24 +591,48 @@ def register_tools(mcp, *, remote, tier=None):
             overrides=overrides,
         )
         resolved = dataclasses.asdict(params)
+        _defaults_path, _file_defaults = load_cluster_defaults(cluster_name)
+        # What the file actually contributed to this build. Keys it carries
+        # for other entry points (delete_s3_bucketname) are not build
+        # parameters and are dropped, matching what the resolution itself
+        # ignores; keys an explicit override shadowed belong under
+        # non_default_settings, not here.
+        _accepted = set(resolved) | set(MAKE_CLUSTER_DEFAULTS)
+        _from_file = {
+            k: v for k, v in sorted(_file_defaults.items())
+            if k in _accepted and k not in (overrides or {})
+        }
+        region = resolve_region_from_az(az)
         token_params = {
             "cluster_name": cluster_name, "cluster_owner": cluster_owner,
             "cluster_owner_email": cluster_owner_email, "az": az,
             "headnode_instance_type": headnode_instance_type,
             "overrides": dict(sorted((overrides or {}).items())),
+            "defaults": _defaults_fingerprint(cluster_name),
         }
         return {
             "cluster_name": cluster_name,
-            "region": resolved.get("region", ""),
+            "region": region,
+            "defaults_file": (
+                os.path.basename(_defaults_path)
+                if _defaults_path else None
+            ),
             "resolved_config": resolved,
             "non_default_settings": {
                 k: v for k, v in sorted((overrides or {}).items())
             },
+            "defaults_file_settings": _from_file,
+            # Only what is genuinely still a hardcoded default. Filtering on
+            # overrides alone reported base_os as ubuntu2404 while the file
+            # built ubuntu2404arm -- a preview stating the wrong OS to the
+            # operator approving the build.
             "notable_defaults": {
                 k: MAKE_CLUSTER_DEFAULTS[k]
                 for k in ("ebs_encryption", "efs_encryption", "cluster_type",
                           "base_os", "scaledown_idletime")
-                if k in MAKE_CLUSTER_DEFAULTS and k not in (overrides or {})
+                if k in MAKE_CLUSTER_DEFAULTS
+                and k not in (overrides or {})
+                and k not in _file_defaults
             },
             "confirmation_token": mint("create_cluster", token_params),
             "next_step": (
@@ -514,6 +659,7 @@ def register_tools(mcp, *, remote, tier=None):
             "cluster_owner_email": cluster_owner_email, "az": az,
             "headnode_instance_type": headnode_instance_type,
             "overrides": dict(sorted((overrides or {}).items())),
+            "defaults": _defaults_fingerprint(cluster_name),
         }
         # Token first, before the denylist and the build, for the same
         # reason delete_cluster verifies first: the gate must not be
@@ -526,8 +672,9 @@ def register_tools(mcp, *, remote, tier=None):
             headnode_instance_type=headnode_instance_type,
             overrides=overrides,
         )
+        region = resolve_region_from_az(az)
         return _plain(core_create_cluster(
-            params=params, repo_root=_repo_root(), region=params.region,
+            params=params, repo_root=_repo_root(), region=region,
             cluster_build_command=f"mcp create_cluster {cluster_name}",
             ansible_version="", wait=False,
         ))

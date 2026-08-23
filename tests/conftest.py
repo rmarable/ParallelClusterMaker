@@ -6,7 +6,19 @@ template under templates/ and hpc-benchmark/.  When a new template variable
 is added, add it here so test_templates.py catches the gap immediately.
 """
 
+import os
+import sys
+
 import pytest
+
+# `src/` on the path for every test module, not just the ones that insert
+# it themselves. The autouse fixture at the bottom of this file patches a
+# pcluster_core attribute, so the module has to be importable during
+# collection of any test file -- running one in isolation failed with
+# ModuleNotFoundError otherwise.
+sys.path.insert(0, os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src"
+))
 
 # Import Ansible's collection loader before anything can import fastmcp.
 #
@@ -585,3 +597,26 @@ def cluster_params_gpu_no_nvidia(cluster_params_gpu_enabled):
         "gpu_vcpus_per_node": 16,
     }
     return {**cluster_params_gpu_enabled, **overrides}
+
+
+@pytest.fixture(autouse=True)
+def _no_operator_defaults_file(monkeypatch, tmp_path_factory):
+    """Keep the developer's own `<cluster>_defaults.yml` out of the suite.
+
+    Those files are auto-applied now, by the CLI and the MCP server both,
+    and they are gitignored -- so a test that builds a cluster named
+    `osiris` resolves against the operator's real osiris_defaults.yml on
+    their laptop and against nothing at all in CI. That is a green local
+    run that means nothing, the same trap as the AZ verification reaching
+    live AWS.
+
+    Discovery is pointed at an empty directory for every test. A test that
+    wants a defaults file writes one and repoints this seam itself; see
+    TestTheDefaultsFileIsAppliedWhenItExists.
+    """
+    import pcluster_core
+
+    empty = tmp_path_factory.mktemp("no_defaults")
+    monkeypatch.setattr(
+        pcluster_core, "_default_repo_root", lambda: str(empty)
+    )

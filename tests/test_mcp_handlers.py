@@ -635,13 +635,23 @@ class TestTheCreateWrapperActuallyCallsTheGate:
             tools_mod, "core_create_cluster",
             lambda **kw: seen.update(kw) or {"status": "kicked off"},
         )
+        # This stub used to fabricate `region` on the params object, which
+        # is exactly what hid the AttributeError create_cluster raised on
+        # every real call -- MakeClusterParams has no such field. It builds
+        # a bare namespace now, and the region comes from the resolver,
+        # stubbed here because this test is about the token gate;
+        # TestCreateClusterResolvesTheRegionItBuildsIn drives the real one.
         monkeypatch.setattr(
             tools_mod, "build_make_cluster_params",
-            lambda **kw: types.SimpleNamespace(region="us-east-1"),
+            lambda **kw: types.SimpleNamespace(),
+        )
+        monkeypatch.setattr(
+            tools_mod, "resolve_region_from_az", lambda az: "us-east-1"
         )
 
         params = dict(self._ARGS)
         params["overrides"] = {}
+        params["defaults"] = None
         token = mint("create_cluster", params)
         result = self._create_tool()(confirmation_token=token, **self._ARGS)
 

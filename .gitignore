@@ -50,6 +50,9 @@ docs/press-release-20260807.txt
 # Working MCP migration plan: unfinished design doc, not a finished spec.
 docs/parallelclustermaker-mcp-plan.md
 
+# Records store: proposal, nothing implemented. Same reason as above.
+docs/records-store-plan.md
+
 # Doc-hygiene tests that check properties of the files above -- gitignored
 # alongside them since they test content that isn't part of the public repo.
 tests/test_claude_docs_citations.py
