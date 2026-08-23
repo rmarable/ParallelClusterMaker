@@ -618,13 +618,31 @@ class TestClusterAgeComesFromTheSerialNotTheCalendarDate:
         monkeypatch.setattr(pcluster_core, "DateTime", _Now)
         assert pcluster_core._age_str("21-August-2026", serial=self._SERIAL) == "38m"
 
-    def test_the_date_only_fallback_still_works(self):
+    def test_the_date_only_fallback_still_works(self, monkeypatch):
         """Kept, not replaced: a cluster from an older toolkit may have no
-        parseable stamp, and an approximate age beats "?"."""
+        parseable stamp, and an approximate age beats "?".
+
+        Time is frozen. The first version asserted the result ended in "h"
+        against a hardcoded date, which was true when written and became
+        false two days later when the real clock crossed _age_str's own
+        48-hour switch to days -- a test that passes today and fails
+        tomorrow is worse than no test, because it fails on unrelated work.
+        """
+        from datetime import datetime, timezone
+
         import pcluster_core
 
-        assert pcluster_core._age_str("21-August-2026", serial=None).endswith("h")
-        assert pcluster_core._age_str("21-August-2026", serial="osiris-nope").endswith("h")
+        # 6 hours after midnight UTC on the date below.
+        fixed_now = datetime(2026, 8, 21, 6, 0, tzinfo=timezone.utc)
+
+        class _Now(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return fixed_now
+
+        monkeypatch.setattr(pcluster_core, "DateTime", _Now)
+        assert pcluster_core._age_str("21-August-2026", serial=None) == "6h"
+        assert pcluster_core._age_str("21-August-2026", serial="osiris-nope") == "6h"
 
     def test_an_unparseable_pair_still_degrades_to_a_question_mark(self):
         import pcluster_core
