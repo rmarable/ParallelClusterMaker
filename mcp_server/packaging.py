@@ -11,9 +11,26 @@ Two facts from measuring the real import graph, not from estimating:
     payoff of keeping `pcluster_core` out of it, and it is why the router
     can be a zip with an empty requirement set rather than sharing the
     handlers' 77 MB.
-  * `aws_cdk` (80 MB) does **not** appear when `pcluster_core` is
-    imported. PCluster imports it lazily, at synthesis time, which is why
-    only the create/update tier carries it.
+  * `aws_cdk` (80 MB unpruned) does **not** appear when `pcluster_core`
+    is imported -- PCluster imports it lazily, at synthesis time. That is
+    a fact about the *import graph* and it does **not** mean only the
+    create/update tier carries it: `aws-parallelcluster` declares 17
+    `aws-cdk.*` packages as hard requirements, so pip installs them into
+    every tier that installs PCluster at all. Measured on a real
+    `pip install --target` of the read-only tier, 2026-08-24: `aws_cdk` is
+    present, at 80 MB before pruning and 44 MB after. An earlier version
+    of this docstring drew the opposite conclusion and was wrong.
+
+A real artifact must be pruned, and nothing here does it for you.
+Measured, same build: `pip install --target` of the read-only tier yields
+**241 MB**, which is 9 MB under Lambda's 250 MB unzipped limit. Removing
+`__pycache__` directories and `.pyc` files takes it to **139 MB** with the
+tier's own sources staged -- 84 MB of the artifact was bytecode for
+modules that Lambda recompiles anyway. `prune_for_lambda` below does that
+and returns the byte total, so a build can check it against
+`ZIP_UNZIPPED_LIMIT_BYTES` rather than discovering the ceiling at
+CreateFunction time. The zip of that pruned tree is 55 MB, which is over
+the 50 MB direct-upload limit, so a handler tier must be uploaded via S3.
 
 `requirements.txt` is the development and CI set and must never be
 installed wholesale into a Lambda artifact: it pulls `ansible` (~408 MB of
@@ -150,6 +167,38 @@ def validate_requirements(tier):
             f"tier {tier!r} requires packages excluded from Lambda artifacts: "
             + "; ".join(bad)
         )
+
+
+def prune_for_lambda(build_dir):
+    """Remove bytecode from a staged artifact and return its byte size.
+
+    `pip install --target` leaves a `__pycache__` beside every module. On
+    the read-only tier that is 84 MB of a 241 MB artifact -- against a
+    250 MB limit -- and Lambda recompiles from source regardless, so the
+    bytecode buys nothing at runtime. Returning the size rather than just
+    pruning is what lets a build compare against
+    ZIP_UNZIPPED_LIMIT_BYTES before it uploads anything.
+
+    Deliberately not called from build_source_archive: that stages this
+    repo's own files into a directory pip has already populated, and the
+    pruning has to happen after *both* steps.
+    """
+    for dirpath, dirnames, filenames in os.walk(build_dir, topdown=False):
+        for name in list(dirnames):
+            if name == "__pycache__":
+                full = os.path.join(dirpath, name)
+                for f in os.listdir(full):
+                    os.unlink(os.path.join(full, f))
+                os.rmdir(full)
+                dirnames.remove(name)
+        for name in filenames:
+            if name.endswith((".pyc", ".pyo")):
+                os.unlink(os.path.join(dirpath, name))
+
+    return sum(
+        os.path.getsize(os.path.join(r, f))
+        for r, _, fs in os.walk(build_dir) for f in fs
+    )
 
 
 def _iter_source_files(repo_root, sources):

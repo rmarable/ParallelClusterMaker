@@ -246,6 +246,13 @@ standing constraints for local development.
   check. `resolve_region_from_az` (`pcluster_core.py`) is the shared
   resolution: it asks EC2 rather than trimming `az[:-1]`, which also proves
   the AZ exists.
+- **A Lambda artifact must be pruned of bytecode.** `pip install --target`
+  of the read-only tier is 241 MB against the 250 MB unzipped limit;
+  removing `__pycache__`/`.pyc` takes it to 139 MB. `prune_for_lambda`
+  returns the total so a build checks before uploading. The 55 MB zip
+  exceeds the 50 MB direct-upload limit, so handler tiers go via S3.
+  `aws-parallelcluster` *declares* 17 `aws-cdk.*` packages — the lazy
+  import does not keep them out of the artifact.
 - **`requirements.txt` is the development set and must never be installed
   into a Lambda artifact** — `ansible` alone is ~408 MB of collections for
   playbooks nothing executes. `mcp_server/packaging.py` holds the per-tier

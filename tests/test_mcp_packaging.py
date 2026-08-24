@@ -284,3 +284,95 @@ class TestTheGeneratedRequirementsFile:
                 render_requirements_file("router")
         finally:
             TIER_PACKAGES["router"]["requirements"] = original
+
+
+class TestPruningIsWhatMakesTheArtifactFit:
+    """A real `pip install --target` of the read-only tier is 241 MB
+    against Lambda's 250 MB unzipped limit -- 9 MB of headroom -- and
+    84 MB of that is `__pycache__` for modules Lambda recompiles anyway.
+    Measured on 2026-08-24, not estimated. Nothing in this module pruned,
+    so the documented headroom was far thinner than it looked.
+    """
+
+    def _staged(self, tmp_path):
+        import os
+
+        pkg = tmp_path / "somedep"
+        (pkg / "__pycache__").mkdir(parents=True)
+        (pkg / "mod.py").write_text("x = 1\n")
+        (pkg / "__pycache__" / "mod.cpython-312.pyc").write_bytes(b"\x00" * 4096)
+        (pkg / "stray.pyc").write_bytes(b"\x00" * 2048)
+        nested = pkg / "sub" / "__pycache__"
+        nested.mkdir(parents=True)
+        (nested / "deep.cpython-312.pyc").write_bytes(b"\x00" * 1024)
+        (pkg / "sub" / "deep.py").write_text("y = 2\n")
+        assert os.path.isdir(pkg / "__pycache__")
+        return tmp_path
+
+    def test_bytecode_is_removed_at_every_depth(self, tmp_path):
+        import os
+
+        from mcp_server.packaging import prune_for_lambda
+
+        root = self._staged(tmp_path)
+        prune_for_lambda(str(root))
+
+        leftover = [
+            os.path.join(r, f)
+            for r, ds, fs in os.walk(root)
+            for f in fs
+            if f.endswith((".pyc", ".pyo"))
+        ]
+        assert leftover == [], leftover
+        assert not any(
+            "__pycache__" in ds for _, ds, _ in os.walk(root)
+        ), "a __pycache__ directory survived"
+
+    def test_the_sources_are_untouched(self, tmp_path):
+        """Vacuity guard: deleting everything would satisfy the test above
+        and produce an artifact that cannot import."""
+        root = self._staged(tmp_path)
+        from mcp_server.packaging import prune_for_lambda
+
+        prune_for_lambda(str(root))
+        assert (root / "somedep" / "mod.py").read_text() == "x = 1\n"
+        assert (root / "somedep" / "sub" / "deep.py").read_text() == "y = 2\n"
+
+    def test_it_returns_a_size_a_build_can_check(self, tmp_path):
+        """The point of returning bytes: a build compares against
+        ZIP_UNZIPPED_LIMIT_BYTES before uploading, rather than learning
+        the ceiling from CreateFunction."""
+        from mcp_server.packaging import (ZIP_UNZIPPED_LIMIT_BYTES,
+                                          prune_for_lambda)
+
+        root = self._staged(tmp_path)
+        size = prune_for_lambda(str(root))
+        assert size == len("x = 1\n") + len("y = 2\n")
+        assert size < ZIP_UNZIPPED_LIMIT_BYTES
+
+    def test_the_cdk_claim_matches_what_pcluster_declares(self):
+        """The docstring used to say the import graph implied only the
+        create/update tier carries aws_cdk. It does not: PCluster declares
+        the CDK packages as hard requirements, so pip installs them into
+        every tier that installs PCluster at all.
+        """
+        import importlib.metadata as md
+
+        try:
+            reqs = md.requires("aws-parallelcluster") or []
+        except md.PackageNotFoundError:
+            pytest.skip("aws-parallelcluster not installed")
+        cdk = [r for r in reqs if r.lower().startswith(("aws-cdk", "aws_cdk"))]
+        assert cdk, "PCluster no longer declares aws-cdk; revisit the docstring"
+
+        from mcp_server.packaging import TIER_PACKAGES
+
+        for tier, spec in TIER_PACKAGES.items():
+            installs_pcluster = any(
+                r.startswith("aws-parallelcluster") for r in spec["requirements"]
+            )
+            if installs_pcluster:
+                assert tier != "router", (
+                    "the router must never install PCluster -- that is what "
+                    "keeps its artifact a few KB"
+                )
