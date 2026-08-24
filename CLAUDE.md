@@ -266,6 +266,15 @@ standing constraints for local development.
   into a Lambda artifact** — `ansible` alone is ~408 MB of collections for
   playbooks nothing executes. `mcp_server/packaging.py` holds the per-tier
   sets and generates `requirements-lambda.txt`.
+- **A fake is written from the API's contract, never from memory of it.**
+  For AWS that means `botocore/data/<service>/*/service-2.json` in `.venv`,
+  which is authoritative and local. A fake built from recall encodes what
+  the caller happens to need and therefore agrees with the code by
+  construction — including where the code is wrong. The `_S3` fake hid
+  three defects that way: it discarded `Bucket`, its `put_object` returned
+  no `ETag` (silently disabling the config store's direction detection),
+  and it always returned `Contents` with `IsTruncated: False`, so the
+  hand-rolled pagination loop had never run a second iteration.
 - **When a test stubs the object under test, at least one test must drive
   the real one.** `handlers/base.py` called a FastMCP method that does not
   exist; every stub defined the same wrong name, so the whole remote

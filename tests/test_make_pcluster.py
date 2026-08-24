@@ -2062,56 +2062,117 @@ class TestTheClusterRecordStore:
     }
 
     class _S3:
-        """Enough of an S3 client for the four primitives, and no more.
+        """A fake modelled on S3's own contract, not on what the callers
+        happen to need.
 
-        `Bucket` is recorded and checked, not discarded: the tests are
-        meticulous about the key prefix (a whole test class cites the IAM
-        for it) and were blind to the bucket, which the same policies pin.
-        A primitive addressing the wrong bucket is the identical failure --
-        AccessDenied on every deployed call -- and passed the whole suite.
+        Written from `botocore/data/s3/*/service-2.json` rather than from
+        memory, because the previous hand-written version hid two real
+        defects in consecutive rounds: it discarded `Bucket` (so every
+        primitive could address the wrong one, green), and its
+        `put_object` returned `None` where `PutObjectOutput` carries an
+        `ETag` (so the mirror marker was never written under test and
+        direction detection was silently off).
+
+        Modelled deliberately, each because production code depends on it:
+          * PutObjectOutput carries ETag.
+          * GetObjectOutput carries Body, ETag, ContentLength, LastModified;
+            a missing key raises NoSuchKey.
+          * ListObjectsV2Output **omits Contents entirely** when nothing
+            matches, and carries KeyCount/IsTruncated/NextContinuationToken;
+            an unknown bucket raises NoSuchBucket. `max_keys` is small so
+            pagination is actually exercised rather than assumed.
+          * DeleteObject succeeds on a key that is not there.
         """
+
+        max_keys = 2  # small on purpose: one page is not a test of paging
 
         def __init__(self, objects=None, bucket="b"):
             self.objects = dict(objects or {})
+            self.etags = {k: f'"seed-{i}"' for i, k in enumerate(self.objects)}
             self.calls = []
             self.bucket = bucket
+            self._seq = 0
 
-        def _check(self, Bucket):
-            assert Bucket == self.bucket, (
-                f"addressed bucket {Bucket!r}, expected {self.bucket!r}"
+        # -- helpers -------------------------------------------------
+        def _err(self, code, op, status):
+            from botocore.exceptions import ClientError
+
+            return ClientError(
+                {"Error": {"Code": code, "Message": code},
+                 "ResponseMetadata": {"HTTPStatusCode": status}},
+                op,
             )
 
-        def put_object(self, Bucket=None, Key=None, Body=None, **kw):
-            self._check(Bucket)
+        def _check(self, Bucket, op):
+            if Bucket != self.bucket:
+                raise self._err("NoSuchBucket", op, 404)
+
+        def _new_etag(self, Key):
+            self._seq += 1
+            self.etags[Key] = f'"etag-{self._seq}"'
+            return self.etags[Key]
+
+        # -- operations ----------------------------------------------
+        def put_object(self, Bucket=None, Key=None, Body=None, IfMatch=None,
+                       **kw):
+            self._check(Bucket, "PutObject")
             self.calls.append(("put", Key))
+            if IfMatch is not None:
+                if Key not in self.objects:
+                    # AWS returns 404 for a conditional write against a key
+                    # that is not there -- not 412. Production catches only
+                    # 412/409, so this surfaces as a raw ClientError rather
+                    # than ClusterConfigConflict; the fake models it so that
+                    # is visible rather than assumed away.
+                    raise self._err("NoSuchKey", "PutObject", 404)
+                if self.etags.get(Key) != IfMatch:
+                    raise self._err("PreconditionFailed", "PutObject", 412)
             self.objects[Key] = Body
+            return {"ETag": self._new_etag(Key)}
 
         def get_object(self, Bucket=None, Key=None, **kw):
-            self._check(Bucket)
+            self._check(Bucket, "GetObject")
             self.calls.append(("get", Key))
             if Key not in self.objects:
-                # What S3 actually raises. A bare KeyError would leave the
-                # production except clause unexercised and pass anyway.
-                from botocore.exceptions import ClientError
-
-                raise ClientError(
-                    {"Error": {"Code": "NoSuchKey", "Message": "not found"}},
-                    "GetObject",
-                )
+                raise self._err("NoSuchKey", "GetObject", 404)
+            import datetime as _dt
             import io as _io
 
-            return {"Body": _io.BytesIO(self.objects[Key])}
+            body = self.objects[Key]
+            return {
+                "Body": _io.BytesIO(body),
+                "ETag": self.etags.get(Key),
+                "ContentLength": len(body),
+                "LastModified": _dt.datetime(2026, 8, 24, tzinfo=_dt.timezone.utc),
+            }
 
         def delete_object(self, Bucket=None, Key=None, **kw):
-            self._check(Bucket)
+            self._check(Bucket, "DeleteObject")
             self.calls.append(("delete", Key))
             self.objects.pop(Key, None)
+            self.etags.pop(Key, None)
+            return {}
 
-        def list_objects_v2(self, Bucket=None, Prefix="", **kw):
-            self._check(Bucket)
+        def list_objects_v2(self, Bucket=None, Prefix="", ContinuationToken=None,
+                            **kw):
+            self._check(Bucket, "ListObjectsV2")
             self.calls.append(("list", Prefix))
             keys = sorted(k for k in self.objects if k.startswith(Prefix))
-            return {"Contents": [{"Key": k} for k in keys], "IsTruncated": False}
+            if ContinuationToken:
+                keys = [k for k in keys if k > ContinuationToken]
+            page, rest = keys[:self.max_keys], keys[self.max_keys:]
+            out = {
+                "Name": Bucket, "Prefix": Prefix, "MaxKeys": self.max_keys,
+                "KeyCount": len(page), "IsTruncated": bool(rest),
+            }
+            # S3 omits Contents entirely when nothing matches. Always
+            # returning it means `resp.get("Contents") or []` is never
+            # exercised on the empty path.
+            if page:
+                out["Contents"] = [{"Key": k} for k in page]
+            if rest:
+                out["NextContinuationToken"] = page[-1]
+            return out
 
     def test_the_key_lives_under_the_prefix_the_iam_grants(self):
         """The one property nothing else can catch: a `records/` prefix
@@ -2183,6 +2244,45 @@ class TestTheClusterRecordStore:
             )
         s3.objects["locks/osiris.lock"] = b"{}"
         assert list_cluster_records(s3, locks_bucketname="b") == ["iris", "osiris"]
+
+    def test_the_listing_pages_past_the_first_response(self):
+        """`list_cluster_records` hand-rolls pagination rather than using a
+        paginator, so the loop has to be exercised. The old fake always
+        answered `IsTruncated: False`, so deleting the loop entirely
+        changed nothing -- a store with more than one page of clusters
+        would have silently listed only the first."""
+        from pcluster_core import list_cluster_records, put_cluster_record
+
+        s3 = self._S3()
+        names = [f"cluster-{i:02d}" for i in range(7)]
+        assert len(names) > s3.max_keys * 2, "must span at least three pages"
+        for name in names:
+            put_cluster_record(
+                s3, locks_bucketname="b", cluster_name=name,
+                record=dict(self._RECORD, cluster_name=name),
+            )
+
+        assert list_cluster_records(s3, locks_bucketname="b") == names
+
+    def test_an_empty_prefix_returns_nothing_rather_than_raising(self):
+        """S3 omits `Contents` entirely when nothing matches -- it does not
+        return an empty list. The old fake always included the key, so
+        `resp.get("Contents") or []` was never exercised on the empty path
+        and indexing it directly would have passed."""
+        from pcluster_core import list_cluster_records
+
+        s3 = self._S3()
+        s3.objects["locks/other.lock"] = b"{}"   # present, but not under vars/
+        assert list_cluster_records(s3, locks_bucketname="b") == []
+
+    def test_an_unknown_bucket_is_not_reported_as_an_empty_store(self):
+        """`NoSuchBucket` is the pre-first-build case and must degrade to
+        an empty listing, not raise -- but it must be the bucket check that
+        decides that, not a swallowed error of any kind."""
+        from pcluster_core import list_cluster_records
+
+        s3 = self._S3(bucket="the-real-one")
+        assert list_cluster_records(s3, locks_bucketname="a-different-one") == []
 
     def test_a_local_record_wins_over_a_divergent_stored_one(self, tmp_path):
         """Order is the property, and a test with only one source present
@@ -2401,36 +2501,11 @@ class TestTheClusterConfigStore:
 
     _CONFIG = "Region: us-east-2\nImage:\n  Os: ubuntu2404\n"
 
-    class _S3(TestTheClusterRecordStore._S3):
-        """Adds ETags and IfMatch, which the record store does not need."""
-
-        def __init__(self, objects=None):
-            super().__init__(objects)
-            self.etags = {}
-            self._seq = 0
-
-        def put_object(self, Bucket=None, Key=None, Body=None, IfMatch=None, **kw):
-            self._check(Bucket)
-            if IfMatch is not None and self.etags.get(Key) != IfMatch:
-                from botocore.exceptions import ClientError
-
-                raise ClientError(
-                    {"Error": {"Code": "PreconditionFailed", "Message": "etag"},
-                     "ResponseMetadata": {"HTTPStatusCode": 412}},
-                    "PutObject",
-                )
-            self._seq += 1
-            self.etags[Key] = f'"etag-{self._seq}"'
-            super().put_object(Bucket=Bucket, Key=Key, Body=Body)
-            # Real S3 returns the new ETag, and the mirror marker depends
-            # on it: a stub that returns None silently disables direction
-            # detection while every assertion still passes.
-            return {"ETag": self.etags[Key]}
-
-        def get_object(self, Bucket=None, Key=None, **kw):
-            out = super().get_object(Bucket=Bucket, Key=Key)
-            out["ETag"] = self.etags.get(Key)
-            return out
+    # One fake, modelled on the service contract in
+    # TestTheClusterRecordStore._S3. The ETag and IfMatch behaviour this
+    # class needs is S3's behaviour, not a test-local embellishment, so
+    # there is nothing to subclass for.
+    _S3 = TestTheClusterRecordStore._S3
 
     def _seeded(self):
         from pcluster_core import put_cluster_config_object
