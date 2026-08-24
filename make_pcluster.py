@@ -50,6 +50,8 @@ from pcluster_core import (
     _validate_queue_sizes,
     _load_defaults_file,
     load_cluster_defaults,
+    resolve_region_from_az,
+    AvailabilityZoneNotFound,
     _resolve as _pcore_resolve,
     _resolve_bool as _pcore_resolve_bool,
     _default_loginnode_instance_type,
@@ -884,21 +886,16 @@ def main():
     # Abort if a non-existent Region or Availability Zone was chosen.
 
     print(f"  Verifying region/AZ: {az}...")
+    # One resolution, shared with the MCP path. This was a second copy of
+    # resolve_region_from_az, and the copies had drifted -- the shared one
+    # now validates the AZ format first and builds its client inside the
+    # try, neither of which this block did.
     try:
-        ec2client = boto3.client("ec2", region_name=az[:-1])
-        _az_info = ec2client.describe_availability_zones(ZoneNames=[az])
-    except (
-        ValueError,
-        EndpointConnectionError,
-        NoCredentialsError,
-        BotoCoreError,
-        ClientError,
-    ) as _e:
-        sys.exit(f"ERROR: Could not verify availability zone '{az}': {_e}")
-
-    if not _az_info.get("AvailabilityZones"):
+        region = resolve_region_from_az(az)
+    except AvailabilityZoneNotFound:
         illegal_az_msg(az)
-    region = _az_info["AvailabilityZones"][0]["RegionName"]
+    except PClusterMakerError as _e:
+        sys.exit(str(_e))
 
     # Activate Turbot cross-account profile now that region is confirmed and
     # before any VPC/STS/spot API calls so all downstream boto3 calls use the

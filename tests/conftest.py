@@ -620,3 +620,15 @@ def _no_operator_defaults_file(monkeypatch, tmp_path_factory):
     monkeypatch.setattr(
         pcluster_core, "_default_repo_root", lambda: str(empty)
     )
+
+    # The sibling seam. mcp_server.tools._repo_root() is what every MCP
+    # tool resolves active_clusters/ and src/vars_files/ against, and it
+    # was never repointed -- so a test driving list_queues or add_queue
+    # would read (and core_add_queue would *write*) the developer's live
+    # cluster state, and see nothing at all in CI. Latent only because no
+    # test drove those tools through the client yet.
+    try:
+        import mcp_server.tools as _mcp_tools
+    except ImportError:
+        return
+    monkeypatch.setattr(_mcp_tools, "_repo_root", lambda: str(empty))

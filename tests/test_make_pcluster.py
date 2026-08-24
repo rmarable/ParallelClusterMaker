@@ -1581,7 +1581,10 @@ class TestBuildMakeClusterParams:
     def test_overrides_win_over_defaults(self):
         params = self._build(overrides={"base_os": "rhel9arm", "enable_fsx": "true"})
         assert params.base_os == "rhel9arm"
-        assert params.enable_fsx == "true"
+        # A real bool, not the string: MakeClusterParams annotates this
+        # `bool` and core_create_cluster tests it with truthiness, so the
+        # string form this once asserted was the defect, not the contract.
+        assert params.enable_fsx is True
 
     def test_an_unknown_override_is_rejected(self):
         """Silently ignoring a typo is the worst outcome: an operator who
@@ -2059,17 +2062,32 @@ class TestTheClusterRecordStore:
     }
 
     class _S3:
-        """Enough of an S3 client for the four primitives, and no more."""
+        """Enough of an S3 client for the four primitives, and no more.
 
-        def __init__(self, objects=None):
+        `Bucket` is recorded and checked, not discarded: the tests are
+        meticulous about the key prefix (a whole test class cites the IAM
+        for it) and were blind to the bucket, which the same policies pin.
+        A primitive addressing the wrong bucket is the identical failure --
+        AccessDenied on every deployed call -- and passed the whole suite.
+        """
+
+        def __init__(self, objects=None, bucket="b"):
             self.objects = dict(objects or {})
             self.calls = []
+            self.bucket = bucket
+
+        def _check(self, Bucket):
+            assert Bucket == self.bucket, (
+                f"addressed bucket {Bucket!r}, expected {self.bucket!r}"
+            )
 
         def put_object(self, Bucket=None, Key=None, Body=None, **kw):
+            self._check(Bucket)
             self.calls.append(("put", Key))
             self.objects[Key] = Body
 
         def get_object(self, Bucket=None, Key=None, **kw):
+            self._check(Bucket)
             self.calls.append(("get", Key))
             if Key not in self.objects:
                 # What S3 actually raises. A bare KeyError would leave the
@@ -2085,10 +2103,12 @@ class TestTheClusterRecordStore:
             return {"Body": _io.BytesIO(self.objects[Key])}
 
         def delete_object(self, Bucket=None, Key=None, **kw):
+            self._check(Bucket)
             self.calls.append(("delete", Key))
             self.objects.pop(Key, None)
 
         def list_objects_v2(self, Bucket=None, Prefix="", **kw):
+            self._check(Bucket)
             self.calls.append(("list", Prefix))
             keys = sorted(k for k in self.objects if k.startswith(Prefix))
             return {"Contents": [{"Key": k} for k in keys], "IsTruncated": False}
@@ -2390,6 +2410,7 @@ class TestTheClusterConfigStore:
             self._seq = 0
 
         def put_object(self, Bucket=None, Key=None, Body=None, IfMatch=None, **kw):
+            self._check(Bucket)
             if IfMatch is not None and self.etags.get(Key) != IfMatch:
                 from botocore.exceptions import ClientError
 
@@ -2424,12 +2445,31 @@ class TestTheClusterConfigStore:
 
         assert _config_key("osiris") == "configs/osiris.yaml"
         repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        for path in glob.glob(
-            os.path.join(repo_root, "templates", "MCPStateAccess*.json_src")
-        ):
-            text = open(path).read()
-            if "configs/" in text:
-                assert "/configs/*" in text, path
+
+        # A per-tier expectation table, not `if "configs/" in text`. That
+        # conditional was satisfied only by the string it checked for, so
+        # renaming the grant to /cfgs/* made the assertion *vanish* rather
+        # than fail -- the guard neutralized itself on exactly the drift it
+        # existed to catch.
+        expected = {
+            "MCPStateAccessReadOnly.json_src": True,     # add_queue/remove_queue
+            "MCPStateAccessStackMutation.json_src": True,  # apply + teardown
+            "MCPStateAccessFleetToggle.json_src": False,   # touches no config
+        }
+        found = {
+            os.path.basename(p): open(p).read()
+            for p in glob.glob(
+                os.path.join(repo_root, "templates", "MCPStateAccess*.json_src")
+            )
+        }
+        assert set(found) == set(expected), (
+            f"policy set changed: {sorted(found)} vs {sorted(expected)}"
+        )
+        for name, should_grant in expected.items():
+            has = "/configs/*" in found[name]
+            assert has is should_grant, (
+                f"{name} {'lost' if should_grant else 'gained'} a configs/ grant"
+            )
 
     def test_a_losing_edit_is_refused_not_swallowed(self, tmp_path):
         """The whole reason for the ETag. Both callers read the same
@@ -2490,33 +2530,170 @@ class TestTheClusterConfigStore:
                 text="Region: x\n", etag='"stale"',
             )
 
-    def test_a_local_config_wins_and_is_mirrored_up(self, tmp_path):
-        """Local is authoritative on the machine that has one, and the
-        stored copy would go stale the moment an operator edited locally."""
+    def _local(self, tmp_path, text):
         import os
 
-        from pcluster_core import (_load_cluster_config, _save_cluster_config,
-                                   get_cluster_config_object)
+        os.makedirs(tmp_path / "active_clusters" / "osiris", exist_ok=True)
+        path = tmp_path / "active_clusters" / "osiris" / "config.osiris"
+        path.write_text(text)
+        return path
 
-        os.makedirs(tmp_path / "active_clusters" / "osiris")
-        local = tmp_path / "active_clusters" / "osiris" / "config.osiris"
-        local.write_text("Region: us-east-1\n")
-        s3 = self._seeded()
+    def test_a_local_config_wins_for_reading(self, tmp_path):
+        from pcluster_core import _load_cluster_config
 
+        self._local(tmp_path, "Region: us-east-1\n")
         config, path, etag = _load_cluster_config(
-            "osiris", str(tmp_path), s3=s3, locks_bucketname="b"
+            "osiris", str(tmp_path), s3=self._seeded(), locks_bucketname="b"
         )
         assert config["Region"] == "us-east-1", "local must win"
         assert path and etag is None
 
+    def test_a_local_edit_mirrors_when_the_store_agrees(self, tmp_path):
+        """The ordinary case: the store holds what this machine last put
+        there, so the mirror follows the local edit."""
+        from pcluster_core import (_load_cluster_config, _save_cluster_config,
+                                   get_cluster_config_object)
+
+        s3 = self._seeded()
+        self._local(tmp_path, self._CONFIG)
+
+        config, path, etag = _load_cluster_config(
+            "osiris", str(tmp_path), s3=s3, locks_bucketname="b"
+        )
+        config["Region"] = "eu-west-1"
         _save_cluster_config(
             config, config_path=path, etag=etag, s3=s3,
+            locks_bucketname="b", cluster_name="osiris",
+        )
+
+        text, _ = get_cluster_config_object(
+            s3, locks_bucketname="b", cluster_name="osiris"
+        )
+        assert "eu-west-1" in text
+
+    def test_a_local_edit_mirrors_when_there_is_no_stored_copy_yet(self, tmp_path):
+        """Vacuity guard for the staleness check: an absent stored object
+        is not divergence, and refusing here would break the first edit
+        after every build."""
+        from pcluster_core import (_save_cluster_config,
+                                   get_cluster_config_object)
+
+        s3 = self._S3()
+        path = self._local(tmp_path, self._CONFIG)
+        _save_cluster_config(
+            {"Region": "us-east-2"}, config_path=str(path), etag=None, s3=s3,
             locks_bucketname="b", cluster_name="osiris",
         )
         text, _ = get_cluster_config_object(
             s3, locks_bucketname="b", cluster_name="osiris"
         )
-        assert "us-east-1" in text, "the mirror must follow the local edit"
+        assert text is not None
+
+    def test_a_stale_local_copy_is_refused_rather_than_pushed_down(self, tmp_path):
+        """The lost-update path the mirror used to guarantee.
+
+        A: local edit, mirrored -> store v2. B (remote, no local file):
+        reads v2, adds a queue, conditional write succeeds -> store v3. A's
+        local file is still v2 and nothing refreshes it. A edits again and
+        the mirror used to overwrite v3 with A's stale content -- B's queue
+        gone, no exception, no warning, and then applied to the live
+        cluster by the next apply_cluster_update.
+        """
+        from pcluster_core import (ClusterConfigConflict, _save_cluster_config,
+                                   get_cluster_config_object)
+
+        s3 = self._seeded()                       # store holds _CONFIG
+        path = self._local(tmp_path, self._CONFIG)
+
+        # B moves the store on.
+        from pcluster_core import put_cluster_config_object
+
+        _, etag = get_cluster_config_object(
+            s3, locks_bucketname="b", cluster_name="osiris"
+        )
+        put_cluster_config_object(
+            s3, locks_bucketname="b", cluster_name="osiris",
+            text="Region: eu-central-1\n", etag=etag,
+        )
+
+        with pytest.raises(ClusterConfigConflict, match="behind"):
+            _save_cluster_config(
+                {"Region": "us-west-1"}, config_path=str(path), etag=None,
+                s3=s3, locks_bucketname="b", cluster_name="osiris",
+            )
+
+        text, _ = get_cluster_config_object(
+            s3, locks_bucketname="b", cluster_name="osiris"
+        )
+        assert "eu-central-1" in text, "the other machine's edit must survive"
+        assert path.read_text() == self._CONFIG, "the local file is untouched too"
+
+    def test_a_writer_landing_after_the_staleness_check_is_still_caught(
+        self, tmp_path
+    ):
+        """What the ETag is actually for.
+
+        The staleness check closes the "local was already behind" case, but
+        it reads the store and then writes -- and another machine can land
+        in that window. Without IfMatch the mirror overwrites that write
+        with no error, which is why removing the etag= argument survived
+        every other test in this class.
+        """
+        from pcluster_core import (ClusterConfigConflict, _save_cluster_config,
+                                   get_cluster_config_object,
+                                   put_cluster_config_object)
+
+        outer = self
+
+        class _RacyS3(self._S3):
+            """Agrees when read, then a second writer lands before our put."""
+
+            def __init__(self):
+                super().__init__()
+                self.raced = False
+
+            def get_object(self, Bucket=None, Key=None, **kw):
+                out = super().get_object(Bucket=Bucket, Key=Key)
+                if Key.startswith("configs/") and not self.raced:
+                    self.raced = True
+                    # Someone else writes between our read and our write.
+                    super().put_object(
+                        Bucket=Bucket, Key=Key,
+                        Body=b"Region: ap-south-1\n",
+                    )
+                    self.etags[Key] = '"etag-raced"'
+                return out
+
+        s3 = _RacyS3()
+        put_cluster_config_object(
+            s3, locks_bucketname="b", cluster_name="osiris", text=outer._CONFIG
+        )
+        path = self._local(tmp_path, outer._CONFIG)
+
+        with pytest.raises(ClusterConfigConflict):
+            _save_cluster_config(
+                {"Region": "us-west-1"}, config_path=str(path), etag=None,
+                s3=s3, locks_bucketname="b", cluster_name="osiris",
+            )
+
+        text, _ = get_cluster_config_object(
+            s3, locks_bucketname="b", cluster_name="osiris"
+        )
+        assert "ap-south-1" in text, "the racing writer's edit must survive"
+
+    def test_whitespace_alone_is_not_divergence(self, tmp_path):
+        """A hand-edited local file differs in whitespace from a
+        semantically identical stored copy. Comparing bytes would call that
+        divergence and refuse a legitimate edit, so the comparison is on
+        normalized dumps."""
+        from pcluster_core import _save_cluster_config
+
+        s3 = self._seeded()
+        path = self._local(tmp_path, "Region:    us-east-2\n\n\nImage:\n  Os: ubuntu2404\n")
+        _save_cluster_config(
+            {"Region": "us-east-2"}, config_path=str(path), etag=None, s3=s3,
+            locks_bucketname="b", cluster_name="osiris",
+        )
 
     def test_apply_gets_a_path_that_exists_and_cleans_it_up(self, tmp_path,
                                                             monkeypatch):
@@ -2633,3 +2810,394 @@ class TestTheClusterConfigStore:
             s3=self._seeded(), locks_bucketname="b",
         )
         assert result is not None
+
+
+class TestEveryBoolFieldIsARealBool:
+    """MAKE_CLUSTER_DEFAULTS and every defaults file carry booleans as the
+    strings "true"/"false". MakeClusterParams annotates those fields `bool`
+    and core_create_cluster tests them with plain truthiness -- `if
+    enable_efa:`, `if enable_fsx:`, `if enable_monitoring:`. A string
+    "false" in one of those slots is truthy, so a build with no features
+    requested provisioned FSx, EFS, EFA, monitoring and a login-node pool,
+    while preview_cluster_config reported every one of them "false" to the
+    operator approving it.
+
+    argparse handed the CLI real bools, so this only ever affected
+    build_make_cluster_params -- and it was unreachable while
+    create_cluster still died on params.region, which is why fixing that
+    bug is what made this one live.
+    """
+
+    _REQUIRED = dict(
+        cluster_name="zzz-no-defaults-file", cluster_owner="testuser",
+        cluster_owner_email="testuser@example.com", az="us-east-2a",
+        headnode_instance_type="c5.xlarge",
+    )
+    _QUEUE = {"compute_instance_type": "c5.2xlarge"}
+
+    def _build(self, **overrides):
+        from pcluster_core import build_make_cluster_params
+
+        merged = dict(self._QUEUE)
+        merged.update(overrides)
+        return build_make_cluster_params(**self._REQUIRED, overrides=merged)
+
+    def test_no_bool_annotated_field_holds_a_string(self):
+        """Asserted over the annotations, not a hand-written list: a field
+        added later cannot quietly miss the coercion."""
+        from pcluster_core import _bool_field_names
+
+        params = self._build()
+        names = _bool_field_names()
+        assert names, "the dataclass introspection found no bool fields"
+
+        wrong = {
+            n: repr(getattr(params, n)) for n in names
+            if not isinstance(getattr(params, n), bool)
+        }
+        assert not wrong, f"bool-annotated fields holding non-bools: {wrong}"
+
+    def test_a_feature_nobody_asked_for_is_off(self):
+        """The behavioral half. `if enable_fsx:` is what core_create_cluster
+        actually runs, so the property that matters is falsiness, not type."""
+        params = self._build()
+        for name in ("enable_fsx", "enable_efs", "enable_efa",
+                     "enable_monitoring", "enable_loginnode",
+                     "enable_external_nfs", "enable_hpc_benchmarks"):
+            assert not getattr(params, name), f"{name} is truthy by default"
+
+    def test_a_feature_that_was_asked_for_is_on(self):
+        """Vacuity guard: coercing everything to False would satisfy the
+        test above and break every feature."""
+        params = self._build(enable_efs="true")
+        assert params.enable_efs is True
+
+    def test_a_yaml_native_bool_from_a_defaults_file_is_accepted(self, tmp_path,
+                                                                 monkeypatch):
+        """`enable_efs: true` is the natural thing to write in YAML and
+        parses as a real bool. The CLI's _resolve_bool has always accepted
+        it; the shim must agree, or one file builds two clusters."""
+        import yaml as _yaml
+
+        (tmp_path / "zzz-no-defaults-file_defaults.yml").write_text(
+            _yaml.safe_dump({"compute_instance_type": "c5.2xlarge",
+                             "enable_efs": True})
+        )
+        monkeypatch.setattr(
+            "pcluster_core._default_repo_root", lambda: str(tmp_path)
+        )
+        from pcluster_core import build_make_cluster_params
+
+        params = build_make_cluster_params(**self._REQUIRED)
+        assert params.enable_efs is True
+
+    def test_the_cli_and_the_shim_agree(self):
+        """One coercion, not two. _resolve_bool is what argparse's path
+        uses; the shim reuses it via _coerce_bool rather than restating the
+        rule, since two readings of "false" is how this diverged."""
+        from pcluster_core import _coerce_bool
+
+        for raw, expected in (
+            ("true", True), ("false", False), ("True", True), ("FALSE", False),
+            (True, True), (False, False), (1, True), (0, False),
+        ):
+            assert _coerce_bool(raw) is expected, raw
+
+
+class TestTheBuildPathValidatesItsOwnInputs:
+    """The MCP build tools never called _validate_cluster_name -- every
+    sibling tool did, but preview_cluster_config and create_cluster went
+    straight into build_make_cluster_params, which fed the raw name to
+    os.path.join for the defaults file and, on the create path, to makedirs
+    under active_clusters/. The check now lives in the core, where the
+    repo's own architecture rule says it belongs, rather than in whichever
+    shim remembers.
+    """
+
+    _REQ = dict(
+        cluster_owner="testuser", cluster_owner_email="testuser@example.com",
+        az="us-east-2a", headnode_instance_type="c5.xlarge",
+    )
+
+    def _build(self, name):
+        from pcluster_core import build_make_cluster_params
+
+        return build_make_cluster_params(
+            cluster_name=name, **self._REQ,
+            overrides={"compute_instance_type": "c5.2xlarge"},
+        )
+
+    @pytest.mark.parametrize("name", [
+        "../../tmp/evil", "../osiris", "/etc/passwd", "UPPER", "9start",
+        "trailing-", "double--hyphen", "", "a" * 40,
+    ])
+    def test_a_name_that_is_not_a_cluster_name_is_refused(self, name):
+        from pcluster_core import PClusterMakerError
+
+        with pytest.raises(PClusterMakerError):
+            self._build(name)
+
+    def test_a_trailing_newline_is_refused(self):
+        """`$` matches before a trailing newline and `\\Z` does not. The name
+        becomes an S3 key, a directory name and a config filename, so what
+        this validator accepts and what every downstream consumer accepts
+        have to be the same set."""
+        from pcluster_core import PClusterMakerError, _validate_cluster_name
+
+        with pytest.raises(SystemExit):
+            _validate_cluster_name("abc\n")
+        with pytest.raises(PClusterMakerError):
+            self._build("osiris\n")
+
+    def test_a_real_name_still_builds(self):
+        """Vacuity guard -- refusing everything would pass the above."""
+        assert self._build("zzz-no-defaults-file").cluster_name == (
+            "zzz-no-defaults-file"
+        )
+
+    def test_the_toolkit_template_is_not_a_cluster_defaults_file(self):
+        """`pcluster_defaults.yml` is tracked, sits at the repo root, and
+        sets all three _REMOTE_DENIED_PARAMS. Auto-discovery matched it for
+        cluster_name="pcluster", so a caller who could not pass
+        post_install_script as an override could still get it applied by
+        choosing that one name -- defeating the denial on the local server.
+        """
+        import os
+
+        from pcluster_core import discover_defaults_file
+
+        # The real repo root, not _default_repo_root() -- conftest's autouse
+        # isolation fixture points that at an empty tmp dir, which would
+        # make this guard pass for the wrong reason.
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        assert os.path.isfile(os.path.join(root, "pcluster_defaults.yml")), (
+            "the template moved; this guard is now vacuous"
+        )
+        assert discover_defaults_file("pcluster", repo_root=root) is None
+
+    def test_the_denied_params_are_what_made_that_collision_matter(self):
+        """Pins why the exclusion exists. If the template stops setting
+        these, the reasoning above needs revisiting rather than silently
+        becoming decoration."""
+        import os
+
+        import yaml as _yaml
+
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        with open(os.path.join(root, "pcluster_defaults.yml")) as fh:
+            template = _yaml.safe_load(fh)
+        assert {"pre_install_script", "post_install_script", "custom_ami"} <= set(template)
+
+
+class TestEveryCreateExitPublishesTheClusterState:
+    """`core_create_cluster` has two exits and the record was published
+    from one of them. The other is the `_KICKED_OFF` branch that every
+    `wait=False` caller takes -- which is every MCP build -- so a remote
+    build produced a live, billing cluster that the transport which built
+    it could not see, poll, or tear down. The store's only writer was
+    unreachable from the surface the store exists to serve.
+
+    Structural, not behavioral, and deliberately so: the property is "no
+    exit from this function skips the publisher", which is about the shape
+    of the function rather than about any one run through it. The
+    behavioral half is TestTheClusterRecordStore, which drives the
+    publisher itself.
+    """
+
+    def _create_fn(self):
+        import ast
+
+        from pcluster_core import __file__ as core_file
+
+        tree = ast.parse(open(core_file).read())
+        return next(
+            n for n in ast.walk(tree)
+            if isinstance(n, ast.FunctionDef) and n.name == "core_create_cluster"
+        )
+
+    def test_no_successful_exit_skips_the_publisher(self):
+        """Every `sys.exit(0)` in the function must have a publish call
+        before it. A failure exit (non-zero) is exempt -- there is no
+        cluster to publish."""
+        import ast
+
+        fn = self._create_fn()
+        publishes = [
+            n.lineno for n in ast.walk(fn)
+            if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+            and n.func.id == "_publish_cluster_state"
+        ]
+        success_exits = [
+            n.lineno for n in ast.walk(fn)
+            if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+            and n.func.attr == "exit" and n.args
+            and isinstance(n.args[0], ast.Constant) and n.args[0].value == 0
+        ]
+        assert success_exits, "no successful exit found -- this guard is vacuous"
+        assert publishes, "core_create_cluster never publishes"
+        for exit_line in success_exits:
+            assert any(p < exit_line for p in publishes), (
+                f"sys.exit(0) at line {exit_line} is reachable without "
+                f"publishing the cluster state; publishes at {publishes}"
+            )
+
+    def test_the_publisher_writes_both_halves(self):
+        """A record without a config leaves every remote queue tool
+        failing, which is the state the store shipped in."""
+        import os
+        import tempfile
+
+        from pcluster_core import (_publish_cluster_state,
+                                   get_cluster_config_object,
+                                   get_cluster_record)
+
+        s3 = TestTheClusterConfigStore._S3()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.makedirs(os.path.join(tmp, "active_clusters", "osiris"))
+            os.makedirs(os.path.join(tmp, "src", "vars_files"))
+            with open(os.path.join(tmp, "src", "vars_files", "osiris.yml"), "w") as fh:
+                fh.write("cluster_name: osiris\nregion: us-east-2\n"
+                         "cluster_serial_number: osiris-1\n")
+            with open(os.path.join(tmp, "active_clusters", "osiris",
+                                   "config.osiris"), "w") as fh:
+                fh.write("Region: us-east-2\n")
+
+            _publish_cluster_state(
+                s3, locks_bucketname="b", cluster_name="osiris", repo_root=tmp
+            )
+
+        assert get_cluster_record(s3, locks_bucketname="b",
+                                  cluster_name="osiris") is not None
+        text, _ = get_cluster_config_object(
+            s3, locks_bucketname="b", cluster_name="osiris"
+        )
+        assert text and "us-east-2" in text
+
+
+class TestTheSmallerReviewFindings:
+    """The tail of the adversarial review: each of these is small, and each
+    turns a confusing failure into a nameable one."""
+
+    def test_a_denial_is_not_reported_as_a_missing_cluster(self):
+        """`except _ClientError: return None` told the operator "no cluster
+        named x is tracked here" when the fault was an IAM policy --
+        pointing at cluster state for a permissions problem. Absence is
+        NoSuchKey/NoSuchBucket/404; AccessDenied is not absence."""
+        from botocore.exceptions import ClientError
+
+        from pcluster_core import PClusterMakerError, get_cluster_record
+
+        class _Denied(TestTheClusterRecordStore._S3):
+            def get_object(self, **kw):
+                raise ClientError(
+                    {"Error": {"Code": "AccessDenied", "Message": "no"},
+                     "ResponseMetadata": {"HTTPStatusCode": 403}},
+                    "GetObject",
+                )
+
+        with pytest.raises(PClusterMakerError, match="MCPStateAccess"):
+            get_cluster_record(_Denied(), locks_bucketname="b",
+                               cluster_name="osiris")
+
+    @pytest.mark.parametrize("code,status", [
+        ("NoSuchKey", 404), ("NoSuchBucket", 404),
+    ])
+    def test_a_genuine_absence_is_still_none(self, code, status):
+        """Vacuity guard: raising on everything would break the ordinary
+        pre-first-build case, where neither key nor bucket exists yet."""
+        from botocore.exceptions import ClientError
+
+        from pcluster_core import get_cluster_record
+
+        class _Absent(TestTheClusterRecordStore._S3):
+            def get_object(self, **kw):
+                raise ClientError(
+                    {"Error": {"Code": code, "Message": "gone"},
+                     "ResponseMetadata": {"HTTPStatusCode": status}},
+                    "GetObject",
+                )
+
+        assert get_cluster_record(_Absent(), locks_bucketname="b",
+                                  cluster_name="osiris") is None
+
+    def test_an_s3_uri_is_refused_as_a_config_path(self):
+        """add_queue returns `s3://bucket/configs/x.yaml` when it edited the
+        stored config. A model passing that straight to
+        apply_cluster_update hit the "used exactly as given" branch and the
+        URI went to pcluster.lib's read_file() as a filesystem path."""
+        from pcluster_core import PClusterMakerError, core_apply_cluster_update
+
+        with pytest.raises(PClusterMakerError, match="omit config_path"):
+            core_apply_cluster_update(
+                cluster_name="osiris",
+                config_path="s3://parallelclustermaker-locks-1-2/configs/osiris.yaml",
+                region="us-east-2", pcluster_bin="pcluster", wait=False,
+            )
+
+    @pytest.mark.parametrize("body,expected", [
+        ("- enable_efs: true\n", "mapping"),
+        ("just a string\n", "mapping"),
+    ])
+    def test_a_defaults_file_that_is_not_a_mapping_says_so(self, body, expected,
+                                                           tmp_path, monkeypatch):
+        """`_drop_unset` calls .items(); a list or scalar document raised a
+        raw AttributeError. Inert while the file was only read under
+        --use_defaults; read on every run now."""
+        from pcluster_core import PClusterMakerError, load_cluster_defaults
+
+        (tmp_path / "osiris_defaults.yml").write_text(body)
+        monkeypatch.setattr(
+            "pcluster_core._default_repo_root", lambda: str(tmp_path)
+        )
+        with pytest.raises(PClusterMakerError, match=expected):
+            load_cluster_defaults("osiris")
+
+    def test_a_region_passed_where_an_az_belongs_gets_the_right_message(self):
+        """`resolve_region_from_az("us-east-1")` built a client for region
+        'us-east-' and surfaced botocore's InvalidRegionError -- raised on
+        the line *above* the except clause that names ValueError. The
+        format check now runs first, so the operator gets the message
+        _validate_az_input exists to print."""
+        from pcluster_core import PClusterMakerError, resolve_region_from_az
+
+        with pytest.raises(PClusterMakerError, match="not a valid Availability Zone"):
+            resolve_region_from_az("us-east-1")
+        with pytest.raises(PClusterMakerError, match="not a valid Availability Zone"):
+            resolve_region_from_az("")
+
+    def test_an_absent_az_raises_the_distinct_type(self):
+        """The CLI maps this one to illegal_az_msg's exact wording, so it
+        has to be distinguishable from a failed call -- and it must still
+        be a PClusterMakerError so every existing handler catches it."""
+        from pcluster_core import (AvailabilityZoneNotFound, PClusterMakerError,
+                                   resolve_region_from_az)
+
+        class _Empty:
+            def describe_availability_zones(self, ZoneNames=None, **kw):
+                return {"AvailabilityZones": []}
+
+        assert issubclass(AvailabilityZoneNotFound, PClusterMakerError)
+        with pytest.raises(AvailabilityZoneNotFound):
+            resolve_region_from_az("us-east-2a", ec2_client=_Empty())
+
+    def test_the_cli_no_longer_carries_its_own_az_resolution(self):
+        """Two copies of one resolution is how they drifted: the shared one
+        gained a format check and a client inside the try, and the CLI's
+        copy had neither."""
+        import ast
+        import os
+
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        tree = ast.parse(open(os.path.join(root, "make_pcluster.py")).read())
+        calls = [
+            n.func.attr for n in ast.walk(tree)
+            if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+        ]
+        assert "describe_availability_zones" not in calls, (
+            "make_pcluster.py resolves the region itself again"
+        )
+        names = [
+            n.func.id for n in ast.walk(tree)
+            if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+        ]
+        assert "resolve_region_from_az" in names

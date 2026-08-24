@@ -213,6 +213,14 @@ standing constraints for local development.
   blast radius, one policy per tier in `templates/MCP*.json_src` — a third
   policy category, neither instance-reachable nor the operator's own. The
   router must import no third-party package.
+- **Booleans are strings in the defaults, `bool` on `MakeClusterParams`, and
+  truthiness-tested in `core_create_cluster`** — so `"false"` is truthy.
+  `build_make_cluster_params` coerces via `_coerce_bool` over
+  `typing.get_type_hints`; without it every feature flag reads as enabled.
+- `build_make_cluster_params` validates `cluster_name`/`cluster_owner` — in
+  the core, not the shims, which never did. `discover_defaults_file`
+  excludes the tracked `pcluster_defaults.yml`: it sets all three
+  `_REMOTE_DENIED_PARAMS`, so `cluster_name="pcluster"` defeated the denial.
 - Cluster records are published to `s3://parallelclustermaker-locks-<acct>-<region>/vars/<name>.json`
   so a machine that did not build a cluster can still see it. Local files
   win: `_read_cluster_record` reads `active_clusters/` + `src/vars_files/`
@@ -223,7 +231,9 @@ standing constraints for local development.
   config rides the same bucket under `configs/`, where writes are
   conditional on the ETag the read returned — `add_queue`/`remove_queue`
   take no cluster lock, so concurrent edits are an ordinary lost-update
-  race and `ClusterConfigConflict` is what makes one visible.
+  race and `ClusterConfigConflict` is what makes one visible. A *local*
+  edit is conditional too, and is refused when the stored copy is a
+  different configuration from the one it started from.
 - **`MakeClusterParams` carries no `region`** — the CLI resolves it from
   the AZ-verification call and passes it to `core_create_cluster`
   separately, so every shim must too. MCP's `create_cluster` read

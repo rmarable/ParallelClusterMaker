@@ -379,9 +379,12 @@ class TestCreateClusterOverrides:
                        "ebs_encryption": "true", "placement_group": "cluster"}
         )
         cfg = json.loads(_text(result))["resolved_config"]
-        assert cfg["enable_fsx"] == "true"
+        # Coerced to a real bool before it reaches MakeClusterParams --
+        # see TestEveryBoolFieldIsARealBool for why the string form was a
+        # bug rather than a convention.
+        assert cfg["enable_fsx"] is True
         assert cfg["fsx_size"] == 2400
-        assert cfg["ebs_encryption"] == "true"
+        assert cfg["ebs_encryption"] is True
 
     @pytest.mark.asyncio
     async def test_an_unknown_parameter_is_rejected(self):

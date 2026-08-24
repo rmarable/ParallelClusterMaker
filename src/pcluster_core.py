@@ -56,6 +56,16 @@ class PClusterMakerError(Exception):
     behavior unchanged."""
 
 
+class AvailabilityZoneNotFound(PClusterMakerError):
+    """The AZ is well-formed but does not exist in this account.
+
+    A subclass, so every existing `except PClusterMakerError` still
+    catches it -- it exists only so make_pcluster.py can keep printing
+    illegal_az_msg's exact wording while sharing one resolution with the
+    MCP path instead of carrying a second copy.
+    """
+
+
 @dataclass(frozen=True)
 class ClusterRecord:
     """Typed shape of what _read_cluster_record returns. Field set matches
@@ -155,10 +165,21 @@ def resolve_region_from_az(az, *, ec2_client=None):
     reach core_create_cluster and bind every regional client to a region
     the operator did not name.
     """
-    client = ec2_client if ec2_client is not None else boto3.client(
-        "ec2", region_name=az[:-1]
-    )
+    # Format first: az[:-1] below builds an endpoint, and a region passed
+    # where an AZ belongs ("us-east-1") produced a raw
+    # botocore.InvalidRegionError about 'us-east-' instead of the message
+    # _validate_az_input exists to print.
     try:
+        _validate_az_input(az)
+    except SystemExit as e:
+        raise PClusterMakerError(str(e))
+
+    # Client construction inside the try: it is what raises on a malformed
+    # region, and it sat above the except clause that names ValueError.
+    try:
+        client = ec2_client if ec2_client is not None else boto3.client(
+            "ec2", region_name=az[:-1]
+        )
         zones = client.describe_availability_zones(ZoneNames=[az]).get(
             "AvailabilityZones"
         )
@@ -167,7 +188,7 @@ def resolve_region_from_az(az, *, ec2_client=None):
             f"ERROR: Could not verify availability zone '{az}': {e}"
         )
     if not zones:
-        raise PClusterMakerError(
+        raise AvailabilityZoneNotFound(
             f"ERROR: '{az}' is not an availability zone in this account."
         )
     return zones[0]["RegionName"]
@@ -179,7 +200,7 @@ def _validate_cluster_name(name):
     Must start with a letter (PCluster v3 API rejects digit-first names).
     Disallows trailing or consecutive hyphens to prevent invalid S3 bucket names.
     """
-    if not re.match(r"^[a-z]([a-z0-9\-]{0,25}[a-z0-9])?$", name) or "--" in name:
+    if not re.match(r"^[a-z]([a-z0-9\-]{0,25}[a-z0-9])?\Z", name) or "--" in name:
         sys.exit(
             "cluster_name must start with a lowercase letter, contain only lowercase "
             "letters, digits, and hyphens, end with a letter or digit, contain no "
@@ -511,9 +532,20 @@ def _load_defaults_file(defaults_path, toolkit_defaults_path, cluster_name):
         )
     try:
         with open(defaults_path) as fh:
-            return _drop_unset(yaml.safe_load(fh) or {})
+            _data = yaml.safe_load(fh) or {}
     except yaml.YAMLError as _e:
         sys.exit(f"ERROR: defaults file is not valid YAML: {defaults_path}\n  {_e}")
+    except OSError as _e:
+        sys.exit(f"ERROR: cannot read defaults file {defaults_path}: {_e}")
+    if not isinstance(_data, dict):
+        sys.exit(
+            f"ERROR: defaults file must be a mapping of parameter names to "
+            f"values, got {type(_data).__name__}: {defaults_path}"
+        )
+    return _drop_unset(_data)
+
+
+_TOOLKIT_DEFAULTS_BASENAME = "pcluster_defaults.yml"
 
 
 def _default_repo_root():
@@ -528,8 +560,19 @@ def discover_defaults_file(cluster_name, *, repo_root=None):
     operator has already described should build the same way whichever
     surface asks for it.
     """
+    try:
+        _validate_cluster_name(cluster_name)
+    except SystemExit as e:
+        raise PClusterMakerError(str(e))
+
     root = repo_root or _default_repo_root()
     path = os.path.join(root, f"{cluster_name}_defaults.yml")
+    # `pcluster_defaults.yml` is the toolkit's tracked template, not a
+    # description of a cluster called "pcluster" -- and it sets all three
+    # of _REMOTE_DENIED_PARAMS, so auto-discovering it lets a caller reach
+    # pre/post-install scripts and custom_ami by choosing that one name.
+    if os.path.basename(path) == _TOOLKIT_DEFAULTS_BASENAME:
+        return None
     return path if os.path.isfile(path) else None
 
 
@@ -546,11 +589,19 @@ def load_cluster_defaults(cluster_name, *, repo_root=None):
         return None, {}
     try:
         with open(path) as fh:
-            return path, _drop_unset(yaml.safe_load(fh) or {})
+            data = yaml.safe_load(fh) or {}
     except yaml.YAMLError as e:
         raise PClusterMakerError(
             f"ERROR: defaults file is not valid YAML: {path}\n  {e}"
         )
+    except OSError as e:
+        raise PClusterMakerError(f"ERROR: cannot read defaults file {path}: {e}")
+    if not isinstance(data, dict):
+        raise PClusterMakerError(
+            f"ERROR: defaults file must be a mapping of parameter names to "
+            f"values, got {type(data).__name__}: {path}"
+        )
+    return path, _drop_unset(data)
 
 
 def _resolve(name, args, file_defaults, hardcoded_defaults, cast=None):
@@ -580,6 +631,42 @@ def _resolve(name, args, file_defaults, hardcoded_defaults, cast=None):
     return val
 
 
+def _coerce_bool(val):
+    """The toolkit's one reading of a boolean parameter.
+
+    Values arrive as real bools (argparse), as the strings "true"/"false"
+    (MAKE_CLUSTER_DEFAULTS and every defaults file), or as YAML ints. Every
+    consumer must agree, because MakeClusterParams annotates these fields
+    `bool` and core_create_cluster tests them with plain truthiness -- so a
+    string "false" reaching one of those slots reads as True and silently
+    enables the feature.
+    """
+    if isinstance(val, bool):
+        return val
+    if isinstance(val, int):
+        return val != 0
+    return str(val).lower() == "true"
+
+
+def _bool_field_names():
+    """The MakeClusterParams fields annotated `bool`.
+
+    Derived from the dataclass rather than listed, so a field added later
+    cannot miss the coercion. `typing.get_type_hints` rather than
+    `f.type`: the latter is the raw annotation, which is a real type today
+    but becomes the *string* "bool" the moment anyone adds `from __future__
+    import annotations` to this module -- at which point a set built by
+    identity would silently go empty and every flag would be truthy again.
+    An `in ("bool", bool)` tuple would also work and was what shipped
+    first, but its string half was unreachable and no test could tell it
+    from nothing.
+    """
+    import typing
+
+    hints = typing.get_type_hints(MakeClusterParams)
+    return {name for name, ann in hints.items() if ann is bool}
+
+
 def _resolve_bool(name, args, file_defaults, hardcoded_defaults):
     """Return True/False for a three-tier string boolean parameter."""
     val = _resolve(name, args, file_defaults, hardcoded_defaults)
@@ -587,11 +674,7 @@ def _resolve_bool(name, args, file_defaults, hardcoded_defaults):
         sys.exit(
             f"ERROR: required boolean parameter '{name}' has no value in CLI args, defaults file, or hardcoded defaults."
         )
-    if isinstance(val, bool):
-        return val
-    if isinstance(val, int):
-        return val != 0
-    return str(val).lower() == "true"
+    return _coerce_bool(val)
 
 
 def _resolve_access_script_path(cluster_data_root, cluster_name):
@@ -862,7 +945,12 @@ def get_cluster_config_object(s3, *, locks_bucketname, cluster_name):
             Bucket=locks_bucketname, Key=_config_key(cluster_name)
         )
         return obj["Body"].read().decode(), obj.get("ETag")
-    except (_ClientError, BotoCoreError, NoCredentialsError, UnicodeDecodeError):
+    except _ClientError as e:
+        _s3_absence_or_raise(
+            e, what=f"s3://{locks_bucketname}/{_config_key(cluster_name)}"
+        )
+        return None, None
+    except (BotoCoreError, NoCredentialsError, UnicodeDecodeError):
         return None, None
 
 
@@ -956,6 +1044,78 @@ def _publish_cluster_record(s3, *, locks_bucketname, cluster_name, repo_root):
         return False
 
 
+def _publish_cluster_config(s3, *, locks_bucketname, cluster_name, repo_root):
+    """Mirror a freshly rendered cluster config, warning on failure.
+
+    Unconditional: the cluster was just built, so there is no earlier
+    version to be conditional against, and this machine rendered the only
+    copy. Never raises, for the same reason _publish_cluster_record does
+    not -- the cluster exists and is billing by now.
+    """
+    path = os.path.join(
+        repo_root, "active_clusters", cluster_name, f"config.{cluster_name}"
+    )
+    if not os.path.isfile(path):
+        return False
+    try:
+        with open(path) as fh:
+            put_cluster_config_object(
+                s3, locks_bucketname=locks_bucketname,
+                cluster_name=cluster_name, text=fh.read(),
+            )
+        return True
+    except (OSError, _ClientError, BotoCoreError, NoCredentialsError) as e:
+        print(
+            "*** WARNING ***\n"
+            f"  Could not publish the cluster config to "
+            f"s3://{locks_bucketname}/{_config_key(cluster_name)}: {e}\n"
+            f"  The cluster is fine. Remote queue tools will not see it."
+        )
+        return False
+
+
+def _publish_cluster_state(s3, *, locks_bucketname, cluster_name, repo_root):
+    """Publish both halves of a cluster's shared state.
+
+    One publisher, called from every exit of the create path. That is the
+    whole point: core_create_cluster has two exits -- the _KICKED_OFF
+    branch every wait=False caller takes, which is every MCP build, and the
+    completed tail -- and the record was originally published from the tail
+    alone. A remote build therefore produced a live cluster that the
+    transport which built it could not see, poll, or tear down.
+    """
+    _publish_cluster_record(
+        s3, locks_bucketname=locks_bucketname, cluster_name=cluster_name,
+        repo_root=repo_root,
+    )
+    _publish_cluster_config(
+        s3, locks_bucketname=locks_bucketname, cluster_name=cluster_name,
+        repo_root=repo_root,
+    )
+
+
+_S3_ABSENT_CODES = ("NoSuchKey", "NoSuchBucket", "404")
+
+
+def _s3_absence_or_raise(e, *, what):
+    """Return None for a genuinely absent object, raise for anything else.
+
+    Catching every ClientError and returning None reported an IAM
+    misconfiguration as "no cluster named x is tracked here" -- pointing
+    the operator at cluster state when the fault was a policy. A missing
+    key (before the first publish) and a missing bucket (before the first
+    build) are the real absences; AccessDenied is not one.
+    """
+    code = e.response.get("Error", {}).get("Code", "")
+    status = e.response.get("ResponseMetadata", {}).get("HTTPStatusCode")
+    if code in _S3_ABSENT_CODES or status == 404:
+        return None
+    raise PClusterMakerError(
+        f"ERROR: could not read {what}: {code or e}. This is not a missing "
+        f"cluster -- check the MCPStateAccess* policy for this tier."
+    )
+
+
 def _records_key(cluster_name):
     return f"vars/{cluster_name}.json"
 
@@ -991,7 +1151,11 @@ def get_cluster_record(s3, *, locks_bucketname, cluster_name):
             Bucket=locks_bucketname, Key=_records_key(cluster_name)
         )
         data = json.loads(obj["Body"].read())
-    except (_ClientError, BotoCoreError, NoCredentialsError, ValueError):
+    except _ClientError as e:
+        return _s3_absence_or_raise(
+            e, what=f"s3://{locks_bucketname}/{_records_key(cluster_name)}"
+        )
+    except (BotoCoreError, NoCredentialsError, ValueError):
         return None
     return data if isinstance(data, dict) else None
 
@@ -1660,6 +1824,16 @@ def build_make_cluster_params(
     the tool wrapper's job and a policy question; this function will build
     whatever it is asked for, exactly like the CLI would.
     """
+    # In the core, not the shims: make_pcluster.py validates in its own
+    # argparse path, and the MCP tools did not validate at all -- so a
+    # cluster_name went straight into os.path.join for the defaults file
+    # and, on the create path, into makedirs under active_clusters/.
+    try:
+        _validate_cluster_name(cluster_name)
+        _validate_cluster_owner(cluster_owner)
+    except SystemExit as e:
+        raise PClusterMakerError(str(e))
+
     fields = {f.name for f in _dc_fields(MakeClusterParams)}
     # Accepted override keys are the dataclass fields PLUS the input keys
     # MAKE_CLUSTER_DEFAULTS carries that get consumed into a derived field
@@ -1730,6 +1904,16 @@ def build_make_cluster_params(
     values["stage_docker_compose"] = stage
     values["docker_compose_arch"] = arch
     values["docker_compose_checksum"] = values.get(f"docker_compose_checksum_{arch}", "")
+
+    # MAKE_CLUSTER_DEFAULTS and every defaults file carry booleans as
+    # "true"/"false"; MakeClusterParams annotates them `bool` and
+    # core_create_cluster tests them with plain truthiness. Without this the
+    # string "false" is truthy and every feature flag reads as enabled --
+    # a build with FSx, EFS, EFA, monitoring and a login-node pool nobody
+    # asked for, previewed to the operator as "false".
+    for _name in _bool_field_names():
+        if _name in values:
+            values[_name] = _coerce_bool(values[_name])
 
     return MakeClusterParams(**{k: v for k, v in values.items() if k in fields})
 
@@ -4554,33 +4738,81 @@ def _dump_cluster_config(config_dict):
     return result
 
 
+def _same_config(a, b):
+    """Whether two config documents are the same configuration.
+
+    Compared as parsed data, not as bytes and not as re-dumped text: both
+    copies are written by _dump_cluster_config in the ordinary flow, but a
+    hand-edited local file differs in whitespace from a semantically
+    identical stored one, and calling that divergence would refuse a
+    legitimate edit. `_make_yaml()` is ruamel in round-trip mode, which
+    *preserves* formatting by design -- re-dumping through it normalizes
+    nothing, which is what the first version of this function got wrong.
+    yaml.safe_load gives plain dicts and lists that compare structurally.
+    """
+    if a is None or b is None:
+        return a is None and b is None
+    try:
+        return yaml.safe_load(a) == yaml.safe_load(b)
+    except yaml.YAMLError:
+        return False
+
+
 def _save_cluster_config(config_dict, *, config_path, etag, s3=None,
                          locks_bucketname=None, cluster_name=None):
     """Persist an edited config to wherever it came from.
 
-    A locally-sourced config is written to disk and then mirrored up
-    unconditionally: this machine holds the authoritative copy, and the
-    stored one is a mirror that would otherwise go stale the moment an
-    operator edits locally. A store-sourced config has no local file and is
-    written back conditionally on the ETag it was read with.
+    Both branches are conditional now. A store-sourced config is written
+    back on the ETag it was read with. A locally-sourced one is *also*
+    written back conditionally, on the ETag the store holds at save time --
+    and refused outright when the stored copy is a different configuration
+    from the local one this edit started from.
+
+    That second check is the point. "Local wins" is the right read
+    ordering, but it made the mirror a blind overwrite: a laptop holding a
+    local file would push its copy down over every edit any other machine
+    had made, forever, with ClusterConfigConflict -- the whole mechanism
+    built to make that visible -- never firing. The earlier justification
+    ("this machine is the writer of record") was simply false: the store
+    branch is a second writer by construction.
 
     Returns the path or URI the edit landed at, for the result objects.
     """
     if config_path:
-        _write_cluster_config(config_path, config_dict)
         if s3 is not None and locks_bucketname and cluster_name:
+            pre_edit = None
+            if os.path.isfile(config_path):
+                with open(config_path) as fh:
+                    pre_edit = fh.read()
+            stored_text, stored_etag = get_cluster_config_object(
+                s3, locks_bucketname=locks_bucketname, cluster_name=cluster_name
+            )
+            if stored_text is not None and not _same_config(stored_text, pre_edit):
+                raise ClusterConfigConflict(
+                    f"The stored configuration for '{cluster_name}' is not the "
+                    f"one this edit started from -- another machine changed it. "
+                    f"Nothing was written. Re-read it (the local copy at "
+                    f"{config_path} is behind) and apply the edit again."
+                )
+            _write_cluster_config(config_path, config_dict)
             try:
                 put_cluster_config_object(
                     s3, locks_bucketname=locks_bucketname,
                     cluster_name=cluster_name,
                     text=_dump_cluster_config(config_dict),
+                    etag=stored_etag,
                 )
+            except ClusterConfigConflict:
+                raise
             except (_ClientError, BotoCoreError, NoCredentialsError) as e:
                 print(
                     "*** WARNING ***\n"
                     f"  Config saved locally but not mirrored to "
                     f"s3://{locks_bucketname}/{_config_key(cluster_name)}: {e}"
                 )
+            return config_path
+
+        _write_cluster_config(config_path, config_dict)
         return config_path
 
     put_cluster_config_object(
@@ -5159,6 +5391,13 @@ def core_apply_cluster_update(*, cluster_name, config_path=None, region,
     read_file(). The temp file is written fresh on every call and removed
     after: a Lambda container is reused, and a cached copy would apply one
     caller's config on behalf of the next."""
+    if config_path and str(config_path).startswith("s3://"):
+        raise PClusterMakerError(
+            f"ERROR: config_path must be a filesystem path, not {config_path!r}. "
+            f"add_queue returns an s3:// URI when it edited the stored config; "
+            f"omit config_path entirely and this fetches it."
+        )
+
     fetched = None
     # An explicitly supplied path is used exactly as it always was, existing
     # or not -- pcluster's own error on a bad path is clearer than one
@@ -8737,6 +8976,10 @@ def core_create_cluster(*, params, repo_root, region, cluster_build_command, ans
         print("Staging files were NOT transferred to the head node and the build")
         print("summary was NOT sent -- both require a running head node. Re-run")
         print("once the cluster reaches CREATE_COMPLETE to finish those steps.")
+        _publish_cluster_state(
+            _lock_s3, locks_bucketname=locks_bucketname,
+            cluster_name=cluster_name, repo_root=repo_root,
+        )
         s3_release_cluster_lock(_lock_s3, locks_bucketname=locks_bucketname, cluster_name=cluster_name)
         sys.exit(0)
 
@@ -8929,7 +9172,7 @@ def core_create_cluster(*, params, repo_root, region, cluster_build_command, ans
     print("")
     print("Finished creating ParallelCluster stack " + cluster_name + "!")
     print("Exiting...")
-    _publish_cluster_record(
+    _publish_cluster_state(
         _lock_s3, locks_bucketname=locks_bucketname,
         cluster_name=cluster_name, repo_root=repo_root,
     )
