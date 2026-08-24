@@ -1005,3 +1005,119 @@ class TestTheStoreIsAddressedInTheClustersRegion:
             f"{len(bare)} at lines {bare}"
         )
         assert os.path.basename(t.__file__) == "tools.py"
+
+
+class TestNoReadOnlyToolWritesTheStore:
+    """`add_queue`/`remove_queue` write `configs/<name>.yaml`. They sat on
+    the read-only tier because they mutate no CloudFormation stack -- true,
+    and beside the point: a tier named read-only whose IAM carries
+    s3:PutObject misrepresents itself to whoever reads the policy next.
+
+    The cost of the move is real and accepted: a queue edit now carries the
+    stack-mutation tier's blast radius, which is more than the edit needs.
+    The alternative is a fifth tier for config writes, i.e. a fifth Lambda,
+    role, policy and cold start.
+    """
+
+    _WRITERS = {"add_queue", "remove_queue"}
+
+    def test_the_config_writers_are_not_on_the_read_only_tier(self):
+        from mcp_server.tiers import TOOL_TIERS
+
+        for name in self._WRITERS:
+            assert TOOL_TIERS[name] != "read-only", (
+                f"{name} writes S3 objects and cannot be read-only"
+            )
+
+    def test_they_are_where_the_rest_of_the_config_lifecycle_lives(self):
+        """apply reads the config, teardown deletes it. Editing belongs
+        with them, not scattered across tiers."""
+        from mcp_server.tiers import TOOL_TIERS
+
+        for name in self._WRITERS:
+            assert TOOL_TIERS[name] == "stack-mutation"
+        assert TOOL_TIERS["delete_cluster"] == "stack-mutation"
+
+    def test_the_read_only_tier_still_reads_configs(self):
+        """Vacuity guard: list_queues stays, so the tier keeps GetObject.
+        Moving the readers too would be over-correction."""
+        from mcp_server.tiers import TOOL_TIERS
+
+        assert TOOL_TIERS["list_queues"] == "read-only"
+
+
+class TestAnInvalidClusterNameDoesNotKillTheServer:
+    """`_require_record` called `_validate_cluster_name` unwrapped, and that
+    function `sys.exit()`s. SystemExit is a BaseException, so it is not
+    turned into a tool error -- it unwinds the server process. 13 of the 18
+    tools reach `_require_record`, so any of them with a malformed
+    cluster_name took the whole session down.
+
+    `tools.py` already documents this hazard for the distributed lock
+    ("an uncaught SystemExit inside a long-lived FastMCP process kills the
+    whole server rather than failing one call"); this was the same hazard
+    one function over, and every other caller of that validator wraps it.
+    """
+
+    _BAD = ["Bad_Name", "UPPER", "9start", "trailing-", "has--double", "", "x" * 40]
+
+    @pytest.mark.parametrize("name", _BAD)
+    @pytest.mark.asyncio
+    async def test_the_session_survives_a_malformed_name(self, name):
+        """The second call is the assertion. A first call that returns an
+        error proves nothing on its own -- SystemExit can surface as an
+        error result while the transport is already unwinding."""
+        async with Client(build_local()) as client:
+            first = await client.call_tool(
+                "check_cluster_health", {"cluster_name": name},
+                raise_on_error=False,
+            )
+            assert first.is_error
+
+            survived = await client.call_tool(
+                "list_clusters", {}, raise_on_error=False
+            )
+            assert not survived.is_error, (
+                f"the server did not survive cluster_name={name!r}"
+            )
+
+    @pytest.mark.asyncio
+    async def test_the_error_still_says_what_is_wrong(self):
+        """Vacuity guard: swallowing the exception into a bare 'not
+        tracked' would satisfy the test above and lose the naming rule."""
+        async with Client(build_local()) as client:
+            result = await client.call_tool(
+                "check_cluster_health", {"cluster_name": "Bad_Name"},
+                raise_on_error=False,
+            )
+        text = _text(result)
+        assert "lowercase" in text and "27 characters" in text
+
+    @pytest.mark.asyncio
+    async def test_every_tool_that_takes_a_cluster_name_is_covered(self):
+        """_require_record is the shared path, so covering one tool covers
+        the rest -- but only while they all go through it. This pins that
+        they do."""
+        import ast
+        import os
+
+        import mcp_server.tools as t
+
+        tree = ast.parse(open(t.__file__).read())
+        reaches = set()
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.FunctionDef):
+                continue
+            args = [a.arg for a in node.args.args]
+            if "cluster_name" not in args:
+                continue
+            calls = {
+                n.func.id for n in ast.walk(node)
+                if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+            }
+            if "_require_record" in calls:
+                reaches.add(node.name)
+        assert len(reaches) >= 8, (
+            f"only {len(reaches)} tools route through _require_record: {reaches}"
+        )
+        assert os.path.basename(t.__file__) == "tools.py"

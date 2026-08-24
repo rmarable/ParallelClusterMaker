@@ -302,7 +302,18 @@ def _plain(result):
 
 
 def _require_record(cluster_name):
-    _validate_cluster_name(cluster_name)
+    # Wrapped, like every other caller of this validator. It sys.exit()s,
+    # which is right for a CLI and fatal here: SystemExit is a
+    # BaseException, so FastMCP's handling does not turn it into a tool
+    # error -- it unwinds the server process instead. 13 of the 18 tools
+    # reach this function, so an invalid cluster_name from any of them
+    # took the whole session down. Same reasoning as _cluster_lock's
+    # translation below, and as build_make_cluster_params/
+    # _queue_config_path/discover_defaults_file, which all wrap it.
+    try:
+        _validate_cluster_name(cluster_name)
+    except SystemExit as e:
+        raise PClusterMakerError(str(e))
     # Local first with no store at all: a cluster this machine built is
     # answered from its own vars file, and its region then addresses the
     # bucket for every later store call. Only a cluster with no local

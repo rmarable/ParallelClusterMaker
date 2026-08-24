@@ -49,9 +49,19 @@ TOOL_TIERS = {
     "diagnose_cluster": "read-only",
     "resolve_access_info": "read-only",
     "list_queues": "read-only",
-    "add_queue": "read-only",
-    "remove_queue": "read-only",
     "preview_cluster_delete": "read-only",
+    # add_queue/remove_queue WRITE configs/<name>.yaml. They were on the
+    # read-only tier because they mutate no stack -- true, and beside the
+    # point: a tier called read-only whose policy carries s3:PutObject
+    # misrepresents itself to whoever reads the policy next. They sit with
+    # the rest of the config's lifecycle instead (apply reads it, teardown
+    # deletes it). The cost is real and is accepted: a queue edit now
+    # carries the stack-mutation tier's blast radius, which is more than
+    # the edit needs. The alternative -- a fifth tier for config writes --
+    # buys least privilege for a fifth Lambda, its own role, policy and
+    # cold start.
+    "add_queue": "stack-mutation",
+    "remove_queue": "stack-mutation",
     "stop_fleet": "fleet-toggle",
     "start_fleet": "fleet-toggle",
     "delete_cluster": "stack-mutation",

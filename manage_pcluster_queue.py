@@ -23,6 +23,8 @@ from pcluster_core import (
     core_list_queues,
     core_add_queue,
     core_remove_queue,
+    _read_cluster_record,
+    _derive_locks_bucket,
     core_apply_queue_config,
 )
 
@@ -79,6 +81,7 @@ def _do_add(cluster_name, args):
     if args.initial_size > args.max_size:
         sys.exit("ERROR: --initial_size cannot exceed --max_size")
 
+    _s3, _bucket = _cluster_store(cluster_name)
     try:
         result = core_add_queue(
             cluster_name=cluster_name,
@@ -94,6 +97,7 @@ def _do_add(cluster_name, args):
             root_volume_type=args.root_volume_type,
             root_volume_iops=args.root_volume_iops,
             root_volume_throughput=args.root_volume_throughput,
+            s3=_s3, locks_bucketname=_bucket,
         )
     except PClusterMakerError as e:
         sys.exit(str(e))
@@ -104,13 +108,52 @@ def _do_add(cluster_name, args):
         _print_update_reminder(cluster_name, result.region, result.queue_name, "added to")
 
 
+def _cluster_store(cluster_name):
+    """(s3, bucket) for this cluster's shared store, or (None, None).
+
+    The CLI edited configs locally and never mirrored, so every CLI queue
+    edit silently diverged the store from the local file -- and once the
+    staleness check landed, the next edit from another machine was refused
+    against a copy that had been left behind on purpose. Two surfaces that
+    can disagree about the same cluster is the shape this codebase keeps
+    removing.
+
+    Addressed in the *cluster's* region, read from its own record, exactly
+    as _record_store does on the MCP side. Returns (None, None) on any
+    failure: mirroring is best-effort here, and _save_cluster_config
+    degrades to a local-only edit with a warning rather than refusing to
+    edit a file on this machine's disk.
+    """
+    try:
+        rec = _read_cluster_record(cluster_name, _repo_root)
+        if not rec or not rec.get("region"):
+            return None, None
+        region = rec["region"]
+        import boto3
+
+        bucket = _derive_locks_bucket(
+            aws_account_id=_aws_account_id(region), region=region
+        )
+        return boto3.client("s3", region_name=region), bucket
+    except Exception:
+        return None, None
+
+
+def _aws_account_id(region):
+    import boto3
+
+    return boto3.client("sts").get_caller_identity()["Account"]
+
+
 def _do_remove(cluster_name, args):
     if not args.queue_name:
         sys.exit("ERROR: -Q/--queue-name is required for remove")
 
+    _s3, _bucket = _cluster_store(cluster_name)
     try:
         result = core_remove_queue(
-            cluster_name=cluster_name, repo_root=_repo_root, queue_name=args.queue_name,
+            cluster_name=cluster_name, repo_root=_repo_root,
+            queue_name=args.queue_name, s3=_s3, locks_bucketname=_bucket,
         )
     except PClusterMakerError as e:
         sys.exit(str(e))

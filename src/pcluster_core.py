@@ -977,7 +977,8 @@ def put_cluster_config_object(s3, *, locks_bucketname, cluster_name, text,
     if etag:
         kwargs["IfMatch"] = etag
     try:
-        s3.put_object(**kwargs)
+        resp = s3.put_object(**kwargs)
+        return (resp or {}).get("ETag")
     except _ClientError as e:
         if etag and _is_conditional_write_rejection(e):
             raise ClusterConfigConflict(
@@ -1059,10 +1060,15 @@ def _publish_cluster_config(s3, *, locks_bucketname, cluster_name, repo_root):
         return False
     try:
         with open(path) as fh:
-            put_cluster_config_object(
+            new_etag = put_cluster_config_object(
                 s3, locks_bucketname=locks_bucketname,
                 cluster_name=cluster_name, text=fh.read(),
             )
+        # Record what we put there. This is the first mirror of a
+        # cluster's config, so it is what lets a later local edit be
+        # recognised as ahead of the store rather than merely different
+        # from it.
+        _write_mirror_marker(path, new_etag)
         return True
     except (OSError, _ClientError, BotoCoreError, NoCredentialsError) as e:
         print(
@@ -4794,6 +4800,37 @@ def _same_config(a, b):
         return False
 
 
+def _mirror_marker_path(config_path):
+    """Where the ETag of this machine's last mirror is recorded.
+
+    Beside the config it describes, hidden, and per cluster. Without it a
+    divergence between the local file and the store is only detectable as
+    "these differ" -- not as which one is newer, since neither carries a
+    version. With it, "the store still holds what I last pushed" is
+    exactly "nobody else has written since", which is the whole question.
+    """
+    d, base = os.path.split(config_path)
+    return os.path.join(d, f".{base}.mirror-etag")
+
+
+def _read_mirror_marker(config_path):
+    try:
+        with open(_mirror_marker_path(config_path)) as fh:
+            return fh.read().strip() or None
+    except OSError:
+        return None
+
+
+def _write_mirror_marker(config_path, etag):
+    if not etag:
+        return
+    try:
+        with open(_mirror_marker_path(config_path), "w") as fh:
+            fh.write(etag)
+    except OSError:
+        pass
+
+
 def _save_cluster_config(config_dict, *, config_path, etag, s3=None,
                          locks_bucketname=None, cluster_name=None):
     """Persist an edited config to wherever it came from.
@@ -4820,24 +4857,69 @@ def _save_cluster_config(config_dict, *, config_path, etag, s3=None,
             if os.path.isfile(config_path):
                 with open(config_path) as fh:
                     pre_edit = fh.read()
-            stored_text, stored_etag = get_cluster_config_object(
-                s3, locks_bucketname=locks_bucketname, cluster_name=cluster_name
-            )
-            if stored_text is not None and not _same_config(stored_text, pre_edit):
-                raise ClusterConfigConflict(
-                    f"The stored configuration for '{cluster_name}' is not the "
-                    f"one this edit started from -- another machine changed it. "
-                    f"Nothing was written. Re-read it (the local copy at "
-                    f"{config_path} is behind) and apply the edit again."
+            try:
+                stored_text, stored_etag = get_cluster_config_object(
+                    s3, locks_bucketname=locks_bucketname,
+                    cluster_name=cluster_name,
                 )
+            except PClusterMakerError as e:
+                # The store is unreachable -- no permissions, no bucket, an
+                # API failure. Editing a config file on this machine's own
+                # disk must not depend on that: same rule
+                # _publish_cluster_record follows, where publishing never
+                # fails an operation the operator actually asked for. The
+                # edit lands locally and the mirror is skipped, loudly.
+                print(
+                    "*** WARNING ***\n"
+                    f"  Shared store unreachable ({e}).\n"
+                    f"  Editing {config_path} locally only -- other machines "
+                    f"will not see this change."
+                )
+                _write_cluster_config(config_path, config_dict)
+                return config_path
+            if stored_text is not None and not _same_config(stored_text, pre_edit):
+                # They differ. Which one is stale is a separate question,
+                # and comparing content cannot answer it -- neither copy
+                # carries a version. The marker does: if the store still
+                # holds the ETag this machine last mirrored, nobody else
+                # has written since, so the local file is the newer one
+                # (an edit made through a path that does not mirror, which
+                # is what the CLI did before it was wired up) and pushing
+                # it up is correct. Anything else means a second writer.
+                marker = _read_mirror_marker(config_path)
+                if marker and stored_etag and marker == stored_etag:
+                    print(
+                        "*** INFO ***\n"
+                        f"  The local config for '{cluster_name}' is ahead of "
+                        f"the shared copy; mirroring it up."
+                    )
+                elif marker:
+                    raise ClusterConfigConflict(
+                        f"The stored configuration for '{cluster_name}' was "
+                        f"changed by another machine since this one last "
+                        f"mirrored. Nothing was written. Re-read it -- the "
+                        f"local copy at {config_path} is behind -- and apply "
+                        f"the edit again."
+                    )
+                else:
+                    raise ClusterConfigConflict(
+                        f"The configuration for '{cluster_name}' differs "
+                        f"between this machine and the shared store, and "
+                        f"there is no record of which is newer (this machine "
+                        f"has not mirrored it before). Nothing was written. "
+                        f"Compare {config_path} against "
+                        f"s3://{locks_bucketname}/{_config_key(cluster_name)} "
+                        f"and re-run once they agree."
+                    )
             _write_cluster_config(config_path, config_dict)
             try:
-                put_cluster_config_object(
+                new_etag = put_cluster_config_object(
                     s3, locks_bucketname=locks_bucketname,
                     cluster_name=cluster_name,
                     text=_dump_cluster_config(config_dict),
                     etag=stored_etag,
                 )
+                _write_mirror_marker(config_path, new_etag)
             except ClusterConfigConflict:
                 raise
             except (_ClientError, BotoCoreError, NoCredentialsError) as e:

@@ -213,6 +213,13 @@ standing constraints for local development.
   blast radius, one policy per tier in `templates/MCP*.json_src` — a third
   policy category, neither instance-reachable nor the operator's own. The
   router must import no third-party package.
+- **No tool on the `read-only` tier may write anything.** `add_queue`/
+  `remove_queue` write `configs/<name>.yaml` and moved to `stack-mutation`,
+  where the rest of the config's lifecycle already lives (apply reads it,
+  teardown deletes it). A tier named read-only carrying `s3:PutObject`
+  misrepresents itself to whoever reads the policy next; mutating no
+  CloudFormation stack is not the same as being read-only. The cost is
+  accepted: a queue edit now carries that tier's blast radius.
 - **Booleans are strings in the defaults, `bool` on `MakeClusterParams`, and
   truthiness-tested in `core_create_cluster`** — so `"false"` is truthy.
   `build_make_cluster_params` coerces via `_coerce_bool` over
@@ -232,8 +239,10 @@ standing constraints for local development.
   conditional on the ETag the read returned — `add_queue`/`remove_queue`
   take no cluster lock, so concurrent edits are an ordinary lost-update
   race and `ClusterConfigConflict` is what makes one visible. A *local*
-  edit is conditional too, and is refused when the stored copy is a
-  different configuration from the one it started from. The bucket is
+  edit is conditional too. Which copy is stale is decided by the mirror
+  marker (the ETag this machine last pushed), not by comparing content —
+  content cannot tell ahead from behind. The CLI mirrors as well, and a
+  store it cannot read degrades to a local-only edit with a warning. The bucket is
   addressed in the **cluster's** region, not the process's — everything
   that writes it already was. `add_queue`/`remove_queue` also refuse while
   the stack is `UPDATE_IN_PROGRESS`: `apply_cluster_update` returns on

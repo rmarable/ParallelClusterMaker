@@ -58,3 +58,4 @@ docs/records-store-plan.md
 tests/test_claude_docs_citations.py
 tests/test_claude_docs_line_citations.py
 tests/test_claude_docs_preamble_budget.py
+docs/mcp-certification-checklist.md

@@ -2422,6 +2422,10 @@ class TestTheClusterConfigStore:
             self._seq += 1
             self.etags[Key] = f'"etag-{self._seq}"'
             super().put_object(Bucket=Bucket, Key=Key, Body=Body)
+            # Real S3 returns the new ETag, and the mirror marker depends
+            # on it: a stub that returns None silently disables direction
+            # detection while every assertion still passes.
+            return {"ETag": self.etags[Key]}
 
         def get_object(self, Bucket=None, Key=None, **kw):
             out = super().get_object(Bucket=Bucket, Key=Key)
@@ -2451,9 +2455,10 @@ class TestTheClusterConfigStore:
         # renaming the grant to /cfgs/* made the assertion *vanish* rather
         # than fail -- the guard neutralized itself on exactly the drift it
         # existed to catch.
+        # Presence of a configs/ grant at all, per tier.
         expected = {
-            "MCPStateAccessReadOnly.json_src": True,     # add_queue/remove_queue
-            "MCPStateAccessStackMutation.json_src": True,  # apply + teardown
+            "MCPStateAccessReadOnly.json_src": True,       # list_queues reads it
+            "MCPStateAccessStackMutation.json_src": True,  # edit + apply + teardown
             "MCPStateAccessFleetToggle.json_src": False,   # touches no config
         }
         found = {
@@ -2470,6 +2475,27 @@ class TestTheClusterConfigStore:
             assert has is should_grant, (
                 f"{name} {'lost' if should_grant else 'gained'} a configs/ grant"
             )
+
+        # And which *actions*, which is the half that moved. add_queue and
+        # remove_queue write configs/<name>.yaml; a tier named read-only
+        # carrying s3:PutObject misrepresents itself to whoever reads the
+        # policy next, so the tools moved to stack-mutation and the write
+        # grant moved with them. read-only keeps GetObject for list_queues.
+        import json as _json
+
+        def _config_actions(name):
+            for st in _json.loads(found[name])["Statement"]:
+                if "/configs/*" in _json.dumps(st.get("Resource", "")):
+                    a = st["Action"]
+                    return set(a if isinstance(a, list) else [a])
+            return set()
+
+        assert _config_actions("MCPStateAccessReadOnly.json_src") == {
+            "s3:GetObject"
+        }, "the read-only tier must not write cluster configs"
+        assert _config_actions("MCPStateAccessStackMutation.json_src") == {
+            "s3:GetObject", "s3:PutObject", "s3:DeleteObject"
+        }, "the tier that owns config edits needs the whole lifecycle"
 
     def test_a_losing_edit_is_refused_not_swallowed(self, tmp_path):
         """The whole reason for the ETag. Both callers read the same
@@ -2616,7 +2642,12 @@ class TestTheClusterConfigStore:
             text="Region: eu-central-1\n", etag=etag,
         )
 
-        with pytest.raises(ClusterConfigConflict, match="behind"):
+        # Refusal is the property; the *wording* depends on whether this
+        # machine has a mirror marker, and here it has none (the store was
+        # seeded directly, not published from this repo). The direction
+        # cases are test_a_second_machines_write_still_refuses and
+        # test_divergence_with_no_marker_claims_no_direction.
+        with pytest.raises(ClusterConfigConflict):
             _save_cluster_config(
                 {"Region": "us-west-1"}, config_path=str(path), etag=None,
                 s3=s3, locks_bucketname="b", cluster_name="osiris",
@@ -2738,6 +2769,140 @@ class TestTheClusterConfigStore:
                 pcluster_bin="pcluster", wait=False, s3=self._S3(),
                 locks_bucketname="b",
             )
+
+    def test_a_local_copy_that_is_ahead_is_mirrored_not_refused(self, tmp_path):
+        """Direction matters and content alone cannot supply it.
+
+        Before the mirror marker, "the local file differs from the store"
+        was reported as "the local copy is behind" in both directions --
+        including the one the un-mirrored CLI produced, where local was
+        the *newer* copy. The operator was told to re-read the stale one.
+        """
+        from pcluster_core import (_publish_cluster_config,
+                                   _save_cluster_config,
+                                   get_cluster_config_object)
+
+        s3 = self._seeded()
+        path = self._local(tmp_path, self._CONFIG)
+        # This machine published it, so the marker records what it wrote.
+        _publish_cluster_config(
+            s3, locks_bucketname="b", cluster_name="osiris",
+            repo_root=str(tmp_path),
+        )
+        # An edit through a path that does not mirror -- the CLI, before.
+        path.write_text("Region: eu-west-1\n")
+
+        _save_cluster_config(
+            {"Region": "ap-south-1"}, config_path=str(path), etag=None,
+            s3=s3, locks_bucketname="b", cluster_name="osiris",
+        )
+
+        text, _ = get_cluster_config_object(
+            s3, locks_bucketname="b", cluster_name="osiris"
+        )
+        assert "ap-south-1" in text, "the local edit should have been mirrored"
+
+    def test_the_marker_keeps_up_across_successive_edits(self, tmp_path):
+        """The marker has to be rewritten on every mirror, not just at
+        publish. Otherwise it goes stale after the first edit and the
+        *second* local-ahead edit is misdiagnosed as another machine's
+        write -- by this machine, about its own change. Not updating it
+        survived every other test in this class.
+        """
+        from pcluster_core import (_publish_cluster_config,
+                                   _save_cluster_config,
+                                   get_cluster_config_object)
+
+        s3 = self._seeded()
+        path = self._local(tmp_path, self._CONFIG)
+        _publish_cluster_config(
+            s3, locks_bucketname="b", cluster_name="osiris",
+            repo_root=str(tmp_path),
+        )
+
+        for region in ("eu-west-1", "ap-south-1", "sa-east-1"):
+            # Each round: an out-of-band local edit, then a mirror.
+            path.write_text(f"Region: {region}\n")
+            _save_cluster_config(
+                {"Region": region}, config_path=str(path), etag=None,
+                s3=s3, locks_bucketname="b", cluster_name="osiris",
+            )
+            text, _ = get_cluster_config_object(
+                s3, locks_bucketname="b", cluster_name="osiris"
+            )
+            assert region in text, f"round {region} was not mirrored"
+
+    def test_a_second_machines_write_still_refuses(self, tmp_path):
+        """Vacuity guard for the above: recognising 'ahead' must not become
+        'always mirror'. Once someone else writes, our marker no longer
+        matches the store and the local copy really is behind."""
+        from pcluster_core import (ClusterConfigConflict,
+                                   _publish_cluster_config,
+                                   _save_cluster_config,
+                                   put_cluster_config_object)
+
+        s3 = self._seeded()
+        path = self._local(tmp_path, self._CONFIG)
+        _publish_cluster_config(
+            s3, locks_bucketname="b", cluster_name="osiris",
+            repo_root=str(tmp_path),
+        )
+        # Another machine writes after our mirror.
+        put_cluster_config_object(
+            s3, locks_bucketname="b", cluster_name="osiris",
+            text="Region: eu-central-1\n",
+        )
+        path.write_text("Region: eu-west-1\n")
+
+        with pytest.raises(ClusterConfigConflict, match="another machine"):
+            _save_cluster_config(
+                {"Region": "ap-south-1"}, config_path=str(path), etag=None,
+                s3=s3, locks_bucketname="b", cluster_name="osiris",
+            )
+
+    def test_divergence_with_no_marker_claims_no_direction(self, tmp_path):
+        """A machine that has never mirrored cannot know which is newer,
+        and must not pretend. The old message asserted 'the local copy is
+        behind' unconditionally."""
+        from pcluster_core import ClusterConfigConflict, _save_cluster_config
+
+        s3 = self._seeded()
+        path = self._local(tmp_path, "Region: eu-west-1\n")
+
+        with pytest.raises(ClusterConfigConflict) as exc:
+            _save_cluster_config(
+                {"Region": "ap-south-1"}, config_path=str(path), etag=None,
+                s3=s3, locks_bucketname="b", cluster_name="osiris",
+            )
+        msg = str(exc.value)
+        assert "no record of which is newer" in msg
+        assert "is behind" not in msg, "must not claim a direction it cannot know"
+
+    def test_an_unreachable_store_still_edits_locally(self, tmp_path, capsys):
+        """Editing a file on this machine's disk must not depend on the
+        store being reachable -- the rule _publish_cluster_record follows.
+        get_cluster_config_object raises on AccessDenied, so without this
+        the CLI would hard-fail for an operator with cluster permissions
+        but no store permissions."""
+        from botocore.exceptions import ClientError
+
+        from pcluster_core import _save_cluster_config
+
+        class _Denied(self._S3):
+            def get_object(self, **kw):
+                raise ClientError(
+                    {"Error": {"Code": "AccessDenied", "Message": "no"},
+                     "ResponseMetadata": {"HTTPStatusCode": 403}},
+                    "GetObject",
+                )
+
+        path = self._local(tmp_path, self._CONFIG)
+        _save_cluster_config(
+            {"Region": "ap-south-1"}, config_path=str(path), etag=None,
+            s3=_Denied(), locks_bucketname="b", cluster_name="osiris",
+        )
+        assert "ap-south-1" in path.read_text(), "the local edit must land"
+        assert "Shared store unreachable" in capsys.readouterr().out
 
     def test_the_config_is_deleted_only_on_a_confirmed_delete(self):
         from pcluster_core import delete_cluster_config_step
