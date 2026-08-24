@@ -2979,6 +2979,89 @@ class TestTheClusterConfigStore:
         assert "ap-south-1" in path.read_text(), "the local edit must land"
         assert "Shared store unreachable" in capsys.readouterr().out
 
+    def test_a_deleted_config_is_a_conflict_not_a_raw_client_error(self):
+        """S3 answers a conditional write against a missing key with
+        NoSuchKey/404, not 412 -- verified against real S3, not inferred.
+        `_is_conditional_write_rejection` covers 412 and 409 only, so this
+        case escaped as a boto ClientError for a situation
+        ClusterConfigConflict exists to describe.
+        """
+        from pcluster_core import (ClusterConfigConflict,
+                                   put_cluster_config_object)
+
+        s3 = self._S3()
+        with pytest.raises(ClusterConfigConflict, match="was deleted"):
+            put_cluster_config_object(
+                s3, locks_bucketname="b", cluster_name="osiris",
+                text="Region: us-east-2\n", etag='"gone"',
+            )
+
+    @pytest.mark.parametrize("code,status", [
+        ("AccessDenied", 403), ("InternalError", 500), ("SlowDown", 503),
+    ])
+    def test_an_unrelated_error_is_not_reported_as_a_deleted_config(
+        self, code, status
+    ):
+        """The predicate has to discriminate, not just say yes. Returning
+        True for everything satisfies the deleted-config test and turns an
+        IAM denial into "your config was deleted" -- pointing the operator
+        at cluster state for a permissions problem, the same failure
+        `_s3_absence_or_raise` was written to stop."""
+        from botocore.exceptions import ClientError
+
+        from pcluster_core import (ClusterConfigConflict,
+                                   put_cluster_config_object)
+
+        class _Broken(self._S3):
+            def put_object(self, **kw):
+                raise self._err(code, "PutObject", status)
+
+        with pytest.raises(ClientError):
+            put_cluster_config_object(
+                _Broken(), locks_bucketname="b", cluster_name="osiris",
+                text="Region: us-east-2\n", etag='"whatever"',
+            )
+
+    def test_the_two_conflict_causes_read_differently(self):
+        """"Changed" and "deleted" need different remedies -- re-read
+        versus re-publish -- so one message covering both would be worse
+        than the raw error it replaced."""
+        from pcluster_core import (ClusterConfigConflict,
+                                   put_cluster_config_object)
+
+        s3 = self._seeded()
+        _, etag = __import__("pcluster_core").get_cluster_config_object(
+            s3, locks_bucketname="b", cluster_name="osiris"
+        )
+        # Someone else writes: the key exists, our ETag is stale -> 412.
+        put_cluster_config_object(
+            s3, locks_bucketname="b", cluster_name="osiris",
+            text="Region: eu-west-1\n",
+        )
+        with pytest.raises(ClusterConfigConflict) as changed:
+            put_cluster_config_object(
+                s3, locks_bucketname="b", cluster_name="osiris",
+                text="Region: sa-east-1\n", etag=etag,
+            )
+        assert "changed while this edit" in str(changed.value)
+        assert "deleted" not in str(changed.value)
+
+    def test_the_lock_predicate_is_not_widened_to_cover_404(self):
+        """The cluster lock shares `_is_conditional_write_rejection`, and
+        there a vanished object means *nobody holds the lock* -- the
+        opposite of what 412 supports. Only the config store may read a
+        404 as a conflict."""
+        from botocore.exceptions import ClientError
+
+        from pcluster_core import _is_conditional_write_rejection
+
+        gone = ClientError(
+            {"Error": {"Code": "NoSuchKey", "Message": "gone"},
+             "ResponseMetadata": {"HTTPStatusCode": 404}},
+            "PutObject",
+        )
+        assert not _is_conditional_write_rejection(gone)
+
     def test_the_config_is_deleted_only_on_a_confirmed_delete(self):
         from pcluster_core import delete_cluster_config_step
 

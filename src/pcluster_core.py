@@ -986,6 +986,17 @@ def put_cluster_config_object(s3, *, locks_bucketname, cluster_name, text,
                 f"edit was being made. Nothing was written. Re-read it and "
                 f"apply the edit again."
             )
+        if etag and _is_missing_key_rejection(e):
+            # Same class of outcome, different cause, so it gets its own
+            # sentence: the object is not stale, it is gone. Without this
+            # the caller got a raw ClientError for a case the conflict
+            # type exists to describe.
+            raise ClusterConfigConflict(
+                f"The stored configuration for '{cluster_name}' was deleted "
+                f"while this edit was being made. Nothing was written. If the "
+                f"cluster still exists, re-publish its config; if it was torn "
+                f"down, this edit has nothing to apply to."
+            )
         raise
 
 
@@ -1207,6 +1218,27 @@ def _lock_owner_body(*, command):
         "command": command,
         "started": DateTime.now(timezone.utc).isoformat(),
     }).encode("utf-8")
+
+
+def _is_missing_key_rejection(e):
+    """True when a conditional write failed because the object is gone.
+
+    Verified against real S3 (us-east-2, 2026-08-24), not inferred: a
+    PutObject carrying IfMatch against a key that does not exist returns
+    **NoSuchKey / 404**, while a stale ETag on a key that does exist
+    returns PreconditionFailed / 412 and IfNoneMatch="*" on an existing
+    key also returns 412.
+
+    Kept separate from _is_conditional_write_rejection rather than folded
+    into it: that predicate is shared with the cluster lock, where a
+    vanished object means *nobody holds the lock*, which is the opposite
+    of the conclusion 412 supports. Only the config store can read a 404
+    as a conflict, because only there does it mean "the thing I was
+    updating was deleted underneath me".
+    """
+    code = e.response.get("Error", {}).get("Code", "")
+    status = e.response.get("ResponseMetadata", {}).get("HTTPStatusCode")
+    return code == "NoSuchKey" or status == 404
 
 
 def _is_conditional_write_rejection(e):

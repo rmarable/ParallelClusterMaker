@@ -274,7 +274,11 @@ standing constraints for local development.
   three defects that way: it discarded `Bucket`, its `put_object` returned
   no `ETag` (silently disabling the config store's direction detection),
   and it always returned `Contents` with `IsTruncated: False`, so the
-  hand-rolled pagination loop had never run a second iteration.
+  hand-rolled pagination loop had never run a second iteration. Modelling
+  it faithfully also closed a real gap: `PutObject` with `IfMatch` against
+  an absent key returns **404**, not 412 (verified live), so that case
+  escaped `_is_conditional_write_rejection` — it is handled separately,
+  never by widening the predicate the cluster lock shares.
 - **When a test stubs the object under test, at least one test must drive
   the real one.** `handlers/base.py` called a FastMCP method that does not
   exist; every stub defined the same wrong name, so the whole remote
