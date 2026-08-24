@@ -4738,6 +4738,42 @@ def _dump_cluster_config(config_dict):
     return result
 
 
+_EDIT_BLOCKING_STATUSES = frozenset({"UPDATE_IN_PROGRESS"})
+
+
+def _refuse_edit_during_update(cluster_name, region, *, describe_fn=None):
+    """Refuse a config edit while the cluster is mid-update.
+
+    apply_cluster_update returns when CloudFormation *accepts* the update
+    -- it must, since a Lambda cannot block for the ~30 minutes an update
+    takes -- so the cluster lock is released while the stack is still
+    UPDATE_IN_PROGRESS. add_queue/remove_queue take no lock at all, so an
+    edit can land in that window: the store moves on, the cluster
+    converges on what was applied, and nothing detects the divergence.
+    This closes the window at the only point that can see it.
+
+    Only a *confirmed* UPDATE_IN_PROGRESS refuses. A describe that fails
+    -- no credentials, no such cluster, an API error -- lets the edit
+    proceed, the same shape as _check_external_nfs_reachable: this exists
+    to catch a real interleaving, not to make editing a config file
+    depend on AWS being reachable.
+    """
+    if not region:
+        return
+    fn = describe_fn or _describe_cluster_json
+    try:
+        status = (fn(cluster_name, region) or {}).get("clusterStatus", "")
+    except Exception:
+        return
+    if status in _EDIT_BLOCKING_STATUSES:
+        raise ClusterConfigConflict(
+            f"'{cluster_name}' is {status}: a configuration update is still "
+            f"being applied. Editing now would leave the stored config ahead "
+            f"of the running cluster with nothing to detect it. Wait for the "
+            f"update to finish, then re-run this edit."
+        )
+
+
 def _same_config(a, b):
     """Whether two config documents are the same configuration.
 
@@ -5171,6 +5207,7 @@ def core_add_queue(
     capacity_type="spot", initial_size=2, max_size=8, maintain_initial_size=False,
     root_volume_size=250, root_volume_type="gp3", root_volume_iops=3000,
     root_volume_throughput=125, s3=None, locks_bucketname=None,
+    describe_fn=None,
 ):
     # Month-day-hour-minute, not %Y%m%d-%H%M: "compute-20260725-1430" is 21
     # chars, so the derived "-resource" name overflowed PCluster's 25-char
@@ -5207,6 +5244,7 @@ def core_add_queue(
     additional_iam = _get_additional_iam_policies(queues)
     root_volume_encrypted = _get_root_volume_encrypted(queues)
     region = config["Region"]
+    _refuse_edit_during_update(cluster_name, region, describe_fn=describe_fn)
 
     capacity_type_yaml = "SPOT" if capacity_type == "spot" else "ONDEMAND"
     min_count = initial_size if maintain_initial_size else 0
@@ -5281,12 +5319,13 @@ class QueueRemoveResult:
 
 
 def core_remove_queue(*, cluster_name, repo_root, queue_name, s3=None,
-                      locks_bucketname=None):
+                      locks_bucketname=None, describe_fn=None):
     config, config_path, _config_etag = _load_cluster_config(
         cluster_name, repo_root, s3=s3, locks_bucketname=locks_bucketname
     )
     queues = config["Scheduling"]["SlurmQueues"]
     region = config["Region"]
+    _refuse_edit_during_update(cluster_name, region, describe_fn=describe_fn)
 
     existing_names = [q.get("Name") for q in queues]
     if queue_name not in existing_names:

@@ -3201,3 +3201,117 @@ class TestTheSmallerReviewFindings:
             if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
         ]
         assert "resolve_region_from_az" in names
+
+
+class TestAConfigEditIsRefusedMidUpdate:
+    """apply_cluster_update returns when CloudFormation *accepts* the
+    update -- it must, since a Lambda cannot block for the ~30 minutes an
+    update takes -- so the cluster lock is released while the stack is
+    still UPDATE_IN_PROGRESS. add_queue/remove_queue take no lock at all,
+    so an edit lands in that window, the store moves on, the cluster
+    converges on what was applied, and nothing detects the divergence.
+
+    Only a *confirmed* UPDATE_IN_PROGRESS refuses. The precedent is
+    _check_external_nfs_reachable: a check that runs from wherever the
+    operator happens to be must not make an ordinary operation depend on
+    AWS being reachable.
+    """
+
+    # A queue must already exist: core_add_queue derives the new queue's
+    # subnets from the existing ones (_get_subnet_ids).
+    _CONFIG = """\
+Region: us-east-2
+Image:
+  Os: ubuntu2404
+HeadNode:
+  InstanceType: c8g.xlarge
+  Networking:
+    SubnetId: subnet-0abc123
+Scheduling:
+  Scheduler: slurm
+  SlurmQueues:
+    - Name: compute
+      CapacityType: SPOT
+      Networking:
+        SubnetIds:
+          - subnet-0abc123
+      ComputeResources:
+        - Name: compute-resource
+          Instances:
+            - InstanceType: c5.xlarge
+          MinCount: 0
+          MaxCount: 8
+"""
+
+    def _repo(self, tmp_path):
+        import os
+
+        os.makedirs(tmp_path / "active_clusters" / "osiris")
+        (tmp_path / "active_clusters" / "osiris" / "config.osiris").write_text(
+            self._CONFIG
+        )
+        return str(tmp_path)
+
+    def _add(self, tmp_path, describe_fn):
+        from pcluster_core import core_add_queue
+
+        return core_add_queue(
+            cluster_name="osiris", repo_root=self._repo(tmp_path),
+            queue_type="cpu", ec2_instance_type="c5.xlarge",
+            queue_name="q1", describe_fn=describe_fn,
+        )
+
+    def test_an_update_in_progress_refuses_the_edit(self, tmp_path):
+        from pcluster_core import ClusterConfigConflict
+
+        with pytest.raises(ClusterConfigConflict, match="UPDATE_IN_PROGRESS"):
+            self._add(tmp_path, lambda n, r: {"clusterStatus": "UPDATE_IN_PROGRESS"})
+
+    def test_the_config_is_untouched_when_the_edit_is_refused(self, tmp_path):
+        """Refusing after writing would be worse than not checking."""
+        import os
+
+        from pcluster_core import ClusterConfigConflict
+
+        root = self._repo(tmp_path)
+        path = os.path.join(root, "active_clusters", "osiris", "config.osiris")
+        with pytest.raises(ClusterConfigConflict):
+            from pcluster_core import core_add_queue
+
+            core_add_queue(
+                cluster_name="osiris", repo_root=root, queue_type="cpu",
+                ec2_instance_type="c5.xlarge", queue_name="q1",
+                describe_fn=lambda n, r: {"clusterStatus": "UPDATE_IN_PROGRESS"},
+            )
+        assert open(path).read() == self._CONFIG
+
+    def test_a_settled_cluster_still_accepts_the_edit(self, tmp_path):
+        """Vacuity guard: refusing on every status would break queue
+        editing entirely."""
+        result = self._add(
+            tmp_path, lambda n, r: {"clusterStatus": "UPDATE_COMPLETE"}
+        )
+        assert result.queue_name == "q1"
+
+    @pytest.mark.parametrize("boom", [
+        lambda n, r: (_ for _ in ()).throw(RuntimeError("no credentials")),
+        lambda n, r: None,
+        lambda n, r: {},
+    ])
+    def test_an_unanswerable_describe_lets_the_edit_proceed(self, tmp_path, boom):
+        """A describe that fails -- no credentials, no such cluster, an API
+        error -- must not block editing a config file. Only a confirmed
+        in-flight update does."""
+        assert self._add(tmp_path, boom).queue_name == "q1"
+
+    def test_remove_queue_is_guarded_too(self, tmp_path):
+        """Both editors, or the guard is a coin flip on which one the
+        caller reached for."""
+        from pcluster_core import ClusterConfigConflict, core_remove_queue
+
+        root = self._repo(tmp_path)
+        with pytest.raises(ClusterConfigConflict, match="UPDATE_IN_PROGRESS"):
+            core_remove_queue(
+                cluster_name="osiris", repo_root=root, queue_name="compute",
+                describe_fn=lambda n, r: {"clusterStatus": "UPDATE_IN_PROGRESS"},
+            )

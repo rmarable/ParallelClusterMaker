@@ -233,7 +233,11 @@ standing constraints for local development.
   take no cluster lock, so concurrent edits are an ordinary lost-update
   race and `ClusterConfigConflict` is what makes one visible. A *local*
   edit is conditional too, and is refused when the stored copy is a
-  different configuration from the one it started from.
+  different configuration from the one it started from. The bucket is
+  addressed in the **cluster's** region, not the process's — everything
+  that writes it already was. `add_queue`/`remove_queue` also refuse while
+  the stack is `UPDATE_IN_PROGRESS`: `apply_cluster_update` returns on
+  CloudFormation's acceptance, so the lock is released mid-update.
 - **`MakeClusterParams` carries no `region`** — the CLI resolves it from
   the AZ-verification call and passes it to `core_create_cluster`
   separately, so every shim must too. MCP's `create_cluster` read

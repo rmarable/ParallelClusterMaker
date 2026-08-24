@@ -927,3 +927,81 @@ class TestTheDefaultsFileReachesTheMcpSurface:
             )
         assert refused.is_error, "the same value as an override is still refused"
         assert "post_install_script" in _text(refused)
+
+
+class TestTheStoreIsAddressedInTheClustersRegion:
+    """The bucket is per account+region. Everything that *writes* it --
+    core_create_cluster publishing, core_delete_cluster removing, the S3
+    lock -- derives it from the cluster's region. The MCP read path derived
+    it from the process environment instead, so a laptop with
+    AWS_DEFAULT_REGION=us-east-1 building into us-west-2 wrote the record
+    to one bucket and looked for it in another, and teardown could never
+    reach whatever the MCP path had written to the wrong one.
+    """
+
+    def _seen_regions(self, monkeypatch, rec_region):
+        """Record which region every store client is built for."""
+        import boto3
+
+        import mcp_server.tools as t
+
+        seen = {"clients": [], "buckets": []}
+        monkeypatch.setattr(t, "_aws_account_id", lambda: "123456789012")
+        monkeypatch.setattr(
+            t, "_store_region", lambda: "us-east-1"  # the ambient region
+        )
+
+        real_client = boto3.client
+
+        def _fake_client(name, region_name=None, **kw):
+            seen["clients"].append(region_name)
+            return object()
+
+        monkeypatch.setattr(boto3, "client", _fake_client)
+        s3, bucket = t._record_store(rec_region)
+        seen["buckets"].append(bucket)
+        monkeypatch.setattr(boto3, "client", real_client)
+        return seen
+
+    def test_a_cluster_region_wins_over_the_ambient_one(self, monkeypatch):
+        seen = self._seen_regions(monkeypatch, "us-west-2")
+        assert seen["clients"] == ["us-west-2"]
+        assert seen["buckets"] == [
+            "parallelclustermaker-locks-123456789012-us-west-2"
+        ]
+
+    def test_the_ambient_region_is_the_fallback(self, monkeypatch):
+        """Only for the two cases with no cluster to ask: enumerating the
+        store, and a cluster this machine has no local record for."""
+        seen = self._seen_regions(monkeypatch, None)
+        assert seen["clients"] == ["us-east-1"]
+        assert seen["buckets"] == [
+            "parallelclustermaker-locks-123456789012-us-east-1"
+        ]
+
+    def test_every_tool_with_a_record_passes_its_region(self):
+        """Asserted over the source: a call site that drops the argument
+        silently addresses the wrong bucket, and no stub can see that
+        because the stub is handed whichever client the caller built."""
+        import ast
+        import os
+
+        import mcp_server.tools as t
+
+        src = open(t.__file__).read()
+        tree = ast.parse(src)
+        bare, passed = [], []
+        for node in ast.walk(tree):
+            if (isinstance(node, ast.Call)
+                    and isinstance(node.func, ast.Name)
+                    and node.func.id == "_record_store"):
+                (passed if node.args else bare).append(node.lineno)
+
+        assert passed, "no call site passes a region"
+        # The two legitimate bare calls: _load_records (enumeration) and
+        # _require_record's fallback for a cluster with no local record.
+        assert len(bare) == 2, (
+            f"expected exactly 2 region-less _record_store() calls, found "
+            f"{len(bare)} at lines {bare}"
+        )
+        assert os.path.basename(t.__file__) == "tools.py"

@@ -153,8 +153,23 @@ def _store_region():
     )
 
 
-def _record_store():
+def _record_store(region=None):
     """(s3 client, bucket) for the shared record store, or (None, None).
+
+    `region` is the *cluster's* region and is what callers pass whenever
+    they have a record in hand. That is the whole point: the bucket is
+    per account+region, and everything that writes it -- core_create_cluster
+    publishing, core_delete_cluster removing -- derives it from the
+    cluster's region, as the S3 lock already does. Deriving it from the
+    process environment instead meant a laptop with AWS_DEFAULT_REGION
+    us-east-1 building into us-west-2 wrote the record to one bucket and
+    looked for it in another, and teardown could never reach whatever the
+    MCP path had written.
+
+    _store_region() remains the fallback for the two cases with no cluster
+    to ask: enumerating the store, and looking up a cluster this machine
+    has no local record for. A server discovers its own region's clusters;
+    cross-region discovery would mean scanning every region on every call.
 
     Returns (None, None) rather than raising whenever the store cannot be
     addressed -- no region, no credentials, an STS call that fails. Every
@@ -163,7 +178,7 @@ def _record_store():
     """
     import boto3
 
-    region = _store_region()
+    region = region or _store_region()
     if not region:
         return None, None
     try:
@@ -288,10 +303,17 @@ def _plain(result):
 
 def _require_record(cluster_name):
     _validate_cluster_name(cluster_name)
-    s3, bucket = _record_store()
-    rec = _read_cluster_record(
-        cluster_name, _repo_root(), s3=s3, locks_bucketname=bucket
-    )
+    # Local first with no store at all: a cluster this machine built is
+    # answered from its own vars file, and its region then addresses the
+    # bucket for every later store call. Only a cluster with no local
+    # record falls back to the ambient region, which is the one case with
+    # nothing better to ask.
+    rec = _read_cluster_record(cluster_name, _repo_root())
+    if rec is None:
+        s3, bucket = _record_store()
+        rec = _read_cluster_record(
+            cluster_name, _repo_root(), s3=s3, locks_bucketname=bucket
+        )
     if rec is None:
         raise PClusterMakerError(
             f"No cluster named {cluster_name!r} is tracked here: no vars file "
@@ -374,8 +396,8 @@ def register_tools(mcp, *, remote, tier=None):
     @tool
     def list_queues(cluster_name: str) -> dict:
         """List the Slurm queues defined in a cluster's config."""
-        _validate_cluster_name(cluster_name)
-        _s3, _bucket = _record_store()
+        rec = _require_record(cluster_name)
+        _s3, _bucket = _record_store(rec.region)
         result = core_list_queues(
             cluster_name=cluster_name, repo_root=_repo_root(),
             s3=_s3, locks_bucketname=_bucket,
@@ -410,8 +432,12 @@ def register_tools(mcp, *, remote, tier=None):
         which is local-transport-only because it execs an interactive ssh.
         This returns the resolved target so a caller can see it.
         """
-        _validate_cluster_name(cluster_name)
-        rec = _read_cluster_record(cluster_name, _repo_root()) or {}
+        # _require_record, not `_read_cluster_record(...) or {}`: the empty
+        # dict made this answer *confidently* from no data -- a login-node
+        # cluster resolved to HeadNode rather than erroring -- and it was
+        # the one record reader never threaded to the store, so a cluster
+        # only the store knows about looked untracked.
+        rec = dataclasses.asdict(_require_record(cluster_name))
         node_type = core_resolve_access_node_type(
             rec, cluster_name,
             login_node_requested=login_node, head_node_requested=head_node,
@@ -429,8 +455,8 @@ def register_tools(mcp, *, remote, tier=None):
         running cluster. apply_queue_config is the separate, deliberately
         separate step that does (stop fleet, update, restart).
         """
-        _validate_cluster_name(cluster_name)
-        _s3, _bucket = _record_store()
+        rec = _require_record(cluster_name)
+        _s3, _bucket = _record_store(rec.region)
         return _plain(core_add_queue(
             cluster_name=cluster_name, repo_root=_repo_root(),
             s3=_s3, locks_bucketname=_bucket,
@@ -444,8 +470,8 @@ def register_tools(mcp, *, remote, tier=None):
     def remove_queue(cluster_name: str, queue_name: str) -> dict:
         """Remove a Slurm queue from a cluster's config. Config-only, like
         add_queue -- apply_queue_config is what reaches the cluster."""
-        _validate_cluster_name(cluster_name)
-        _s3, _bucket = _record_store()
+        rec = _require_record(cluster_name)
+        _s3, _bucket = _record_store(rec.region)
         return _plain(core_remove_queue(
             cluster_name=cluster_name, repo_root=_repo_root(),
             s3=_s3, locks_bucketname=_bucket, queue_name=queue_name,
@@ -497,7 +523,7 @@ def register_tools(mcp, *, remote, tier=None):
         not be followed by a blind restart.
         """
         rec = _require_record(cluster_name)
-        s3, bucket = _record_store()
+        s3, bucket = _record_store(rec.region)
         with _cluster_lock(cluster_name, rec.region, "mcp apply_cluster_update"):
             return _plain(core_apply_cluster_update(
                 cluster_name=cluster_name, config_path=config_path,
