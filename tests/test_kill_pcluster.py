@@ -640,3 +640,257 @@ class TestTheDeleteWaitDropsOneKnownBenignUpstreamError:
         assert wrapped, (
             "_live_status must describe inside quiet_missing_config_version_noise()"
         )
+
+
+class TestTeardownFinalizeOnly:
+    """finalize_only=True is the other half of wait=False.
+
+    wait=False returns before every teardown step, so on its own it leaves
+    the IAM policies, the S3 bucket, the credentials and the shared-store
+    record behind with nothing able to remove them -- a truncated
+    capability, where CLAUDE.md's 900s-ceiling bullet calls for a
+    decomposed one. This half finishes the job, and the property that
+    makes it safe for a caller that cannot block is that it is structurally
+    incapable of waiting, not that it promises not to.
+    """
+
+    def _finalize(self, staged, **kw):
+        return pcluster_core.core_delete_cluster(
+            cluster_name=CLUSTER, cluster_owner=OWNER, region="us-east-1",
+            repo_root=str(staged["root"]), delete_s3_bucketname="true",
+            debug_mode=False, finalize_only=True, **kw
+        )
+
+    def test_it_never_initiates_a_delete(self, staged):
+        """The stack is already gone; calling delete-cluster again would at
+        best be a no-op and at worst re-enter a delete on a rebuilt name."""
+        self._finalize(staged)
+        assert staged["pc_lib"].delete_calls == []
+
+    def test_it_reaches_the_teardown_and_removes_local_state(self, staged):
+        """The whole point: what wait=False left behind is now gone."""
+        result = self._finalize(staged)
+        assert result.success is True
+        assert result.exit_code == 0
+        assert not staged["serial_file"].exists()
+        assert not staged["vars_file"].exists()
+
+    def test_it_cannot_wait(self, staged, monkeypatch):
+        """The non-blocking guarantee is structural. A stack still in
+        DELETE_IN_PROGRESS must cost exactly one describe -- if this path
+        could ever reach the retry loop it would block for up to 40
+        minutes, which under a 900s function timeout is a kill mid-teardown
+        with the cluster lock held by a dead process.
+
+        A slept-through retry loop is invisible in the return value (the
+        refusal below is identical either way), so this asserts on the call
+        count, which is the only thing that can see it.
+        """
+        pc_lib = _FakePcLib(describe_sequence=[{"clusterStatus": "DELETE_IN_PROGRESS"}])
+        monkeypatch.setitem(sys.modules, "pcluster.lib", pc_lib)
+        slept = []
+        monkeypatch.setattr(pcluster_core.time, "sleep", lambda s: slept.append(s))
+        self._finalize(staged)
+        # One for core_delete_cluster's own opening describe, one for the gate.
+        assert len(pc_lib.describe_calls) == 2
+        assert slept == []
+
+    @pytest.mark.parametrize("status", ["DELETE_IN_PROGRESS", "DELETE_FAILED", "CREATE_COMPLETE"])
+    def test_it_refuses_unless_the_stack_is_confirmed_gone(self, staged, monkeypatch, status):
+        monkeypatch.setitem(
+            sys.modules, "pcluster.lib",
+            _FakePcLib(describe_sequence=[{"clusterStatus": status}]),
+        )
+        result = self._finalize(staged)
+        assert result.success is False
+        assert result.exit_code == 1
+
+    @pytest.mark.parametrize("status", ["DELETE_IN_PROGRESS", "DELETE_FAILED", "CREATE_COMPLETE"])
+    def test_a_refusal_destroys_nothing(self, staged, monkeypatch, status):
+        """Refusing has to mean refusing. Tearing IAM or S3 out from under
+        a stack that still exists is how a DELETE_FAILED is manufactured --
+        the same reasoning the wait=False path already documents -- and the
+        local files are what a later finalize needs to try again."""
+        monkeypatch.setitem(
+            sys.modules, "pcluster.lib",
+            _FakePcLib(describe_sequence=[{"clusterStatus": status}]),
+        )
+        self._finalize(staged)
+        assert staged["serial_file"].exists()
+        assert staged["vars_file"].exists()
+
+    def test_the_refusal_explains_the_state_rather_than_naming_a_constant(
+        self, staged, monkeypatch, capsys,
+    ):
+        """The gate reuses the wait loop, so a stack that merely still
+        exists comes back as `TIMED_OUT` — accurate inside that loop, and
+        meaningless to whoever reads the refusal. Printing the raw constant
+        told a live operator nothing; accepting either spelling is what let
+        that through the first time.
+        """
+        monkeypatch.setitem(
+            sys.modules, "pcluster.lib",
+            _FakePcLib(describe_sequence=[{"clusterStatus": "DELETE_IN_PROGRESS"}]),
+        )
+        self._finalize(staged)
+        out = capsys.readouterr().out
+        assert "confirmed gone" in out
+        assert "the stack still exists" in out
+        assert "TIMED_OUT" not in out, "internal constant leaked to the operator"
+
+    def test_delete_failed_is_named_verbatim(self, staged, monkeypatch, capsys):
+        """The opposite of the rule above: DELETE_FAILED is the string the
+        operator greps the CloudFormation console for, so it is passed
+        through rather than translated."""
+        monkeypatch.setitem(
+            sys.modules, "pcluster.lib",
+            _FakePcLib(describe_sequence=[{"clusterStatus": "DELETE_FAILED"}]),
+        )
+        self._finalize(staged)
+        out = capsys.readouterr().out
+        assert "DELETE_FAILED" in out
+        assert "re-run the delete" in out
+
+    def test_no_banner_claims_the_stack_is_gone_before_the_gate_looks(
+        self, staged, monkeypatch, capsys,
+    ):
+        """The banner printed "The stack is already gone" ahead of the only
+        call that could know, and against a live DELETE_IN_PROGRESS that
+        was simply false — the operator saw it asserted and then denied
+        four lines later."""
+        monkeypatch.setitem(
+            sys.modules, "pcluster.lib",
+            _FakePcLib(describe_sequence=[{"clusterStatus": "DELETE_IN_PROGRESS"}]),
+        )
+        self._finalize(staged)
+        out = capsys.readouterr().out
+        assert "gone" not in out.split("*** ERROR ***")[0], (
+            "a refused finalize must not announce the teardown it refused"
+        )
+
+    def test_the_banner_appears_once_the_gate_passes(self, staged, capsys):
+        """Vacuity guard: 'no banner' must not be satisfied by deleting it."""
+        self._finalize(staged)
+        out = capsys.readouterr().out
+        assert "Finalizing teardown: killme" in out
+        assert "The stack is confirmed gone" in out
+
+    def test_a_failed_describe_is_not_a_deleted_stack(self, staged, monkeypatch):
+        """This repo's standing rule, and the one an over-eager gate gets
+        wrong: an expired token or a throttle must not read as 'gone' and
+        authorize the destruction of the credentials. The waiting path
+        re-raises here; so must this one."""
+        boom = RuntimeError("ExpiredToken")
+        monkeypatch.setitem(
+            sys.modules, "pcluster.lib",
+            _FakePcLib(describe_sequence=[boom]),
+        )
+        with pytest.raises(RuntimeError):
+            self._finalize(staged)
+        assert staged["serial_file"].exists()
+
+    def test_a_cluster_already_absent_finalizes(self, staged, monkeypatch):
+        """NotFoundException is the ordinary case -- the stack is gone, which
+        is exactly the precondition -- not an error."""
+        monkeypatch.setitem(
+            sys.modules, "pcluster.lib",
+            _FakePcLib(describe_sequence=[NotFoundException("gone")]),
+        )
+        result = self._finalize(staged)
+        assert result.success is True
+        assert not staged["vars_file"].exists()
+
+    def test_the_results_sync_is_skipped(self, staged, monkeypatch):
+        """The sync reads off the head node over ssh and runs before the
+        delete on the waiting path. On this path the stack that owned that
+        node is gone by definition, so attempting it can only produce a
+        warning about results it was never going to reach."""
+        staged["vars_file"].write_text(_vars_yaml(enable_hpc_benchmarks="true"))
+        called = []
+        monkeypatch.setattr(
+            pcluster_core, "_sync_performance_results_to_s3",
+            lambda **kw: called.append(kw) or (True, ""),
+        )
+        self._finalize(staged)
+        assert called == []
+
+    def test_the_waiting_path_still_syncs(self, staged, monkeypatch):
+        """Vacuity guard for the test above: 'skipped on finalize' must not
+        be satisfied by the sync having been deleted outright."""
+        staged["vars_file"].write_text(_vars_yaml(enable_hpc_benchmarks="true"))
+        called = []
+        monkeypatch.setattr(
+            pcluster_core, "_sync_performance_results_to_s3",
+            lambda **kw: called.append(kw) or (True, ""),
+        )
+        pcluster_core.core_delete_cluster(
+            cluster_name=CLUSTER, cluster_owner=OWNER, region="us-east-1",
+            repo_root=str(staged["root"]), delete_s3_bucketname="true",
+            debug_mode=False, wait=False,
+        )
+        assert len(called) == 1
+
+    def test_there_is_exactly_one_teardown_body(self):
+        """What makes the decomposition a decomposition rather than a second
+        implementation: both modes fall into the *same* steps.
+
+        Two copies would drift -- a step added to the waiting path only
+        would leave a resource that finalize can never clean up, which is
+        precisely the class of defect this whole change exists to fix, and
+        no behavioral test comparing the two modes would catch it if the
+        new step were simply absent from both fixtures.
+        """
+        import ast
+        import inspect
+
+        src = inspect.getsource(pcluster_core.core_delete_cluster)
+        tree = ast.parse(src.lstrip())
+        counts = {}
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+                counts[node.func.id] = counts.get(node.func.id, 0) + 1
+        for step in (
+            "run_credential_teardown_steps",
+            "run_resource_teardown_steps",
+            "delete_cluster_record_step",
+            "delete_cluster_config_step",
+            "_delete_sns_topic_step",
+        ):
+            assert counts.get(step) == 1, (
+                f"{step} is called {counts.get(step)} times; the teardown body "
+                f"must be shared by the waiting and finalize paths, not duplicated"
+            )
+
+    def test_finalize_only_defaults_to_false(self, staged):
+        """The CLI shim passes neither wait nor finalize_only, so the
+        defaults are what preserve today's blocking teardown."""
+        import inspect
+
+        sig = inspect.signature(pcluster_core.core_delete_cluster)
+        assert sig.parameters["finalize_only"].default is False
+
+    @pytest.mark.parametrize("status", ["DELETE_IN_PROGRESS", "DELETE_FAILED", "CREATE_COMPLETE"])
+    def test_a_refusal_runs_no_teardown_steps(self, staged, monkeypatch, status):
+        """The return value cannot see this, and DELETE_FAILED is why.
+
+        Letting DELETE_FAILED past the gate still exits non-zero -- the
+        waiting path's own cf_delete_failed branch produces exactly that --
+        so every assertion on success/exit_code passes while the IAM role
+        and the S3 bucket are stripped from a stack that still exists. The
+        waiting path does that on purpose, having just tried the delete
+        itself; arriving here means an earlier delete_cluster failed, and
+        the answer to that is to re-run the delete, not to scavenge the
+        resources it still depends on.
+        """
+        monkeypatch.setitem(
+            sys.modules, "pcluster.lib",
+            _FakePcLib(describe_sequence=[{"clusterStatus": status}]),
+        )
+        ran = []
+        for step in ("run_credential_teardown_steps", "run_resource_teardown_steps"):
+            monkeypatch.setattr(
+                pcluster_core, step,
+                lambda _s=step, **kw: ran.append(_s) or [],
+            )
+        self._finalize(staged)
+        assert ran == []

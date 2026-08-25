@@ -851,17 +851,29 @@ _DELETE_POLL_SECONDS = 30
 
 
 def _elapsed_str(seconds):
-    """Fixed-width elapsed time for a progress line: 02m30s.
+    """Elapsed time for a progress line: " 1m", "13m", " 1m30s".
 
-    Zero-padded on both fields so the column after it never moves. Neither
-    wait can reach 100 minutes (create is 60 polls x 60s, delete 80 x 30s),
-    so two digits of minutes is enough for the life of any run.
+    Three rules, each for its own reason:
 
-    The delete wait polls twice a minute, so whole-minute resolution
-    printed every label twice and read as a stuck loop.
+    * **Minutes are space-padded to two, never zero-padded.** `01m` reads
+      like a timestamp and this is a duration; a leading space keeps the
+      minutes column aligned without pretending to be one.
+    * **A whole minute drops its seconds.** The create wait polls exactly
+      once a minute, so every label carried a redundant "00s".
+    * **Seconds keep their leading zero when present.** `1m5s` and `1m50s`
+      are different quantities; dropping it there is ambiguous.
+
+    The minutes field is therefore one width for any run either wait can
+    reach (neither gets to 100 minutes: create is 60 polls x 60s, delete
+    80 x 30s). The delete wait still alternates " 0m30s"/" 1m", so the
+    label as a whole varies -- the property the original report was about
+    is that every poll gets a *distinct* label, since whole-minute
+    resolution printed each one twice and read as a stuck loop.
     """
     minutes, secs = divmod(int(seconds), 60)
-    return f"{minutes:02d}m{secs:02d}s"
+    if secs == 0:
+        return f"{minutes:>2d}m"
+    return f"{minutes:>2d}m{secs:02d}s"
 
 
 _UPSTREAM_LOGGER = "pcluster.aws.common"
@@ -5861,7 +5873,7 @@ def _format_destruction_summary(
 
 def core_delete_cluster(
     *, cluster_name, cluster_owner, region, repo_root,
-    delete_s3_bucketname, debug_mode, wait=True,
+    delete_s3_bucketname, debug_mode, wait=True, finalize_only=False,
 ):
     """Tear down a cluster via boto3/pcluster.lib, replacing the
     ansible-playbook subprocess call to delete_pcluster.yml -- which stays
@@ -5885,6 +5897,18 @@ def core_delete_cluster(
     "preflight for display, core re-derives before acting" tradeoff already
     used for stop_pcluster.py/start_pcluster.py and manage_pcluster_
     queue.py's -W flow.
+
+    finalize_only=True runs the second half alone: it never calls
+    delete-cluster and never waits, requiring instead that the stack is
+    already gone. wait=False returns before every step below, so one call
+    leaves the IAM policies, the S3 bucket, the credentials and the store
+    record behind. A second wait=False call does clean them up -- an
+    absent stack makes _initiate_cluster_delete report already_gone, which
+    classifies as _CLUSTER_NOT_FOUND rather than _KICKED_OFF -- but only
+    by issuing another delete-cluster against the name first, which
+    deletes the new stack if that name has been rebuilt since, and which
+    silently no-ops again if the stack is still deleting. This mode is
+    that second call made explicit and made safe.
     """
     from pcluster_aux_data import p_val
     import pcluster.lib as pc
@@ -5981,15 +6005,19 @@ def core_delete_cluster(
 
         start_ts = teardown_timestamp()
         print("")
-        print("=" * 65)
-        print(f"Destroying: {cluster_name} in {az}")
-        print(f"Start Time: {start_ts}")
-        print("")
-        print("This process will take approximately 15-20 minutes to complete.")
-        print("=" * 65)
-        print("")
+        if not finalize_only:
+            print("=" * 65)
+            print(f"Destroying: {cluster_name} in {az}")
+            print(f"Start Time: {start_ts}")
+            print("")
+            print("This process will take approximately 15-20 minutes to complete.")
+            print("=" * 65)
+            print("")
 
-        if enable_hpc_benchmarks:
+        # Deliberately not on the finalize path: the sync reads off the head
+        # node over ssh, and by then the stack that owned it is gone. The
+        # wait=False half already ran it, while the node was still up.
+        if enable_hpc_benchmarks and not finalize_only:
             _head_ip = _pclib_head_ip(pc.describe_cluster, cluster_name, region)
             _sync_ok, _sync_detail = _sync_performance_results_to_s3(
                 head_ip=_head_ip, ssh_keypair=ssh_keypair, ec2_user=ec2_user,
@@ -6010,19 +6038,59 @@ def core_delete_cluster(
         def _print_teardown_progress(attempt, status, cfn_status):
             """Same scoped, disclosed exception as the create side's own
             progress printer: this wait was previously entirely silent."""
-            detail = f" (CloudFormation: {cfn_status})" if cfn_status else ""
+            # Only when it says something the cluster status does not --
+            # see the create-side printer for why.
+            detail = (
+                f" (CloudFormation: {cfn_status})"
+                if cfn_status and cfn_status != status else ""
+            )
             elapsed = _elapsed_str((attempt + 1) * _DELETE_POLL_SECONDS)
             print(
                 f"  [ {elapsed} ] {cluster_name}: "
                 f"{status or 'status unavailable'}{detail}"
             )
 
-        with quiet_missing_config_version_noise():
-            outcome = run_cluster_delete_and_classify(
-                pc.delete_cluster, pc.describe_cluster, cluster_name, region,
-                progress_fn=_print_teardown_progress, wait=wait,
-                delay_seconds=_DELETE_POLL_SECONDS,
+        if finalize_only:
+            # One describe, no delete call, no wait loop -- so this path
+            # cannot block past a single API round trip no matter what the
+            # stack is doing. That is structural rather than a precondition
+            # check, which is the property that makes it safe under a 900s
+            # function timeout where the waiting teardown is not.
+            with quiet_missing_config_version_noise():
+                terminal_state = _confirm_stack_is_gone(
+                    pc.describe_cluster, cluster_name, region,
+                )
+            if terminal_state not in (_CLUSTER_NOT_FOUND, _DELETE_COMPLETE):
+                print("")
+                print("*** ERROR ***")
+                print(f"Cannot finalize teardown of '{cluster_name}': the stack is not")
+                print(f"confirmed gone -- {_finalize_refusal_reason(terminal_state)}.")
+                print("Deleting the IAM role or the S3 bucket out from under a stack that")
+                print("still exists is exactly how a DELETE_FAILED gets manufactured.")
+                print("Poll until the stack is gone, then finalize:")
+                print(f"  pcluster describe-cluster --cluster-name {cluster_name} --region {region}")
+                return DeleteClusterResult(
+                    cluster_name=cluster_name, success=False, exit_code=1,
+                    rebuild_command=_rebuild_cmd,
+                )
+            outcome = ClusterDeleteOutcome(
+                terminal_state,
+                *_classify_cluster_delete_outcome(terminal_state, cluster_name),
             )
+            print("=" * 65)
+            print(f"Finalizing teardown: {cluster_name} in {az}")
+            print(f"Start Time: {start_ts}")
+            print("")
+            print("The stack is confirmed gone; this removes what it left behind.")
+            print("=" * 65)
+            print("")
+        else:
+            with quiet_missing_config_version_noise():
+                outcome = run_cluster_delete_and_classify(
+                    pc.delete_cluster, pc.describe_cluster, cluster_name, region,
+                    progress_fn=_print_teardown_progress, wait=wait,
+                    delay_seconds=_DELETE_POLL_SECONDS,
+                )
 
         if outcome.terminal_state == _KICKED_OFF:
             # Workstream 4: the caller asked to initiate the delete without
@@ -6037,7 +6105,8 @@ def core_delete_cluster(
             print("")
             print(f"Deletion of cluster '{cluster_name}' was initiated and NOT waited on.")
             print("Nothing has been cleaned up yet -- the stack is still deleting.")
-            print("Poll until the stack is gone, then re-run to finish teardown:")
+            print("Poll until the stack is gone, then finish the teardown -- either")
+            print("the CLI, or finalize_cluster_teardown over MCP:")
             print(f"  pcluster describe-cluster --cluster-name {cluster_name} --region {region}")
             print(f"  ./kill_pcluster.py -N {cluster_name} -O {cluster_owner} -A {az}")
             return DeleteClusterResult(
@@ -9149,7 +9218,15 @@ def core_create_cluster(*, params, repo_root, region, cluster_build_command, ans
         one without opening the CloudFormation console. The final build
         summary after it is still byte-identical."""
         elapsed = _elapsed_str((attempt + 1) * _CREATE_POLL_SECONDS)
-        detail = f" (CloudFormation: {cfn_status})" if cfn_status else ""
+        # Only when it says something the cluster status does not. The two
+        # agree for the whole of a healthy build, so printing both made
+        # every line carry a duplicate; they diverge exactly when it
+        # matters -- a failed create reads CREATE_FAILED beside
+        # CloudFormation's ROLLBACK_IN_PROGRESS.
+        detail = (
+            f" (CloudFormation: {cfn_status})"
+            if cfn_status and cfn_status != status else ""
+        )
         print(
             f"  [ {elapsed} ] {cluster_name}: {status or 'status unavailable'}{detail}"
         )
@@ -9921,6 +9998,38 @@ def _wait_for_cluster_delete(
     if last_exc is not None:
         raise last_exc
     return _TIMED_OUT
+
+
+def _finalize_refusal_reason(terminal_state):
+    """Operator-facing wording for a state the finalize gate rejects.
+
+    The gate reuses the wait loop, so a stack that simply still exists
+    comes back as TIMED_OUT -- accurate inside that loop, where it means
+    "no terminal state within the retries", and meaningless to whoever
+    reads the refusal. DELETE_FAILED is passed through verbatim because
+    that is the string the operator will grep the CloudFormation console
+    for."""
+    if terminal_state == _DELETE_FAILED:
+        return "the stack reached DELETE_FAILED, so re-run the delete rather than finalizing"
+    if terminal_state == _TIMED_OUT:
+        return "the stack still exists (it is not in any deleted state yet)"
+    return f"unrecognized state: {terminal_state}"
+
+
+def _confirm_stack_is_gone(describe_fn, cluster_name, region):
+    """core_delete_cluster(finalize_only=True)'s gate: is the stack gone?
+
+    Reuses the wait loop at retries=1 rather than re-deriving what a
+    terminal state is -- two definitions of "gone" is the drift this repo
+    has already paid for elsewhere. retries=1 means one describe and no
+    sleep (the loop only sleeps while attempt < retries - 1), so the
+    caller's non-blocking guarantee comes from this call being incapable
+    of waiting, not from a promise not to.
+
+    A describe that fails for some other reason propagates, exactly as it
+    does on the waiting path: a failed AWS call is not a deleted stack.
+    """
+    return _wait_for_cluster_delete(describe_fn, cluster_name, region, retries=1)
 
 
 def _classify_cluster_delete_outcome(terminal_state, cluster_name):

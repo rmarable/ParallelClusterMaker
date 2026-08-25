@@ -7132,18 +7132,85 @@ class TestTheWaitProgressLineSpacing:
         assert ":>3d}m]" not in body
         assert ":>3d}m ]" not in body
 
-    def test_the_elapsed_field_is_fixed_width(self):
-        """The delete wait polls twice a minute, so whole-minute resolution
-        printed every label twice and read as a stuck loop. Seconds fix
-        that, but only if the field stays one width -- otherwise the column
-        after it jitters, which is the sloppiness the minutes hid."""
+    def test_minutes_are_not_zero_padded(self):
+        """`01m00s` reads as a timestamp; it is a duration. Minutes are
+        space-padded so the leading zero is gone and the column still does
+        not move -- reverting to `{minutes:02d}` satisfies the fixed-width
+        test above and reintroduces exactly what was reported.
+
+        Seconds keep their zero deliberately: `1m5s` and `1m50s` are
+        different quantities and dropping it there is ambiguous.
+        """
         src = os.path.join(REPO_ROOT, "src")
         if src not in sys.path:
             sys.path.insert(0, src)
         import pcluster_core
 
-        widths = {len(pcluster_core._elapsed_str(t)) for t in (0, 30, 90, 600, 2400, 3600)}
-        assert widths == {6}, widths
+        assert pcluster_core._elapsed_str(90) == " 1m30s"
+        assert pcluster_core._elapsed_str(630) == "10m30s"
+        # A leading zero *followed by a digit* is padding; "0m" on its own
+        # is the real value at zero minutes, not a padded one.
+        import re as _re
+
+        for t in (0, 60, 300, 540, 3540, 90, 630):
+            label = pcluster_core._elapsed_str(t)
+            assert not _re.match(r"^0\d", label), (t, label)
+
+    def test_the_cloudformation_status_is_shown_only_when_it_differs(self):
+        """Both printers appended "(CloudFormation: X)" unconditionally,
+        and the two statuses agree for the whole of a healthy build -- so
+        every line carried the same value twice. They diverge exactly when
+        it matters: a failed create reads CREATE_FAILED beside
+        CloudFormation's ROLLBACK_IN_PROGRESS.
+
+        Asserted on the source of both printers rather than by driving a
+        wait, since reaching them needs a live cluster. The guard is that
+        neither builds the detail without comparing.
+        """
+        with open(os.path.join(REPO_ROOT, "src", "pcluster_core.py")) as fh:
+            body = fh.read()
+
+        unconditional = 'f" (CloudFormation: {cfn_status})" if cfn_status else ""'
+        assert unconditional not in body, (
+            "a printer appends the CloudFormation status without comparing it"
+        )
+        guarded = body.count("if cfn_status and cfn_status != status else")
+        assert guarded == 2, (
+            f"expected both the create and delete printers to compare, "
+            f"found {guarded}"
+        )
+
+    def test_a_whole_minute_drops_its_seconds(self):
+        """The create wait polls exactly once a minute, so every label
+        carried a redundant "00s". A whole minute prints as "1m"/"13m";
+        anything else keeps its seconds.
+
+        This gives up fixed width on purpose -- an earlier version padded
+        both fields so the column after the bracket never moved, and the
+        delete wait now alternates "0m30s"/"1m", shifting it by three. The
+        property that actually mattered in the original report is the one
+        below: every poll gets a *distinct* label.
+        """
+        src = os.path.join(REPO_ROOT, "src")
+        if src not in sys.path:
+            sys.path.insert(0, src)
+        import pcluster_core
+
+        assert pcluster_core._elapsed_str(60) == " 1m"
+        assert pcluster_core._elapsed_str(780) == "13m"
+        assert pcluster_core._elapsed_str(0) == " 0m"
+        assert pcluster_core._elapsed_str(90) == " 1m30s"
+        assert pcluster_core._elapsed_str(65) == " 1m05s", (
+            "seconds keep their zero: 1m5s and 1m50s are different"
+        )
+
+        # The minutes column does not move for any run either wait can
+        # reach, which is what the space padding buys.
+        minute_fields = {
+            pcluster_core._elapsed_str(t).split("m")[0]
+            for t in (60, 540, 600, 780, 3540)
+        }
+        assert {len(f) for f in minute_fields} == {2}, minute_fields
 
     def test_every_poll_of_a_delete_gets_a_distinct_label(self):
         """The reported symptom, stated directly."""

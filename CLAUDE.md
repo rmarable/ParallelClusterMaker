@@ -203,6 +203,29 @@ standing constraints for local development.
   S3 lock held by a dead process. `apply_queue_config` is local-only for
   this reason; remote callers drive `stop_fleet` → `apply_cluster_update`
   → `start_fleet`. Decompose such a tool, never delete the capability.
+- **`delete_cluster` initiates a teardown; `finalize_cluster_teardown`
+  finishes it.** `wait=False` returns on CloudFormation's acceptance and
+  skips *every* teardown step, so one call leaves the IAM policies, the S3
+  bucket, the credentials, the SNS topic and the store record behind. A
+  *second* `delete_cluster` does finish the job — an absent stack
+  classifies as `_CLUSTER_NOT_FOUND`, not `_KICKED_OFF` — but it gets
+  there by **issuing another delete-cluster against the name**, which
+  deletes the new stack if that name has since been rebuilt, and called
+  too early it silently no-ops and reports success, indistinguishable
+  from having finished.
+  `core_delete_cluster(finalize_only=True)` is the explicit second half:
+  it never calls delete-cluster and never waits, refusing unless the stack
+  is confirmed gone (`_confirm_stack_is_gone` — the wait loop at
+  `retries=1`, so the non-blocking guarantee is structural, not a
+  promise).
+  `DELETE_FAILED` refuses: the waiting path strips IAM and S3 there
+  deliberately, having just attempted the delete, but arriving *here*
+  means an earlier delete failed and the answer is to re-run it. That path
+  exits non-zero either way, so only asserting no teardown step ran can
+  see it. A failed describe propagates: a failed AWS call is not a deleted
+  stack. Both modes fall into **one** teardown body, and their two
+  tokens — both minted by `preview_cluster_delete` — are deliberately not
+  interchangeable.
 - **Cognito access tokens carry no `aud` claim** — they carry `client_id`;
   only ID tokens have `aud`. `mcp_server/auth/authorizer_lambda.py`
   validates `client_id` and pins `token_use == "access"` so an ID token
@@ -247,6 +270,20 @@ standing constraints for local development.
   that writes it already was. `add_queue`/`remove_queue` also refuse while
   the stack is `UPDATE_IN_PROGRESS`: `apply_cluster_update` returns on
   CloudFormation's acceptance, so the lock is released mid-update.
+- **One server manages one region, by design, and the IAM matches.** The
+  record store is per account+region, so a server answers only for its own
+  region — cross-region discovery would mean scanning every region's
+  bucket on every listing — and each tier's `MCPStateAccess*` policy names
+  exactly one bucket, so multi-region means one topology per region, never
+  wider IAM. On a Lambda the mismatch is unreachable (no local files, so a
+  record can only come from that region's own store), but `_require_record`
+  still refuses a *stored* record whose `region` disagrees with the bucket
+  it came out of, naming both — acting on it sends every later store call
+  to a bucket the record was not in, which under one-region IAM surfaces as
+  an opaque `AccessDenied`. Scoped to the store branch: a *local* vars file
+  may name any region, which is why it is read first. The not-found
+  message names the limit too — "not tracked here" otherwise reads as
+  "does not exist".
 - **`MakeClusterParams` carries no `region`** — the CLI resolves it from
   the AZ-verification call and passes it to `core_create_cluster`
   separately, so every shim must too. MCP's `create_cluster` read

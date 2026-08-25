@@ -1121,3 +1121,382 @@ class TestAnInvalidClusterNameDoesNotKillTheServer:
             f"only {len(reaches)} tools route through _require_record: {reaches}"
         )
         assert os.path.basename(t.__file__) == "tools.py"
+
+
+class TestListQueuesReturnsWhatItsAnnotationPromises:
+    """`list_queues` was annotated `-> dict` and returned a list. FastMCP
+    validates structured content against the annotation, so *every* call
+    failed with "structured_content must be a dict or None" while carrying
+    the correct payload inside the error text.
+
+    Invisible to every existing test because they call the wrapper
+    function directly, where the annotation is inert -- it only bites
+    through a real client session. Found by calling the tool against a
+    live cluster.
+    """
+
+    def _stub(self, monkeypatch, queues):
+        import types
+
+        monkeypatch.setattr(
+            tools_mod, "_require_record",
+            lambda name: types.SimpleNamespace(region="us-east-1"),
+        )
+        monkeypatch.setattr(
+            tools_mod, "core_list_queues", lambda **kw: queues
+        )
+
+    @pytest.mark.asyncio
+    async def test_a_queue_listing_survives_the_transport(self, monkeypatch):
+        self._stub(monkeypatch, [
+            {"name": "compute", "queue_type": "compute",
+             "capacity_type": "SPOT", "min_count": 0, "max_count": 8,
+             "instance_types": ["c8g.xlarge"]},
+        ])
+        async with Client(build_local()) as client:
+            result = await client.call_tool(
+                "list_queues", {"cluster_name": "osiris"},
+                raise_on_error=False,
+            )
+        assert not result.is_error, _text(result)
+        assert "compute" in _text(result)
+
+    @pytest.mark.asyncio
+    async def test_an_empty_listing_survives_too(self, monkeypatch):
+        """The shape has to hold when there is nothing to report -- an
+        empty list is still a list."""
+        self._stub(monkeypatch, [])
+        async with Client(build_local()) as client:
+            result = await client.call_tool(
+                "list_queues", {"cluster_name": "osiris"},
+                raise_on_error=False,
+            )
+        assert not result.is_error, _text(result)
+
+    def test_the_annotation_matches_what_the_core_returns(self):
+        """The root cause, pinned directly: a wrapper whose annotation
+        disagrees with its return value fails only over the transport, so
+        nothing that calls the function catches it."""
+        import ast
+
+        tree = ast.parse(open(tools_mod.__file__).read())
+        fn = next(
+            n for n in ast.walk(tree)
+            if isinstance(n, ast.FunctionDef) and n.name == "list_queues"
+        )
+        assert ast.unparse(fn.returns) == "list[dict]", ast.unparse(fn.returns)
+
+
+class TestFinalizeCompletesWhatDeleteStarted:
+    """delete_cluster returns on CloudFormation's acceptance, so by itself
+    it cleans up nothing. finalize_cluster_teardown is the other half --
+    the decomposition CLAUDE.md's 900s-ceiling bullet calls for, rather
+    than a capability a remote caller simply does not have.
+    """
+
+    def _rec(self):
+        return type("R", (), {
+            "region": "us-east-2", "cluster_owner": "testuser", "serial": "osiris-1",
+            "ec2_keypair": "kp", "s3_bucketname": "bucket",
+        })()
+
+    @pytest.mark.asyncio
+    async def test_the_previewed_token_lets_the_finalize_through(self, monkeypatch):
+        monkeypatch.setattr(tools_mod, "_require_record", lambda name: self._rec())
+        called = []
+        monkeypatch.setattr(
+            tools_mod, "core_delete_cluster",
+            lambda **kw: called.append(kw) or {"success": True},
+        )
+        async with Client(build_local()) as client:
+            preview = json.loads(_text(
+                await client.call_tool("preview_cluster_delete", {"cluster_name": "osiris"})
+            ))
+            await client.call_tool("finalize_cluster_teardown", {
+                "cluster_name": "osiris",
+                "confirmation_token": preview["finalization_token"],
+            })
+        assert len(called) == 1
+        assert called[0]["finalize_only"] is True
+
+    @pytest.mark.asyncio
+    async def test_it_never_asks_the_core_to_wait(self, monkeypatch):
+        """finalize_only is what makes this non-blocking; passing wait as
+        well would be a second, contradictory answer to the same question."""
+        monkeypatch.setattr(tools_mod, "_require_record", lambda name: self._rec())
+        called = []
+        monkeypatch.setattr(
+            tools_mod, "core_delete_cluster",
+            lambda **kw: called.append(kw) or {"success": True},
+        )
+        async with Client(build_local()) as client:
+            preview = json.loads(_text(
+                await client.call_tool("preview_cluster_delete", {"cluster_name": "osiris"})
+            ))
+            await client.call_tool("finalize_cluster_teardown", {
+                "cluster_name": "osiris",
+                "confirmation_token": preview["finalization_token"],
+            })
+        assert "wait" not in called[0]
+
+    @pytest.mark.asyncio
+    async def test_a_delete_token_does_not_authorize_a_finalize(self, monkeypatch):
+        """The two tokens bind the same parameters but different actions,
+        and they must not be interchangeable: one authorizes initiating a
+        stack delete, the other authorizes destroying the credentials and
+        the S3 bucket. A single token covering both would make the second,
+        irreversible half reachable on the strength of consent to the
+        first."""
+        monkeypatch.setattr(tools_mod, "_require_record", lambda name: self._rec())
+        called = []
+        monkeypatch.setattr(tools_mod, "core_delete_cluster", lambda **kw: called.append(kw))
+        async with Client(build_local()) as client:
+            preview = json.loads(_text(
+                await client.call_tool("preview_cluster_delete", {"cluster_name": "osiris"})
+            ))
+            result = await client.call_tool("finalize_cluster_teardown", {
+                "cluster_name": "osiris",
+                "confirmation_token": preview["confirmation_token"],
+            }, raise_on_error=False)
+        assert result.is_error
+        assert called == []
+
+    @pytest.mark.asyncio
+    async def test_a_finalize_token_does_not_authorize_a_delete(self, monkeypatch):
+        """The other direction, which is the one an 'accept either' fix
+        would leave open."""
+        monkeypatch.setattr(tools_mod, "_require_record", lambda name: self._rec())
+        called = []
+        monkeypatch.setattr(tools_mod, "core_delete_cluster", lambda **kw: called.append(kw))
+        async with Client(build_local()) as client:
+            preview = json.loads(_text(
+                await client.call_tool("preview_cluster_delete", {"cluster_name": "osiris"})
+            ))
+            result = await client.call_tool("delete_cluster", {
+                "cluster_name": "osiris",
+                "confirmation_token": preview["finalization_token"],
+            }, raise_on_error=False)
+        assert result.is_error
+        assert called == []
+
+    @pytest.mark.asyncio
+    async def test_a_token_from_a_different_cluster_is_refused(self, monkeypatch):
+        monkeypatch.setattr(tools_mod, "_require_record", lambda name: self._rec())
+        called = []
+        monkeypatch.setattr(tools_mod, "core_delete_cluster", lambda **kw: called.append(kw))
+        async with Client(build_local()) as client:
+            preview = json.loads(_text(
+                await client.call_tool("preview_cluster_delete", {"cluster_name": "osiris"})
+            ))
+            result = await client.call_tool("finalize_cluster_teardown", {
+                "cluster_name": "production",
+                "confirmation_token": preview["finalization_token"],
+            }, raise_on_error=False)
+        assert result.is_error
+        assert called == []
+
+    @pytest.mark.asyncio
+    async def test_finalize_without_a_token_is_rejected_by_the_schema(self):
+        async with Client(build_local()) as client:
+            with pytest.raises(ToolError):
+                await client.call_tool("finalize_cluster_teardown", {"cluster_name": "osiris"})
+
+    @pytest.mark.asyncio
+    async def test_the_remote_transport_gets_it_too(self):
+        """The gap this closes is specifically the remote one: locally an
+        operator can always fall back to kill_pcluster.py, but a network
+        caller has no filesystem and no CLI, so without this tool a remote
+        teardown could never be completed at all."""
+        async with Client(build_remote()) as client:
+            names = {t.name for t in await client.list_tools()}
+        assert "finalize_cluster_teardown" in names
+
+    def test_it_carries_the_same_blast_radius_as_the_delete(self):
+        """It destroys IAM policies, an S3 bucket and credentials, so it
+        belongs on the tier that already covers that -- not read-only,
+        where its name might suggest a mere bookkeeping step."""
+        from mcp_server.tiers import TOOL_TIERS
+
+        assert TOOL_TIERS["finalize_cluster_teardown"] == TOOL_TIERS["delete_cluster"]
+        assert TOOL_TIERS["finalize_cluster_teardown"] == "stack-mutation"
+
+
+class TestOneServerManagesOneRegion:
+    """The record store is per account+region, so a server answers for the
+    region it runs in and no other. That is a design limit, not an
+    oversight -- cross-region discovery would mean scanning every region's
+    bucket on every listing -- and the deployed IAM matches it: each tier's
+    MCPStateAccess policy names one bucket, `-locks-<acct>-<region>`.
+
+    Two things follow, and both are pinned here: the operator must be told
+    *why* a cluster is invisible rather than that it does not exist, and a
+    record that contradicts the bucket it was found in must be refused
+    rather than acted on.
+    """
+
+    def _stub(self, monkeypatch, *, local=None, stored=None, store_region="us-east-1"):
+        import mcp_server.tools as t
+
+        def _read(cluster_name, repo_root, s3=None, locks_bucketname=None):
+            return stored if s3 is not None else local
+
+        monkeypatch.setattr(t, "_read_cluster_record", _read)
+        monkeypatch.setattr(t, "_record_store", lambda region=None: ("s3", "bucket"))
+        monkeypatch.setattr(t, "_store_region", lambda: store_region)
+        return t
+
+    def _rec(self, region):
+        """A full ClusterRecord projection -- from_dict wants all 22 fields,
+        and a thin dict would fail for a reason unrelated to the guard."""
+        return {
+            "cluster_name": "osiris", "cluster_owner": "rmarable",
+            "serial": "osiris-1", "region": region,
+            "headnode_instance_type": "c8g.large", "enable_loginnode": "false",
+            "loginnode_instance_type": "", "loginnode_count": 0,
+            "cpu_instance_types": ["c8g.xlarge"], "gpu_instance_types": [],
+            "enable_cpu_queue": "true", "enable_gpu_queue": "false",
+            "initial_cpu_queue_size": 0, "max_cpu_queue_size": 8,
+            "initial_gpu_queue_size": 0, "max_gpu_queue_size": 0,
+            "cluster_type": "spot", "deployment_date": "2026-08-24",
+            "ssh_keypair": "/dev/null/x.pem", "ec2_keypair": "kp",
+            "ec2_user": "ubuntu", "s3_bucketname": "bucket",
+            "enable_monitoring": "false",
+        }
+
+    def test_a_store_record_naming_another_region_is_refused(self, monkeypatch):
+        """The bucket is derived from the cluster's own region when the
+        record is published, so these agree by construction. Disagreeing
+        means something published to the wrong bucket — and acting on it
+        would send every later store call in the request to a bucket this
+        record was not found in, which on a Lambda granted one region is an
+        opaque AccessDenied rather than anything diagnosable."""
+        from pcluster_core import PClusterMakerError
+
+        t = self._stub(monkeypatch, stored=self._rec("us-west-2"),
+                       store_region="us-east-1")
+        with pytest.raises(PClusterMakerError) as exc:
+            t._require_record("osiris")
+        msg = str(exc.value)
+        assert "us-east-1" in msg and "us-west-2" in msg, (
+            "the refusal must name both regions — which store it came from "
+            "and which region it claims — or it cannot be acted on"
+        )
+        assert "vars/osiris.json" in msg
+
+    def test_a_local_record_may_name_any_region(self, monkeypatch):
+        """The case the guard must not break, and the reason it is scoped to
+        the store branch: an operator's own checkout legitimately holds a
+        vars file for a cluster in any region, and reading it first is what
+        lets that cluster's region address its own bucket afterward."""
+        t = self._stub(monkeypatch, local=self._rec("us-west-2"),
+                       store_region="us-east-1")
+        rec = t._require_record("osiris")
+        assert rec.region == "us-west-2"
+
+    def test_a_store_record_in_its_own_region_passes(self, monkeypatch):
+        """Vacuity guard: refusing everything would satisfy the test above."""
+        t = self._stub(monkeypatch, stored=self._rec("us-east-1"),
+                       store_region="us-east-1")
+        assert t._require_record("osiris").region == "us-east-1"
+
+    def test_an_unresolvable_store_region_does_not_false_refuse(self, monkeypatch):
+        """With no region resolvable there is nothing to compare against, so
+        the guard has no opinion. Treating "" as a mismatch would refuse
+        every call on a server whose region cannot be determined — failing
+        closed on the wrong axis, since the record itself is fine."""
+        t = self._stub(monkeypatch, stored=self._rec("us-west-2"), store_region="")
+        assert t._require_record("osiris").region == "us-west-2"
+
+    def test_a_record_carrying_no_region_is_not_called_a_mismatch(self, monkeypatch):
+        """A record with no region is missing data, not contradictory data,
+        so the guard must abstain rather than invent a disagreement with the
+        store's region. Such a record fails anyway — ClusterRecord requires
+        the field — but it must fail as malformed, which is what an operator
+        can act on, and not as a region conflict that does not exist."""
+        rec = self._rec("us-east-1")
+        del rec["region"]
+        t = self._stub(monkeypatch, stored=rec, store_region="us-east-1")
+        with pytest.raises(Exception) as exc:
+            t._require_record("osiris")
+        assert "record store but its record says" not in str(exc.value)
+
+    def test_the_not_found_message_explains_the_single_region_limit(self, monkeypatch):
+        """'No cluster named X is tracked here' reads as 'it does not exist'.
+        For a cluster that is up and healthy in another region that is
+        actively misleading, and the remedy — use that region's endpoint —
+        is not guessable from the old wording."""
+        from pcluster_core import PClusterMakerError
+
+        t = self._stub(monkeypatch, store_region="us-east-1")
+        with pytest.raises(PClusterMakerError) as exc:
+            t._require_record("osiris")
+        msg = str(exc.value)
+        assert "us-east-1" in msg
+        assert "one region" in msg
+        assert "endpoint" in msg, "the message must name the remedy, not just the fact"
+
+
+
+class TestTheSanitizerIsWhatGuaranteesTheRecordShape:
+    """`ClusterRecord.from_dict` indexes every field with `rec[f]` and has no
+    guard, which reads like a latent `KeyError` on a truncated record. It is
+    not, and the reason is worth pinning: `_sanitize_record` is a *total*
+    projection — it builds the dict key by key with a default for each — and
+    it sits at the single read point every caller goes through. A record
+    that reaches `from_dict` therefore always has every field, whatever the
+    stored object looked like.
+
+    Written after building a guard for the missing-field case and then
+    discovering, only by seeding a real two-field object into a real bucket,
+    that the case cannot occur. The unit tests that made the guard look
+    necessary stubbed `_read_cluster_record` — the very function whose
+    behavior the question turned on. Hence the last test here, which drives
+    the real one.
+
+    If the sanitizer ever stops being total, this fires and the guard
+    becomes worth having again.
+    """
+
+    def test_the_sanitizer_supplies_every_field_from_nothing(self):
+        import dataclasses
+
+        from pcluster_core import ClusterRecord, _sanitize_record
+
+        out = _sanitize_record({}, "osiris")
+        expected = {f.name for f in dataclasses.fields(ClusterRecord)}
+        assert expected - set(out) == set(), (
+            "a field ClusterRecord requires is not defaulted by the sanitizer"
+        )
+
+    def test_from_dict_accepts_what_the_sanitizer_produces(self):
+        from pcluster_core import ClusterRecord, _sanitize_record
+
+        rec = ClusterRecord.from_dict(_sanitize_record({}, "osiris"))
+        assert rec.cluster_name == "osiris"
+
+    def test_a_truncated_store_object_still_yields_a_whole_record(
+        self, monkeypatch, tmp_path,
+    ):
+        """The real `_read_cluster_record`, not a stub of it.
+
+        A two-field object in the store — the shape a hand-edit or a
+        truncated write leaves behind — comes back complete, with blanks
+        where the data was missing. That is deliberate: `list_clusters`
+        showing a row with empty columns is more use than a listing that
+        omits the cluster or refuses to render at all.
+        """
+        import pcluster_core
+
+        monkeypatch.setattr(
+            pcluster_core, "get_cluster_record",
+            lambda s3, **kw: {"cluster_name": "probe", "region": "us-east-1"},
+        )
+        rec = pcluster_core._read_cluster_record(
+            "probe", str(tmp_path), s3=object(), locks_bucketname="bucket",
+        )
+        assert rec is not None
+        built = pcluster_core.ClusterRecord.from_dict(rec)
+        assert built.cluster_name == "probe"
+        assert built.region == "us-east-1"
+        assert built.cluster_owner == ""
+        assert built.cpu_instance_types == []

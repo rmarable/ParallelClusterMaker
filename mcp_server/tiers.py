@@ -65,6 +65,7 @@ TOOL_TIERS = {
     "stop_fleet": "fleet-toggle",
     "start_fleet": "fleet-toggle",
     "delete_cluster": "stack-mutation",
+    "finalize_cluster_teardown": "stack-mutation",
     # create/update both call assert_valid_node_js() on their first line
     "create_cluster": "stack-mutation-node",
     "apply_cluster_update": "stack-mutation-node",

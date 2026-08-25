@@ -321,15 +321,42 @@ def _require_record(cluster_name):
     # nothing better to ask.
     rec = _read_cluster_record(cluster_name, _repo_root())
     if rec is None:
+        store_region = _store_region()
         s3, bucket = _record_store()
         rec = _read_cluster_record(
             cluster_name, _repo_root(), s3=s3, locks_bucketname=bucket
         )
+        # A record that came out of the store must name the store's own
+        # region: the bucket is per account+region and _publish_cluster_record
+        # derives it from the cluster's region, so the two agree by
+        # construction. They can only disagree if something published to the
+        # wrong bucket -- the exact defect the cluster's-region addressing
+        # rule was introduced to fix. Refusing here is not a policy choice:
+        # every later store call in this request would address the bucket
+        # this record was NOT found in, and on a Lambda whose IAM grants one
+        # region that surfaces as an opaque AccessDenied instead. Scoped to
+        # the store branch on purpose -- a *local* vars file may name any
+        # region, which is the whole point of reading it first.
+        if rec is not None and rec.get("region") and store_region \
+                and rec["region"] != store_region:
+            raise PClusterMakerError(
+                f"Cluster {cluster_name!r} was found in the {store_region} "
+                f"record store but its record says it runs in "
+                f"{rec['region']}. One of the two is wrong -- a record is "
+                f"published to the bucket for its own cluster's region, so "
+                f"these cannot disagree on a healthy store. Inspect "
+                f"s3://parallelclustermaker-locks-<account>-{store_region}"
+                f"/vars/{cluster_name}.json before acting on it."
+            )
     if rec is None:
         raise PClusterMakerError(
             f"No cluster named {cluster_name!r} is tracked here: no vars file "
             f"under active_clusters/, and no record in the shared store for "
-            f"{_store_region() or 'an unresolved region'}."
+            f"{_store_region() or 'an unresolved region'}. This server manages "
+            f"one region by design -- the record store is per account+region, "
+            f"so a cluster built in another region is visible only to a server "
+            f"running there. If {cluster_name!r} exists elsewhere, use that "
+            f"region's endpoint."
         )
     return ClusterRecord.from_dict(rec)
 
@@ -758,9 +785,17 @@ def register_tools(mcp, *, remote, tier=None):
                 f"(the only record of a failed build; expire after 180 days)",
             ],
             "confirmation_token": mint("delete_cluster", params),
+            # Both halves are minted here rather than from a second preview
+            # tool: they describe one previewed operation, and a teardown
+            # outlives a 15-minute token, so the operator re-previews before
+            # finalizing anyway and gets a fresh pair when they do.
+            "finalization_token": mint("finalize_cluster_teardown", params),
             "next_step": (
-                "Call delete_cluster with this confirmation_token and the same "
-                "arguments. The token expires in 15 minutes."
+                "Call delete_cluster with confirmation_token and the same "
+                "arguments; once the stack is gone, call "
+                "finalize_cluster_teardown with finalization_token to remove "
+                "what it left behind. Tokens expire in 15 minutes -- preview "
+                "again for a fresh pair."
             ),
         }
 
@@ -794,6 +829,40 @@ def register_tools(mcp, *, remote, tier=None):
             region=rec.region, repo_root=_repo_root(),
             delete_s3_bucketname="true" if delete_s3_bucketname else "false",
             debug_mode=False, wait=False,
+        ))
+
+    @tool
+    def finalize_cluster_teardown(cluster_name: str, confirmation_token: str,
+                                  delete_s3_bucketname: bool = True) -> dict:
+        """Finish a teardown delete_cluster started. Requires a token from
+        preview_cluster_delete (its finalization_token).
+
+        delete_cluster returns as soon as CloudFormation accepts the delete,
+        because no tool may block on a 15-20 minute operation. That leaves
+        the IAM policies, the S3 bucket, the EC2 keypair and its .pem, the
+        Secrets Manager secret, the SNS topic and the shared-store record
+        all still present. This removes them.
+
+        Calling delete_cluster a second time also completes the teardown,
+        but only by re-issuing a stack delete against the name first --
+        which deletes the new stack if that name has been rebuilt since,
+        and which silently reports success again if the stack is still
+        deleting. This tool issues no delete and says which it saw.
+
+        Refuses unless the stack is confirmed gone, and never waits for it:
+        poll list_clusters until the cluster disappears, then call this.
+        """
+        params = {
+            "cluster_name": cluster_name,
+            "delete_s3_bucketname": delete_s3_bucketname,
+        }
+        verify(confirmation_token, "finalize_cluster_teardown", params)
+        rec = _require_record(cluster_name)
+        return _plain(core_delete_cluster(
+            cluster_name=cluster_name, cluster_owner=rec.cluster_owner,
+            region=rec.region, repo_root=_repo_root(),
+            delete_s3_bucketname="true" if delete_s3_bucketname else "false",
+            debug_mode=False, finalize_only=True,
         ))
 
     @tool
