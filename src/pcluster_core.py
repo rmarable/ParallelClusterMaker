@@ -3577,6 +3577,22 @@ def _run_ssh(head_ip, ssh_keypair, ec2_user, timeout, remote_cmd):
     return result.returncode, result.stdout, result.stderr
 
 
+# A cluster is healthy in more than one terminal state, and treating
+# CREATE_COMPLETE as the only one meant a single apply_cluster_update
+# marked a cluster unhealthy *permanently* -- UPDATE_COMPLETE is terminal
+# and never decays back. Found the first time this repo ever updated a
+# cluster: every other check passed (Slurm answering, head node reachable,
+# Grafana up) and check_cluster_health still reported overall: False.
+_HEALTHY_CLUSTER_STATES = ("CREATE_COMPLETE", "UPDATE_COMPLETE")
+
+# The cluster runs, but not with the configuration that was asked for: an
+# update failed and rolled back. Reporting that as plain "pass" hides a
+# real divergence between what is deployed and what was requested, and as
+# "fail" would be wrong too -- nothing is broken. Same shape as the Slurm
+# check's partial-capacity note.
+_DEGRADED_CLUSTER_STATES = ("UPDATE_ROLLBACK_COMPLETE",)
+
+
 def check_cfn_status(cluster_name, region, pcluster_bin):
     try:
         data = _describe_cluster_json(cluster_name, region)
@@ -3587,7 +3603,12 @@ def check_cfn_status(cluster_name, region, pcluster_bin):
             head_node.get("publicIpAddress") or
             head_node.get("privateIpAddress") or ""
         )
-        if cs != "CREATE_COMPLETE":
+        if cs in _DEGRADED_CLUSTER_STATES:
+            return True, (
+                f"clusterStatus={cs} -- an update failed and rolled back, so "
+                f"the cluster is running its previous configuration"
+            ), head_ip
+        if cs not in _HEALTHY_CLUSTER_STATES:
             return False, f"clusterStatus={cs} cloudFormationStackStatus={cfs}", head_ip
         return True, f"clusterStatus={cs}", head_ip
     except PClusterMakerError as e:

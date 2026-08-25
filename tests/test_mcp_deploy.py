@@ -331,3 +331,50 @@ class TestDeploymentPlan:
         import json
 
         json.loads(json.dumps(deployment_plan(ACCOUNT)))
+
+
+class TestTierMemoryTracksTierWork:
+    """The per-tier memory sizes encode how much work each tier does, and
+    an inversion is the mistake worth catching -- a literal-value test
+    would just be a second copy of the constant.
+
+    read-only was provisioned at 1024 MB and measured at 238 MB peak on the
+    first deployed invocation (tools/list, list_clusters and
+    check_cluster_health); it is 384 now. Lambda scales CPU with memory, so
+    the reduction lengthens the ~8.6s cold start -- accepted for a tier
+    where no call is latency-critical.
+    """
+
+    def test_memory_never_decreases_as_the_tier_does_more(self):
+        from mcp_server.deploy import TIER_RUNTIME
+
+        order = ["router", "read-only", "fleet-toggle",
+                 "stack-mutation", "stack-mutation-node"]
+        sizes = [TIER_RUNTIME[t]["memory"] for t in order]
+        assert sizes == sorted(sizes), (
+            f"memory must not invert across tiers doing progressively more "
+            f"work: {dict(zip(order, sizes))}"
+        )
+
+    def test_every_tier_clears_the_measured_floor(self):
+        """238 MB was the observed peak on the lightest tier that loads
+        PCluster's dependency chain; nothing that loads it can be sized
+        below that and still run."""
+        from mcp_server.deploy import TIER_RUNTIME
+
+        MEASURED_PEAK_MB = 238
+        for tier in ("read-only", "fleet-toggle", "stack-mutation",
+                     "stack-mutation-node"):
+            assert TIER_RUNTIME[tier]["memory"] > MEASURED_PEAK_MB, (
+                f"{tier} is sized below the {MEASURED_PEAK_MB} MB peak "
+                f"measured on a real invocation"
+            )
+
+    def test_lambda_accepts_every_size(self):
+        """Lambda takes memory in 1 MB steps between 128 and 10240; a value
+        outside that is rejected at CreateFunction, which is the slowest
+        possible place to find out."""
+        from mcp_server.deploy import TIER_RUNTIME
+
+        for tier, cfg in TIER_RUNTIME.items():
+            assert 128 <= cfg["memory"] <= 10240, (tier, cfg["memory"])

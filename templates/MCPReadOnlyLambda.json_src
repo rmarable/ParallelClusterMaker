@@ -41,6 +41,16 @@
             ]
         },
         {
+            "Sid": "MCPClusterBucketExists",
+            "Action": [
+                "s3:ListBucket"
+            ],
+            "Effect": "Allow",
+            "Resource": [
+                "arn:aws:s3:::parallelclustermaker-*"
+            ]
+        },
+        {
             "Sid": "MCPCostExplorer",
             "Action": [
                 "ce:GetCostAndUsage",

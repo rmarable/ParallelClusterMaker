@@ -16,6 +16,7 @@ only thing standing between a rename and a router that is denied at
 runtime on an ARN matching nothing it can reach.
 """
 
+import io
 import json
 import os
 import sys
@@ -346,3 +347,96 @@ class TestAFailingHandlerLambdaDoesNotLeakItsStackTrace:
         source = inspect.getsource(router.lambda_handler)
         assert "unwrap_invocation(" in source
         assert "json.loads(response[\"Payload\"].read())" not in source
+
+
+class TestAnInvokeThatFailsOutrightIsNotLeaked:
+    """`unwrap_invocation` covers a handler that *ran* and failed: Lambda
+    answers 200 with `FunctionError` and its own error object. `invoke`
+    itself can fail before any response exists -- a tier that is not
+    deployed, an AccessDenied on the router's role, throttling -- and that
+    path was uncaught, so the exception propagated out of `lambda_handler`
+    and Lambda serialized it verbatim.
+
+    Observed against a partially deployed topology: `FunctionError:
+    Unhandled`, with `"/var/task/mcp_server/router.py"` in the payload.
+    That is the same pair of bugs `unwrap_invocation` exists to prevent --
+    an internal path disclosed, and a body that is not a JSON-RPC response
+    -- arriving through the one door it does not watch.
+    """
+
+    def _handler_with_failing_invoke(self, monkeypatch, exc):
+        import mcp_server.router as router
+
+        class _Client:
+            def invoke(self, **kw):
+                raise exc
+
+        class _Boto:
+            @staticmethod
+            def client(name, *a, **k):
+                return _Client()
+
+        monkeypatch.setitem(sys.modules, "boto3", _Boto)
+        return router
+
+    def test_a_missing_tier_is_a_json_rpc_error(self, monkeypatch):
+        router = self._handler_with_failing_invoke(
+            monkeypatch, RuntimeError("Function not found: ...:pclustermaker-mcp-stack-mutation"),
+        )
+        event = {"body": json.dumps({
+            "jsonrpc": "2.0", "id": 7, "method": "tools/call",
+            "params": {"name": "delete_cluster", "arguments": {}}})}
+        out = router.lambda_handler(event, None)
+        body = json.loads(out["body"])
+        assert out["statusCode"] == 200
+        assert body["jsonrpc"] == "2.0" and body["id"] == 7
+        assert body["error"]["code"] == -32603
+
+    def test_no_internal_path_reaches_the_client(self, monkeypatch):
+        """The disclosure half. A traceback naming /var/task tells a caller
+        the runtime layout; the tier name alone is what they can act on."""
+        router = self._handler_with_failing_invoke(
+            monkeypatch, RuntimeError('File "/var/task/mcp_server/router.py", line 210'),
+        )
+        event = {"body": json.dumps({
+            "jsonrpc": "2.0", "id": 8, "method": "tools/call",
+            "params": {"name": "delete_cluster", "arguments": {}}})}
+        out = router.lambda_handler(event, None)
+        assert "/var/task" not in out["body"], out["body"]
+        assert "stack-mutation" in out["body"], "the tier has to be named"
+
+    def test_the_exception_type_is_reported_not_its_message(self, monkeypatch):
+        """Enough to diagnose (ResourceNotFound vs AccessDenied vs throttle)
+        without echoing an arbitrary AWS string back to a caller."""
+        router = self._handler_with_failing_invoke(
+            monkeypatch, PermissionError("arn:aws:iam::123456789012:role/secret-role denied"),
+        )
+        event = {"body": json.dumps({
+            "jsonrpc": "2.0", "id": 9, "method": "tools/call",
+            "params": {"name": "stop_fleet", "arguments": {}}})}
+        out = router.lambda_handler(event, None)
+        assert "PermissionError" in out["body"]
+        assert "secret-role" not in out["body"]
+
+    def test_a_working_invoke_is_untouched(self, monkeypatch):
+        """Vacuity guard: the net must not swallow successful responses."""
+        import mcp_server.router as router
+
+        class _Client:
+            def invoke(self, **kw):
+                return {"StatusCode": 200,
+                        "Payload": io.BytesIO(json.dumps(
+                            {"jsonrpc": "2.0", "id": 10, "result": {"ok": True}}
+                        ).encode())}
+
+        class _Boto:
+            @staticmethod
+            def client(name, *a, **k):
+                return _Client()
+
+        monkeypatch.setitem(sys.modules, "boto3", _Boto)
+        event = {"body": json.dumps({
+            "jsonrpc": "2.0", "id": 10, "method": "tools/call",
+            "params": {"name": "list_clusters", "arguments": {}}})}
+        out = router.lambda_handler(event, None)
+        assert json.loads(out["body"])["result"] == {"ok": True}

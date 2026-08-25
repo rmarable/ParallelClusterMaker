@@ -188,15 +188,32 @@ def lambda_handler(event, context):
     def _invoke(tier, payload):
         from mcp_server.tiers import function_name_for
 
-        response = client.invoke(
-            FunctionName=function_name_for(tier),
-            InvocationType="RequestResponse",
-            Payload=json.dumps(payload).encode("utf-8"),
+        request_id = (
+            (payload or {}).get("id") if isinstance(payload, dict) else None
         )
-        return unwrap_invocation(
-            response, tier=tier,
-            request_id=(payload or {}).get("id") if isinstance(payload, dict) else None,
-        )
+        try:
+            response = client.invoke(
+                FunctionName=function_name_for(tier),
+                InvocationType="RequestResponse",
+                Payload=json.dumps(payload).encode("utf-8"),
+            )
+        except Exception as e:
+            # unwrap_invocation covers a handler that *ran* and failed --
+            # Lambda answers 200 with FunctionError and an error object.
+            # Invoke itself can fail before any response exists at all: a
+            # tier that is not deployed, an AccessDenied on the router's
+            # role, throttling. Left uncaught, that propagates out of
+            # lambda_handler and Lambda serializes it verbatim, stack trace
+            # included -- observed against a partially deployed topology:
+            # `FunctionError: Unhandled` with "/var/task/mcp_server/router.py"
+            # in the payload. Same two bugs unwrap_invocation exists to
+            # prevent (an internal path disclosed, and a body that is not a
+            # JSON-RPC response), reached by the one door it does not watch.
+            return _error(
+                request_id, _INTERNAL_ERROR,
+                f"tier {tier!r} could not be invoked: {type(e).__name__}",
+            )
+        return unwrap_invocation(response, tier=tier, request_id=request_id)
 
     try:
         body = json.loads(event.get("body") or "null")

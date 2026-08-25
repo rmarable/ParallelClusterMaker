@@ -48,6 +48,18 @@ PYTHON_RUNTIME = "python3.12"
 # dependency chain, not about resident size.
 TIER_RUNTIME = {
     "router": {"timeout": 60, "memory": 256},
+    # 1024 is a CPU choice, not a memory one, and the numbers are why.
+    # Measured on real deployed invocations, peak usage flat at ~237 MB
+    # every time -- so nothing below is memory-starved -- while the cold
+    # start, which is CPU-bound on importing PCluster's dependency chain,
+    # moves sharply:
+    #
+    #     1024 MB -> 8.6s     512 MB -> 24.2s     384 MB -> 28.6s
+    #
+    # Lambda allocates CPU in proportion to memory, so trimming to the
+    # measured peak triples first-call latency to save a fraction of a
+    # cent per invocation. Do not "right-size" this against Max Memory
+    # Used; that reads the wrong axis.
     "read-only": {"timeout": LAMBDA_MAX_TIMEOUT_SECONDS, "memory": 1024},
     "fleet-toggle": {"timeout": LAMBDA_MAX_TIMEOUT_SECONDS, "memory": 1024},
     "stack-mutation": {"timeout": LAMBDA_MAX_TIMEOUT_SECONDS, "memory": 2048},
@@ -162,6 +174,12 @@ def deploy_tier(lam, tier, *, aws_account_id, code, environment=None):
     # combined update. Code first: a configuration pointing at code that
     # was never uploaded is the worse intermediate state of the two.
     lam.update_function_code(FunctionName=kwargs["FunctionName"], **_code_update(code))
+    # ...and Lambda will not accept the second call until the first has
+    # settled: it answers ResourceConflictException, "An update is in
+    # progress for resource". So this path could never have completed a
+    # redeploy. Invisible to the tests, which stub the client and answer
+    # both calls instantly; it took a real second deployment to see.
+    _wait_until_updated(lam, kwargs["FunctionName"])
     cfg = {
         k: kwargs[k]
         for k in ("Role", "Timeout", "MemorySize", "Description")
@@ -174,6 +192,23 @@ def deploy_tier(lam, tier, *, aws_account_id, code, environment=None):
     )
     print(f"  Updated MCP function: {kwargs['FunctionName']}")
     return resp["FunctionArn"]
+
+
+def _wait_until_updated(lam, function_name):
+    """Block until a function's last update has settled.
+
+    Lambda's own waiter, not a sleep: it polls LastUpdateStatus and knows
+    the terminal values. A create also has to settle before the function
+    can be invoked, but create_function is followed by no second call
+    here, so only the update path needs it.
+    """
+    try:
+        lam.get_waiter("function_updated_v2").wait(FunctionName=function_name)
+    except Exception:
+        # An account or botocore old enough to lack the waiter should not
+        # fail the deploy outright -- the configuration call below will
+        # surface any real problem with its own error.
+        pass
 
 
 def _already_exists(exc):

@@ -772,3 +772,65 @@ class TestSlurmIsFoundOnANonInteractiveShell:
         )
         ok, detail = pcluster_core.check_slurm("1.2.3.4", "/k.pem", "ubuntu", 15)
         assert ok, detail
+
+
+class TestAnUpdatedClusterIsStillHealthy:
+    """`check_cfn_status` accepted `CREATE_COMPLETE` and nothing else, so a
+    single `apply_cluster_update` marked a cluster unhealthy **permanently**
+    -- `UPDATE_COMPLETE` is terminal and never decays back.
+
+    Found the first time this repo ever updated a cluster: every other
+    check passed (Slurm answering, head node reachable, Grafana up) and
+    `check_cluster_health` still reported `overall: False`, on both the CLI
+    and the deployed Lambda. It hid because every prior cluster had only
+    ever been `CREATE_COMPLETE`.
+    """
+
+    def _status(self, monkeypatch, cluster_status):
+        import pcluster_core
+
+        monkeypatch.setattr(
+            pcluster_core, "_describe_cluster_json",
+            lambda name, region: {
+                "clusterStatus": cluster_status,
+                "cloudFormationStackStatus": cluster_status,
+                "headNode": {"publicIpAddress": "1.2.3.4"},
+            },
+        )
+        return pcluster_core.check_cfn_status("c", "us-east-1", "pcluster")
+
+    def test_update_complete_is_healthy(self, monkeypatch):
+        ok, msg, ip = self._status(monkeypatch, "UPDATE_COMPLETE")
+        assert ok is True, "an updated cluster is a healthy cluster"
+        assert ip == "1.2.3.4"
+
+    def test_create_complete_is_still_healthy(self, monkeypatch):
+        """Vacuity guard -- the fix must not become 'accept everything'."""
+        ok, _, _ = self._status(monkeypatch, "CREATE_COMPLETE")
+        assert ok is True
+
+    @pytest.mark.parametrize("bad", [
+        "CREATE_FAILED", "UPDATE_FAILED", "DELETE_IN_PROGRESS",
+        "DELETE_FAILED", "CREATE_IN_PROGRESS", "UPDATE_IN_PROGRESS",
+    ])
+    def test_the_unhealthy_states_still_fail(self, monkeypatch, bad):
+        """The half that matters more: widening the accepted set must not
+        turn a broken cluster into a passing one."""
+        ok, msg, _ = self._status(monkeypatch, bad)
+        assert ok is False, f"{bad} must not report healthy"
+        assert bad in msg
+
+    def test_a_rolled_back_update_passes_with_a_note(self, monkeypatch):
+        """The cluster runs, but not with the configuration that was asked
+        for. 'fail' would be wrong -- nothing is broken -- and a bare 'pass'
+        hides a real divergence between deployed and requested."""
+        ok, msg, _ = self._status(monkeypatch, "UPDATE_ROLLBACK_COMPLETE")
+        assert ok is True
+        assert "rolled back" in msg and "previous configuration" in msg
+
+    def test_the_note_survives_the_caller_s_formatting(self, monkeypatch):
+        """core_check_cluster_health does msg.split('=', 1)[1] on a pass, so
+        a note that lives before the '=' would be silently dropped."""
+        _, msg, _ = self._status(monkeypatch, "UPDATE_ROLLBACK_COMPLETE")
+        detail = msg.split("=", 1)[1]
+        assert "rolled back" in detail
