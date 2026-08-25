@@ -68,9 +68,18 @@ class _FakeS3Lock:
         self.created_buckets = []
         self.public_access_blocked = []
         self.race_on_next_get = False
+        self.existing_buckets = set()
+
+    def head_bucket(self, Bucket):
+        """Modeled on the service contract: botocore's s3 service-2.json
+        gives HeadBucket exactly one error, NoSuchBucket, at HTTP 404."""
+        if Bucket not in self.existing_buckets:
+            raise _client_error("NoSuchBucket", "HeadBucket", status=404)
+        return {}
 
     def create_bucket(self, **kwargs):
         self.created_buckets.append(kwargs)
+        self.existing_buckets.add(kwargs["Bucket"])
 
     def put_public_access_block(self, **kwargs):
         self.public_access_blocked.append(kwargs)
@@ -170,6 +179,41 @@ class TestCreateLocksBucket:
 
         s3 = _AlreadyOwned()
         _create_locks_bucket(s3, locks_bucketname="x", region="us-east-1")  # must not raise
+        assert len(s3.public_access_blocked) == 1
+
+    def test_an_existing_bucket_is_neither_created_nor_reconfigured(self):
+        """The locks bucket is long-lived and account-wide, so in any real
+        deployment it already exists. Issuing CreateBucket anyway is what
+        broke the first live create_cluster through a least-privilege Lambda
+        role, which is correctly denied s3:CreateBucket."""
+        s3 = _FakeS3Lock()
+        s3.existing_buckets.add("parallelclustermaker-locks-123-us-east-1")
+        _create_locks_bucket(
+            s3, locks_bucketname="parallelclustermaker-locks-123-us-east-1",
+            region="us-east-1",
+        )
+        assert s3.created_buckets == []
+        assert s3.public_access_blocked == []
+
+    def test_a_role_that_cannot_create_buckets_still_takes_the_lock(self):
+        """The live failure, as a test: AccessDenied on CreateBucket for a
+        bucket that already exists and that the role can read and write."""
+        class _CannotCreate(_FakeS3Lock):
+            def create_bucket(self, **kwargs):
+                raise _client_error("AccessDenied", "CreateBucket", status=403)
+
+            def put_public_access_block(self, **kwargs):
+                raise _client_error("AccessDenied", "PutPublicAccessBlock", status=403)
+
+        s3 = _CannotCreate()
+        s3.existing_buckets.add("x")
+        _create_locks_bucket(s3, locks_bucketname="x", region="us-east-1")
+
+    def test_an_absent_bucket_is_still_created(self):
+        """The vacuity guard: the fix must not become "never create it"."""
+        s3 = _FakeS3Lock()
+        _create_locks_bucket(s3, locks_bucketname="brand-new", region="us-east-1")
+        assert [b["Bucket"] for b in s3.created_buckets] == ["brand-new"]
         assert len(s3.public_access_blocked) == 1
 
     def test_other_client_errors_propagate(self):

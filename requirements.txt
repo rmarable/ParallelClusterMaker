@@ -1,4 +1,4 @@
-aws-parallelcluster>=3.15
+aws-parallelcluster>=3.15,<3.17
 boto3
 botocore
 ansible

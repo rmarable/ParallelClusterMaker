@@ -31,6 +31,7 @@ from fastmcp.exceptions import ToolError  # noqa: E402
 import mcp_server.tools as tools_mod  # noqa: E402
 from mcp_server.server import build_local, build_remote  # noqa: E402
 from mcp_server.tiers import TOOL_TIERS, UNIMPLEMENTED  # noqa: E402
+from pcluster_core import _is_writable_dir, resolve_writable_repo_root  # noqa: E402
 
 
 def _text(result):
@@ -1643,3 +1644,90 @@ class TestFinalizeClusterBuildIsLocalOnly:
         assert not r.is_error, r.content[0].text if r.content else ""
         assert len(called) == 1
         assert called[0]["region"] == "us-west-2", "the cluster's region must be used"
+
+
+class TestABuildCanWriteOnAReadOnlyDeployment:
+    """Lambda mounts the package at /var/task read-only, and a build writes
+    src/vars_files/<name>.yml and active_clusters/<name>/.  The first live
+    create_cluster through the deployed image tier died on exactly that:
+    OSError(30) 'Read-only file system'.  Nothing local could see it -- a
+    developer checkout is writable, so resolve_writable_repo_root returns it
+    untouched and every existing test exercises that branch.
+    """
+
+    def _read_only_tree(self, tmp_path):
+        root = tmp_path / "task"
+        (root / "templates").mkdir(parents=True)
+        (root / "templates" / "vars_file.j2").write_text("{{ cluster_name }}")
+        (root / "src").mkdir()
+        (root / "src" / "pcluster_core.py").write_text("# module")
+        (root / "scripts").mkdir()
+        os.chmod(root / "src", 0o555)
+        os.chmod(root, 0o555)
+        return root
+
+    def test_a_writable_root_is_returned_untouched(self, tmp_path):
+        root = tmp_path / "checkout"
+        root.mkdir()
+        assert resolve_writable_repo_root(str(root)) == str(root)
+        # and nothing was created beside it
+        assert list(tmp_path.iterdir()) == [root]
+
+    @pytest.mark.skipif(os.geteuid() == 0, reason="root ignores the mode bits")
+    def test_a_read_only_root_yields_a_writable_overlay(self, tmp_path):
+        root = self._read_only_tree(tmp_path)
+        overlay = resolve_writable_repo_root(
+            str(root), overlay_root=str(tmp_path / "overlay")
+        )
+        assert overlay != str(root)
+
+        # the two written paths are real directories, and really writable
+        for rel in ("active_clusters", os.path.join("src", "vars_files")):
+            target = os.path.join(overlay, rel)
+            assert os.path.isdir(target) and not os.path.islink(target)
+            probe = os.path.join(target, "probe")
+            with open(probe, "w") as fh:
+                fh.write("ok")
+            assert open(probe).read() == "ok"
+
+    @pytest.mark.skipif(os.geteuid() == 0, reason="root ignores the mode bits")
+    def test_the_source_tree_is_still_readable_through_the_overlay(self, tmp_path):
+        root = self._read_only_tree(tmp_path)
+        overlay = resolve_writable_repo_root(
+            str(root), overlay_root=str(tmp_path / "overlay")
+        )
+        # a template the build renders, and a module under src/, both reachable
+        assert (
+            open(os.path.join(overlay, "templates", "vars_file.j2")).read()
+            == "{{ cluster_name }}"
+        )
+        assert open(os.path.join(overlay, "src", "pcluster_core.py")).read() == "# module"
+
+    @pytest.mark.skipif(os.geteuid() == 0, reason="root ignores the mode bits")
+    def test_resolving_twice_is_not_an_error(self, tmp_path):
+        """A warm container calls this again; the overlay already exists."""
+        root = self._read_only_tree(tmp_path)
+        first = resolve_writable_repo_root(
+            str(root), overlay_root=str(tmp_path / "overlay")
+        )
+        second = resolve_writable_repo_root(
+            str(root), overlay_root=str(tmp_path / "overlay")
+        )
+        assert first == second
+
+    @pytest.mark.skipif(os.geteuid() == 0, reason="root ignores the mode bits")
+    def test_the_probe_is_what_detects_it_not_the_permission_bits(self, tmp_path):
+        """os.access(W_OK) answers from the mode bits and reports a read-only
+        *filesystem* as writable, which is the case that shipped.  The
+        detection has to be an actual write."""
+        root = self._read_only_tree(tmp_path)
+        assert _is_writable_dir(str(root)) is False
+        writable = tmp_path / "rw"
+        writable.mkdir()
+        assert _is_writable_dir(str(writable)) is True
+
+    def test_the_probe_leaves_nothing_behind(self, tmp_path):
+        root = tmp_path / "rw"
+        root.mkdir()
+        assert _is_writable_dir(str(root)) is True
+        assert list(root.iterdir()) == []

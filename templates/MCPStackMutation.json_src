@@ -263,6 +263,47 @@
             ],
             "Resource": "arn:aws:secretsmanager:*:<AWS_ACCOUNT_ID>:secret:parallelcluster/*",
             "Effect": "Allow"
+        },
+        {
+            "Sid": "IAMClusterRoleLifecycle",
+            "Action": [
+                "iam:CreateRole",
+                "iam:DeleteRole",
+                "iam:PutRolePolicy",
+                "iam:DeleteRolePolicy",
+                "iam:ListRolePolicies",
+                "iam:ListInstanceProfilesForRole",
+                "iam:TagRole",
+                "iam:PassRole",
+                "iam:AttachRolePolicy",
+                "iam:DetachRolePolicy",
+                "iam:ListAttachedRolePolicies"
+            ],
+            "Resource": "arn:aws:iam::<AWS_ACCOUNT_ID>:role/pclustermaker-role-*",
+            "Effect": "Allow"
+        },
+        {
+            "Sid": "IAMClusterPolicyLifecycle",
+            "Action": [
+                "iam:CreatePolicy",
+                "iam:DeletePolicy",
+                "iam:GetPolicyVersion",
+                "iam:ListPolicyVersions",
+                "iam:ListEntitiesForPolicy"
+            ],
+            "Resource": "arn:aws:iam::<AWS_ACCOUNT_ID>:policy/pclustermaker-policy-*",
+            "Effect": "Allow"
+        },
+        {
+            "Sid": "IAMClusterInstanceProfile",
+            "Action": [
+                "iam:CreateInstanceProfile",
+                "iam:DeleteInstanceProfile",
+                "iam:AddRoleToInstanceProfile",
+                "iam:RemoveRoleFromInstanceProfile"
+            ],
+            "Resource": "arn:aws:iam::<AWS_ACCOUNT_ID>:instance-profile/pclustermaker-role-*",
+            "Effect": "Allow"
         }
     ]
 }

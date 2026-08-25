@@ -68,6 +68,7 @@ from pcluster_core import (
     list_cluster_records,
     load_cluster_defaults,
     resolve_region_from_az,
+    resolve_writable_repo_root,
     core_start_fleet,
     core_stop_fleet,
 )
@@ -112,8 +113,22 @@ _REMOTE_DENIED_PARAMS = {
 }
 
 
+_RESOLVED_REPO_ROOT = None
+
+
 def _repo_root():
-    return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    """The repo root, made writable when the deployment is read-only.
+
+    Cached per process: on a Lambda the resolution builds an overlay, and
+    rebuilding it on every tool call would be filesystem work for an answer
+    that cannot change within a container.  Locally the root is already
+    writable and this returns it untouched.
+    """
+    global _RESOLVED_REPO_ROOT
+    if _RESOLVED_REPO_ROOT is None:
+        real = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        _RESOLVED_REPO_ROOT = resolve_writable_repo_root(real)
+    return _RESOLVED_REPO_ROOT
 
 
 def _pcluster_bin():

@@ -13,6 +13,7 @@ documenting "up to ~30 minutes". It is local-only now, and
 """
 
 import ast
+import io
 import os
 import sys
 
@@ -32,7 +33,11 @@ from mcp_server.deploy import (  # noqa: E402
     function_spec,
     validate_timeouts,
 )
-from mcp_server.packaging import TIER_PACKAGES  # noqa: E402
+from mcp_server.packaging import (  # noqa: E402
+    PCLUSTER_REQUIREMENT,
+    TIER_PACKAGES,
+    render_requirements_file,
+)
 from mcp_server.tiers import FUNCTION_NAMES, TOOL_TIERS  # noqa: E402
 
 ACCOUNT = "123456789012"
@@ -378,3 +383,54 @@ class TestTierMemoryTracksTierWork:
 
         for tier, cfg in TIER_RUNTIME.items():
             assert 128 <= cfg["memory"] <= 10240, (tier, cfg["memory"])
+
+
+class TestBothSurfacesPinTheSamePclusterVersion:
+    """requirements.txt and the Lambda tier specs each name a PCluster
+    version, and they drifted in effect rather than in text: both said
+    ">=3.15", so the operator's venv resolved 3.15.1 while a Lambda artifact
+    built months later resolved 3.16.0. PCluster refuses to manage a cluster
+    created by a version it does not recognize, so the remote transport built
+    a real cluster the operator's own CLI could neither describe nor tear
+    down -- reported as "belongs to an incompatible ParallelCluster major
+    version". An unpinned upper bound is what makes that reachable.
+    """
+
+    def _requirements_line(self):
+        path = os.path.join(REPO_ROOT, "requirements.txt")
+        for raw in io.open(path, encoding="utf-8").read().splitlines():
+            if raw.strip().lower().startswith("aws-parallelcluster"):
+                return raw.strip()
+        raise AssertionError("requirements.txt names no aws-parallelcluster")
+
+    def test_the_two_surfaces_agree(self):
+        assert PCLUSTER_REQUIREMENT == self._requirements_line()
+
+    def test_the_pin_carries_an_upper_bound(self):
+        """The half that actually prevents the drift. A lower bound alone is
+        satisfied by every future release."""
+        assert "<" in PCLUSTER_REQUIREMENT, (
+            f"{PCLUSTER_REQUIREMENT!r} has no upper bound, so an artifact built "
+            f"later can resolve a PCluster the operator's CLI cannot manage"
+        )
+
+    def test_every_tier_that_ships_pcluster_uses_the_constant(self):
+        """Four tiers named the version as a literal; one edited copy is the
+        whole failure mode again."""
+        shipping = [
+            t for t, spec in TIER_PACKAGES.items()
+            if any("parallelcluster" in r for r in spec["requirements"])
+        ]
+        assert shipping, "no tier ships PCluster -- the sweep has gone vacuous"
+        for tier in shipping:
+            named = [
+                r for r in TIER_PACKAGES[tier]["requirements"]
+                if "parallelcluster" in r
+            ]
+            assert named == [PCLUSTER_REQUIREMENT], (
+                f"tier {tier!r} names {named} rather than the shared constant"
+            )
+
+    def test_the_generated_file_carries_the_pin(self):
+        for tier in ("read-only", "stack-mutation-node"):
+            assert PCLUSTER_REQUIREMENT in render_requirements_file(tier)

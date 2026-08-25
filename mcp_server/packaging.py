@@ -69,6 +69,16 @@ EXCLUDED_FROM_LAMBDA = {
 # The router's empty requirement list is a load-bearing claim, not an
 # oversight -- see this module's docstring and
 # TestTheRouterPackageIsTiny.
+# Must stay byte-identical to requirements.txt's own line, and the upper
+# bound is the load-bearing half. Unpinned (">=3.15"), a Lambda artifact
+# built today resolved 3.16.0 while the operator's older venv sat at
+# 3.15.1, and PCluster refuses to manage a cluster created by a version it
+# does not recognize: the remote transport built a real cluster the
+# operator's own CLI could not describe or tear down. Two surfaces stating
+# one version is the pattern this repo pins by test --
+# TestBothSurfacesPinTheSamePclusterVersion.
+PCLUSTER_REQUIREMENT = "aws-parallelcluster>=3.15,<3.17"
+
 TIER_PACKAGES = {
     "router": {
         "requirements": [],
@@ -78,7 +88,7 @@ TIER_PACKAGES = {
         "kind": "zip",
     },
     "read-only": {
-        "requirements": ["aws-parallelcluster>=3.15", "boto3", "botocore",
+        "requirements": [PCLUSTER_REQUIREMENT, "boto3", "botocore",
                          "Jinja2", "PyYAML", "ruamel.yaml", "jmespath", "fastmcp"],
         "sources": ["mcp_server/", "src/pcluster_core.py",
                     "src/pcluster_aux_data.py", "templates/"],
@@ -86,7 +96,7 @@ TIER_PACKAGES = {
         "kind": "zip",
     },
     "fleet-toggle": {
-        "requirements": ["aws-parallelcluster>=3.15", "boto3", "botocore",
+        "requirements": [PCLUSTER_REQUIREMENT, "boto3", "botocore",
                          "Jinja2", "PyYAML", "ruamel.yaml", "jmespath", "fastmcp"],
         "sources": ["mcp_server/", "src/pcluster_core.py",
                     "src/pcluster_aux_data.py", "templates/"],
@@ -94,7 +104,7 @@ TIER_PACKAGES = {
         "kind": "zip",
     },
     "stack-mutation": {
-        "requirements": ["aws-parallelcluster>=3.15", "boto3", "botocore",
+        "requirements": [PCLUSTER_REQUIREMENT, "boto3", "botocore",
                          "Jinja2", "PyYAML", "ruamel.yaml", "jmespath", "fastmcp"],
         "sources": ["mcp_server/", "src/pcluster_core.py",
                     "src/pcluster_aux_data.py", "templates/"],
@@ -106,7 +116,7 @@ TIER_PACKAGES = {
         # Node.js, not a package: create_cluster and update_cluster call
         # assert_valid_node_js() on their first line, and a zip artifact
         # cannot supply a Node runtime. Hence a container image.
-        "requirements": ["aws-parallelcluster>=3.15", "boto3", "botocore",
+        "requirements": [PCLUSTER_REQUIREMENT, "boto3", "botocore",
                          "Jinja2", "PyYAML", "ruamel.yaml", "jmespath", "fastmcp"],
         "sources": ["mcp_server/", "src/pcluster_core.py",
                     "src/pcluster_aux_data.py", "templates/", "scripts/"],

@@ -14,6 +14,26 @@
   * On macOS, run `brew install node`.
   * On Debian/Ubuntu (`apt`), run `sudo apt-get install nodejs`, or follow [NodeSource's install instructions](https://github.com/nodesource/distributions) for a newer version than your distribution ships.
   * On RPM-based distributions, install the `nodejs` package with your package manager.
+* An OCI container runtime is required **only to deploy the MCP remote transport**, and only for one of its five tiers. Nothing in normal operation needs it: building, operating and tearing down clusters from the CLI, and running the MCP server locally over stdio, all work without a container runtime. Skip this unless you are standing up the hosted (browser-reachable) MCP topology described in `docs/parallelclustermaker-mcp-plan.md`.
+  * The `stack-mutation-node` tier ships as a container image rather than a zip, and the reason is Node.js again. `pcluster`'s `create_cluster()` and `update_cluster()` call `assert_valid_node_js()` as their first statement, which does `shutil.which("node")` and fails loudly without it. AWS's Python Lambda runtimes ship no Node and a zip artifact cannot add one, so that tier — which carries `create_cluster`, `apply_cluster_update` and `preview_cluster_config` — is built from `mcp_server/Dockerfile.stack-mutation-node` and pushed to ECR. The other four tiers are plain zips and need no runtime at all.
+  * On macOS, [Finch](https://runfinch.com/) is the lightest option and is AWS's own: `brew install --cask finch`, then `finch vm init` once (`finch vm start` on later boots). [Docker Desktop](https://www.docker.com/products/docker-desktop/), [Podman Desktop](https://podman-desktop.io/) and [Rancher Desktop](https://rancherdesktop.io/) all work equally well; Docker Desktop requires a paid subscription for larger organizations, which the others do not.
+  * On Linux, install Docker Engine or Podman from your distribution's repositories — neither needs a virtual machine, so there is nothing to start first. Podman is rootless by default and is the simpler choice if you would rather not add your user to the `docker` group.
+  * On Windows, use [Docker Desktop](https://www.docker.com/products/docker-desktop/) or [Rancher Desktop](https://rancherdesktop.io/) with the WSL2 backend, and build from inside a WSL2 shell rather than from PowerShell — the repository's build tooling is POSIX shell. Finch does not support Windows.
+  * **Build for the Lambda function's architecture, not your laptop's.** An image built on Apple Silicon or an ARM Linux host defaults to `linux/arm64`, and Lambda rejects a mismatch at `CreateFunction` rather than at invocation. Pass `--platform linux/amd64` unless the function is configured for `arm64`.
+  * **The ECR repository must exist before the first push.** `finch push` (and `docker push`) will not create it, and the failure names the wrong cause: ECR answers an unknown repository with `repository does not exist or may require authorization`, whose second half sends you auditing IAM for a permission that was never missing. Create it once with `aws ecr create-repository --repository-name pclustermaker-mcp-stack-mutation-node --region <region>`.
+  * **On Finch, `finch login` can succeed while `finch push` reports `no basic auth credentials`.** Finch runs containerd inside a Lima VM, and the push happens in the VM rather than on the host. `finch login` writes the credential to the host — by default handing it to the macOS keychain via `"credsStore": "osxkeychain"` in `~/.finch/config.json`, which leaves the `auths` entry empty — and the VM has no `~/.docker/config.json` of its own, so the pusher finds nothing. Removing `credsStore` so the token is written inline is *not* sufficient by itself; the credential has to reach the VM. Write it there directly, then scrub it afterward (the ECR token is short-lived, but it is still a credential at rest):
+
+    ```sh
+    export LIMA_HOME=/Applications/Finch/lima/data
+    LIMACTL=/Applications/Finch/lima/bin/limactl
+    AUTH=$(printf 'AWS:%s' "$(aws ecr get-login-password --region <region>)" | base64)
+    printf '{"auths":{"<acct>.dkr.ecr.<region>.amazonaws.com":{"auth":"%s"}}}' "$AUTH" \
+      | $LIMACTL shell finch -- sh -c 'mkdir -p $HOME/.docker && cat > $HOME/.docker/config.json'
+    finch push <acct>.dkr.ecr.<region>.amazonaws.com/pclustermaker-mcp-stack-mutation-node:latest
+    $LIMACTL shell finch -- sh -c 'rm -f $HOME/.docker/config.json'
+    ```
+
+    This is a Finch-specific workaround, confirmed on Finch; the other runtimes were not tested against it. Docker Desktop and Rancher Desktop are not expected to need it, since their builder reads the same host credential store the CLI writes.
 
 ## Python version
 

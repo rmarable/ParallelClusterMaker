@@ -15,6 +15,7 @@ that a DELETE_FAILED/unconfirmed/orphaned outcome preserves them and exits
 non-zero, and that the abort window and cluster lock still work.
 """
 
+import errno
 import io
 import os
 import sys
@@ -894,3 +895,263 @@ class TestTeardownFinalizeOnly:
             )
         self._finalize(staged)
         assert ran == []
+
+
+class TestTheStoreSuppliesWhatOnlyTheBuilderHad:
+    """The serial file and the vars file both live only on the machine that
+    built the cluster, so core_delete_cluster aborted on each in turn and a
+    remote teardown could never run -- on values the published record has
+    carried all along. Local still wins, the same order as
+    _read_cluster_record and for the same reason.
+
+    Found live: MCP delete_cluster against a Lambda returned
+    "Missing cluster_serial_number_file: /var/task/active_clusters/..."
+    while s3://<locks-bucket>/vars/<name>.json held the record.
+    """
+
+    def test_the_store_record_is_returned_whole(self, monkeypatch):
+        """One read serves both the serial and the vars, rather than two
+        round trips for one object."""
+        record = {"serial": SERIAL, "aws_account_id": "1234", "az": "us-east-1a"}
+        monkeypatch.setattr(pcluster_core, "get_cluster_record", lambda s3, **kw: record)
+        monkeypatch.setattr(pcluster_core.boto3, "client", lambda *a, **k: _StsOnly())
+        assert pcluster_core._cluster_record_from_store(
+            CLUSTER, region="us-east-1"
+        ) == record
+
+    def test_an_absent_record_is_none_not_an_exception(self, monkeypatch):
+        monkeypatch.setattr(pcluster_core, "get_cluster_record", lambda s3, **kw: None)
+        monkeypatch.setattr(pcluster_core.boto3, "client", lambda *a, **k: _StsOnly())
+        assert pcluster_core._cluster_record_from_store(
+            "nope", region="us-east-1"
+        ) is None
+
+    def test_an_unreachable_store_is_none_not_a_traceback(self, monkeypatch):
+        """Teardown's own error path says what is missing; a store that
+        cannot be reached must not surface as a traceback in front of it."""
+        def _boom(*a, **k):
+            raise RuntimeError("no credentials")
+
+        monkeypatch.setattr(pcluster_core.boto3, "client", _boom)
+        assert pcluster_core._cluster_record_from_store(
+            "x", region="us-east-1"
+        ) is None
+
+    def test_it_does_not_consult_local_state(self, monkeypatch):
+        """Store-only by design: the caller reaches this exactly when the
+        local files are absent, so re-reading local state here would only
+        re-answer a question already asked."""
+        def _should_not_run(*a, **k):
+            raise AssertionError("_read_local_vars_file must not be consulted here")
+
+        monkeypatch.setattr(pcluster_core, "_read_local_vars_file", _should_not_run)
+        monkeypatch.setattr(
+            pcluster_core, "get_cluster_record", lambda s3, **kw: {"serial": "s-1"},
+        )
+        monkeypatch.setattr(pcluster_core.boto3, "client", lambda *a, **k: _StsOnly())
+        assert pcluster_core._cluster_record_from_store(
+            "x", region="us-east-1"
+        ) == {"serial": "s-1"}
+
+
+class TestTeardownRunsOffTheStoreAlone:
+    """The wiring, not the helper. Tests covering _cluster_record_from_store
+    in isolation all passed with the fallback reverted -- nothing drove
+    core_delete_cluster down the no-local-file path, which is the only path
+    that was broken. These assert on the real function.
+    """
+
+    def _record(self):
+        return {
+            "serial": SERIAL, "cluster_name": CLUSTER, "cluster_owner": OWNER,
+            "region": "us-east-1", "aws_account_id": "183295445014",
+            "az": "us-east-1a", "ec2_iam_policy": "pclustermaker-policy-x",
+            "ec2_iam_role": "pclustermaker-role-x", "ec2_keypair": "kp",
+            "ec2_user": "ubuntu", "ec2_user_home": "/home/ubuntu",
+            "ssh_keypair": "kp.pem", "ssh_secret_name": "parallelcluster/x",
+            "s3_bucketname": "parallelclustermaker-x",
+            "fsx_hydration_iam_policy": "", "results_bucketname": "",
+            "enable_monitoring": "false", "enable_external_nfs": "false",
+            "enable_fsx_hydration": "false", "enable_hpc_benchmarks": "false",
+        }
+
+    def _run(self, staged):
+        return pcluster_core.core_delete_cluster(
+            cluster_name=CLUSTER, cluster_owner=OWNER, region="us-east-1",
+            repo_root=str(staged["root"]), delete_s3_bucketname="true",
+            debug_mode=False, wait=False,
+        )
+
+    def test_a_teardown_with_neither_local_file_still_deletes_the_stack(
+        self, staged, monkeypatch,
+    ):
+        """The whole point: a machine that did not build the cluster has
+        neither file, and that is exactly when teardown must still work."""
+        staged["serial_file"].unlink()
+        staged["vars_file"].unlink()
+        rec = self._record()
+        monkeypatch.setattr(
+            pcluster_core, "_cluster_record_from_store", lambda name, **kw: rec,
+        )
+        self._run(staged)
+        assert staged["pc_lib"].delete_calls == [(CLUSTER, "us-east-1")]
+
+    def test_the_store_values_are_what_teardown_acts_on(
+        self, staged, monkeypatch, capsys,
+    ):
+        """Not merely "it did not abort": every resource name is built from
+        the serial, so the store's value has to be the one in play."""
+        staged["serial_file"].unlink()
+        staged["vars_file"].unlink()
+        rec = self._record()
+        monkeypatch.setattr(
+            pcluster_core, "_cluster_record_from_store", lambda name, **kw: rec,
+        )
+        self._run(staged)
+        assert SERIAL in capsys.readouterr().out
+
+    def test_one_store_read_serves_both_files(self, staged, monkeypatch):
+        """Two lookups for one object is a second round trip and a second
+        chance for the two halves to disagree."""
+        calls = []
+        rec = self._record()
+
+        def _counted(name, **kw):
+            calls.append(name)
+            return rec
+
+        staged["serial_file"].unlink()
+        staged["vars_file"].unlink()
+        monkeypatch.setattr(pcluster_core, "_cluster_record_from_store", _counted)
+        self._run(staged)
+        assert calls == [CLUSTER]
+
+    def test_no_local_files_and_no_record_still_aborts(self, staged, monkeypatch):
+        """The vacuity guard: the fix must not become "proceed regardless".
+        A teardown that cannot name the serial must not run against a blank
+        one."""
+        staged["serial_file"].unlink()
+        staged["vars_file"].unlink()
+        monkeypatch.setattr(
+            pcluster_core, "_cluster_record_from_store", lambda name, **kw: None,
+        )
+        result = self._run(staged)
+        assert result.success is False
+        assert result.exit_code == 1
+        assert staged["pc_lib"].delete_calls == []
+
+    def test_a_record_without_a_serial_aborts(self, staged, monkeypatch):
+        """A record whose serial is blank must not resolve to "" and let
+        teardown proceed -- every resource name is built from it."""
+        staged["serial_file"].unlink()
+        rec = dict(self._record(), serial="")
+        monkeypatch.setattr(
+            pcluster_core, "_cluster_record_from_store", lambda name, **kw: rec,
+        )
+        result = self._run(staged)
+        assert result.success is False
+        assert staged["pc_lib"].delete_calls == []
+
+    def test_a_record_predating_the_teardown_fields_is_refused(
+        self, staged, monkeypatch, capsys,
+    ):
+        """Every teardown field defaults to "", so an older record loads
+        cleanly and would run cleanup against blank policy and role names --
+        skipping steps silently and leaving orphans while reporting success.
+        Refusing names the cause and the remedy instead."""
+        staged["serial_file"].unlink()
+        staged["vars_file"].unlink()
+        legacy = {
+            "serial": SERIAL, "cluster_name": CLUSTER, "cluster_owner": OWNER,
+            "region": "us-east-1", "ec2_keypair": "kp", "ec2_user": "ubuntu",
+            "s3_bucketname": "parallelclustermaker-x", "enable_monitoring": "false",
+        }
+        monkeypatch.setattr(
+            pcluster_core, "_cluster_record_from_store", lambda name, **kw: legacy,
+        )
+        result = self._run(staged)
+        assert result.success is False
+        assert staged["pc_lib"].delete_calls == []
+        out = capsys.readouterr().out
+        assert "predates teardown" in out
+        assert "ec2_iam_policy" in out
+
+    def test_the_refusal_does_not_fire_on_a_current_record(self, staged, monkeypatch):
+        """The vacuity guard: the check must not refuse every store-driven
+        teardown, which would undo the whole extension."""
+        staged["serial_file"].unlink()
+        staged["vars_file"].unlink()
+        rec = self._record()
+        monkeypatch.setattr(
+            pcluster_core, "_cluster_record_from_store", lambda name, **kw: rec,
+        )
+        self._run(staged)
+        assert staged["pc_lib"].delete_calls == [(CLUSTER, "us-east-1")]
+
+    def test_local_files_are_still_preferred(self, staged, monkeypatch):
+        """Local wins, the same order as _read_cluster_record. The store is
+        not consulted at all when both files are there."""
+        def _should_not_run(*a, **k):
+            raise AssertionError("the store must not be consulted when local files exist")
+
+        monkeypatch.setattr(
+            pcluster_core, "_cluster_record_from_store", _should_not_run,
+        )
+        self._run(staged)
+        assert staged["pc_lib"].delete_calls == [(CLUSTER, "us-east-1")]
+
+
+class _StsOnly:
+    """Stands in for both the s3 and sts clients boto3.client would return."""
+
+    def get_caller_identity(self):
+        return {"Account": "183295445014"}
+
+
+class TestAnAbsentLocalKeyIsNotAnOrphan:
+    """A remote teardown has no local .pem by construction. The step caught
+    FileNotFoundError, but on a read-only filesystem the kernel rejects the
+    write before discovering the file is not there, so it raises EROFS
+    instead -- and a purely local step then appeared in the orphan report,
+    telling the operator to remove by hand a file that was never on that
+    machine. Observed live on the deployed stack-mutation Lambda:
+    "[Errno 30] Read-only file system: 'storecert-...pem'".
+
+    EROFS is raised directly rather than simulated with chmod: a read-only
+    *directory* is a different thing from a read-only *filesystem*, and on
+    macOS unlinking an absent file inside one raises FileNotFoundError,
+    which the step already handled. A chmod-based test passes with the fix
+    reverted and proves nothing.
+    """
+
+    def test_a_read_only_filesystem_is_not_a_failure(self, tmp_path, monkeypatch):
+        def _erofs(path):
+            raise OSError(errno.EROFS, "Read-only file system", path)
+
+        monkeypatch.setattr(os, "remove", _erofs)
+        step = pcluster_core._delete_local_ssh_key_step(str(tmp_path / "absent.pem"))
+        assert step.succeeded is True
+
+    def test_an_existing_key_is_still_removed(self, tmp_path):
+        """The vacuity guard: the fix must not become "never delete it"."""
+        pem = tmp_path / "real.pem"
+        pem.write_text("KEY")
+        step = pcluster_core._delete_local_ssh_key_step(str(pem))
+        assert step.succeeded is True
+        assert not pem.exists()
+
+    def test_a_genuine_failure_on_a_real_key_is_still_reported(
+        self, tmp_path, monkeypatch,
+    ):
+        """The absence check must not swallow a failure to remove a key that
+        is actually there."""
+        pem = tmp_path / "stuck.pem"
+        pem.write_text("KEY")
+
+        def _denied(path):
+            raise PermissionError("denied")
+
+        monkeypatch.setattr(os, "remove", _denied)
+        step = pcluster_core._delete_local_ssh_key_step(str(pem))
+        assert step.succeeded is False
+        assert "denied" in step.detail

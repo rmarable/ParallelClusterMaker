@@ -1,0 +1,123 @@
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Sid": "ClusterAlertTopicLifecycle",
+            "Action": [
+                "sns:CreateTopic",
+                "sns:DeleteTopic",
+                "sns:GetTopicAttributes",
+                "sns:SetTopicAttributes",
+                "sns:Subscribe",
+                "sns:Unsubscribe",
+                "sns:ListSubscriptionsByTopic",
+                "sns:Publish",
+                "sns:TagResource"
+            ],
+            "Resource": "arn:aws:sns:*:<AWS_ACCOUNT_ID>:sns_alerts_*",
+            "Effect": "Allow"
+        },
+        {
+            "Sid": "ListTopicsIsUnscopable",
+            "Action": [
+                "sns:ListTopics"
+            ],
+            "Resource": "*",
+            "Effect": "Allow"
+        },
+        {
+            "Sid": "ClusterKeypairLifecycle",
+            "Action": [
+                "ec2:CreateKeyPair",
+                "ec2:ImportKeyPair",
+                "ec2:DeleteKeyPair",
+                "ec2:DescribeKeyPairs"
+            ],
+            "Resource": "*",
+            "Effect": "Allow"
+        },
+        {
+            "Sid": "PerBuildBucketLifecycle",
+            "Action": [
+                "s3:CreateBucket",
+                "s3:DeleteBucket",
+                "s3:PutBucketVersioning",
+                "s3:PutEncryptionConfiguration",
+                "s3:PutBucketPublicAccessBlock",
+                "s3:PutBucketTagging",
+                "s3:GetBucketLocation",
+                "s3:ListBucket",
+                "s3:ListBucketVersions"
+            ],
+            "Resource": "arn:aws:s3:::parallelclustermaker-*",
+            "Effect": "Allow"
+        },
+        {
+            "Sid": "PerBuildBucketObjects",
+            "Action": [
+                "s3:PutObject",
+                "s3:GetObject",
+                "s3:DeleteObject",
+                "s3:DeleteObjectVersion"
+            ],
+            "Resource": "arn:aws:s3:::parallelclustermaker-*/*",
+            "Effect": "Allow"
+        },
+        {
+            "Sid": "PclusterOwnRoleLifecycle",
+            "Action": [
+                "iam:CreateRole",
+                "iam:DeleteRole",
+                "iam:GetRole",
+                "iam:TagRole",
+                "iam:UntagRole",
+                "iam:PutRolePolicy",
+                "iam:GetRolePolicy",
+                "iam:DeleteRolePolicy",
+                "iam:ListRolePolicies",
+                "iam:AttachRolePolicy",
+                "iam:DetachRolePolicy",
+                "iam:ListAttachedRolePolicies",
+                "iam:PassRole"
+            ],
+            "Resource": "arn:aws:iam::<AWS_ACCOUNT_ID>:role/parallelcluster/*",
+            "Effect": "Allow"
+        },
+        {
+            "Sid": "GrafanaPasswordParameter",
+            "Action": [
+                "ssm:PutParameter",
+                "ssm:GetParameter",
+                "ssm:DeleteParameter",
+                "ssm:AddTagsToResource"
+            ],
+            "Resource": "arn:aws:ssm:*:<AWS_ACCOUNT_ID>:parameter/parallelcluster/*",
+            "Effect": "Allow"
+        },
+        {
+            "Sid": "ResolveOwnIdentity",
+            "Action": [
+                "sts:GetCallerIdentity"
+            ],
+            "Resource": "*",
+            "Effect": "Allow"
+        },
+        {
+            "Sid": "ClusterPrivateDns",
+            "Action": [
+                "route53:ListHostedZones",
+                "route53:AssociateVPCWithHostedZone"
+            ],
+            "Resource": "*",
+            "Effect": "Allow"
+        },
+        {
+            "Sid": "TagTheSshKeySecret",
+            "Action": [
+                "secretsmanager:TagResource"
+            ],
+            "Resource": "arn:aws:secretsmanager:*:<AWS_ACCOUNT_ID>:secret:parallelcluster/*",
+            "Effect": "Allow"
+        }
+    ]
+}

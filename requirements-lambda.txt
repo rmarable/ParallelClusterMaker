@@ -5,7 +5,7 @@
 # Deliberately NOT requirements.txt: that is the development set and
 # pulls ansible (~408 MB of collections) plus the plotting stack,
 # which together exceed Lambda's 250 MB unzipped limit on their own.
-aws-parallelcluster>=3.15
+aws-parallelcluster>=3.15,<3.17
 boto3
 botocore
 Jinja2

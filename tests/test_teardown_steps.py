@@ -115,11 +115,18 @@ class TestDeleteLocalSshKeyStep:
         assert result.succeeded is True
 
     def test_a_real_os_error_is_reported_not_raised(self, tmp_path, monkeypatch):
+        # The key has to exist: an absent path is a deliberate no-op now,
+        # since a read-only filesystem raises EROFS rather than
+        # FileNotFoundError and a purely local step must not be reported as
+        # an AWS-side orphan.
+        pem = tmp_path / "x.pem"
+        pem.write_text("fake key material")
+
         def _boom(path):
             raise PermissionError("denied")
 
         monkeypatch.setattr(os, "remove", _boom)
-        result = _delete_local_ssh_key_step(str(tmp_path / "x.pem"))
+        result = _delete_local_ssh_key_step(str(pem))
         assert result.succeeded is False
         assert "denied" in result.detail
 

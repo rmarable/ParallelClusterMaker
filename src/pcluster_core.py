@@ -98,10 +98,33 @@ class ClusterRecord:
     s3_bucketname: str
     enable_monitoring: str
 
+    # Teardown's own inputs. core_delete_cluster read all of these from the
+    # local vars file, so a machine that did not build the cluster could not
+    # tear it down -- the gap the store exists to close, left open because
+    # nothing had needed these fields until teardown ran remotely. Defaulted
+    # so a record written before they existed still loads.
+    aws_account_id: str = ""
+    az: str = ""
+    ec2_iam_policy: str = ""
+    ec2_iam_role: str = ""
+    ec2_user_home: str = ""
+    ssh_secret_name: str = ""
+    fsx_hydration_iam_policy: str = ""
+    results_bucketname: str = ""
+    enable_external_nfs: str = "false"
+    enable_fsx_hydration: str = "false"
+    enable_hpc_benchmarks: str = "false"
+
     @classmethod
     def from_dict(cls, rec):
-        """Build from the dict _read_cluster_record returns."""
-        return cls(**{f: rec[f] for f in cls.__dataclass_fields__})
+        """Build from the dict _read_cluster_record returns.
+
+        A key the dict does not carry falls back to the field's default,
+        so a record published before a field existed still loads: the
+        store outlives any one version of this class, and a stored record
+        is not re-written until its cluster is rebuilt.
+        """
+        return cls(**{f: rec[f] for f in cls.__dataclass_fields__ if f in rec})
 
     @classmethod
     def unknown(cls, cluster_name):
@@ -478,6 +501,28 @@ def _read_serial_first_line(serial_file_path):
         return fh.readline().rstrip("\n")
 
 
+def _cluster_record_from_store(cluster_name, *, region, s3=None):
+    """The cluster's published record as a dict, or None.
+
+    Store-only on purpose: the caller has already looked for the local
+    files and this runs exactly when they are absent, so consulting local
+    state here would only re-answer a question already asked. Every
+    failure is None rather than an exception -- teardown's own error path
+    says what is missing and why, and a store that cannot be reached must
+    not turn into a traceback in front of it.
+    """
+    try:
+        if s3 is None:
+            s3 = boto3.client("s3", region_name=region)
+        sts = boto3.client("sts")
+        aws_account_id = sts.get_caller_identity()["Account"]
+        bucket = _derive_locks_bucket(aws_account_id=aws_account_id, region=region)
+        record = get_cluster_record(s3, locks_bucketname=bucket, cluster_name=cluster_name)
+    except Exception:
+        return None
+    return record or None
+
+
 def _extract_rebuild_command(serial_file_path):
     """Return the last make_pcluster command recorded in a serial file, or None."""
     try:
@@ -821,10 +866,28 @@ def _derive_locks_bucket(*, aws_account_id, region):
 
 
 def _create_locks_bucket(s3, *, locks_bucketname, region):
-    """Idempotently create the locks bucket -- unconditionally, unlike the
-    results bucket (which is gated on enable_hpc_benchmarks): every build or
-    teardown needs the lock before anything else happens, regardless of
-    which features are enabled."""
+    """Ensure the locks bucket exists -- for every build and teardown, unlike
+    the results bucket (which is gated on enable_hpc_benchmarks): the lock is
+    taken before anything else happens, regardless of which features are
+    enabled. Creating it is skipped when it is already there; see below."""
+    # An existing bucket is left entirely alone -- no CreateBucket, no
+    # PutPublicAccessBlock. Both were issued unconditionally, which is
+    # harmless for the operator (their own credentials can create buckets)
+    # and fatal for a least-privilege Lambda role, which is denied
+    # s3:CreateBucket on a bucket that already exists and that it can
+    # otherwise read and write perfectly well. Granting the handler tiers
+    # CreateBucket to get past it would hand every one of them the right to
+    # create buckets in the account, to fix a call that never needed to
+    # happen: this bucket is long-lived and account-wide, so in any real
+    # deployment the operator's first CLI build already made it.
+    try:
+        s3.head_bucket(Bucket=locks_bucketname)
+        return
+    except _ClientError:
+        # Absent, or unreadable for a reason the create below will report
+        # more usefully than a head_bucket error code would.
+        pass
+
     kwargs = {"Bucket": locks_bucketname}
     if region != "us-east-1":
         kwargs["CreateBucketConfiguration"] = {"LocationConstraint": region}
@@ -2131,11 +2194,19 @@ _MCP_LAMBDA_TIERS = {
     ),
     "stack-mutation": (
         "pclustermaker-mcp-stack-mutation",
-        ["MCPStackMutation.json_src", "MCPStateAccessStackMutation.json_src"],
+        [
+            "MCPStackMutation.json_src",
+            "MCPStateAccessStackMutation.json_src",
+            "MCPClusterBuild.json_src",
+        ],
     ),
     "stack-mutation-node": (
         "pclustermaker-mcp-stack-mutation-node",
-        ["MCPStackMutation.json_src", "MCPStateAccessStackMutation.json_src"],
+        [
+            "MCPStackMutation.json_src",
+            "MCPStateAccessStackMutation.json_src",
+            "MCPClusterBuild.json_src",
+        ],
     ),
     "register": (
         "pclustermaker-mcp-register",
@@ -3056,6 +3127,78 @@ _RESULTS_BUCKET_PREFIX = "parallelclustermaker-results"
 _S3_BUCKET_NAME_MAX = 63  # S3's own limit on bucket names
 
 
+_WRITABLE_SUBDIRS = ("active_clusters", os.path.join("src", "vars_files"))
+
+
+def resolve_writable_repo_root(repo_root, *, overlay_root=None):
+    """A repo root that can be written to, for a read-only deployment.
+
+    Lambda mounts the deployment package at /var/task read-only, but a build
+    writes src/vars_files/<name>.yml and active_clusters/<name>/.  Returning
+    the root unchanged when it is already writable keeps every local caller
+    on exactly the path it had before; only a read-only root builds an
+    overlay under /tmp, where the source directories are symlinked back to
+    the real tree and just the written paths are real directories.
+
+    An overlay rather than a second "state root" parameter: repo_root is
+    read by dozens of call sites that join their own subpath onto it, and
+    threading a second root through all of them would leave each one a place
+    to pick the wrong half.
+    """
+    if _is_writable_dir(repo_root):
+        return repo_root
+
+    base = overlay_root or os.path.join("/tmp", "_ParallelClusterMaker_root")
+    os.makedirs(base, exist_ok=True)
+
+    # Symlink every top-level entry back to the read-only tree, except the
+    # ones that must be written; those are real directories.
+    reserved = {p.split(os.sep, 1)[0] for p in _WRITABLE_SUBDIRS}
+    for entry in sorted(os.listdir(repo_root)):
+        if entry in reserved:
+            continue
+        link = os.path.join(base, entry)
+        if not os.path.lexists(link):
+            os.symlink(os.path.join(repo_root, entry), link)
+
+    # "src" is both: it holds modules that must be read and vars_files/,
+    # which must be written, so it is a real directory of symlinks.
+    real_src = os.path.join(repo_root, "src")
+    if os.path.isdir(real_src):
+        overlay_src = os.path.join(base, "src")
+        os.makedirs(overlay_src, exist_ok=True)
+        for entry in sorted(os.listdir(real_src)):
+            if entry == "vars_files":
+                continue
+            link = os.path.join(overlay_src, entry)
+            if not os.path.lexists(link):
+                os.symlink(os.path.join(real_src, entry), link)
+
+    for rel in _WRITABLE_SUBDIRS:
+        os.makedirs(os.path.join(base, rel), exist_ok=True)
+
+    return base
+
+
+def _is_writable_dir(path):
+    """Whether a directory can actually be written to.
+
+    os.access(W_OK) is not enough: it answers from the permission bits and
+    reports a read-only *filesystem* as writable, which is precisely the
+    case this exists to detect.  The write is what settles it.
+    """
+    if not os.path.isdir(path):
+        return False
+    probe = os.path.join(path, ".pcm-write-probe")
+    try:
+        with open(probe, "w"):
+            pass
+        os.unlink(probe)
+        return True
+    except OSError:
+        return False
+
+
 def _derive_results_bucket(*, aws_account_id, region):
     """Return the name of the long-lived HPC benchmark results bucket.
 
@@ -3207,6 +3350,18 @@ def _sanitize_record(data, cluster_name):
         "ec2_user":               _str("ec2_user", "ubuntu"),
         "s3_bucketname":          _str("s3_bucketname"),
         "enable_monitoring":      _str("enable_monitoring", "false"),
+        # Teardown's inputs; see ClusterRecord for why they are here.
+        "aws_account_id":         _str("aws_account_id"),
+        "az":                     _str("az"),
+        "ec2_iam_policy":         _str("ec2_iam_policy"),
+        "ec2_iam_role":           _str("ec2_iam_role"),
+        "ec2_user_home":          _str("ec2_user_home"),
+        "ssh_secret_name":        _str("ssh_secret_name"),
+        "fsx_hydration_iam_policy": _str("fsx_hydration_iam_policy"),
+        "results_bucketname":     _str("results_bucketname"),
+        "enable_external_nfs":    _str("enable_external_nfs", "false"),
+        "enable_fsx_hydration":   _str("enable_fsx_hydration", "false"),
+        "enable_hpc_benchmarks":  _str("enable_hpc_benchmarks", "false"),
     }
 
 
@@ -6054,21 +6209,69 @@ def core_delete_cluster(
     cluster_serial_number_file = os.path.join(cluster_data_dir, cluster_name + ".serial")
     vars_file_path = os.path.join(src_dir, "vars_files", cluster_name + ".yml")
 
-    if os.path.isfile(cluster_serial_number_file):
+    # The serial lives in a local file only the machine that built the
+    # cluster has, so a remote teardown aborted here every time -- on a
+    # value the published record has carried all along. Local first, same
+    # order as _read_cluster_record and for the same reason.
+    # Both of these live only on the machine that built the cluster, so a
+    # remote teardown had neither and aborted here -- on values the
+    # published record carries. Local first, the same order (and the same
+    # reason) as _read_cluster_record. One store read serves both.
+    _have_serial_file = os.path.isfile(cluster_serial_number_file)
+    _have_vars_file = os.path.isfile(vars_file_path)
+    _store_record = (
+        None if (_have_serial_file and _have_vars_file)
+        else _cluster_record_from_store(cluster_name, region=region)
+    )
+    _serial_from_store = None
+
+    if _have_serial_file:
         p_val("cluster_serial_number_file", debug_mode)
     else:
-        print("")
-        print("*** ERROR ***")
-        print("Missing cluster_serial_number_file: " + cluster_serial_number_file)
-        print("Aborting...")
-        return DeleteClusterResult(cluster_name=cluster_name, success=False, exit_code=1)
+        _serial_from_store = (_store_record or {}).get("serial") or None
+        if not _serial_from_store:
+            print("")
+            print("*** ERROR ***")
+            print("Missing cluster_serial_number_file: " + cluster_serial_number_file)
+            print(
+                "  and no serial in the shared store for "
+                f'"{cluster_name}" in {region}.'
+            )
+            print("Aborting...")
+            return DeleteClusterResult(
+                cluster_name=cluster_name, success=False, exit_code=1,
+            )
+        print(f"Serial resolved from the shared store: {_serial_from_store}")
 
-    if os.path.isfile(vars_file_path):
+    if _have_vars_file:
         p_val("vars_file_path", debug_mode)
+    elif _store_record:
+        # A record published before the teardown fields existed loads
+        # fine -- every one of them defaults to "" -- and would then run
+        # cleanup against blank policy and role names, skipping steps
+        # silently and leaving orphans behind while reporting success.
+        # Refuse instead, and say what to do about it.
+        _missing = [
+            k for k in ("aws_account_id", "ec2_iam_policy", "ec2_iam_role")
+            if not _store_record.get(k)
+        ]
+        if _missing:
+            print("")
+            print("*** ERROR ***")
+            print(f'The stored record for "{cluster_name}" predates teardown:')
+            print("  missing " + ", ".join(_missing))
+            print("  Tear this cluster down from the machine that built it,")
+            print("  which has the vars file, or rebuild the record there.")
+            print("Aborting...")
+            return DeleteClusterResult(
+                cluster_name=cluster_name, success=False, exit_code=1,
+            )
+        print(f"Cluster settings resolved from the shared store for {cluster_name}")
     else:
         print("")
         print("*** ERROR ***")
         print("Missing vars_file_path: " + vars_file_path)
+        print(f'  and no record in the shared store for "{cluster_name}" in {region}.')
         print("Aborting...")
         return DeleteClusterResult(cluster_name=cluster_name, success=False, exit_code=1)
 
@@ -6078,8 +6281,11 @@ def core_delete_cluster(
     # on, preserving the original concurrency-safety property the local
     # lock existed for (a concurrent kill_pcluster.py must not delete this
     # file out from under an in-flight reader).
-    with open(vars_file_path) as fh:
-        aws_account_id = (yaml.safe_load(fh) or {}).get("aws_account_id", "")
+    if _have_vars_file:
+        with open(vars_file_path) as fh:
+            aws_account_id = (yaml.safe_load(fh) or {}).get("aws_account_id", "")
+    else:
+        aws_account_id = (_store_record or {}).get("aws_account_id", "")
     _lock_s3 = boto3.client("s3", region_name=region)
     locks_bucketname = _derive_locks_bucket(aws_account_id=aws_account_id, region=region)
     _lock_path = _acquire_distributed_cluster_lock(
@@ -6088,9 +6294,16 @@ def core_delete_cluster(
         describe_fn=pc.describe_cluster,
     )
     try:
-        cluster_serial_number = _read_serial_first_line(cluster_serial_number_file)
-        with open(vars_file_path) as fh:
-            cluster_vars = yaml.safe_load(fh) or {}
+        cluster_serial_number = _serial_from_store or _read_serial_first_line(
+            cluster_serial_number_file
+        )
+        if _have_vars_file:
+            with open(vars_file_path) as fh:
+                cluster_vars = yaml.safe_load(fh) or {}
+        else:
+            # The record's keys are the vars-file's own names for every
+            # field teardown reads, so it drops straight in here.
+            cluster_vars = dict(_store_record or {})
 
         def _v(key, default=""):
             return cluster_vars.get(key, default)
@@ -6121,7 +6334,12 @@ def core_delete_cluster(
             aws_account_id=aws_account_id, region=region,
         )
 
-        _rebuild_cmd = _extract_rebuild_command(cluster_serial_number_file)
+        # The rebuild command is recorded in the serial file and nowhere
+        # else, so a store-resolved teardown simply has none to report.
+        _rebuild_cmd = (
+            None if _serial_from_store
+            else _extract_rebuild_command(cluster_serial_number_file)
+        )
         _isdir_cdd = os.path.isdir(cluster_data_dir)
 
         start_ts = teardown_timestamp()
@@ -10011,6 +10229,17 @@ def _delete_local_ssh_key_step(ssh_keypair):
     "ignore_errors but no register" choice there (nothing for an orphan
     report to name)."""
     try:
+        # Absent is success, and the check has to precede the unlink rather
+        # than be caught after it: on a read-only filesystem the kernel
+        # rejects the write before it ever discovers the file is not there,
+        # so this raises EROFS rather than FileNotFoundError. A remote
+        # teardown has no local .pem by construction, and reporting one as
+        # an orphan tells the operator to go remove a file that was never
+        # on that machine.
+        if not os.path.exists(ssh_keypair):
+            return TeardownStepResult(
+                "Delete the SSH private key associated with this cluster", True
+            )
         os.remove(ssh_keypair)
     except FileNotFoundError:
         pass

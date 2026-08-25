@@ -2059,6 +2059,13 @@ class TestTheClusterRecordStore:
         "ssh_keypair": "osiris.pem", "ec2_keypair": "osiris-key",
         "ec2_user": "ubuntu", "s3_bucketname": "parallelclustermaker-osiris",
         "enable_monitoring": "false",
+        # Teardown's own inputs, added once core_delete_cluster had to run
+        # on a machine that did not build the cluster.
+        "aws_account_id": "", "az": "", "ec2_iam_policy": "",
+        "ec2_iam_role": "", "ec2_user_home": "", "ssh_secret_name": "",
+        "fsx_hydration_iam_policy": "", "results_bucketname": "",
+        "enable_external_nfs": "false", "enable_fsx_hydration": "false",
+        "enable_hpc_benchmarks": "false",
     }
 
     class _S3:

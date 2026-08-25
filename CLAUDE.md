@@ -311,7 +311,12 @@ standing constraints for local development.
 - Cluster records are published to `s3://parallelclustermaker-locks-<acct>-<region>/vars/<name>.json`
   so a machine that did not build a cluster can still see it. Local files
   win: `_read_cluster_record` reads `active_clusters/` + `src/vars_files/`
-  first and only falls back to the store. The `vars/` prefix is fixed by
+  first and only falls back to the store. **Teardown follows the same
+  order**, via `_cluster_record_from_store` — one read for both the serial
+  and the vars, since both files exist only on the building machine. The
+  record therefore projects teardown's own 11 inputs, defaulted so an older
+  record still loads, and a record missing them is **refused** rather than
+  run against blank names. The `vars/` prefix is fixed by
   the `MCPStateAccess*` IAM policies, which granted it long before any code
   used it. Published after a successful build, deleted on teardown under
   the same `cf_delete_confirmed` gate as the credentials. The cluster
@@ -349,6 +354,17 @@ standing constraints for local development.
   check. `resolve_region_from_az` (`pcluster_core.py`) is the shared
   resolution: it asks EC2 rather than trimming `az[:-1]`, which also proves
   the AZ exists.
+- **A read-only deployment and a least-privilege role break three
+  assumptions a checkout never tests.** `repo_root` is both the source root
+  and the state root, so `resolve_writable_repo_root` overlays a read-only
+  one under `/tmp` — detection is a write probe, never `os.access(W_OK)`.
+  `_create_locks_bucket` returns early on `head_bucket`; no handler tier
+  may be granted `s3:CreateBucket`. `MCPClusterBuild.json_src` carries the
+  build grants `MCPStackMutation` had no room for, on both tiers.
+- **The PCluster version is pinned at both ends**, upper bound included:
+  `PCLUSTER_REQUIREMENT` is the one spelling, and `requirements.txt` must
+  match it. A version skew between an artifact and the operator's venv
+  builds clusters neither can manage.
 - **A Lambda artifact must be pruned of bytecode.** `pip install --target`
   of the read-only tier is 241 MB against the 250 MB unzipped limit;
   removing `__pycache__`/`.pyc` takes it to 139 MB. `prune_for_lambda`

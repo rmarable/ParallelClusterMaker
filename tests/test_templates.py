@@ -511,6 +511,7 @@ _MCP_LAMBDA_POLICY_FILES = [
     "MCPReadOnlyLambda.json_src",
     "MCPFleetToggleLambda.json_src",
     "MCPStackMutation.json_src",
+    "MCPClusterBuild.json_src",
     "MCPStateAccessReadOnly.json_src",
     "MCPStateAccessFleetToggle.json_src",
     "MCPStateAccessStackMutation.json_src",

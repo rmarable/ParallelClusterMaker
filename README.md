@@ -1018,9 +1018,21 @@ MCP tools are thin wrappers, so anything the CLI can do the agent does
 identically, and a fix lands in both at once.
 
 A remote transport also exists in `mcp_server/` (a router plus tiered
-Lambda handlers behind API Gateway and Cognito). **It has not been
-deployed or exercised against AWS**, so it is deliberately not documented
-here yet. Everything below is the local stdio server.
+Lambda handlers behind API Gateway and Cognito). Its five Lambda tiers
+have been deployed and exercised against AWS; **the API Gateway and
+Cognito front end has not**, so the transport is not yet reachable from a
+browser and is deliberately not documented in full here. Everything below
+is the local stdio server, which needs none of it.
+
+Deploying that transport has two prerequisites the local server does not:
+an **OCI container runtime** (Finch, Docker, Podman or Rancher) and an
+**ECR repository**. One of the five tiers, `stack-mutation-node`, ships as
+a container image rather than a zip because `pcluster`'s `create_cluster()`
+and `update_cluster()` call `assert_valid_node_js()` first, and AWS's
+Python Lambda runtimes bundle no Node.js that a zip could supply. See
+[INSTALL.md](INSTALL.md) for the runtime recommendations per platform, the
+`--platform linux/amd64` architecture trap, and the ECR repository and
+credential steps.
 
 ### Installing into Claude Code
 
