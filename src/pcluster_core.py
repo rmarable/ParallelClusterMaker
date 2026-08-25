@@ -3598,6 +3598,50 @@ def check_ssh(head_ip, ssh_keypair, ec2_user, timeout):
         return False, f"SSH failed: {e}"
 
 
+# Where PCluster installs the Slurm binaries. A non-interactive `ssh host
+# sinfo` does not get them: verified on a live us-east-1 head node, the
+# non-login PATH is the bare system default while a login shell appends
+# /opt/slurm/bin. So `sinfo` exited 127 ("command not found") and
+# check_slurm reported a perfectly healthy cluster as failed -- the one
+# check that separates "the cluster exists" from "the cluster can run
+# work", broken against every real cluster.
+#
+# Prepended rather than run through `bash -lc`: a login shell sources
+# /etc/profile.d, which this repo already documents as hazardous, and any
+# banner a fragment prints lands in the output _classify_sinfo_nodes
+# parses -- where an unreadable line counts as an unusable node. Prepending
+# is deterministic and still finds sinfo if it is elsewhere on PATH.
+_SLURM_BIN_DIR = "/opt/slurm/bin"
+
+
+def _slurm_remote_cmd(script):
+    """A remote command that survives ssh's re-parsing and finds Slurm.
+
+    Two things go wrong without this, and the second was live for as long
+    as the check existed:
+
+    * **PATH.** A non-interactive `ssh host sinfo` gets the bare system
+      PATH; /opt/slurm/bin is appended only by a login shell. `sinfo` exited
+      127 and check_slurm reported a healthy cluster as failed.
+    * **Quoting.** _ssh_args does no quoting and _run_ssh just appends the
+      argv, so ssh joins the parts with spaces and the *remote* shell
+      re-parses them. `["sinfo", "-h", "-o", "%D %T"]` therefore arrived as
+      five words, splitting the format string; and a naive
+      `export PATH=...; exec sinfo` split at the semicolon, running the
+      export in one command and sinfo in another with the original PATH --
+      which is what the first attempt at this fix did, and what a live head
+      node caught immediately.
+
+    shlex.quote makes the whole script one argument on the far side. The
+    same pattern is already used for remote mkdir/chown elsewhere here.
+
+    Deliberately not `bash -lc`: a login shell sources /etc/profile.d, and
+    a banner from any fragment lands in the output _classify_sinfo_nodes
+    parses, where an unreadable line counts as an unusable node.
+    """
+    return ["bash", "-c", shlex.quote(f"export PATH={_SLURM_BIN_DIR}:$PATH; exec {script}")]
+
+
 def check_slurm(head_ip, ssh_keypair, ec2_user, timeout):
     """Report Slurm healthy only if it answers AND has a usable node.
 
@@ -3608,7 +3652,7 @@ def check_slurm(head_ip, ssh_keypair, ec2_user, timeout):
     try:
         rc, stdout, stderr = _run_ssh(
             head_ip, ssh_keypair, ec2_user, timeout,
-            ["sinfo", "-h", "-o", "%D %T"],
+            _slurm_remote_cmd('sinfo -h -o "%D %T"'),
         )
         if rc != 0:
             return False, f"sinfo returned rc={rc}: {stderr.strip()[:120]}"
@@ -4092,7 +4136,10 @@ class SinfoSection:
 
 def _diagnose_sinfo(head_ip, ssh_keypair, ec2_user, timeout):
     try:
-        rc, stdout, stderr = _run_ssh(head_ip, ssh_keypair, ec2_user, timeout, ["sinfo", "-N", "-l"])
+        rc, stdout, stderr = _run_ssh(
+            head_ip, ssh_keypair, ec2_user, timeout,
+            _slurm_remote_cmd(shlex.join(["sinfo", "-N", "-l"])),
+        )
         if rc == 0:
             return SinfoSection(_format_sinfo(stdout) if stdout.strip() else "", None)
         return SinfoSection("", f"sinfo failed (rc={rc}): {stderr.strip()[:200]}")
@@ -4118,7 +4165,10 @@ def _diagnose_sacct(head_ip, ssh_keypair, ec2_user, timeout, hours):
         "--noheader",
     ]
     try:
-        rc, stdout, stderr = _run_ssh(head_ip, ssh_keypair, ec2_user, timeout, sacct_cmd)
+        rc, stdout, stderr = _run_ssh(
+            head_ip, ssh_keypair, ec2_user, timeout,
+            _slurm_remote_cmd(shlex.join(sacct_cmd)),
+        )
         if rc != 0:
             stderr_short = stderr.strip()[:200]
             if "command not found" in stderr_short or rc == 127:

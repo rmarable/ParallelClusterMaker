@@ -838,3 +838,72 @@ class TestDiagnosePclusterMainCliShim:
         self._stage_main(monkeypatch, report=report)
         dx.main()
         assert "(unavailable — No such file)" in capsys.readouterr().out
+
+
+class TestDiagnoseFindsSlurmOnTheHeadNode:
+    """`sinfo` and `sacct` are not on a non-interactive PATH -- verified on
+    a live us-east-1 head node, 2026-08-24, where `ssh host sinfo` answers
+    `command not found` while /opt/slurm/bin/sinfo works. So two of
+    diagnose's four probe types returned rc=127 against every real
+    cluster, and the sections rendered as unavailable.
+
+    check_slurm had the identical bug and was fixed first; nothing pinned
+    the diagnose half, so reverting it passed this whole file.
+    """
+
+    def _captured(self, monkeypatch, fn, *args):
+        import pcluster_core
+
+        seen = []
+
+        def _fake(head_ip, keypair, user, timeout, remote_cmd):
+            seen.append(" ".join(remote_cmd))
+            return 0, "", ""
+
+        monkeypatch.setattr(pcluster_core, "_run_ssh", _fake)
+        fn(*args)
+        return seen
+
+    def test_sinfo_gets_slurm_on_path(self, monkeypatch):
+        import pcluster_core
+
+        cmds = self._captured(
+            monkeypatch, pcluster_core._diagnose_sinfo,
+            "1.2.3.4", "/k.pem", "ubuntu", 15,
+        )
+        assert cmds and "/opt/slurm/bin" in cmds[0], cmds
+        assert "sinfo" in cmds[0], cmds
+
+    def test_sacct_gets_slurm_on_path(self, monkeypatch):
+        import pcluster_core
+
+        cmds = self._captured(
+            monkeypatch, pcluster_core._diagnose_sacct,
+            "1.2.3.4", "/k.pem", "ubuntu", 15, 24,
+        )
+        assert cmds and "/opt/slurm/bin" in cmds[0], cmds
+        assert "sacct" in cmds[0], cmds
+
+    def test_the_sacct_arguments_survive_the_remote_shell(self, monkeypatch):
+        """ssh joins argv with spaces and the remote shell re-parses it, so
+        every argument has to come through quoting intact. The same class
+        of bug split check_slurm's `%D %T` format into two words."""
+        import pcluster_core
+
+        cmds = self._captured(
+            monkeypatch, pcluster_core._diagnose_sacct,
+            "1.2.3.4", "/k.pem", "ubuntu", 15, 24,
+        )
+        for flag in ("--noheader", "--state=", "--format=", "--starttime="):
+            assert flag in cmds[0], (flag, cmds[0])
+
+    def test_the_probes_that_do_not_need_slurm_are_left_alone(self, monkeypatch):
+        """Vacuity guard: `tail` and `test -f` are on the default PATH, so
+        wrapping them too would be noise rather than a fix."""
+        import pcluster_core
+
+        cmds = self._captured(
+            monkeypatch, pcluster_core._diagnose_postinstall,
+            "1.2.3.4", "/k.pem", "ubuntu", 15,
+        )
+        assert cmds and "/opt/slurm/bin" not in cmds[0], cmds

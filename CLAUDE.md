@@ -266,6 +266,30 @@ standing constraints for local development.
   into a Lambda artifact** — `ansible` alone is ~408 MB of collections for
   playbooks nothing executes. `mcp_server/packaging.py` holds the per-tier
   sets and generates `requirements-lambda.txt`.
+- **Slurm is not on a non-interactive PATH, and a remote command is
+  re-parsed by the remote shell.** `ssh host sinfo` gets the bare system
+  PATH — `/opt/slurm/bin` is appended only by a login shell — so
+  `check_slurm` and two of `diagnose`'s four probes returned rc=127
+  against every real cluster. `_slurm_remote_cmd` prepends the directory
+  and `shlex.quote`s the whole script, because `_ssh_args` does no quoting
+  and ssh joins argv with spaces: `["sinfo","-o","%D %T"]` arrived as five
+  words. Not `bash -lc` — a login shell sources `/etc/profile.d`, and a
+  banner from any fragment lands in the text `_classify_sinfo_nodes`
+  parses, where an unreadable line counts as an unusable node.
+- **`access_cluster.j2` and `grafana_tunnel.j2` route ssh through SSM**
+  (`-o ProxyCommand` + `AWS-StartSSHSession`), falling back to direct ssh
+  with a warning when `session-manager-plugin` is absent. Still ssh, not
+  `aws ssm start-session`: that lands as `ssm-user`, whose `$HOME`, PATH
+  and Slurm environment are not the ones a login node exists to provide,
+  and loses scp/rsync/agent-forwarding/`-L`. The tunnel's `pgrep` must
+  match the *target actually used* — it matched the IP, and over SSM the
+  command line carries the instance ID, so `stop` reported success and
+  left the tunnel running.
+- **An MCP tool's return annotation is enforced.** FastMCP validates
+  structured content against it, so `list_queues` annotated `-> dict` while
+  returning a list failed *every* call — with the correct payload inside
+  the error text. Tests that call a wrapper directly cannot see this; only
+  a real client session can.
 - **A fake is written from the API's contract, never from memory of it.**
   For AWS that means `botocore/data/<service>/*/service-2.json` in `.venv`,
   which is authoritative and local. A fake built from recall encodes what

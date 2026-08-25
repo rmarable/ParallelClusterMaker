@@ -7235,3 +7235,88 @@ class TestTheStagingDirectoryIsValidOnBothMachines:
         body = inspect.getsource(pcluster_core._transfer_staging_dir)
         assert "os.path.dirname(stage_dir" in body
         assert "mkdir -p" in body
+
+
+class TestTheAccessScriptsPreferSSM:
+    """access_cluster.j2 and grafana_tunnel.j2 route ssh through Session
+    Manager when they can, so neither needs an inbound port 22 or a
+    reachable address.
+
+    Deliberately still `ssh`, not `aws ssm start-session`: the operator
+    keeps landing as ec2_user with their key, and scp, rsync, agent
+    forwarding and -L forwards keep working -- none of which a bare
+    start-session provides, and which would instead land them as ssm-user
+    with the wrong $HOME, PATH and Slurm environment.
+    """
+
+    _CTX = dict(cluster_name="osiris", region="us-east-1",
+                ssh_keypair="/k.pem", ec2_user="ubuntu")
+
+    def _render(self, name):
+        src = os.path.join(REPO_ROOT, "src")
+        if src not in sys.path:
+            sys.path.insert(0, src)
+        import pcluster_core
+
+        return pcluster_core.render_template(
+            os.path.join(REPO_ROOT, "templates"), name, **self._CTX
+        )
+
+    @pytest.mark.parametrize("template", [
+        "access_cluster.j2", "grafana_tunnel.j2",
+    ])
+    def test_it_resolves_an_instance_id(self, template):
+        """SSM addresses an instance, ssh an address. Without this lookup
+        there is nothing to target."""
+        body = self._render(template)
+        assert "InstanceId" in body, template
+
+    @pytest.mark.parametrize("template", [
+        "access_cluster.j2", "grafana_tunnel.j2",
+    ])
+    def test_it_uses_the_ssm_proxycommand(self, template):
+        body = self._render(template)
+        assert "AWS-StartSSHSession" in body, template
+        assert "ProxyCommand" in body, template
+        assert "portNumber=%p" in body, template
+
+    @pytest.mark.parametrize("template", [
+        "access_cluster.j2", "grafana_tunnel.j2",
+    ])
+    def test_it_falls_back_rather_than_failing(self, template):
+        """An operator without the plugin still gets a shell, and is told
+        why. Chosen over hard-failing so the scripts keep working for
+        anyone who has not installed it."""
+        body = self._render(template)
+        assert "session-manager-plugin" in body, template
+        assert "WARNING" in body, template
+
+    def test_the_tunnel_pid_matches_whichever_target_was_used(self):
+        """The pgrep pattern matched the IP. Over SSM the command line
+        carries `ubuntu@i-0abc...` instead, so the PID would never have
+        been captured and `stop` would have silently done nothing -- the
+        script would report success and leave the tunnel running."""
+        body = self._render("grafana_tunnel.j2")
+        pgrep_line = next(
+            l for l in body.splitlines() if "pgrep" in l and "SSH_PID" in l
+        )
+        assert "SSH_TARGET" in pgrep_line, pgrep_line
+        assert "HEAD_NODE_IP" not in pgrep_line, (
+            "pgrep still matches the address, which is wrong over SSM"
+        )
+
+    def test_the_empty_proxy_array_is_guarded(self):
+        """`"${PROXY_ARGS[@]}"` on an empty array is an unbound-variable
+        error under `set -u` on bash before 4.4, and the script has no
+        control over which bash an operator runs."""
+        body = self._render("grafana_tunnel.j2")
+        assert 'PROXY_ARGS[@]+"${PROXY_ARGS[@]}"' in body
+
+    @pytest.mark.parametrize("template", [
+        "access_cluster.j2", "grafana_tunnel.j2",
+    ])
+    def test_the_direct_path_still_exists(self, template):
+        """Vacuity guard: removing the fallback entirely would satisfy the
+        SSM assertions and strand anyone without the plugin."""
+        body = self._render(template)
+        assert "HEAD_NODE_IP" in body, template

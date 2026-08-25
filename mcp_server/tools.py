@@ -405,8 +405,16 @@ def register_tools(mcp, *, remote, tier=None):
         return _plain(result)
 
     @tool
-    def list_queues(cluster_name: str) -> dict:
-        """List the Slurm queues defined in a cluster's config."""
+    def list_queues(cluster_name: str) -> list[dict]:
+        """List the Slurm queues defined in a cluster's config.
+
+        Annotated `list[dict]`, like list_clusters, because that is what it
+        returns. It said `dict` while returning a list, and FastMCP
+        validates structured content against the annotation -- so every
+        call failed with "structured_content must be a dict or None",
+        carrying the correct payload in the error text. No local test saw
+        it: they call the wrapper directly, where the annotation is inert.
+        """
         rec = _require_record(cluster_name)
         _s3, _bucket = _record_store(rec.region)
         result = core_list_queues(

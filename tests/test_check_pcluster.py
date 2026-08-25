@@ -248,11 +248,16 @@ class TestCheckSlurmReadsTheNodeStates:
 
         monkeypatch.setattr(subprocess, "run", _run)
         chk.check_slurm("1.2.3.4", "/tmp/key.pem", "ubuntu", 15)
-        assert "sinfo" in seen["args"]
-        assert "%T" in " ".join(seen["args"]), (
-            "sinfo is not being asked for node states"
-        )
-        assert "-s" not in seen["args"], "-s reports an aggregate, not states"
+
+        # Asserted on the joined command, not on list membership: the probe
+        # is now a single shell-quoted script (see _slurm_remote_cmd --
+        # sinfo is not on a non-interactive PATH), so "sinfo" is no longer
+        # an argv element of its own. The property being checked is
+        # unchanged.
+        joined = " ".join(seen["args"])
+        assert "sinfo" in joined
+        assert "%T" in joined, "sinfo is not being asked for node states"
+        assert "sinfo -s" not in joined, "-s reports an aggregate, not states"
 
 
 class TestSinfoClassificationIsSharedNotDuplicated:
@@ -700,3 +705,70 @@ class TestCheckPclusterMainCliShim:
         assert "head node IP: 1.2.3.4" in out
         assert f"{chk._PASS} SSH reachability\n" in out
         assert f"{chk._SKIP} Slurm — SSH unreachable" in out
+
+
+class TestSlurmIsFoundOnANonInteractiveShell:
+    """`ssh host sinfo` does not get Slurm on PATH. Verified on a live
+    us-east-1 head node, 2026-08-24: the non-login PATH is the bare system
+    default, while a login shell appends /opt/slurm/bin. So the check ran
+    `sinfo`, got rc=127 "command not found", and reported a healthy
+    cluster as failed -- the one check that separates "the cluster exists"
+    from "the cluster can run work".
+
+    No local test could see it: every one stubs _run_ssh, so the remote
+    command was never executed anywhere.
+    """
+
+    def _captured(self, monkeypatch, rc=0, stdout="8 idle\n"):
+        import pcluster_core
+
+        seen = {}
+
+        def _fake(head_ip, keypair, user, timeout, remote_cmd):
+            seen["cmd"] = remote_cmd
+            return rc, stdout, ""
+
+        monkeypatch.setattr(pcluster_core, "_run_ssh", _fake)
+        pcluster_core.check_slurm("1.2.3.4", "/k.pem", "ubuntu", 15)
+        return seen["cmd"]
+
+    def test_the_remote_command_puts_slurm_on_path(self, monkeypatch):
+        cmd = self._captured(monkeypatch)
+        joined = " ".join(cmd)
+        assert "/opt/slurm/bin" in joined, cmd
+        assert "sinfo" in joined, cmd
+
+    def test_it_does_not_use_a_login_shell(self, monkeypatch):
+        """`bash -lc` would also work and is the tempting one-liner. It
+        sources /etc/profile.d, which this repo documents as hazardous, and
+        a banner printed by any fragment lands in the output
+        _classify_sinfo_nodes parses -- where an unreadable line counts as
+        an unusable node, which can flip the verdict."""
+        cmd = self._captured(monkeypatch)
+        assert "-lc" not in cmd, cmd
+        assert not any(a.startswith("-l") for a in cmd if a != "-c"), cmd
+
+    def test_a_healthy_fleet_still_passes(self, monkeypatch):
+        """Vacuity guard: the command change must not break parsing."""
+        import pcluster_core
+
+        monkeypatch.setattr(
+            pcluster_core, "_run_ssh",
+            lambda *a, **k: (0, "8 idle\n", ""),
+        )
+        ok, detail = pcluster_core.check_slurm("1.2.3.4", "/k.pem", "ubuntu", 15)
+        assert ok, detail
+
+    def test_the_powered_down_state_counts_as_usable(self, monkeypatch):
+        """A scale-from-zero spot queue reports `idle~` -- idle with the
+        power-saving flag. The live cluster reported exactly that for all
+        eight nodes, so treating the flag as unusable would call every
+        idle cluster broken."""
+        import pcluster_core
+
+        monkeypatch.setattr(
+            pcluster_core, "_run_ssh",
+            lambda *a, **k: (0, "8 idle~\n", ""),
+        )
+        ok, detail = pcluster_core.check_slurm("1.2.3.4", "/k.pem", "ubuntu", 15)
+        assert ok, detail

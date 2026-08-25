@@ -62,6 +62,11 @@ if [[ -z "$HEAD_NODE_IP" || "$HEAD_NODE_IP" == "None" ]]; then
   exit 1
 fi
 
+# SSM addresses an instance ID, ssh an address. Same helper, same rc
+# discipline; a failure is not fatal because the direct path below does
+# not need it.
+INSTANCE_ID="$(_describe_head_node InstanceId "${AWS_STDERR}")" || true
+
 if [[ -f "$SSH_KEYPAIR" ]]; then
   :
 else
@@ -70,15 +75,39 @@ else
   bash "${RETRIEVE_SCRIPT}" --out "${SSH_KEYPAIR}"
 fi
 
+# Session Manager carries the tunnel when it can, so this needs no inbound
+# port 22 and no public IP. Still `ssh -L` rather than SSM's own
+# AWS-StartPortForwardingSession: the -L semantics, the -fN backgrounding
+# and the PID-file lifecycle below are all unchanged this way, and the
+# only difference is how the connection is routed.
+SSH_TARGET="${EC2_USER}@${HEAD_NODE_IP}"
+PROXY_ARGS=()
+if [[ -n "${INSTANCE_ID:-}" && "${INSTANCE_ID}" != "None" ]] \
+   && command -v session-manager-plugin >/dev/null 2>&1; then
+  SSH_TARGET="${EC2_USER}@${INSTANCE_ID}"
+  PROXY_ARGS=(-o "ProxyCommand=aws ssm start-session --target %h --document-name AWS-StartSSHSession --parameters portNumber=%p --region {{ region }}")
+  echo "Tunnelling via SSM (${INSTANCE_ID})..."
+elif ! command -v session-manager-plugin >/dev/null 2>&1; then
+  echo "WARNING: session-manager-plugin not found -- tunnelling over direct SSH." >&2
+  echo "  That needs inbound port 22 and a reachable address. To use SSM instead:" >&2
+  echo "    brew install --cask session-manager-plugin" >&2
+fi
+
+# ${PROXY_ARGS[@]+...} guards the empty-array case: under `set -u` an
+# empty array expansion is an unbound variable on bash before 4.4, and
+# this script has no control over which bash an operator runs it with.
 ssh -i "$SSH_KEYPAIR" \
+    ${PROXY_ARGS[@]+"${PROXY_ARGS[@]}"} \
     -L "${LOCAL_PORT}:localhost:443" \
     -o StrictHostKeyChecking=accept-new \
     -o ExitOnForwardFailure=yes \
     -fN \
-    "${EC2_USER}@${HEAD_NODE_IP}"
+    "${SSH_TARGET}"
 
-# Capture the PID of the backgrounded ssh process.
-SSH_PID=$(pgrep -n -f "ssh.*${LOCAL_PORT}:localhost:443.*${HEAD_NODE_IP}" 2>/dev/null || true)
+# Capture the PID of the backgrounded ssh process. Matched on whichever
+# target was actually used -- an instance ID over SSM, an address
+# otherwise -- since pgrep sees the real command line.
+SSH_PID=$(pgrep -n -f "ssh.*${LOCAL_PORT}:localhost:443.*${SSH_TARGET##*@}" 2>/dev/null || true)
 [[ -n "$SSH_PID" ]] && echo "$SSH_PID" > "$PID_FILE"
 
 echo ""

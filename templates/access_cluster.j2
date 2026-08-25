@@ -57,6 +57,11 @@ if [[ "$_AWS_RC" -ne 0 ]]; then
     exit 1
 fi
 
+# SSM addresses an instance ID, SSH an address. Resolved with the same
+# helper and the same rc discipline; a failure here is never fatal, since
+# the direct-SSH path below does not need it.
+INSTANCE_ID="$(_describe_node InstanceId "${AWS_STDERR}")" || true
+
 if [[ -z "$HEAD_NODE_IP" || "$HEAD_NODE_IP" == "None" ]]; then
     echo "ERROR: No running ${NODE_LABEL} found for {{ cluster_name }} in {{ region }}." >&2
     echo "  The AWS call succeeded, so the cluster is stopped, deleted, or in another region." >&2
@@ -74,6 +79,30 @@ rm -f "${AWS_STDERR}"
 if [[ ! -f "$SSH_KEYPAIR" ]]; then
     echo "Local key not found — retrieving from Secrets Manager..."
     bash "${RETRIEVE_SCRIPT}" --out "${SSH_KEYPAIR}"
+fi
+
+# Session Manager carries the ssh connection when it can, so no inbound
+# port 22 and no public IP are required. This is deliberately *not* a
+# replacement for ssh: the operator still lands as ${EC2_USER} with their
+# key, and scp, rsync, agent forwarding and -L port forwards keep working,
+# none of which a bare `aws ssm start-session` provides. `aws ssm
+# start-session` would also land as ssm-user, whose $HOME, PATH and Slurm
+# environment are not the ones this node was built for.
+#
+# Falls back to a direct connection rather than failing: an operator
+# without the plugin still gets a shell, and is told why.
+if [[ -n "${INSTANCE_ID}" && "${INSTANCE_ID}" != "None" ]] \
+   && command -v session-manager-plugin >/dev/null 2>&1; then
+    echo "Connecting to ${NODE_LABEL} of {{ cluster_name }} via SSM (${INSTANCE_ID})..."
+    exec ssh -i "${SSH_KEYPAIR}" -o StrictHostKeyChecking=accept-new \
+        -o ProxyCommand="aws ssm start-session --target %h --document-name AWS-StartSSHSession --parameters portNumber=%p --region {{ region }}" \
+        "${EC2_USER}@${INSTANCE_ID}" "$@"
+fi
+
+if ! command -v session-manager-plugin >/dev/null 2>&1; then
+    echo "WARNING: session-manager-plugin not found -- connecting over direct SSH." >&2
+    echo "  That needs inbound port 22 and a reachable address. To use SSM instead:" >&2
+    echo "    brew install --cask session-manager-plugin" >&2
 fi
 
 echo "Connecting to ${NODE_LABEL} of {{ cluster_name }} at ${HEAD_NODE_IP}..."
