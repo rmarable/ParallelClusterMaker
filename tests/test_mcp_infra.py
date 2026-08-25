@@ -21,6 +21,7 @@ import os
 import sys
 
 import pytest
+from botocore.exceptions import ClientError
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(REPO_ROOT, "src"))
@@ -46,6 +47,9 @@ class _FakeIam:
     def __init__(self, existing_policies=(), existing_roles=()):
         self._existing_policies = set(existing_policies)
         self._existing_roles = set(existing_roles)
+        # What is actually present, so a delete can tell absent from real.
+        self._live_policies = set(existing_policies)
+        self._live_roles = set(existing_roles)
         self.created_policies = []
         self.created_roles = []
         self.attached = []
@@ -63,12 +67,14 @@ class _FakeIam:
             raise self._already("CreatePolicy")
         json.loads(PolicyDocument)  # must be valid rendered JSON
         self.created_policies.append({"name": PolicyName, "doc": PolicyDocument})
+        self._live_policies.add(PolicyName)
         return {"Policy": {"Arn": f"arn:aws:iam::{ACCOUNT}:policy/{PolicyName}"}}
 
     def create_role(self, RoleName, AssumeRolePolicyDocument, Description=""):
         if RoleName in self._existing_roles:
             raise self._already("CreateRole")
         self.created_roles.append({"name": RoleName, "trust": AssumeRolePolicyDocument})
+        self._live_roles.add(RoleName)
 
     def attach_role_policy(self, RoleName, PolicyArn):
         self.attached.append((RoleName, PolicyArn))
@@ -76,10 +82,29 @@ class _FakeIam:
     def detach_role_policy(self, RoleName, PolicyArn):
         self.detached.append((RoleName, PolicyArn))
 
+    def _no_such(self, op):
+        """IAM's own answer for a missing entity, per botocore's iam
+        service-2.json: NoSuchEntityException on DeleteRole, DeletePolicy
+        and DetachRolePolicy. The fake used to succeed unconditionally,
+        which made "it was not there" indistinguishable from "it was
+        deleted" -- so a teardown against an empty account looked exactly
+        like a teardown that had done seventeen things."""
+        return ClientError(
+            {"Error": {"Code": "NoSuchEntity",
+                       "Message": "The entity does not exist"}}, op
+        )
+
     def delete_role(self, RoleName):
+        if RoleName not in self._live_roles:
+            raise self._no_such("DeleteRole")
+        self._live_roles.discard(RoleName)
         self.deleted_roles.append(RoleName)
 
     def delete_policy(self, PolicyArn):
+        name = PolicyArn.rsplit("/", 1)[-1]
+        if name not in self._live_policies:
+            raise self._no_such("DeletePolicy")
+        self._live_policies.discard(name)
         self.deleted_policies.append(PolicyArn)
 
 
@@ -222,9 +247,25 @@ class TestSetupMcpInfra:
             _run(iam=_Denied())
 
 
+def _seeded_iam():
+    """A fake holding exactly what _setup_mcp_infra creates.
+
+    These tests used to delete against an *empty* fake and assert that
+    everything had been deleted -- which passed only because the fake
+    succeeded on every delete, including for entities that were never
+    there. With the fake modelling IAM's NoSuchEntityException, "attempted"
+    and "deleted" are finally different things, and the intent of these
+    tests (the teardown covers every role and policy the table declares) is
+    expressed by seeding what it should find.
+    """
+    return _FakeIam(
+        existing_policies=[_mcp_policy_name(b) for b in _mcp_policy_templates()],
+        existing_roles=[_mcp_role_name(t) for t in _MCP_LAMBDA_TIERS],
+    )
+
 class TestDeleteMcpInfra:
     def test_deletes_every_role_and_policy_the_table_declares(self):
-        iam = _FakeIam()
+        iam = _seeded_iam()
         _delete_mcp_infra(iam, aws_account_id=ACCOUNT)
         assert set(iam.deleted_roles) == {_mcp_role_name(t) for t in _MCP_LAMBDA_TIERS}
         assert set(iam.deleted_policies) == {
@@ -235,7 +276,7 @@ class TestDeleteMcpInfra:
     def test_detaches_before_deleting(self):
         """IAM refuses to delete an attached policy or a role with
         attachments, so ordering here is functional, not cosmetic."""
-        iam = _FakeIam()
+        iam = _seeded_iam()
         _delete_mcp_infra(iam, aws_account_id=ACCOUNT)
         assert iam.detached, "nothing was detached"
         # Every role's detaches must precede its own deletion.
@@ -250,7 +291,7 @@ class TestDeleteMcpInfra:
         reason; here it should be true by construction, and this test is
         what proves the construction actually holds."""
         created_iam, _ = _run()
-        deleted_iam = _FakeIam()
+        deleted_iam = _seeded_iam()
         _delete_mcp_infra(deleted_iam, aws_account_id=ACCOUNT)
         created_policy_arns = {
             f"arn:aws:iam::{ACCOUNT}:policy/{p['name']}"
@@ -266,7 +307,10 @@ class TestDeleteMcpInfra:
                     raise RuntimeError("boom")
                 super().delete_role(RoleName)
 
-        iam = _Flaky()
+        iam = _Flaky(
+            existing_policies=[_mcp_policy_name(b) for b in _mcp_policy_templates()],
+            existing_roles=[_mcp_role_name(t) for t in _MCP_LAMBDA_TIERS],
+        )
         _delete_mcp_infra(iam, aws_account_id=ACCOUNT)
         assert len(iam.deleted_roles) == len(_MCP_LAMBDA_TIERS) - 1
         assert iam.deleted_policies, "policy deletion must still run"
@@ -278,3 +322,112 @@ class TestDeleteMcpInfra:
 
         with pytest.raises(RuntimeError):
             _delete_mcp_infra(_Flaky(), aws_account_id=ACCOUNT, suppress=False)
+
+
+class TestTheMcpTeardownCanBeAudited:
+    """_delete_mcp_infra computed a per-call boolean and threw it away,
+    printing nothing. A denied delete, a resource that was never there, and
+    a clean sweep were indistinguishable, so the only way to know a teardown
+    had worked was to go and look -- which is what actually happened when
+    the session-53 infrastructure was removed. Tolerating a failure is
+    right; hiding it is the defect, and it is the same one `ignore_errors`
+    without `register` had in delete_pcluster.yml.
+    """
+
+    def _denied(self, op):
+        return ClientError(
+            {"Error": {"Code": "AccessDenied", "Message": "not authorized"}}, op
+        )
+
+    def _absent(self, op):
+        return ClientError(
+            {"Error": {"Code": "NoSuchEntity", "Message": "cannot be found"}}, op
+        )
+
+    def test_a_clean_sweep_reports_what_it_deleted(self, capsys):
+        iam = _FakeIam()
+        _setup_mcp_infra(iam, aws_account_id=ACCOUNT, region=REGION,
+                         mcp_user_pool_id=POOL)
+        capsys.readouterr()
+        result = _delete_mcp_infra(iam, aws_account_id=ACCOUNT)
+        assert result.ok
+        assert not result.failed
+        assert len(result.deleted) == 17, result.deleted   # 7 roles + 10 policies
+        out = capsys.readouterr().out
+        assert "Deleted MCP role:" in out
+        assert "Deleted MCP policy:" in out
+
+    def test_a_failure_is_named_not_swallowed(self, capsys):
+        """The property the old code could not express."""
+        class _DenyOneRole(_FakeIam):
+            def delete_role(self, RoleName):
+                if RoleName.endswith("router-role"):
+                    raise ClientError(
+                        {"Error": {"Code": "AccessDenied",
+                                   "Message": "not authorized"}}, "DeleteRole")
+                return super().delete_role(RoleName=RoleName)
+
+        iam = _DenyOneRole()
+        _setup_mcp_infra(iam, aws_account_id=ACCOUNT, region=REGION,
+                         mcp_user_pool_id=POOL)
+        capsys.readouterr()
+        result = _delete_mcp_infra(iam, aws_account_id=ACCOUNT)
+        assert not result.ok
+        assert len(result.failed) == 1
+        what, why = result.failed[0]
+        assert "router-role" in what
+        assert "AccessDenied" in why or "not authorized" in why
+        out = capsys.readouterr().out
+        assert "FAILED" in out
+        assert "removed by hand" in out
+        assert "router-role" in out
+
+    def test_the_rest_still_runs_after_one_failure(self):
+        """Tolerance is the half that was already right and must stay."""
+        class _DenyOneRole(_FakeIam):
+            def delete_role(self, RoleName):
+                if RoleName.endswith("router-role"):
+                    raise ClientError(
+                        {"Error": {"Code": "AccessDenied", "Message": "no"}},
+                        "DeleteRole")
+                return super().delete_role(RoleName=RoleName)
+
+        iam = _DenyOneRole()
+        _setup_mcp_infra(iam, aws_account_id=ACCOUNT, region=REGION,
+                         mcp_user_pool_id=POOL)
+        result = _delete_mcp_infra(iam, aws_account_id=ACCOUNT)
+        assert len(result.deleted) == 16      # everything but the denied role
+        assert len(result.failed) == 1
+
+    def test_an_absent_entity_is_absent_not_deleted(self, capsys):
+        """A teardown against an empty account must not claim to have
+        deleted seventeen things, and must not report a failure either."""
+        result = _delete_mcp_infra(_FakeIam(), aws_account_id=ACCOUNT)
+        assert result.ok
+        assert result.deleted == []
+        assert len(result.absent) == 17
+        assert "No MCP infrastructure was present." in capsys.readouterr().out
+
+    def test_suppress_false_still_raises(self):
+        """The escape hatch an operator uses when they want the traceback."""
+        class _DenyOneRole(_FakeIam):
+            def delete_role(self, RoleName):
+                raise ClientError(
+                    {"Error": {"Code": "AccessDenied", "Message": "no"}},
+                    "DeleteRole")
+
+        iam = _DenyOneRole()
+        _setup_mcp_infra(iam, aws_account_id=ACCOUNT, region=REGION,
+                         mcp_user_pool_id=POOL)
+        with pytest.raises(ClientError):
+            _delete_mcp_infra(iam, aws_account_id=ACCOUNT, suppress=False)
+
+    def test_a_missing_entity_never_raises_even_unsuppressed(self):
+        """"It was not there" is a success for a teardown, so suppress=False
+        must not turn an empty account into an exception."""
+        _delete_mcp_infra(_FakeIam(), aws_account_id=ACCOUNT, suppress=False)
+
+    def test_verbose_false_says_nothing(self, capsys):
+        """For a caller that renders its own report."""
+        _delete_mcp_infra(_FakeIam(), aws_account_id=ACCOUNT, verbose=False)
+        assert capsys.readouterr().out == ""

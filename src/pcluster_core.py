@@ -26,6 +26,7 @@ import urllib.request
 import yaml
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import (asdict as _dc_asdict, dataclass,
+                         field as _dc_field,
                          fields as _dc_fields,
                          is_dataclass as _dc_is_dataclass)
 from datetime import datetime as DateTime, timedelta, timezone
@@ -2314,7 +2315,31 @@ def _setup_mcp_infra(iam, *, aws_account_id, region, mcp_user_pool_id, templates
     return roles
 
 
-def _delete_mcp_infra(iam, *, aws_account_id, suppress=True):
+@dataclass
+class MCPTeardownResult:
+    """What _delete_mcp_infra actually did. `failed` is the one that matters:
+    everything else is informational."""
+
+    deleted: list = _dc_field(default_factory=list)
+    absent: list = _dc_field(default_factory=list)
+    failed: list = _dc_field(default_factory=list)  # (what, why)
+
+    @property
+    def ok(self):
+        return not self.failed
+
+
+def _is_missing_iam_entity(exc):
+    """IAM's own "it was not there" answer, which is a success for a
+    teardown and must not be counted as a failure. Matched on the error
+    code rather than the exception class: the class is generated per
+    client, so `except iam.exceptions.NoSuchEntityException` is not
+    available to a caller holding only the exception."""
+    code = getattr(exc, "response", {}).get("Error", {}).get("Code", "")
+    return code in ("NoSuchEntity", "NoSuchEntityException")
+
+
+def _delete_mcp_infra(iam, *, aws_account_id, suppress=True, verbose=True):
     """Tear down everything _setup_mcp_infra created, driven by the same
     table so the two cannot disagree about what exists.
 
@@ -2322,14 +2347,36 @@ def _delete_mcp_infra(iam, *, aws_account_id, suppress=True):
     attached, and refuses to delete a role that still has attachments.
     Tolerant by default -- one missing resource must not abandon the rest,
     matching the teardown discipline the delete-side playbook already
-    follows."""
-    def _try(fn, *a, **kw):
+    follows.
+
+    Returns an MCPTeardownResult, and says what it did. It used to compute
+    a per-call boolean and discard it, printing nothing: a denied delete,
+    a resource that was never there, and a clean sweep were indis-
+    tinguishable, and the only way to know a teardown had worked was to go
+    and look. That is the same defect `ignore_errors` without `register`
+    had in delete_pcluster.yml -- tolerating a failure is right, hiding it
+    is not.
+
+    An absent entity is reported as absent rather than deleted, because a
+    teardown that silently "succeeds" against an empty account tells the
+    operator nothing about whether it ever had anything to do.
+    """
+    result = MCPTeardownResult()
+
+    def _try(what, fn, *a, **kw):
         try:
             fn(*a, **kw)
+            result.deleted.append(what)
+            if verbose:
+                print(f"  Deleted MCP {what}")
             return True
-        except Exception:
+        except Exception as e:
+            if _is_missing_iam_entity(e):
+                result.absent.append(what)
+                return True
             if not suppress:
                 raise
+            result.failed.append((what, str(e).strip().splitlines()[0][:160]))
             return False
 
     policy_arns = {
@@ -2338,12 +2385,33 @@ def _delete_mcp_infra(iam, *, aws_account_id, suppress=True):
     }
     for tier, (_fn, templates) in _MCP_LAMBDA_TIERS.items():
         role = _mcp_role_name(tier)
+        # A detach is bookkeeping, not a resource: report only what it
+        # stops, which is the role delete immediately below it.
         for basename in templates:
-            _try(iam.detach_role_policy, RoleName=role, PolicyArn=policy_arns[basename])
-        _try(iam.detach_role_policy, RoleName=role, PolicyArn=_MCP_BASIC_EXECUTION_ARN)
-        _try(iam.delete_role, RoleName=role)
-    for arn in policy_arns.values():
-        _try(iam.delete_policy, PolicyArn=arn)
+            try:
+                iam.detach_role_policy(RoleName=role, PolicyArn=policy_arns[basename])
+            except Exception as e:
+                if not suppress and not _is_missing_iam_entity(e):
+                    raise
+        try:
+            iam.detach_role_policy(RoleName=role, PolicyArn=_MCP_BASIC_EXECUTION_ARN)
+        except Exception as e:
+            if not suppress and not _is_missing_iam_entity(e):
+                raise
+        _try(f"role: {role}", iam.delete_role, RoleName=role)
+    for basename, arn in policy_arns.items():
+        _try(f"policy: {_mcp_policy_name(basename)}", iam.delete_policy, PolicyArn=arn)
+
+    if verbose:
+        if result.failed:
+            print("")
+            print(f"*** WARNING *** {len(result.failed)} MCP teardown step(s) FAILED.")
+            print("The following are still in the account and must be removed by hand:")
+            for what, why in result.failed:
+                print(f"  - {what} -- {why}")
+        elif not result.deleted:
+            print("  No MCP infrastructure was present.")
+    return result
 
 
 def _cleanup_iam_on_failure(iam, ec2_iam_role, ec2_iam_policy, aws_account_id, enable_monitoring=False):
