@@ -1517,6 +1517,19 @@ class TestCreateClusterCannotKillTheServer:
     plain error.
     """
 
+    @pytest.fixture(autouse=True)
+    def _no_real_aws(self, monkeypatch):
+        """Minting the token runs the real preview_cluster_config, which
+        resolves the region from EC2 (`resolve_region_from_az` asks AWS
+        rather than trimming the AZ name, deliberately). Unstubbed that is
+        a live API call: green on a developer machine that has credentials,
+        `NoCredentialsError` on a CI runner that does not. This class is
+        about what create_cluster returns, not about region resolution.
+        """
+        monkeypatch.setattr(
+            tools_mod, "resolve_region_from_az", lambda az, **kw: "us-east-1",
+        )
+
     # conftest points defaults-file discovery at an empty directory, so a
     # compute type has to be supplied explicitly or the preview is refused
     # for having no queue (checklist 0.6) before it can mint a token.

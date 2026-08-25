@@ -462,6 +462,11 @@ three gates; see the `Makefile`.
   any test touching PCluster's config objects needs `AWS_REGION`/
   `AWS_DEFAULT_REGION` set via `monkeypatch.setenv` (botocore prefers
   `AWS_REGION`).
+- **No test may reach AWS**, enforced by `_no_test_reaches_aws` in
+  `tests/conftest.py` — patched at botocore's HTTP layer, since a test may
+  construct a client but not put a request on the wire (`@pytest.mark.allow_aws`
+  opts out). An unstubbed call is invisible where it is written: it passes
+  wherever there are credentials and fails in CI, far from its cause.
 - CI creates `.venv/` explicitly via `python -m venv .venv && .venv/bin/pip
   install -r requirements.txt` — the top-level scripts fire a `sys.exit()`
   venv guard at import time, so running pytest outside `.venv/` fails

@@ -632,3 +632,50 @@ def _no_operator_defaults_file(monkeypatch, tmp_path_factory):
     except ImportError:
         return
     monkeypatch.setattr(_mcp_tools, "_repo_root", lambda: str(empty))
+
+
+def pytest_configure(config):
+    config.addinivalue_line(
+        "markers",
+        "allow_aws: this test may put a real request on the wire",
+    )
+
+
+@pytest.fixture(autouse=True)
+def _no_test_reaches_aws(request, monkeypatch):
+    """No test may make a real AWS API call.
+
+    CLAUDE.md states that every AWS call in this suite is stubbed, but
+    nothing enforced it -- and the failure is invisible where it is
+    written: a developer machine has credentials, so an unstubbed call
+    succeeds and the test passes. It surfaces only on a runner without
+    them, as a NoCredentialsError raised far from the test that caused it.
+    That has now happened twice, most recently in
+    TestCreateClusterCannotKillTheServer, whose token minting ran the real
+    preview_cluster_config -- which resolves the region by asking EC2
+    rather than trimming the AZ name, deliberately.
+
+    Patched at botocore's HTTP layer rather than at boto3.client, because a
+    test is entitled to *construct* a client: many stub one method on a
+    real client object, and several assert on region binding. What no test
+    may do is put a request on the wire. The message names the URL, so the
+    offending call is identifiable without reading a stack trace.
+    """
+    if request.node.get_closest_marker("allow_aws"):
+        return
+
+    try:
+        from botocore.httpsession import URLLib3Session
+    except ImportError:
+        return
+
+    def _blocked(self, http_request, *args, **kwargs):
+        raise AssertionError(
+            "this test tried to reach AWS: "
+            f"{getattr(http_request, 'method', '?')} "
+            f"{getattr(http_request, 'url', '?')} -- every AWS call in this "
+            "suite must be stubbed, since unstubbed it passes wherever there "
+            "are credentials and fails in CI."
+        )
+
+    monkeypatch.setattr(URLLib3Session, "send", _blocked)
