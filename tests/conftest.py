@@ -9,6 +9,8 @@ is added, add it here so test_templates.py catches the gap immediately.
 import os
 import sys
 
+from urllib.parse import urlparse
+
 import pytest
 
 # `src/` on the path for every test module, not just the ones that insert
@@ -669,13 +671,24 @@ def _no_test_reaches_aws(request, monkeypatch):
     except ImportError:
         return
 
+    real_send = URLLib3Session.send
+
     def _blocked(self, http_request, *args, **kwargs):
+        url = getattr(http_request, "url", "") or ""
+        host = urlparse(url).hostname or ""
+        # Only AWS *service* endpoints are the concern. botocore's
+        # credential chain probes the instance metadata service at
+        # 169.254.169.254 during client construction, which is not a test
+        # calling AWS -- it is link-local, unroutable on a CI runner, and
+        # fails fast on its own. Blocking it here failed 13 tests that
+        # reach no service at all.
+        if not host.endswith("amazonaws.com"):
+            return real_send(self, http_request, *args, **kwargs)
         raise AssertionError(
             "this test tried to reach AWS: "
-            f"{getattr(http_request, 'method', '?')} "
-            f"{getattr(http_request, 'url', '?')} -- every AWS call in this "
-            "suite must be stubbed, since unstubbed it passes wherever there "
-            "are credentials and fails in CI."
+            f"{getattr(http_request, 'method', '?')} {url} -- every AWS call "
+            "in this suite must be stubbed, since unstubbed it passes "
+            "wherever there are credentials and fails in CI."
         )
 
     monkeypatch.setattr(URLLib3Session, "send", _blocked)
