@@ -226,6 +226,23 @@ standing constraints for local development.
   stack. Both modes fall into **one** teardown body, and their two
   tokens — both minted by `preview_cluster_delete` — are deliberately not
   interchangeable.
+- **`core_create_cluster` returns a `CreateClusterResult`; it must never
+  `sys.exit`.** `SystemExit` is a `BaseException` and `create_cluster`
+  cannot use `_cluster_lock`'s translation (it locks internally), so an
+  exit — including the success one it used to take — kills the server. The
+  CLI shim converts `exit_code`. The shared validation helpers still exit,
+  so the wrapper keeps a narrow `except SystemExit` net as a backstop.
+- **`finalize_cluster_build` is the create-side twin of
+  `finalize_cluster_teardown`.** `wait=False` returns before every step
+  needing a live head node, so the access scripts are rendered into
+  `stage_dir` and lost with the process, staging never reaches the node,
+  and no summary is sent — and re-running the build refuses on the vars
+  file it wrote. Gated on `CREATE_COMPLETE` (`_confirm_stack_is_built`,
+  one describe, never waits), it reads context from the **rendered vars
+  file**, not the build's in-memory state, and is **local-only** (writes
+  `active_clusters/`, scp's the local `.pem`). `stage_dir` is the literal
+  `/tmp`, never `tempfile.gettempdir()`. The remote create path still ends
+  with no access scripts — a smaller gap, not a closed one.
 - **Cognito access tokens carry no `aud` claim** — they carry `client_id`;
   only ID tokens have `aud`. `mcp_server/auth/authorizer_lambda.py`
   validates `client_id` and pins `token_use == "access"` so an ID token

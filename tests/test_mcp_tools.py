@@ -1500,3 +1500,146 @@ class TestTheSanitizerIsWhatGuaranteesTheRecordShape:
         assert built.region == "us-east-1"
         assert built.cluster_owner == ""
         assert built.cpu_instance_types == []
+
+
+class TestCreateClusterCannotKillTheServer:
+    """`core_create_cluster` used to `sys.exit()` on every path, success
+    included. `SystemExit` is a `BaseException`, and this tool cannot use
+    `_cluster_lock`'s SystemExit translation because the core locks
+    internally and wrapping would deadlock — so a *successful* MCP build
+    killed the server instead of returning. Confirmed live on 2026-08-25:
+    the call never returned and the transport disconnected.
+
+    Every test here drives the tool through a real client session, because
+    that is the only place the failure was visible — a direct call to the
+    wrapper would raise SystemExit into the test runner and look like a
+    plain error.
+    """
+
+    # conftest points defaults-file discovery at an empty directory, so a
+    # compute type has to be supplied explicitly or the preview is refused
+    # for having no queue (checklist 0.6) before it can mint a token.
+    _ARGS = dict(cluster_name="osiris", cluster_owner="rmarable",
+                 cluster_owner_email="rmarable@gmail.com", az="us-east-1a",
+                 headnode_instance_type="c8g.large",
+                 overrides={"compute_instance_type": "c7g.large"})
+
+    async def _token(self, c):
+        r = await c.call_tool("preview_cluster_config", dict(self._ARGS),
+                              raise_on_error=False)
+        return json.loads(r.content[0].text)["confirmation_token"]
+
+    @pytest.mark.asyncio
+    async def test_a_kicked_off_build_returns_a_result(self, monkeypatch):
+        from pcluster_core import CreateClusterResult
+
+        monkeypatch.setattr(
+            tools_mod, "core_create_cluster",
+            lambda **kw: CreateClusterResult(
+                cluster_name="osiris", success=True, exit_code=0,
+                kicked_off=True, message="started"),
+        )
+        async with Client(build_local()) as c:
+            tok = await self._token(c)
+            r = await c.call_tool("create_cluster",
+                                  {**self._ARGS, "confirmation_token": tok},
+                                  raise_on_error=False)
+        assert not r.is_error, r.content[0].text if r.content else ""
+        payload = json.loads(r.content[0].text)
+        assert payload["kicked_off"] is True
+        assert payload["success"] is True
+
+    @pytest.mark.asyncio
+    async def test_a_validation_sys_exit_becomes_a_tool_error(self, monkeypatch):
+        """The shared validation helpers (p_fail/refer_to_docs_and_quit)
+        still sys.exit(1) with the message already printed. Those are not
+        converted, so the wrapper's narrow SystemExit net is what keeps one
+        bad input from taking the whole server down."""
+        def _boom(**kw):
+            raise SystemExit(1)
+
+        monkeypatch.setattr(tools_mod, "core_create_cluster", _boom)
+        async with Client(build_local()) as c:
+            tok = await self._token(c)
+            r = await c.call_tool("create_cluster",
+                                  {**self._ARGS, "confirmation_token": tok},
+                                  raise_on_error=False)
+            assert r.is_error
+            # The session must still be usable -- that is the whole point.
+            alive = await c.call_tool("list_clusters", {}, raise_on_error=False)
+        assert not alive.is_error, "the server did not survive the SystemExit"
+
+    @pytest.mark.asyncio
+    async def test_a_failed_build_is_reported_not_raised(self, monkeypatch):
+        from pcluster_core import CreateClusterResult
+
+        monkeypatch.setattr(
+            tools_mod, "core_create_cluster",
+            lambda **kw: CreateClusterResult(
+                cluster_name="osiris", success=False, exit_code=1,
+                message="build failed"),
+        )
+        async with Client(build_local()) as c:
+            tok = await self._token(c)
+            r = await c.call_tool("create_cluster",
+                                  {**self._ARGS, "confirmation_token": tok},
+                                  raise_on_error=False)
+        payload = json.loads(r.content[0].text)
+        assert payload["success"] is False and payload["exit_code"] == 1
+
+
+class TestFinalizeClusterBuildIsLocalOnly:
+    """The create-side twin of finalize_cluster_teardown, and unlike that
+    one it is local-only: it renders access scripts into the operator's
+    `active_clusters/` and scp's a local staging tree with the local
+    `.pem`. A remote handler has neither, and the scripts are only useful
+    on the machine that runs them -- the same reasoning that keeps
+    rotate_cluster_key local.
+    """
+
+    @pytest.mark.asyncio
+    async def test_the_local_transport_has_it(self):
+        async with Client(build_local()) as c:
+            names = {t.name for t in await c.list_tools()}
+        assert "finalize_cluster_build" in names
+
+    @pytest.mark.asyncio
+    async def test_the_remote_transport_does_not(self):
+        async with Client(build_remote()) as c:
+            names = {t.name for t in await c.list_tools()}
+        assert "finalize_cluster_build" not in names
+
+    def test_it_is_declared_local_only_as_data(self):
+        """The split is data in _LOCAL_ONLY, never a second registration
+        list -- so the two transports cannot disagree."""
+        assert "finalize_cluster_build" in tools_mod._LOCAL_ONLY
+
+    @pytest.mark.asyncio
+    async def test_it_takes_no_confirmation_token(self, monkeypatch):
+        """It destroys nothing and only completes work the operator already
+        authorized by building. A token here would be friction with no
+        matching risk -- and would need a preview tool that has nothing to
+        preview."""
+        # The record's region must differ from the ambient one, or a tool
+        # that wrongly used _store_region() would look correct: the test
+        # environment sets AWS_REGION=us-east-2, so a fixture using that
+        # cannot tell the two apart.
+        rec = type("R", (), {"region": "us-west-2", "cluster_owner": "testuser",
+                             "serial": "s", "ec2_keypair": "kp",
+                             "s3_bucketname": "b"})()
+        monkeypatch.setattr(tools_mod, "_require_record", lambda name: rec)
+        monkeypatch.setattr(tools_mod, "_store_region", lambda: "us-east-2")
+        called = []
+        monkeypatch.setattr(
+            tools_mod, "core_finalize_cluster_build",
+            lambda **kw: called.append(kw) or {"success": True},
+        )
+        async with Client(build_local()) as c:
+            tool = next(t for t in await c.list_tools()
+                        if t.name == "finalize_cluster_build")
+            assert tool.inputSchema.get("required") == ["cluster_name"]
+            r = await c.call_tool("finalize_cluster_build",
+                                  {"cluster_name": "certify"}, raise_on_error=False)
+        assert not r.is_error, r.content[0].text if r.content else ""
+        assert len(called) == 1
+        assert called[0]["region"] == "us-west-2", "the cluster's region must be used"

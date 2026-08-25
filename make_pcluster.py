@@ -995,13 +995,16 @@ def main():
         use_private_gpu_subnet=use_private_gpu_subnet,
     )
 
-    core_create_cluster(
+    # The core returns a result now rather than exiting; the CLI's own
+    # observable behavior (an exit code) is reproduced here.
+    result = core_create_cluster(
         params=params,
         repo_root=_repo_root,
         region=region,
         cluster_build_command=cluster_build_command,
         ansible_version=ANSIBLE_VERSION,
     )
+    sys.exit(result.exit_code)
 
 
 if __name__ == "__main__":

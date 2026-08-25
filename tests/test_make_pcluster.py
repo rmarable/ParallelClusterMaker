@@ -3338,10 +3338,16 @@ class TestEveryCreateExitPublishesTheClusterState:
             if isinstance(n, ast.FunctionDef) and n.name == "core_create_cluster"
         )
 
-    def test_no_successful_exit_skips_the_publisher(self):
-        """Every `sys.exit(0)` in the function must have a publish call
-        before it. A failure exit (non-zero) is exempt -- there is no
-        cluster to publish."""
+    def test_no_successful_return_skips_the_publisher(self):
+        """Every successful return must have a publish call before it. A
+        failure return is exempt -- there is no cluster to publish.
+
+        This used to look for `sys.exit(0)`. The function now returns a
+        CreateClusterResult on every path (a sys.exit here killed the MCP
+        server, since SystemExit is a BaseException and this tool cannot
+        use the lock-translating wrapper), so the guard follows the same
+        property to its new shape rather than being deleted with the
+        construct it happened to match."""
         import ast
 
         fn = self._create_fn()
@@ -3350,19 +3356,82 @@ class TestEveryCreateExitPublishesTheClusterState:
             if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
             and n.func.id == "_publish_cluster_state"
         ]
-        success_exits = [
+        successes = []
+        for n_ in ast.walk(fn):
+            if not (isinstance(n_, ast.Return) and isinstance(n_.value, ast.Call)):
+                continue
+            if getattr(n_.value.func, "id", None) != "CreateClusterResult":
+                continue
+            for kw in n_.value.keywords:
+                if (kw.arg == "success" and isinstance(kw.value, ast.Constant)
+                        and kw.value.value is True):
+                    successes.append(n_.lineno)
+        assert successes, "no successful return found -- this guard is vacuous"
+        assert publishes, "core_create_cluster never publishes"
+
+        # "some publish appears earlier in the file" is too weak: with two
+        # success paths and two publishes, deleting the publish next to the
+        # second one still leaves the first at a lower line number, and the
+        # check passes while that path publishes nothing. Require a publish
+        # among the return's own preceding siblings, which is what "this
+        # path publishes" actually means.
+        parents = {}
+        for node in ast.walk(fn):
+            for child in ast.iter_child_nodes(node):
+                parents[child] = node
+
+        def _publishes_on_this_path(ret):
+            block_owner = parents.get(ret)
+            for field in ("body", "orelse", "finalbody"):
+                for stmts in ([getattr(block_owner, field, None)] if block_owner else []):
+                    if not isinstance(stmts, list) or ret not in stmts:
+                        continue
+                    for stmt in stmts[: stmts.index(ret)]:
+                        # Deliberately NOT ast.walk: that descends into
+                        # earlier sibling *blocks*, so the publish nested in
+                        # the _KICKED_OFF branch counted as covering the
+                        # final return on a path that never runs it -- and
+                        # deleting the real one still passed. Both publishes
+                        # are direct statements, so match only those.
+                        if not isinstance(stmt, ast.Expr):
+                            continue
+                        call = stmt.value
+                        if (isinstance(call, ast.Call)
+                                and getattr(call.func, "id", None)
+                                == "_publish_cluster_state"):
+                            return True
+            return False
+
+        returns = [
+            n_ for n_ in ast.walk(fn)
+            if isinstance(n_, ast.Return) and n_.lineno in successes
+        ]
+        for ret in returns:
+            assert _publishes_on_this_path(ret), (
+                f"the success return at line {ret.lineno} does not publish the "
+                f"cluster state on its own path; publishes at {publishes}"
+            )
+
+    def test_the_function_never_exits_the_process(self):
+        """The defect this whole shape exists to prevent: a sys.exit
+        anywhere core_create_cluster controls takes the MCP server down
+        with it, because SystemExit is a BaseException and create_cluster
+        cannot be wrapped in _cluster_lock's translation (it locks
+        internally, so wrapping deadlocks). Observed live on 2026-08-25 --
+        a *successful* build killed the server."""
+        import ast
+
+        fn = self._create_fn()
+        exits = [
             n.lineno for n in ast.walk(fn)
             if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
-            and n.func.attr == "exit" and n.args
-            and isinstance(n.args[0], ast.Constant) and n.args[0].value == 0
+            and n.func.attr == "exit"
+            and getattr(n.func.value, "id", None) == "sys"
         ]
-        assert success_exits, "no successful exit found -- this guard is vacuous"
-        assert publishes, "core_create_cluster never publishes"
-        for exit_line in success_exits:
-            assert any(p < exit_line for p in publishes), (
-                f"sys.exit(0) at line {exit_line} is reachable without "
-                f"publishing the cluster state; publishes at {publishes}"
-            )
+        assert not exits, (
+            f"core_create_cluster calls sys.exit at lines {exits}; it must "
+            f"return a CreateClusterResult and let the CLI shim exit"
+        )
 
     def test_the_publisher_writes_both_halves(self):
         """A record without a config leaves every remote queue tool
@@ -3638,3 +3707,121 @@ Scheduling:
                 cluster_name="osiris", repo_root=root, queue_name="compute",
                 describe_fn=lambda n, r: {"clusterStatus": "UPDATE_IN_PROGRESS"},
             )
+
+
+class TestFinalizeCompletesWhatTheBuildStarted:
+    """`core_create_cluster(wait=False)` returns as soon as CloudFormation
+    accepts the stack, so everything needing a live head node is skipped:
+    the access scripts are rendered into stage_dir and lost with the
+    process, the staging tree never reaches the node, the summary is never
+    sent. The build's own message says to re-run once the stack completes,
+    and re-running is refused -- it aborts on the vars file it wrote
+    itself. So an MCP-built cluster could not be finished at all.
+
+    Verified live on 2026-08-25 against a cluster in exactly that state.
+    """
+
+    def _staged(self, tmp_path, monkeypatch, status="CREATE_COMPLETE",
+                describe_calls=None):
+        import sys
+        import types
+
+        import pcluster_core
+
+        (tmp_path / "active_clusters" / "certify").mkdir(parents=True)
+        (tmp_path / "active_clusters" / "certify" / "certify.serial").write_text("s\n")
+        (tmp_path / "src" / "vars_files").mkdir(parents=True)
+        (tmp_path / "src" / "vars_files" / "certify.yml").write_text(
+            "aws_account_id: '123456789012'\naz: us-east-1a\n"
+        )
+
+        calls = describe_calls if describe_calls is not None else []
+
+        pc = types.ModuleType("pcluster.lib")
+
+        def _describe(cluster_name, region):
+            calls.append((cluster_name, region))
+            return {"clusterStatus": status}
+
+        pc.describe_cluster = _describe
+        monkeypatch.setitem(sys.modules, "pcluster.lib", pc)
+        monkeypatch.setattr(pcluster_core, "_acquire_distributed_cluster_lock",
+                            lambda *a, **k: None)
+        monkeypatch.setattr(pcluster_core, "s3_release_cluster_lock",
+                            lambda *a, **k: None)
+        monkeypatch.setattr(pcluster_core.boto3, "client", lambda *a, **k: object())
+        return calls
+
+    def _run(self, tmp_path):
+        import pcluster_core
+
+        return pcluster_core.core_finalize_cluster_build(
+            cluster_name="certify", cluster_owner="rmarable",
+            region="us-east-1", repo_root=str(tmp_path),
+        )
+
+    @pytest.mark.parametrize("status", ["CREATE_IN_PROGRESS", "CREATE_FAILED",
+                                        "ROLLBACK_COMPLETE", "DELETE_IN_PROGRESS"])
+    def test_it_refuses_unless_the_stack_is_complete(self, tmp_path, monkeypatch, status):
+        """Every step needs a head node that answers. Running against a
+        half-built stack would scp into nothing and publish a summary for a
+        cluster that may never exist."""
+        self._staged(tmp_path, monkeypatch, status=status)
+        r = self._run(tmp_path)
+        assert r.success is False and r.exit_code == 1
+        assert status in r.message
+
+    def test_a_refusal_renders_nothing(self, tmp_path, monkeypatch):
+        """Refusing has to mean refusing: a half-rendered access script in
+        active_clusters/ would look like a finished build."""
+        self._staged(tmp_path, monkeypatch, status="CREATE_IN_PROGRESS")
+        self._run(tmp_path)
+        produced = list((tmp_path / "active_clusters" / "certify").iterdir())
+        assert [p.name for p in produced] == ["certify.serial"]
+
+    def test_it_cannot_wait(self, tmp_path, monkeypatch):
+        """Structural, like the teardown twin: one describe, no retry loop,
+        so it stays callable from anything that cannot block."""
+        calls = []
+        self._staged(tmp_path, monkeypatch, status="CREATE_IN_PROGRESS",
+                     describe_calls=calls)
+        self._run(tmp_path)
+        assert len(calls) == 1
+
+    def test_a_missing_vars_file_is_refused(self, tmp_path, monkeypatch):
+        """Only a cluster this machine built can be finalized here -- the
+        vars file is the whole rendering context."""
+        self._staged(tmp_path, monkeypatch)
+        (tmp_path / "src" / "vars_files" / "certify.yml").unlink()
+        r = self._run(tmp_path)
+        assert r.success is False and "vars file" in r.message
+
+    def test_a_missing_serial_file_is_refused(self, tmp_path, monkeypatch):
+        self._staged(tmp_path, monkeypatch)
+        (tmp_path / "active_clusters" / "certify" / "certify.serial").unlink()
+        r = self._run(tmp_path)
+        assert r.success is False and "serial file" in r.message
+
+    def test_a_failed_describe_propagates(self, tmp_path, monkeypatch):
+        """A failed AWS call is not an incomplete cluster -- the same rule
+        the teardown gate follows."""
+        import sys
+        import types
+
+        self._staged(tmp_path, monkeypatch)
+        pc = types.ModuleType("pcluster.lib")
+
+        def _boom(cluster_name, region):
+            raise RuntimeError("ExpiredToken")
+
+        pc.describe_cluster = _boom
+        monkeypatch.setitem(sys.modules, "pcluster.lib", pc)
+        with pytest.raises(RuntimeError):
+            self._run(tmp_path)
+
+    def test_the_refusal_explains_an_in_progress_stack(self, tmp_path, monkeypatch, capsys):
+        self._staged(tmp_path, monkeypatch, status="CREATE_IN_PROGRESS")
+        self._run(tmp_path)
+        out = capsys.readouterr().out
+        assert "still building" in out
+        assert "head node" in out

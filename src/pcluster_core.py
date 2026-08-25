@@ -5724,6 +5724,25 @@ def core_apply_queue_config(*, cluster_record, config_path, region, pcluster_bin
 
 
 @dataclass(frozen=True)
+class CreateClusterResult:
+    """What core_create_cluster returns, mirroring DeleteClusterResult.
+
+    It used to sys.exit() on every path, including success. That is right
+    for a CLI and fatal for a server: SystemExit is a BaseException, and
+    the MCP wrapper cannot use the lock-translating wrapper (this function
+    locks internally, so wrapping would deadlock), so a *successful*
+    create_cluster killed the server instead of returning. The CLI shim
+    converts exit_code back into sys.exit, leaving that path unchanged.
+    """
+
+    cluster_name: str
+    success: bool
+    exit_code: int
+    kicked_off: bool = False
+    message: str = ""
+
+
+@dataclass(frozen=True)
 class DeleteClusterResult:
     cluster_name: str
     success: bool
@@ -7742,23 +7761,23 @@ def core_create_cluster(*, params, repo_root, region, cluster_build_command, ans
     site or require passing partial state between functions that has no
     other reason to exist.
 
-    Every sys.exit() below -- bare int, an f-string message, or (via
-    p_fail/refer_to_docs_and_quit/illegal_az_msg) always a bare
-    sys.exit(1) with the message already printed -- is left exactly as it
-    was in the original script, unconverted to PClusterMakerError. None of
-    them need a numeric-vs-string exit-code translation the way
-    kill_pcluster.py's core_delete_cluster did: every one of these already
-    IS the final observable behavior (message printed, then a bare
-    sys.exit()), and letting it propagate straight out of this function
-    reproduces that exactly, with no wrapping needed at the CLI shim at all.
-    This intentionally leaves the same disclosed limitation already accepted
-    for core_stop_fleet/core_start_fleet: an MCP caller of a hypothetical
-    create_cluster tool gets a raw, uncaught SystemExit on any of these
-    paths, not a catchable error. Full MCP-safety hardening of this
-    validation surface is out of scope for Workstream 1's job, which is to
-    make the orchestration callable and testable outside of a CLI main() at
-    all -- something this function achieves even with that limitation, since
-    nothing about it depends on argparse or sys.argv.
+    Returns a CreateClusterResult; the CLI shim turns exit_code back into
+    sys.exit, so the command-line behavior is unchanged. It previously
+    sys.exit()ed on every path instead, and the docstring here recorded
+    that as a disclosed limitation -- "an MCP caller of a hypothetical
+    create_cluster tool gets a raw, uncaught SystemExit". That prediction
+    was exact and the cost was total: SystemExit is a BaseException, this
+    function locks internally so the wrapper cannot use _cluster_lock's
+    translation, and the *success* path exited too -- so every successful
+    MCP create_cluster killed the server rather than returning. Confirmed
+    live on 2026-08-25, which is what retired the limitation.
+
+    The validation helpers p_fail/refer_to_docs_and_quit/illegal_az_msg
+    still sys.exit(1) internally, with the message already printed. Those
+    are shared with other entry points and are not converted here; the MCP
+    wrapper catches SystemExit around this call so they surface as a tool
+    error rather than as a dead server. That net is the backstop, not the
+    mechanism -- every path this function controls returns.
 
     The operator's Ctrl-C abort window (ctrlC_Abort) is also kept inside
     this function, breaking the "gate always stays in the CLI shim" pattern
@@ -7905,7 +7924,10 @@ def core_create_cluster(*, params, repo_root, region, cluster_build_command, ans
             cluster_build_command=cluster_build_command,
         ):
             print(_line)
-        sys.exit(1)
+        return CreateClusterResult(
+            cluster_name=cluster_name, success=False, exit_code=1,
+            message="a vars file for this cluster already exists",
+        )
     else:
         p_val("vars_file_path", debug_mode)
 
@@ -7965,19 +7987,37 @@ def core_create_cluster(*, params, repo_root, region, cluster_build_command, ans
             loginnode_subnet_id,
         ) = _fut_network.result()
     except Exception as _e:
-        sys.exit(f"ERROR: Network/VPC discovery failed: {_e}")
+        print(f"ERROR: Network/VPC discovery failed: {_e}", file=sys.stderr)
+        return CreateClusterResult(
+            cluster_name=cluster_name, success=False, exit_code=1,
+            message=f"ERROR: Network/VPC discovery failed: {_e}",
+        )
     try:
         aws_account_id = _fut_account.result()
     except Exception as _e:
-        sys.exit(f"ERROR: Could not retrieve AWS account ID: {_e}")
+        print(f"ERROR: Could not retrieve AWS account ID: {_e}", file=sys.stderr)
+        return CreateClusterResult(
+            cluster_name=cluster_name, success=False, exit_code=1,
+            message=f"ERROR: Could not retrieve AWS account ID: {_e}",
+        )
     try:
         _describe = _fut_describe.result()
     except FileNotFoundError:
-        sys.exit(
-            "ERROR: 'pcluster' command not found. Install aws-parallelcluster before running this script."
+        _PCLUSTER_MISSING_MSG = (
+            "ERROR: 'pcluster' command not found. Install "
+            "aws-parallelcluster before running this script."
+        )
+        print(_PCLUSTER_MISSING_MSG, file=sys.stderr)
+        return CreateClusterResult(
+            cluster_name=cluster_name, success=False, exit_code=1,
+            message=_PCLUSTER_MISSING_MSG,
         )
     except Exception as _e:
-        sys.exit(f"ERROR: Could not check cluster existence: {_e}")
+        print(f"ERROR: Could not check cluster existence: {_e}", file=sys.stderr)
+        return CreateClusterResult(
+            cluster_name=cluster_name, success=False, exit_code=1,
+            message=f"ERROR: Could not check cluster existence: {_e}",
+        )
 
     if _describe.returncode == 0:
         error_msg = (
@@ -8307,9 +8347,15 @@ def core_create_cluster(*, params, repo_root, region, cluster_build_command, ans
     if enable_external_nfs and not re.fullmatch(
         r"^[a-zA-Z0-9.\-]+$", external_nfs_server
     ):
-        sys.exit(
-            f"ERROR: external_nfs_server contains invalid characters: {external_nfs_server!r}\n"
+        _NFS_MSG = (
+            f"ERROR: external_nfs_server contains invalid characters: "
+            f"{external_nfs_server!r}\n"
             f"  Only letters, digits, dots, and hyphens are permitted."
+        )
+        print(_NFS_MSG, file=sys.stderr)
+        return CreateClusterResult(
+            cluster_name=cluster_name, success=False, exit_code=1,
+            message=_NFS_MSG,
         )
     else:
         p_val("enable_external_nfs", debug_mode)
@@ -8560,7 +8606,10 @@ def core_create_cluster(*, params, repo_root, region, cluster_build_command, ans
             enable_monitoring=enable_monitoring,
         )
         s3_release_cluster_lock(_lock_s3, locks_bucketname=locks_bucketname, cluster_name=cluster_name)
-        sys.exit(1)
+        return CreateClusterResult(
+            cluster_name=cluster_name, success=False, exit_code=1,
+            message="build failed; see the messages above",
+        )
 
     try:
         if enable_fsx_hydration:
@@ -9043,7 +9092,10 @@ def core_create_cluster(*, params, repo_root, region, cluster_build_command, ans
         with contextlib.suppress(FileNotFoundError):
             os.remove(cluster_serial_number_file)
         s3_release_cluster_lock(_lock_s3, locks_bucketname=locks_bucketname, cluster_name=cluster_name)
-        sys.exit(1)
+        return CreateClusterResult(
+            cluster_name=cluster_name, success=False, exit_code=1,
+            message="build failed; see the messages above",
+        )
 
     # Every remaining create_pcluster.yml task, wired straight to Python --
     # this retires the playbook from execution entirely, matching what
@@ -9103,7 +9155,12 @@ def core_create_cluster(*, params, repo_root, region, cluster_build_command, ans
         print("Run kill_pcluster.py to tear down any partial stack before retrying:")
         print(f"  ./kill_pcluster.py -N {cluster_name} -O {cluster_owner} -A {az}")
         s3_release_cluster_lock(_lock_s3, locks_bucketname=locks_bucketname, cluster_name=cluster_name)
-        sys.exit(1)
+        # Returned, not exited -- and every call site returns it onward.
+        # This is nested, so a bare return here would only leave the helper
+        # and let the caller run on to the success path.
+        return CreateClusterResult(
+            cluster_name=cluster_name, success=False, exit_code=1, message=reason,
+        )
 
     sns = boto3.client("sns", region_name=region)
     sns_topic_arn = None
@@ -9182,7 +9239,10 @@ def core_create_cluster(*, params, repo_root, region, cluster_build_command, ans
         shutil.rmtree(cluster_data_dir, ignore_errors=True)
         print(f"  Removed local state: {os.path.relpath(vars_file_path, repo_root)}")
         s3_release_cluster_lock(_lock_s3, locks_bucketname=locks_bucketname, cluster_name=cluster_name)
-        sys.exit(1)
+        return CreateClusterResult(
+            cluster_name=cluster_name, success=False, exit_code=1,
+            message="build failed; see the messages above",
+        )
 
     # Print the pre-launch summary and open the Ctrl-C abort window right
     # before actually launching the stack -- matching the playbook's own
@@ -9239,7 +9299,7 @@ def core_create_cluster(*, params, repo_root, region, cluster_build_command, ans
             progress_fn=_print_build_progress, wait=wait,
         )
     except Exception as _launch_e:
-        _fail_after_launch(f"Exception launching cluster: {_launch_e}")
+        return _fail_after_launch(f"Exception launching cluster: {_launch_e}")
 
     if outcome.terminal_state == _KICKED_OFF:
         # Workstream 4: launched, deliberately not waited on. Everything
@@ -9261,10 +9321,13 @@ def core_create_cluster(*, params, repo_root, region, cluster_build_command, ans
             cluster_name=cluster_name, repo_root=repo_root,
         )
         s3_release_cluster_lock(_lock_s3, locks_bucketname=locks_bucketname, cluster_name=cluster_name)
-        sys.exit(0)
+        return CreateClusterResult(
+            cluster_name=cluster_name, success=True, exit_code=0,
+            kicked_off=True, message=outcome.create_headline,
+        )
 
     if not outcome.create_confirmed:
-        _fail_after_launch(outcome.create_headline)
+        return _fail_after_launch(outcome.create_headline)
 
     stop_stack_creation_timestamp = teardown_timestamp()
 
@@ -9300,7 +9363,7 @@ def core_create_cluster(*, params, repo_root, region, cluster_build_command, ans
             stop_overall_timestamp=stop_overall_timestamp,
         )
     except Exception as _post_launch_e:
-        _fail_after_launch(f"Exception after cluster launch: {_post_launch_e}")
+        return _fail_after_launch(f"Exception after cluster launch: {_post_launch_e}")
 
     # Append make_pcluster.py's own command line to the cluster_serial_number
     # file, and upload the serial number to S3 for durability.
@@ -9457,7 +9520,224 @@ def core_create_cluster(*, params, repo_root, region, cluster_build_command, ans
         cluster_name=cluster_name, repo_root=repo_root,
     )
     s3_release_cluster_lock(_lock_s3, locks_bucketname=locks_bucketname, cluster_name=cluster_name)
-    sys.exit(0)
+    return CreateClusterResult(
+        cluster_name=cluster_name, success=True, exit_code=0,
+        message="cluster created",
+    )
+
+
+def _confirm_stack_is_built(describe_fn, cluster_name, region):
+    """core_finalize_cluster_build's gate: has the stack finished building?
+
+    One describe, no waiting -- the same structural guarantee
+    _confirm_stack_is_gone gives the teardown twin, and for the same
+    reason: this has to be callable from something that cannot block. A
+    describe that fails propagates rather than being read as "not ready":
+    a failed AWS call is not a half-built cluster.
+    """
+    return describe_fn(cluster_name=cluster_name, region=region).get("clusterStatus", "")
+
+
+def core_finalize_cluster_build(
+    *, cluster_name, cluster_owner, region, repo_root, debug_mode=False,
+):
+    """Finish what a wait=False build started.
+
+    core_create_cluster returns as soon as CloudFormation accepts the
+    stack, because no tool may block for a 20-45 minute build. Everything
+    after that point needs a head node that exists and answers, so none of
+    it runs: the access scripts are rendered into stage_dir and discarded
+    with the process, the staging tree never reaches the head node, and
+    the build summary is never sent. The build's own message says to
+    re-run once the stack completes, and re-running is refused -- it
+    aborts on the vars file it wrote itself. So a cluster built over MCP
+    had no way to be finished at all.
+
+    This is the create-side twin of core_delete_cluster(finalize_only=True),
+    and it reads its context from the rendered vars file rather than from
+    the build's in-memory state: that file is what every other surface
+    already consumes, and it carries every key these templates need.
+    """
+    from pcluster_aux_data import p_val
+    import pcluster.lib as pc
+
+    _validate_cluster_name(cluster_name)
+    _validate_cluster_owner(cluster_owner)
+
+    src_dir = os.path.join(repo_root, "src")
+    cluster_data_dir = os.path.join(repo_root, "active_clusters", cluster_name)
+    cluster_serial_number_file = os.path.join(
+        cluster_data_dir, cluster_name + ".serial"
+    )
+    vars_file_path = os.path.join(src_dir, "vars_files", cluster_name + ".yml")
+
+    for _label, _path in (
+        ("vars file", vars_file_path),
+        ("serial file", cluster_serial_number_file),
+    ):
+        if not os.path.isfile(_path):
+            print("")
+            print("*** ERROR ***")
+            print(f"Cannot finalize the build of {cluster_name!r}: {_label} is missing")
+            print(f"  {_path}")
+            print("Only a cluster this machine built can be finalized here.")
+            return CreateClusterResult(
+                cluster_name=cluster_name, success=False, exit_code=1,
+                message=f"{_label} is missing",
+            )
+
+    with open(vars_file_path) as fh:
+        ctx = yaml.safe_load(fh) or {}
+    p_val("vars_file_path", debug_mode)
+
+    def _flag(key):
+        return str(ctx.get(key, "")).lower() == "true"
+
+    aws_account_id = str(ctx.get("aws_account_id", ""))
+    _lock_s3 = boto3.client("s3", region_name=region)
+    locks_bucketname = _derive_locks_bucket(
+        aws_account_id=aws_account_id, region=region
+    )
+    _acquire_distributed_cluster_lock(
+        _lock_s3, locks_bucketname=locks_bucketname, region=region,
+        cluster_name=cluster_name, command="finalize_cluster_build",
+        describe_fn=pc.describe_cluster,
+    )
+    try:
+        with quiet_missing_config_version_noise():
+            status = _confirm_stack_is_built(pc.describe_cluster, cluster_name, region)
+        if status != _CREATE_COMPLETE:
+            print("")
+            print("*** ERROR ***")
+            print(f"Cannot finalize the build of {cluster_name!r}: the stack is")
+            print(f"{_build_refusal_reason(status)}.")
+            print("Every step here needs a head node that exists and answers.")
+            print("Poll until the stack is complete, then finalize:")
+            print(f"  pcluster describe-cluster --cluster-name {cluster_name} --region {region}")
+            return CreateClusterResult(
+                cluster_name=cluster_name, success=False, exit_code=1,
+                message=f"stack is {status}",
+            )
+
+        head_ip = _pclib_head_ip(pc.describe_cluster, cluster_name, region)
+        if not head_ip:
+            print("")
+            print("*** ERROR ***")
+            print(f"The stack for {cluster_name!r} is complete but reports no head node")
+            print("address, so the staging transfer and the access scripts cannot be")
+            print("completed. Check that the head node is running.")
+            return CreateClusterResult(
+                cluster_name=cluster_name, success=False, exit_code=1,
+                message="no head node address",
+            )
+
+        start_ts = teardown_timestamp()
+        print("")
+        print("=" * 65)
+        print(f"Finalizing build: {cluster_name} in {ctx.get('az', region)}")
+        print(f"Start Time: {start_ts}")
+        print("")
+        print("The stack is complete; this finishes the steps that needed it.")
+        print("=" * 65)
+        print("")
+
+        _templates_dir = os.path.join(repo_root, "templates")
+        # Literal "/tmp", never tempfile.gettempdir(): on macOS that is
+        # /var/folders/..., which the build then mkdir's on an Ubuntu head
+        # node. The bug is invisible on Linux, where gettempdir() *is*
+        # /tmp, so only this spelling is safe -- same derivation the build
+        # itself uses.
+        stage_dir = ctx.get("stage_dir") or os.path.join(
+            "/tmp", "_ParallelClusterMaker_stage",
+            str(ctx.get("cluster_serial_number", cluster_name)),
+        )
+        os.makedirs(stage_dir, exist_ok=True)
+
+        # The same set core_create_cluster renders pre-launch. They were
+        # written to stage_dir and lost with that process; nothing about
+        # them depends on the build having stayed alive.
+        _scripts = [
+            ("kill_pcluster.j2", f"kill_pcluster.{cluster_name}.sh"),
+            ("access_cluster.j2", f"access_cluster.{cluster_name}.sh"),
+            ("retrieve_ssh_key.j2", f"retrieve_ssh_key.{cluster_name}.sh"),
+        ]
+        for _tmpl_name, _dest_name in _scripts:
+            _rendered = render_template(_templates_dir, _tmpl_name, **ctx)
+            _dest = os.path.join(stage_dir, _dest_name)
+            with open(
+                os.open(_dest, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o755), "w"
+            ) as _tf:
+                _tf.write(_rendered)
+            print(f"  Rendered {_dest_name}")
+
+        if _flag("enable_monitoring") and ctx.get("grafana_tunnel_dest"):
+            _rendered = render_template(_templates_dir, "grafana_tunnel.j2", **ctx)
+            with open(
+                os.open(ctx["grafana_tunnel_dest"],
+                        os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o755), "w"
+            ) as _gf:
+                _gf.write(_rendered)
+            print("  Rendered the Grafana tunnel script")
+
+        deploy_staging_and_performance_tree_to_head_node(
+            head_node_public_ip=head_ip,
+            ssh_keypair=ctx["ssh_keypair"], ssh_known_hosts=ctx["ssh_known_hosts"],
+            ec2_user=ctx["ec2_user"], ec2_user_home=ctx["ec2_user_home"],
+            stage_dir=stage_dir,
+            enable_hpc_benchmarks=_flag("enable_hpc_benchmarks"),
+            performance_stage_dir=ctx.get("performance_stage_dir"),
+            headnode_performance_dir_dest=ctx.get("headnode_performance_dir_dest"),
+            ebs_hpc_performance_dir=ctx.get("ebs_hpc_performance_dir"),
+            enable_efs=_flag("enable_efs"),
+            efs_hpc_performance_dir=ctx.get("efs_hpc_performance_dir"),
+            enable_fsx=_flag("enable_fsx"),
+            fsx_hpc_performance_dir=ctx.get("fsx_hpc_performance_dir"),
+        )
+
+        finalize_staging_directory(
+            stage_dir=stage_dir, cluster_data_dir=cluster_data_dir,
+            s3_bucketname=ctx["s3_bucketname"], region=region,
+        )
+
+        sns = boto3.client("sns", region_name=region)
+        sns_topic_arn = f"arn:aws:sns:{region}:{aws_account_id}:sns_alerts_{cluster_name}"
+        stop_ts = teardown_timestamp()
+        # The build's own timers died with it. These describe this
+        # finalization, not the original build, and are labeled as such
+        # rather than invented.
+        render_and_publish_build_summary_report(
+            sns, ctx=ctx, sns_topic_arn=sns_topic_arn,
+            templates_dir=_templates_dir, head_node_public_ip=head_ip,
+            start_overall_timestamp=start_ts, start_stack_timestamp=start_ts,
+            stop_stack_timestamp=stop_ts, stop_overall_timestamp=stop_ts,
+        )
+
+        print("")
+        print(f"Finished finalizing the build of {cluster_name}!")
+        print(f"  Access it with: ./access_cluster.py -N {cluster_name}")
+        return CreateClusterResult(
+            cluster_name=cluster_name, success=True, exit_code=0,
+            message="build finalized",
+        )
+    finally:
+        s3_release_cluster_lock(
+            _lock_s3, locks_bucketname=locks_bucketname, cluster_name=cluster_name
+        )
+
+
+def _build_refusal_reason(status):
+    """Operator-facing wording for a status the finalize gate rejects.
+
+    CREATE_FAILED and ROLLBACK_* are passed through verbatim, because those
+    are the strings the operator will grep the CloudFormation console for;
+    the in-progress case gets prose, because "CREATE_IN_PROGRESS" already
+    reads clearly but "still building" says what to do about it.
+    """
+    if status.endswith("_IN_PROGRESS"):
+        return f"{status} -- still building, so the head node is not ready yet"
+    if not status:
+        return "in an unknown state -- describe-cluster returned no status"
+    return f"in {status}, not CREATE_COMPLETE"
 
 
 # ---------------------------------------------------------------------------

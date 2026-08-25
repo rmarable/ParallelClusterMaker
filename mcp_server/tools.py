@@ -56,6 +56,7 @@ from pcluster_core import (
     core_check_cluster_health,
     core_create_cluster,
     core_delete_cluster,
+    core_finalize_cluster_build,
     core_diagnose_cluster,
     core_get_cost_report,
     core_list_clusters,
@@ -83,6 +84,11 @@ from mcp_server.confirmation_token import mint, verify
 from mcp_server.tiers import TOOL_TIERS
 
 _LOCAL_ONLY = frozenset({
+    # Writes access scripts into the operator's active_clusters/ and scp's
+    # a local staging tree with the local .pem -- a remote handler has
+    # neither, and the scripts it renders are only useful on the machine
+    # that will run them. Same reasoning as rotate_cluster_key.
+    "finalize_cluster_build",
     "rotate_cluster_key",
     "manage_grafana_tunnel",
     "apply_queue_config",
@@ -745,11 +751,24 @@ def register_tools(mcp, *, remote, tier=None):
             overrides=overrides,
         )
         region = resolve_region_from_az(az)
-        return _plain(core_create_cluster(
-            params=params, repo_root=_repo_root(), region=region,
-            cluster_build_command=f"mcp create_cluster {cluster_name}",
-            ansible_version="", wait=False,
-        ))
+        # core_create_cluster returns a CreateClusterResult, but its shared
+        # validation helpers (p_fail/refer_to_docs_and_quit/illegal_az_msg)
+        # still sys.exit(1) with the message already printed. SystemExit is
+        # a BaseException, and this tool cannot use _cluster_lock's
+        # translation because the core locks internally -- so without this
+        # net one of those paths takes the whole server down instead of
+        # failing one call. Deliberately narrow: it catches only SystemExit.
+        try:
+            return _plain(core_create_cluster(
+                params=params, repo_root=_repo_root(), region=region,
+                cluster_build_command=f"mcp create_cluster {cluster_name}",
+                ansible_version="", wait=False,
+            ))
+        except SystemExit as e:
+            raise PClusterMakerError(
+                f"cluster creation for {cluster_name!r} failed during validation "
+                f"(exit {e.code}); the reason was printed to the server log."
+            )
 
     @tool
     def preview_cluster_delete(cluster_name: str,
@@ -829,6 +848,28 @@ def register_tools(mcp, *, remote, tier=None):
             region=rec.region, repo_root=_repo_root(),
             delete_s3_bucketname="true" if delete_s3_bucketname else "false",
             debug_mode=False, wait=False,
+        ))
+
+    @tool
+    def finalize_cluster_build(cluster_name: str) -> dict:
+        """Finish a build that create_cluster started. LOCAL TRANSPORT ONLY.
+
+        create_cluster returns as soon as CloudFormation accepts the stack,
+        because no tool may block for a 20-45 minute build. Every step
+        after that needs a head node that answers, so none of it runs: the
+        access scripts are rendered to a temp directory and discarded, the
+        staging tree never reaches the head node, and the build summary is
+        never sent. Re-running the build cannot finish them -- it refuses
+        on the vars file it wrote itself.
+
+        Takes no confirmation token: it destroys nothing and only completes
+        work the operator already authorized by building. Refuses unless
+        the stack is CREATE_COMPLETE, and never waits for it.
+        """
+        rec = _require_record(cluster_name)
+        return _plain(core_finalize_cluster_build(
+            cluster_name=cluster_name, cluster_owner=rec.cluster_owner,
+            region=rec.region, repo_root=_repo_root(),
         ))
 
     @tool
