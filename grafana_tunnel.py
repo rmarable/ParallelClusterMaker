@@ -81,6 +81,13 @@ def main():
     except PClusterMakerError as e:
         sys.exit(str(e))
 
+    # The core captures the script's output now, because on the stdio MCP
+    # transport an inherited stdout corrupts the JSON-RPC stream. The CLI
+    # has no such constraint and the operator wants to see it, so it is
+    # printed back here -- unchanged behavior on this surface.
+    if result.output:
+        print(result.output, end="")
+
     if not result.success:
         sys.exit(f"ERROR: {result.error}.")
 

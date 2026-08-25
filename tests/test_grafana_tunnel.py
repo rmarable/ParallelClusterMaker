@@ -65,7 +65,7 @@ def _stage(tmp_path, monkeypatch, returncode):
     )
     monkeypatch.setattr(
         mod.subprocess, "run",
-        lambda *a, **k: types.SimpleNamespace(returncode=returncode),
+        lambda *a, **k: types.SimpleNamespace(returncode=returncode, stdout='', stderr=''),
     )
     monkeypatch.setattr(sys, "argv", ["grafana_tunnel.py", "-N", name])
     return mod
@@ -129,7 +129,7 @@ class TestCoreManageGrafanaTunnel:
         script.write_text("#!/bin/bash\nexit 0\n")
         monkeypatch.setattr(
             pcluster_core.subprocess, "run",
-            lambda *a, **k: types.SimpleNamespace(returncode=0),
+            lambda *a, **k: types.SimpleNamespace(returncode=0, stdout='', stderr=''),
         )
         result = pcluster_core.core_manage_grafana_tunnel(
             cluster_record=_record(), tunnel_script_path=str(script), port=9000,
@@ -147,7 +147,7 @@ class TestCoreManageGrafanaTunnel:
 
         def _fake_run(cmd, **k):
             seen["cmd"] = cmd
-            return types.SimpleNamespace(returncode=0)
+            return types.SimpleNamespace(returncode=0, stdout='', stderr='')
 
         monkeypatch.setattr(pcluster_core.subprocess, "run", _fake_run)
         result = pcluster_core.core_manage_grafana_tunnel(
@@ -164,10 +164,81 @@ class TestCoreManageGrafanaTunnel:
         script.write_text("#!/bin/bash\nexit 1\n")
         monkeypatch.setattr(
             pcluster_core.subprocess, "run",
-            lambda *a, **k: types.SimpleNamespace(returncode=1),
+            lambda *a, **k: types.SimpleNamespace(returncode=1, stdout='', stderr=''),
         )
         result = pcluster_core.core_manage_grafana_tunnel(
             cluster_record=_record(), tunnel_script_path=str(script),
         )
         assert result.success is False
         assert "exit 1" in result.error
+
+
+class TestTheTunnelScriptNeverWritesToOurStdout:
+    """On the stdio MCP transport this process's stdout **is** the JSON-RPC
+    stream. The tunnel script prints -- "Tunnelling via SSM (i-...)" and
+    "Grafana tunnel open for <cluster>." -- and those lines were inherited,
+    so they landed in the protocol. Observed live: the client logged
+    "Failed to parse JSONRPC message from server" once per line, corrupting
+    the session for every later call, not just this one.
+
+    The output is captured and returned rather than discarded, so a failing
+    tunnel is still diagnosable, and grafana_tunnel.py prints it back on
+    the CLI surface where there is no protocol to corrupt.
+    """
+
+    def test_the_child_never_inherits_stdout(self, monkeypatch, tmp_path):
+        """Asserted on the call itself: a test that only checks what
+        reached stdout would pass against an inherited-but-quiet script,
+        and the real one is not quiet."""
+        import types
+
+        import pcluster_core
+
+        seen = {}
+
+        def _fake_run(cmd, **kw):
+            seen.update(kw)
+            return types.SimpleNamespace(returncode=0, stdout="noisy\n", stderr="")
+
+        script = tmp_path / "tunnel.sh"
+        script.write_text("#!/bin/bash\necho noisy\n")
+        monkeypatch.setattr(pcluster_core.subprocess, "run", _fake_run)
+        pcluster_core.core_manage_grafana_tunnel(
+            cluster_record=_record(), tunnel_script_path=str(script), port=3000,
+        )
+        assert seen.get("capture_output") is True, (
+            "the tunnel script's stdout must be captured; inheriting it "
+            "corrupts the MCP stdio protocol"
+        )
+
+    def test_the_output_is_returned_not_swallowed(self, monkeypatch, tmp_path):
+        """Capturing must not mean discarding -- a failing tunnel is
+        diagnosed from exactly this text."""
+        import types
+
+        import pcluster_core
+
+        monkeypatch.setattr(
+            pcluster_core.subprocess, "run",
+            lambda *a, **k: types.SimpleNamespace(
+                returncode=1, stdout="Tunnelling via SSM (i-abc)\n", stderr="boom\n"),
+        )
+        script = tmp_path / "tunnel.sh"
+        script.write_text("#!/bin/bash\n")
+        r = pcluster_core.core_manage_grafana_tunnel(
+            cluster_record=_record(), tunnel_script_path=str(script), port=3000,
+        )
+        assert r.success is False
+        assert "Tunnelling via SSM" in r.output and "boom" in r.output
+
+    def test_the_cli_still_shows_it(self):
+        """The CLI has no protocol to corrupt and the operator wants the
+        text, so grafana_tunnel.py prints it back."""
+        import os
+
+        body = open(os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            "grafana_tunnel.py")).read()
+        assert "result.output" in body, (
+            "the CLI must print the captured output or the operator loses it"
+        )

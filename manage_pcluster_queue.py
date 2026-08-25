@@ -121,12 +121,29 @@ def _cluster_store(cluster_name):
     Addressed in the *cluster's* region, read from its own record, exactly
     as _record_store does on the MCP side. Returns (None, None) on any
     failure: mirroring is best-effort here, and _save_cluster_config
-    degrades to a local-only edit with a warning rather than refusing to
-    edit a file on this machine's disk.
+    degrades to a local-only edit rather than refusing to edit a file on
+    this machine's disk.
+
+    A failure here is *announced*. It used to be silent, and the two ways
+    of losing the store are not the same: _save_cluster_config prints
+    "Shared store unreachable" when it holds a client and the read fails,
+    but a failure at this layer -- bad credentials, no record, an STS call
+    that will not answer -- hands it no client at all, so it took the
+    no-store path and said nothing. The operator's edit landed locally and
+    nothing told them it had not propagated. Verified with deliberately
+    invalid credentials: the edit applied and not one line mentioned the
+    store.
     """
     try:
         rec = _read_cluster_record(cluster_name, _repo_root)
         if not rec or not rec.get("region"):
+            print(
+                "*** WARNING ***\n"
+                f"  No region on record for {cluster_name!r}, so the shared "
+                f"store cannot be addressed.\n"
+                f"  Editing locally only -- other machines will not see "
+                f"this change."
+            )
             return None, None
         region = rec["region"]
         import boto3
@@ -135,7 +152,13 @@ def _cluster_store(cluster_name):
             aws_account_id=_aws_account_id(region), region=region
         )
         return boto3.client("s3", region_name=region), bucket
-    except Exception:
+    except Exception as e:
+        print(
+            "*** WARNING ***\n"
+            f"  Shared store unreachable ({type(e).__name__}: {e}).\n"
+            f"  Editing locally only -- other machines will not see this "
+            f"change."
+        )
         return None, None
 
 

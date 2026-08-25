@@ -4435,6 +4435,7 @@ class TunnelResult:
     port: int
     success: bool
     error: str | None
+    output: str = ""   # the script's own stdout/stderr, never printed
 
 
 def core_manage_grafana_tunnel(*, cluster_record, tunnel_script_path, port=8443, stop=False):
@@ -4467,13 +4468,27 @@ def core_manage_grafana_tunnel(*, cluster_record, tunnel_script_path, port=8443,
     action = "stop" if stop else "start"
     # The tunnel script's exit status is the only signal that ssh -L actually
     # bound the port; swallowing it made a dead tunnel look like a live one.
-    result = subprocess.run(["bash", tunnel_script_path, str(port), action], check=False)
+    # Captured, never inherited. On the stdio MCP transport this process's
+    # stdout *is* the JSON-RPC stream, so a child that prints -- and this
+    # one does, "Tunnelling via SSM (i-...)" and "Grafana tunnel open for
+    # <cluster>." -- corrupts the protocol for every later call on that
+    # session, not merely this one. Observed live: the client logged
+    # "Failed to parse JSONRPC message from server" for each line.
+    # The output is returned instead of discarded, so a failing tunnel can
+    # still be diagnosed.
+    result = subprocess.run(
+        ["bash", tunnel_script_path, str(port), action],
+        check=False, capture_output=True, text=True,
+    )
+    output = (result.stdout or "") + (result.stderr or "")
     if result.returncode != 0:
         return TunnelResult(
             cluster_name=cluster_name, action=action, port=port, success=False,
             error=f"tunnel script failed to {action} the tunnel (exit {result.returncode})",
+            output=output,
         )
-    return TunnelResult(cluster_name=cluster_name, action=action, port=port, success=True, error=None)
+    return TunnelResult(cluster_name=cluster_name, action=action, port=port,
+                        success=True, error=None, output=output)
 
 
 # ---------------------------------------------------------------------------
