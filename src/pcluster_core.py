@@ -4352,6 +4352,62 @@ def core_resolve_access_node_type(rec, cluster_name, *, login_node_requested=Fal
     return AccessInfo(cluster_name=cluster_name, node_type=node_type, node_label=node_label)
 
 
+def core_ensure_generated_script(
+    *, cluster_data_root, cluster_name, repo_root, template, dest_name,
+):
+    """Return the path to one of a cluster's generated scripts, rendering
+    it if the build never wrote one.
+
+    A wait=False build -- every MCP build -- returns before
+    finalize_staging_directory copies the rendered scripts out of
+    stage_dir, so the scripts are discarded with the process and
+    access_cluster.py failed with "Access script not found. Make sure the
+    cluster was built with ./make_pcluster.py", which is wrong twice: the
+    cluster was built correctly, and the suggested remedy is a rebuild.
+
+    The script is a pure function of the vars file, so it is rendered on
+    demand here rather than making access depend on a build step having
+    run. Rendering, not reimplementing: the template already carries the
+    SSM ProxyCommand, the plugin-absent fallback and the rc/stderr
+    diagnosis, and a second copy of that in Python would drift.
+
+    Raises PClusterMakerError when there is no vars file to render from --
+    a cluster known only through the shared store cannot be rendered here,
+    since the store keeps the 22-field record, not the 124-key vars file.
+    """
+    root = os.path.normpath(cluster_data_root)
+    path = os.path.normpath(os.path.join(root, cluster_name, dest_name))
+    if not path.startswith(root + os.sep):
+        raise PClusterMakerError(
+            f"Resolved script path escapes active_clusters/: {path}"
+        )
+    if os.path.isfile(path):
+        return path
+
+    vars_file_path = os.path.join(
+        repo_root, "src", "vars_files", cluster_name + ".yml"
+    )
+    if not os.path.isfile(vars_file_path):
+        raise PClusterMakerError(
+            f"No {dest_name} and no vars file for {cluster_name!r}.\n"
+            f"  Looked for: {path}\n"
+            f"  and:        {vars_file_path}\n"
+            f"  This machine did not build {cluster_name!r}. A cluster known "
+            f"only through the shared record store cannot be accessed from "
+            f"here -- run this from the machine that built it, or rebuild."
+        )
+
+    with open(vars_file_path) as fh:
+        ctx = yaml.safe_load(fh) or {}
+    rendered = render_template(
+        os.path.join(repo_root, "templates"), template, **ctx
+    )
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o755), "w") as fh:
+        fh.write(rendered)
+    return path
+
+
 def core_exec_access_script(*, cluster_data_root, cluster_name, node_type):
     """Run the cluster's access script with ACCESS_NODE_TYPE set and return
     its exit code. Interactive by design (inherits stdin/stdout/stderr for
@@ -4396,7 +4452,12 @@ def core_manage_grafana_tunnel(*, cluster_record, tunnel_script_path, port=8443,
     if not os.path.isfile(tunnel_script_path):
         raise PClusterMakerError(
             f"ERROR: tunnel script not found: {tunnel_script_path}\n"
-            f"  Make sure the cluster was built with monitoring enabled."
+            # Monitoring is already known to be enabled -- the check above
+            # raised otherwise -- so blaming the build for not enabling it
+            # sent the operator to look at the wrong thing entirely.
+            f"  The build never wrote it, which is what an MCP build does.\n"
+            f"  Run this from the machine that built the cluster, where it "
+            f"is rendered on demand from the vars file."
         )
 
     action = "stop" if stop else "start"

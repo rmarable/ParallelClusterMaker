@@ -241,8 +241,17 @@ standing constraints for local development.
   one describe, never waits), it reads context from the **rendered vars
   file**, not the build's in-memory state, and is **local-only** (writes
   `active_clusters/`, scp's the local `.pem`). `stage_dir` is the literal
-  `/tmp`, never `tempfile.gettempdir()`. The remote create path still ends
-  with no access scripts — a smaller gap, not a closed one.
+  `/tmp`, never `tempfile.gettempdir()`.
+- **Access must not depend on the build having finished.**
+  `access_cluster.py` and `grafana_tunnel.py` render their generated
+  script on demand via `core_ensure_generated_script` when one is absent —
+  it is a pure function of the vars file. Rendering, never
+  reimplementing — the template carries the SSM ProxyCommand, the
+  plugin-absent fallback and the rc/stderr diagnosis. An existing script is
+  never overwritten. With no vars file the error says this machine did not
+  build the cluster; it must never say "make sure the cluster was built
+  with make_pcluster.py", which blamed the operator for a supported MCP
+  build and offered a rebuild.
 - **Cognito access tokens carry no `aud` claim** — they carry `client_id`;
   only ID tokens have `aud`. `mcp_server/auth/authorizer_lambda.py`
   validates `client_id` and pins `token_use == "access"` so an ID token

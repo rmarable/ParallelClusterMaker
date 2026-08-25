@@ -3825,3 +3825,144 @@ class TestFinalizeCompletesWhatTheBuildStarted:
         out = capsys.readouterr().out
         assert "still building" in out
         assert "head node" in out
+
+
+class TestAccessDoesNotDependOnTheBuildHavingFinished:
+    """`access_cluster.py` required the generated script and nothing else,
+    so an MCP-built cluster -- which never gets one, because a wait=False
+    build returns before the scripts are copied out of stage_dir -- could
+    not be reached from the CLI at all. The message made it worse: "Make
+    sure the cluster was built with ./make_pcluster.py" says the operator
+    built it wrong, when they built it in a supported way, and offers a
+    rebuild as the remedy.
+
+    The script is a pure function of the vars file, so it is rendered on
+    demand. Rendering rather than reimplementing: the template carries the
+    SSM ProxyCommand, the plugin-absent fallback and the rc/stderr
+    diagnosis, and a second copy of that in Python would drift from it.
+    """
+
+    _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+    def _repo(self, tmp_path):
+        import shutil
+
+        (tmp_path / "src" / "vars_files").mkdir(parents=True)
+        (tmp_path / "active_clusters" / "certify").mkdir(parents=True)
+        shutil.copytree(
+            os.path.join(self._ROOT, "templates"), str(tmp_path / "templates")
+        )
+        return tmp_path
+
+    def test_it_renders_the_script_when_the_build_did_not(self, tmp_path):
+        """The whole point: no script on disk, and access still resolves."""
+        import yaml
+
+        from pcluster_core import core_ensure_generated_script
+
+        repo = self._repo(tmp_path)
+        # A real rendered vars file is the context; use the live one if this
+        # machine has it, else skip -- this asserts the rendering path, not
+        # the template's own contents.
+        live = os.path.join(self._ROOT, "src", "vars_files")
+        candidates = [f for f in os.listdir(live) if f.endswith(".yml")] \
+            if os.path.isdir(live) else []
+        if not candidates:
+            pytest.skip("no rendered vars file on this machine to render from")
+        ctx = yaml.safe_load(open(os.path.join(live, candidates[0])))
+        (repo / "src" / "vars_files" / "certify.yml").write_text(yaml.safe_dump(ctx))
+
+        path = core_ensure_generated_script(
+            cluster_data_root=str(repo / "active_clusters"),
+            cluster_name="certify", repo_root=str(repo),
+            template="access_cluster.j2", dest_name="access_cluster.certify.sh",
+        )
+        assert os.path.isfile(path)
+        assert os.access(path, os.X_OK), "the rendered script must be executable"
+
+    def test_an_existing_script_is_not_overwritten(self, tmp_path):
+        """A build that did finish, or an operator edit, wins over a
+        re-render."""
+        from pcluster_core import core_ensure_generated_script
+
+        repo = self._repo(tmp_path)
+        dest = repo / "active_clusters" / "certify" / "access_cluster.certify.sh"
+        dest.write_text("# hand-edited\n")
+        path = core_ensure_generated_script(
+            cluster_data_root=str(repo / "active_clusters"),
+            cluster_name="certify", repo_root=str(repo),
+            template="access_cluster.j2", dest_name="access_cluster.certify.sh",
+        )
+        assert open(path).read() == "# hand-edited\n"
+
+    def test_no_vars_file_names_the_real_reason(self, tmp_path):
+        """A cluster known only through the shared store keeps the 22-field
+        record, not the 124-key vars file, so it cannot be rendered here --
+        and the message has to say that rather than blame the build."""
+        from pcluster_core import PClusterMakerError, core_ensure_generated_script
+
+        repo = self._repo(tmp_path)
+        with pytest.raises(PClusterMakerError) as exc:
+            core_ensure_generated_script(
+                cluster_data_root=str(repo / "active_clusters"),
+                cluster_name="certify", repo_root=str(repo),
+                template="access_cluster.j2",
+                dest_name="access_cluster.certify.sh",
+            )
+        msg = str(exc.value)
+        assert "did not build" in msg
+        assert "shared record store" in msg
+        assert "make_pcluster.py" not in msg, (
+            "the old message blamed the build and offered a rebuild; a cluster "
+            "built over MCP is not a cluster built wrongly"
+        )
+
+    def test_a_traversing_name_cannot_escape_active_clusters(self, tmp_path):
+        """The message matters, not just the raise: without the guard this
+        still fails, but on the *missing vars file* further down, so an
+        assertion that only checks the exception type passes either way."""
+        from pcluster_core import PClusterMakerError, core_ensure_generated_script
+
+        repo = self._repo(tmp_path)
+        with pytest.raises(PClusterMakerError) as exc:
+            core_ensure_generated_script(
+                cluster_data_root=str(repo / "active_clusters"),
+                cluster_name="../escape", repo_root=str(repo),
+                template="access_cluster.j2", dest_name="x.sh",
+            )
+        assert "escapes active_clusters/" in str(exc.value)
+
+    def test_the_shim_actually_calls_the_renderer(self):
+        """Asserted over the source: the core function can be perfect and
+        access_cluster.py can simply stop calling it, which is exactly the
+        state this change fixed and which no test of the core can see."""
+        import ast
+
+        tree = ast.parse(open(os.path.join(self._ROOT, "access_cluster.py")).read())
+        called = {
+            n.func.id for n in ast.walk(tree)
+            if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+        }
+        assert "core_ensure_generated_script" in called, (
+            "access_cluster.py must render the script on demand; without it "
+            "an MCP-built cluster is unreachable from the CLI"
+        )
+
+    def test_the_tunnel_shim_calls_it_too(self):
+        """Same gap on the monitoring path -- grafana_tunnel.py had the same
+        hard dependency and the same misleading message."""
+        import ast
+
+        tree = ast.parse(open(os.path.join(self._ROOT, "grafana_tunnel.py")).read())
+        called = {
+            n.func.id for n in ast.walk(tree)
+            if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+        }
+        assert "core_ensure_generated_script" in called
+
+    def test_no_shim_tells_the_operator_to_rebuild(self):
+        """Swept across both shims and the core: the misleading remedy must
+        not come back in either the access or the tunnel path."""
+        for rel in ("access_cluster.py", "grafana_tunnel.py", "src/pcluster_core.py"):
+            body = open(os.path.join(self._ROOT, rel)).read()
+            assert "Make sure the cluster was built" not in body, rel

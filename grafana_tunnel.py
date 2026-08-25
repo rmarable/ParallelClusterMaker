@@ -27,6 +27,7 @@ from pcluster_core import (
     PClusterMakerError,
     _validate_cluster_name,
     _read_cluster_record,
+    core_ensure_generated_script,
     core_manage_grafana_tunnel,
 )
 
@@ -54,6 +55,21 @@ def main():
         _repo_root, "active_clusters", cluster_name,
         f"grafana_tunnel.{cluster_name}.sh",
     )
+
+    # Same reason access_cluster.py renders on demand: an MCP build returns
+    # before the generated scripts are copied out of stage_dir, so a
+    # monitoring cluster built that way has no tunnel script and the old
+    # message blamed the build for not enabling monitoring.
+    if str(getattr(cluster_record, "enable_monitoring", "")).lower() == "true":
+        try:
+            core_ensure_generated_script(
+                cluster_data_root=os.path.join(_repo_root, "active_clusters"),
+                cluster_name=cluster_name, repo_root=_repo_root,
+                template="grafana_tunnel.j2",
+                dest_name=f"grafana_tunnel.{cluster_name}.sh",
+            )
+        except PClusterMakerError as e:
+            sys.exit(f"ERROR: {e}")
 
     try:
         result = core_manage_grafana_tunnel(

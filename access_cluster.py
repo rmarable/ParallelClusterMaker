@@ -25,7 +25,7 @@ import subprocess  # noqa: F401 -- tests/test_kill_access.py patches mod.subproc
 sys.path.insert(0, _src_dir)
 from pcluster_core import (
     PClusterMakerError,
-    _resolve_access_script_path,
+    core_ensure_generated_script,
     _resolve_access_node_type,
     _validate_cluster_name,
     _read_cluster_record,
@@ -63,13 +63,17 @@ def main():
     _cluster_data_root = os.path.join(
         os.path.dirname(os.path.abspath(__file__)), "active_clusters"
     )
-    access_script = _resolve_access_script_path(_cluster_data_root, cluster_name)
-
-    if not os.path.isfile(access_script):
-        sys.exit(
-            f"ERROR: Access script not found: {access_script}\n"
-            f"  Make sure the cluster was built with: ./make_pcluster.py -N {cluster_name}"
+    # Rendered on demand when the build never wrote one -- an MCP build
+    # returns before the scripts are copied out of stage_dir, and telling
+    # the operator to rebuild (as this did) was wrong: the cluster is fine.
+    try:
+        core_ensure_generated_script(
+            cluster_data_root=_cluster_data_root, cluster_name=cluster_name,
+            repo_root=_repo_root, template="access_cluster.j2",
+            dest_name=f"access_cluster.{cluster_name}.sh",
         )
+    except PClusterMakerError as e:
+        sys.exit(f"ERROR: {e}")
 
     rec = _read_cluster_record(cluster_name, _repo_root) or {}
     try:
