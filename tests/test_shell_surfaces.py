@@ -1620,76 +1620,77 @@ class TestMonitoringWrapperOnlyTheHeadNodeWritesTheTree:
             )
 
 
-class TestMonitoringWrapperLoginNodeBootRace:
-    """PCluster's own CDK makes the LoginNodes pool depend only on the head
-    node's raw EC2 instance existing, not on its bootstrap completing (unlike
-    the CloudWatch alarms in the same cluster_stack.py, which do depend on
-    wait_condition) -- confirmed by reading the installed aws-parallelcluster
-    package. A login node can therefore reach this wrapper before the head
-    node has populated MONITORING_HOME. Unlike ComputeFleet, which fails
-    immediately because clustermgtd's ordering makes an absent tree a real
-    error, LoginNode polls for a bounded window instead."""
+class TestMonitoringWrapperSkipsLoginNodes:
+    """Upstream's installer supports two node types and no more: its header
+    says "ParallelCluster HeadNode and ComputeFleet nodes" and its
+    `case "${PLATFORM_NODE_TYPE}"` has arms for exactly those. A login node
+    falls through `verify_docker` and matches nothing, so the run fails --
+    and this wrapper exits with the installer's status, so that failure
+    became the custom action's, the node was marked unhealthy, and its Auto
+    Scaling Group replaced it. Observed live: three login nodes launched and
+    abandoned on Heartbeat Timeout across 45 minutes, the stack never
+    leaving CREATE_IN_PROGRESS.
 
-    def test_times_out_and_exits_nonzero_when_the_tree_never_appears(
+    This class replaced TestMonitoringWrapperLoginNodeBootRace, which pinned
+    a bounded poll for MONITORING_HOME. That poll was a correct answer to
+    the wrong question: it made the login node wait for a tree it was then
+    going to fail on anyway, and cost every login node up to 300s of boot
+    time to do it.
+    """
+
+    def test_a_login_node_does_no_work_and_exits_zero(
         self, cluster_params, tmp_path
     ):
-        r, trace, _ = _run_wrapper(
-            cluster_params, tmp_path, "LoginNode", tree=False,
-            extra_env={
-                "MONITORING_LOGIN_WAIT_SECONDS": "1",
-                "MONITORING_LOGIN_POLL_SECONDS": "1",
-            },
-        )
-        assert r.returncode != 0
-        output = (r.stdout + r.stderr).decode()
-        assert "monitoring install did not complete in time" in output, output
-        for forbidden in ("aws s3 cp", "rm ", "mkdir ", "tar ", "chown "):
-            assert forbidden not in trace
+        """Whether or not the tree is present -- there is nothing here for a
+        login node either way."""
+        for tree in (False, True):
+            r, trace, _ = _run_wrapper(
+                cluster_params, tmp_path, "LoginNode", tree=tree,
+            )
+            assert r.returncode == 0, (
+                f"tree={tree}: a login node must not fail this wrapper; "
+                f"{(r.stdout + r.stderr).decode()[:300]}"
+            )
+            for forbidden in ("aws s3 cp", "rm ", "mkdir ", "tar ", "chown "):
+                assert forbidden not in trace, (
+                    f"tree={tree}: login node ran {forbidden!r}"
+                )
 
-    def test_succeeds_immediately_when_the_tree_is_already_present(
-        self, cluster_params, tmp_path
-    ):
-        """The common case -- the head node won the race, as it almost always
-        will -- must not pay any wait at all."""
+    def test_it_never_runs_the_installer(self, cluster_params, tmp_path):
+        """The defect itself. The installer is what fails on a login node,
+        so the assertion is on the execution trace, not on the exit status:
+        a stubbed installer returns 0 and would hide this entirely."""
         r, trace, _ = _run_wrapper(
             cluster_params, tmp_path, "LoginNode", tree=True,
-            extra_env={
-                "MONITORING_LOGIN_WAIT_SECONDS": "60",
-                "MONITORING_LOGIN_POLL_SECONDS": "60",
-            },
         )
-        assert r.returncode == 0
+        assert "install.sh" not in trace, (
+            f"the login node invoked the installer: {trace}"
+        )
 
-    def test_recovers_if_the_tree_appears_during_the_wait(
-        self, cluster_params, tmp_path
-    ):
-        """The actual race: the tree does not exist yet when the login node
-        reaches this point, but the head node finishes within the window."""
-        p, _, monitoring_home = _run_wrapper(
-            cluster_params, tmp_path, "LoginNode", tree=False,
-            extra_env={
-                "MONITORING_LOGIN_WAIT_SECONDS": "20",
-                "MONITORING_LOGIN_POLL_SECONDS": "1",
-            },
-            background=True,
+    def test_it_does_not_wait(self, cluster_params, tmp_path):
+        """With nothing to install there is nothing to wait for. The old
+        poll ran up to 300s per login node boot."""
+        start = time.time()
+        r, _, _ = _run_wrapper(cluster_params, tmp_path, "LoginNode", tree=False)
+        assert r.returncode == 0
+        assert time.time() - start < 10, "the login node arm is still waiting"
+
+    def test_it_says_why_it_did_nothing(self, cluster_params, tmp_path):
+        """Silence here reads as a broken custom action to whoever is
+        reading the bootstrap log."""
+        r, _, _ = _run_wrapper(cluster_params, tmp_path, "LoginNode", tree=True)
+        out = (r.stdout + r.stderr).decode()
+        assert "HeadNode" in out and "ComputeFleet" in out, out
+
+    def test_the_head_node_still_installs(self, cluster_params, tmp_path):
+        """Vacuity guard: 'skip the installer' must not become 'skip it
+        everywhere'."""
+        r, trace, _ = _run_wrapper(
+            cluster_params, tmp_path, "HeadNode", tree=True,
         )
-        try:
-            time.sleep(2.5)
-            assert p.poll() is None, (
-                "the login node gave up before the tree ever appeared -- the "
-                "wait loop is not actually waiting"
-            )
-            os.makedirs(os.path.join(monitoring_home, "installer"), exist_ok=True)
-            with open(
-                os.path.join(monitoring_home, "installer", "install.sh"), "w"
-            ) as fh:
-                fh.write("#!/bin/bash\n")
-            stdout, stderr = p.communicate(timeout=20)
-        finally:
-            if p.poll() is None:
-                p.kill()
-                p.communicate()
-        assert p.returncode == 0, (stdout + stderr).decode()
+        assert "install.sh" in trace, (
+            f"the head node no longer runs the installer: {trace}"
+        )
 
 
 class TestTheDockerComposePluginIsStagedNotFetchedFromGitHub:

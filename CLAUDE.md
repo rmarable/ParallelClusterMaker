@@ -226,6 +226,22 @@ standing constraints for local development.
   stack. Both modes fall into **one** teardown body, and their two
   tokens — both minted by `preview_cluster_delete` — are deliberately not
   interchangeable.
+- **The monitoring wrapper must not run upstream's installer on a login
+  node.** `installer/install.sh` supports two node types and says so in its
+  own header — `case "${PLATFORM_NODE_TYPE}"` has arms for `HeadNode` and
+  `ComputeFleet` only. A login node falls through `verify_docker`, matches
+  nothing, and fails; the wrapper exits with the installer's status, so
+  that became the custom action's, the node was marked unhealthy, and its
+  Auto Scaling Group replaced it — forever. Observed live: three login
+  nodes abandoned on Heartbeat Timeout across 45 minutes with the stack
+  never leaving `CREATE_IN_PROGRESS`. The `LoginNode` arm now exits 0
+  immediately; Grafana runs on the head node and operators reach it through
+  `grafana_tunnel`, so there is no login-node half to install. That also
+  retires the bounded `MONITORING_HOME` poll, which only existed to let the
+  install proceed and cost every login node up to 300s of boot. Only the
+  *combination* fails, which is why neither a login-node cluster nor a
+  monitoring cluster caught it alone — and the harness stubs the installer,
+  so the guard asserts on the **execution trace**, not the exit status.
 - **Every `import pcluster.lib` must be followed by `ensure_event_loop()`.**
   PCluster's CDK layer calls `asyncio.get_event_loop()`, which returns a
   loop on the main thread and **raises** on any other; FastMCP dispatches
