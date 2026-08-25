@@ -34,6 +34,8 @@ from pcluster_core import (
     _acquire_distributed_cluster_lock,
     _create_locks_bucket,
     _derive_locks_bucket,
+    _derive_mcp_user_pool_name,
+    _derive_results_bucket,
     _is_conditional_write_rejection,
     _lock_key,
     _lock_owner_body,
@@ -458,3 +460,60 @@ class TestAcquireDistributedClusterLock:
         )
         assert key == _lock_key(CLUSTER)
         assert describe.calls == [(CLUSTER, "us-east-2")]
+
+
+class TestTheMcpUserPoolNameIsDerivedNotChosen:
+    """The pool is one account+region resource that outlives every cluster.
+    The one created by hand during certification was
+    "pclustermaker-mcp-certify" -- a cluster's name on an account-wide
+    resource, which became actively misleading the moment that cluster was
+    torn down and the pool was not.
+    """
+
+    def test_it_keys_on_account_and_region(self):
+        assert _derive_mcp_user_pool_name(
+            aws_account_id="183295445014", region="us-east-1"
+        ) == "parallelclustermaker-mcp-183295445014-us-east-1"
+
+    def test_two_regions_do_not_collide(self):
+        a = _derive_mcp_user_pool_name(aws_account_id="1", region="us-east-1")
+        b = _derive_mcp_user_pool_name(aws_account_id="1", region="us-west-2")
+        assert a != b
+
+    def test_it_cannot_see_a_cluster_or_a_serial(self):
+        """The whole point. A cluster- or serial-derived input would restore
+        the per-cluster naming this replaces, and a 12-digit account id is
+        indistinguishable from a serial datestamp by inspection -- the same
+        guard _derive_results_bucket carries."""
+        import inspect
+
+        params = list(inspect.signature(_derive_mcp_user_pool_name).parameters)
+        assert params == ["aws_account_id", "region"]
+
+    def test_it_is_keyword_only(self):
+        """Two same-typed parameters: transposing them yields a plausible
+        name rather than an error."""
+        import inspect
+
+        for p in inspect.signature(_derive_mcp_user_pool_name).parameters.values():
+            assert p.kind == inspect.Parameter.KEYWORD_ONLY
+
+    def test_it_matches_the_sibling_derivations(self):
+        """One naming scheme across the three long-lived account+region
+        resources, so an operator reading a console listing sees one family."""
+        kw = dict(aws_account_id="183295445014", region="us-east-1")
+        pool = _derive_mcp_user_pool_name(**kw)
+        locks = _derive_locks_bucket(**kw)
+        results = _derive_results_bucket(**kw)
+        for name in (pool, locks, results):
+            assert name.startswith("parallelclustermaker-")
+            assert name.endswith("-183295445014-us-east-1")
+
+    def test_an_overlong_name_is_refused(self, monkeypatch):
+        """Cognito caps PoolName at 128; a silent truncation would collide
+        two accounts onto one pool."""
+        import pcluster_core
+
+        monkeypatch.setattr(pcluster_core, "_MCP_USER_POOL_PREFIX", "x" * 130)
+        with pytest.raises(SystemExit):
+            _derive_mcp_user_pool_name(aws_account_id="1", region="us-east-1")

@@ -10,10 +10,14 @@
 # as a deployment tool.
 FROM public.ecr.aws/lambda/python:3.12
 
-# Node.js for jsii. Pinned major version: jsii is sensitive to the runtime
-# it bridges to, and "whatever is newest" is not a property to inherit
-# silently on every rebuild.
-RUN dnf install -y nodejs npm && dnf clean all && node --version
+# Node.js for jsii. The major is pinned by package name, not left to the
+# bare `nodejs` provide: on this base image that resolves to **Node 18**,
+# which reached end of life on 2025-04-30 and says so in a banner the CDK
+# prints on every single invocation. AL2023 offers nodejs20, nodejs22 and
+# nodejs24; 22 is the current LTS. "Whatever is newest" is also not a
+# property to inherit silently on a rebuild, since jsii is sensitive to the
+# runtime it bridges to.
+RUN dnf install -y nodejs22 nodejs22-npm && dnf clean all && node --version
 
 COPY requirements-lambda.txt ${LAMBDA_TASK_ROOT}/
 RUN pip install --no-cache-dir -r ${LAMBDA_TASK_ROOT}/requirements-lambda.txt
@@ -28,7 +32,12 @@ ENV PYTHONPATH="${LAMBDA_TASK_ROOT}:${LAMBDA_TASK_ROOT}/src"
 
 # Fail the build rather than the first invocation if Node is missing --
 # assert_valid_node_js() would otherwise surface it 20 minutes into an
-# operator's first create_cluster call.
-RUN node --version && python -c "import shutil,sys; sys.exit(0 if shutil.which('node') else 1)"
+# operator's first create_cluster call. The major is checked too, not just
+# presence: the image shipped Node 18 for its whole life because nothing
+# looked, and an EOL runtime under the jsii bridge is exactly the kind of
+# thing that goes unnoticed until it breaks.
+RUN node --version \
+ && python -c "import shutil,sys; sys.exit(0 if shutil.which('node') else 1)" \
+ && node -e "const m=+process.versions.node.split('.')[0]; if(m<20){console.error('Node '+m+' is end-of-life; pin nodejs20 or newer');process.exit(1)}"
 
 CMD ["mcp_server.handlers.stack_mutation_node.lambda_handler"]

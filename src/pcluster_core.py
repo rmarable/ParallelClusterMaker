@@ -3199,6 +3199,44 @@ def _is_writable_dir(path):
         return False
 
 
+_MCP_USER_POOL_PREFIX = "parallelclustermaker-mcp"
+
+# Cognito's own limit on a user pool name (CreateUserPool, PoolName).
+_COGNITO_POOL_NAME_MAX = 128
+
+
+def _derive_mcp_user_pool_name(*, aws_account_id, region):
+    """Return the name of the MCP remote transport's Cognito user pool.
+
+    Same derivation shape as _derive_locks_bucket and
+    _derive_results_bucket, and for the same reason: the pool is one
+    account+region resource that outlives every cluster, so its name must
+    not carry a cluster's. The pool created by hand during certification
+    was called "pclustermaker-mcp-certify", which reads as belonging to
+    that one cluster and became misleading the moment the cluster was torn
+    down and the pool was not.
+
+    A user pool is regional, and the name is only unique within an account
+    and region -- so the region in the name buys legibility rather than
+    uniqueness, exactly as it does for the results bucket, where the
+    operator otherwise cannot tell two pools apart in a console listing
+    that spans regions.
+
+    Keyword-only, matching the other two derivations: both parameters are
+    strings and a transposition would produce a plausible-looking name
+    rather than an error.
+    """
+    name = f"{_MCP_USER_POOL_PREFIX}-{aws_account_id}-{region}"
+    if len(name) > _COGNITO_POOL_NAME_MAX:
+        sys.exit(
+            f"*** ERROR ***\n"
+            f'  Derived MCP user pool name "{name}" is {len(name)} characters '
+            f"(Cognito limit: {_COGNITO_POOL_NAME_MAX}).\n"
+            f"  aws_account_id={aws_account_id}, region={region}"
+        )
+    return name
+
+
 def _derive_results_bucket(*, aws_account_id, region):
     """Return the name of the long-lived HPC benchmark results bucket.
 

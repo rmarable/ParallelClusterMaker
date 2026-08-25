@@ -434,3 +434,61 @@ class TestBothSurfacesPinTheSamePclusterVersion:
     def test_the_generated_file_carries_the_pin(self):
         for tier in ("read-only", "stack-mutation-node"):
             assert PCLUSTER_REQUIREMENT in render_requirements_file(tier)
+
+
+class TestTheDeploymentHasAProductionCaller:
+    """Every deployment through session 53 was driven from a scratchpad
+    script, so `deploy.py` was exercised only by tests and by hand -- which
+    is how `deploy_tier`'s update path shipped broken (it raised
+    ResourceConflictException on every existing function) and stayed broken
+    until a live redeploy hit it. `deploy_mcp.py` is the caller.
+    """
+
+    _PATH = os.path.join(REPO_ROOT, "deploy_mcp.py")
+
+    def _source(self):
+        return io.open(self._PATH, encoding="utf-8").read()
+
+    def test_the_entry_point_exists_and_is_executable(self):
+        assert os.path.isfile(self._PATH), "deploy_mcp.py is missing"
+        assert os.access(self._PATH, os.X_OK), "deploy_mcp.py is not executable"
+
+    def test_it_carries_the_venv_guard_every_entry_point_has(self):
+        """sys.prefix, not sys.executable -- Homebrew's python symlinks
+        resolve outside .venv/."""
+        src = self._source()
+        assert "sys.prefix" in src
+        assert "sys.executable" not in src
+
+    def test_it_actually_calls_deploy_tier(self):
+        """The point of the script. An AST walk rather than a substring so
+        a mention in a docstring cannot satisfy it."""
+        tree = ast.parse(self._source())
+        called = {
+            n.func.id for n in ast.walk(tree)
+            if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+        }
+        assert "deploy_tier" in called
+
+    def test_it_builds_for_lambdas_platform_not_the_operators(self):
+        """An arm64 laptop otherwise stages arm64 wheels into an x86_64
+        function, and the failure is an ImportError at the first invocation
+        rather than at build time."""
+        src = self._source()
+        assert "manylinux2014_x86_64" in src
+        assert "--only-binary" in src
+
+    def test_it_checks_the_unzipped_limit_before_uploading(self):
+        """Learning the 250 MB ceiling from CreateFunction is the thing
+        prune_for_lambda's return value exists to prevent."""
+        src = self._source()
+        assert "ZIP_UNZIPPED_LIMIT_BYTES" in src
+        assert "prune_for_lambda" in src
+
+    def test_the_image_tier_cannot_be_deployed_as_a_zip(self):
+        """stack-mutation-node has no zip form: pcluster's create/update
+        need Node on PATH and a zip cannot supply it. The script must say
+        so rather than build an artifact that could never work."""
+        src = self._source()
+        assert "--image-uri" in src
+        assert "ImageUri" in src
