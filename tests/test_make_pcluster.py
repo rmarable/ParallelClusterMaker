@@ -3966,3 +3966,144 @@ class TestAccessDoesNotDependOnTheBuildHavingFinished:
         for rel in ("access_cluster.py", "grafana_tunnel.py", "src/pcluster_core.py"):
             body = open(os.path.join(self._ROOT, rel)).read()
             assert "Make sure the cluster was built" not in body, rel
+
+
+class TestPclusterCallsWorkOffTheMainThread:
+    """`aws-parallelcluster`'s CDK layer calls `asyncio.get_event_loop()`,
+    which returns a loop on the main thread and **raises** on any other.
+    FastMCP dispatches sync tools on an AnyIO worker thread, so every MCP
+    `create_cluster` failed with "There is no current event loop in thread
+    'AnyIO worker thread'".
+
+    Three things hid it: the CLI runs on the main thread and never hit it;
+    PCluster wrapped it in an exception whose `str()` is empty; and
+    `core_create_cluster` exited rather than returned, so the caller saw
+    nothing at all. Only driving the create path through a real MCP
+    session exposed it.
+    """
+
+    def test_a_worker_thread_gets_a_loop(self):
+        """The property itself. Asserted on a real thread, because the main
+        thread already has a loop and would pass without the fix."""
+        import asyncio
+        import threading
+
+        from pcluster_core import ensure_event_loop
+
+        seen = {}
+
+        def _worker():
+            try:
+                asyncio.get_event_loop()
+                seen["before"] = "had one"
+            except RuntimeError:
+                seen["before"] = "none"
+            ensure_event_loop()
+            seen["after"] = type(asyncio.get_event_loop()).__name__
+
+        t = threading.Thread(target=_worker)
+        t.start()
+        t.join()
+        assert seen["before"] == "none", (
+            "a fresh worker thread must start with no loop, or this test "
+            "cannot see the fix"
+        )
+        assert "EventLoop" in seen["after"]
+
+    def test_it_is_idempotent_and_safe_on_the_main_thread(self):
+        import asyncio
+
+        from pcluster_core import ensure_event_loop
+
+        ensure_event_loop()
+        first = asyncio.get_event_loop()
+        ensure_event_loop()
+        assert asyncio.get_event_loop() is first, (
+            "an existing loop must not be replaced"
+        )
+
+    def test_every_pcluster_lib_import_installs_a_loop(self):
+        """Any of these can be reached from a tool call, so the guard has to
+        sit at each one. Asserted over the source: a site that drops it
+        fails only off the main thread, which no ordinary test runs on."""
+        import inspect
+
+        import pcluster_core
+
+        src = inspect.getsource(pcluster_core).splitlines()
+        imports = [i for i, line in enumerate(src)
+                   if line.strip() == "import pcluster.lib as pc"]
+        assert imports, "no pcluster.lib import found -- this guard is vacuous"
+        missing = [
+            i + 1 for i in imports
+            if src[i + 1].strip() != "ensure_event_loop()"
+        ]
+        assert not missing, (
+            f"pcluster.lib is imported without ensure_event_loop() at line(s) "
+            f"{missing}; that call fails only on a worker thread"
+        )
+
+
+class TestAPclusterExceptionAlwaysSaysSomething:
+    """`ParallelClusterApiException.__init__` calls `super().__init__()`
+    with no arguments, so `str(exc)` is empty for **every** PCluster API
+    exception -- including the validation failures that are the usual way
+    a build is rejected. "Exception launching cluster: " with nothing
+    after it is what a live operator saw, and what cost two build attempts
+    to see through.
+    """
+
+    def _exc(self, message=None, errors=()):
+        content = type("C", (), {
+            "message": message,
+            "configuration_validation_errors": list(errors),
+        })()
+        return type("CreateClusterBadRequestException", (Exception,),
+                    {})(), content
+
+    def test_the_message_is_extracted_from_content(self):
+        from pcluster_core import pcluster_exception_detail
+
+        exc, content = self._exc(message="Invalid cluster configuration")
+        exc.content = content
+        out = pcluster_exception_detail(exc)
+        assert "Invalid cluster configuration" in out
+        assert out.startswith("CreateClusterBadRequestException")
+
+    def test_validation_errors_name_the_validator(self):
+        """The validator's name is the actionable part -- "RoleValidator"
+        tells you where to look, the prose alone often does not."""
+        from pcluster_core import pcluster_exception_detail
+
+        err = type("E", (), {"level": "ERROR", "type": "RoleValidator",
+                             "message": "role not found"})()
+        exc, content = self._exc(message="Invalid", errors=[err])
+        exc.content = content
+        out = pcluster_exception_detail(exc)
+        assert "RoleValidator" in out and "role not found" in out
+
+    def test_info_level_findings_are_not_reported_as_errors(self):
+        """PCluster returns INFO entries alongside real failures; folding
+        them in makes a one-line problem read as several."""
+        from pcluster_core import pcluster_exception_detail
+
+        info = type("E", (), {"level": "INFO", "type": "DeletionPolicyValidator",
+                              "message": "storage will be deleted"})()
+        exc, content = self._exc(message="Invalid", errors=[info])
+        exc.content = content
+        assert "DeletionPolicyValidator" not in pcluster_exception_detail(exc)
+
+    def test_it_never_returns_an_empty_description(self):
+        """The whole point: an exception with no content and no str() must
+        still produce something an operator can act on."""
+        from pcluster_core import pcluster_exception_detail
+
+        out = pcluster_exception_detail(Exception())
+        assert out.strip()
+        assert "Exception" in out
+
+    def test_a_plain_exception_still_reports_its_message(self):
+        from pcluster_core import pcluster_exception_detail
+
+        out = pcluster_exception_detail(RuntimeError("boom"))
+        assert "RuntimeError" in out and "boom" in out

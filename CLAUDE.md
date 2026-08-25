@@ -226,6 +226,21 @@ standing constraints for local development.
   stack. Both modes fall into **one** teardown body, and their two
   tokens — both minted by `preview_cluster_delete` — are deliberately not
   interchangeable.
+- **Every `import pcluster.lib` must be followed by `ensure_event_loop()`.**
+  PCluster's CDK layer calls `asyncio.get_event_loop()`, which returns a
+  loop on the main thread and **raises** on any other; FastMCP dispatches
+  sync tools on an AnyIO worker thread, so every MCP `create_cluster`
+  failed with "There is no current event loop in thread 'AnyIO worker
+  thread'". The CLI runs on the main thread and never hit it — a CLI build
+  proves nothing about the MCP path. It fails *only* off the main thread,
+  so the guard is pinned by AST at each site plus a real-thread test.
+- **A pcluster.lib exception's `str()` is empty.**
+  `ParallelClusterApiException.__init__` calls `super().__init__()` with
+  no arguments, so formatting one with `{e}` yields a sentence with
+  nothing in it — which is what hid the event-loop failure. The detail is
+  on `.content`: a `message`, and `configuration_validation_errors` naming
+  the validator. `pcluster_exception_detail` extracts both, skips INFO,
+  and never returns an empty string.
 - **`core_create_cluster` returns a `CreateClusterResult`; it must never
   `sys.exit`.** `SystemExit` is a `BaseException` and `create_cluster`
   cannot use `_cluster_lock`'s translation (it locks internally), so an

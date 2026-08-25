@@ -6,6 +6,7 @@ All functions are importable without AWS credentials and without the
 venv guard that the main scripts enforce at import time.
 """
 
+import asyncio
 import contextlib
 import copy
 import glob
@@ -3409,6 +3410,7 @@ def _update_compute_fleet_lib(cluster_name, region, status):
     wait_ops list -- which is why the fleet paths poll manually and always
     have."""
     import pcluster.lib as pc
+    ensure_event_loop()
 
     try:
         return pc.update_compute_fleet(
@@ -3433,6 +3435,7 @@ def _update_cluster_lib(cluster_name, region, config_path):
     across what can be a 30-minute wait, and the library's own polling is
     opaque. Same precedent as create/delete."""
     import pcluster.lib as pc
+    ensure_event_loop()
 
     try:
         return pc.update_cluster(
@@ -3467,6 +3470,7 @@ def _describe_cluster_json(cluster_name, region):
     their behavior is unchanged.
     """
     import pcluster.lib as pc
+    ensure_event_loop()
 
     try:
         return pc.describe_cluster(cluster_name=cluster_name, region=region)
@@ -5992,6 +5996,7 @@ def core_delete_cluster(
     """
     from pcluster_aux_data import p_val
     import pcluster.lib as pc
+    ensure_event_loop()
 
     _validate_cluster_name(cluster_name)
     _validate_cluster_owner(cluster_owner)
@@ -8622,6 +8627,7 @@ def core_create_cluster(*, params, repo_root, region, cluster_build_command, ans
     # machine (see s3_acquire_cluster_lock's own docstring for why the
     # local mkdir lock this replaced could not do that).
     import pcluster.lib as pc
+    ensure_event_loop()
     _lock_s3 = boto3.client("s3", region_name=region)
     locks_bucketname = _derive_locks_bucket(aws_account_id=aws_account_id, region=region)
     _lock_path = _acquire_distributed_cluster_lock(
@@ -9360,7 +9366,10 @@ def core_create_cluster(*, params, repo_root, region, cluster_build_command, ans
             progress_fn=_print_build_progress, wait=wait,
         )
     except Exception as _launch_e:
-        return _fail_after_launch(f"Exception launching cluster: {_launch_e}")
+        return _fail_after_launch(
+            f"Exception launching cluster: "
+            f"{pcluster_exception_detail(_launch_e)}"
+        )
 
     if outcome.terminal_state == _KICKED_OFF:
         # Workstream 4: launched, deliberately not waited on. Everything
@@ -9424,7 +9433,10 @@ def core_create_cluster(*, params, repo_root, region, cluster_build_command, ans
             stop_overall_timestamp=stop_overall_timestamp,
         )
     except Exception as _post_launch_e:
-        return _fail_after_launch(f"Exception after cluster launch: {_post_launch_e}")
+        return _fail_after_launch(
+            f"Exception after cluster launch: "
+            f"{pcluster_exception_detail(_post_launch_e)}"
+        )
 
     # Append make_pcluster.py's own command line to the cluster_serial_number
     # file, and upload the serial number to S3 for durability.
@@ -9587,6 +9599,61 @@ def core_create_cluster(*, params, repo_root, region, cluster_build_command, ans
     )
 
 
+def ensure_event_loop():
+    """Give the calling thread an asyncio event loop if it has none.
+
+    `aws-parallelcluster`'s CDK layer calls `asyncio.get_event_loop()`,
+    which returns a loop on the main thread and **raises** on any other.
+    FastMCP dispatches sync tools on an AnyIO worker thread, so every MCP
+    `create_cluster` died with "There is no current event loop in thread
+    'AnyIO worker thread'" -- wrapped in a
+    `CreateClusterBadRequestException` whose `str()` is empty, so it
+    surfaced as a blank message. The CLI never hit it because it runs on
+    the main thread, which is why this was invisible until the create path
+    was driven through a real MCP session.
+
+    Idempotent, and safe on the main thread: it only installs a loop when
+    there is none, and never touches a loop that is already running.
+    """
+    try:
+        asyncio.get_event_loop()
+    except RuntimeError:
+        asyncio.set_event_loop(asyncio.new_event_loop())
+
+
+def pcluster_exception_detail(exc):
+    """A readable description of a pcluster.lib exception.
+
+    `ParallelClusterApiException.__init__` calls `super().__init__()` with
+    no arguments, so `str(exc)` is **empty for every PCluster API
+    exception** -- including the validation failures that are the most
+    common way a build is rejected. "Exception launching cluster: " with
+    nothing after it is what a live operator saw. The detail is on
+    `exc.content`: a `message`, and for the create/update paths a list of
+    `configuration_validation_errors` naming the validator that objected.
+
+    Falls back to the type name, so this never returns an empty string.
+    """
+    parts = []
+    content = getattr(exc, "content", None)
+    message = getattr(content, "message", None)
+    if message:
+        parts.append(str(message))
+    errors = getattr(content, "configuration_validation_errors", None) or []
+    for err in errors:
+        level = getattr(err, "level", "") or ""
+        if str(level).upper() == "INFO":
+            continue
+        etype = getattr(err, "type", "") or "validation"
+        emsg = getattr(err, "message", "") or ""
+        parts.append(f"[{etype}] {emsg}")
+    if not parts:
+        text = str(exc).strip()
+        if text:
+            parts.append(text)
+    return f"{type(exc).__name__}: " + ("; ".join(parts) if parts else "no detail")
+
+
 def _confirm_stack_is_built(describe_fn, cluster_name, region):
     """core_finalize_cluster_build's gate: has the stack finished building?
 
@@ -9621,6 +9688,7 @@ def core_finalize_cluster_build(
     """
     from pcluster_aux_data import p_val
     import pcluster.lib as pc
+    ensure_event_loop()
 
     _validate_cluster_name(cluster_name)
     _validate_cluster_owner(cluster_owner)
