@@ -50,11 +50,16 @@ _JWKS_CLIENT = None
 
 
 class Unauthorized(Exception):
-    """Raised for every authentication failure.
+    """Raised for every authentication failure, with a message that says why.
 
-    The name is load-bearing: API Gateway maps an authorizer error whose
-    message is `Unauthorized` to a 401. Do not rename it, and do not
-    replace a raise with a Deny policy -- see this module's docstring.
+    The **message** is what API Gateway maps, not the class name, and it
+    must be exactly `Unauthorized` to produce a 401 -- measured, not
+    assumed: a REST authorizer raising the bare word returned 401 and one
+    raising a sentence returned 500. So these descriptive messages are for
+    the log, and `lambda_handler` re-raises the bare word to the transport.
+
+    Never replace a raise with a Deny policy: that is a 403, which does not
+    prompt a client to re-authenticate. See this module's docstring.
     """
 
 
@@ -199,9 +204,30 @@ def _api_wildcard(method_arn):
 
 
 def lambda_handler(event, context):
+    """Authorize one request, or deny it as a 401.
+
+    Two messages, deliberately: the descriptive one goes to CloudWatch,
+    where an operator can see *which* rule refused the token, and the bare
+    word `Unauthorized` goes to API Gateway, which is the only string it
+    maps to a 401. Raising the descriptive message at the transport yields
+    a **500** -- measured on a REST API, both ways -- and a 500 is worse
+    than either alternative here: a client reads it as a server fault and
+    never re-authenticates, which is the entire behaviour the 401 exists to
+    trigger.
+
+    An *unexpected* exception is deliberately not converted. A bug in this
+    function is a server fault and should surface as one; turning it into a
+    401 would send a correctly-credentialled client into a re-auth loop
+    over a defect it cannot fix.
+    """
     region = os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION")
     user_pool_id = os.environ.get("MCP_USER_POOL_ID")
-    if not user_pool_id or not region:
-        # Fail closed. A misconfigured authorizer must never allow.
-        raise Unauthorized("authorizer is not configured with a user pool and region")
-    return authorize(event, region=region, user_pool_id=user_pool_id)
+    try:
+        if not user_pool_id or not region:
+            # Fail closed. A misconfigured authorizer must never allow.
+            raise Unauthorized(
+                "authorizer is not configured with a user pool and region")
+        return authorize(event, region=region, user_pool_id=user_pool_id)
+    except Unauthorized as e:
+        print(f"Unauthorized: {e}")
+        raise Exception("Unauthorized") from None

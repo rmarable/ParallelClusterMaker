@@ -219,12 +219,56 @@ class TestEveryFailureRaisesRatherThanDenying:
     def test_a_misconfigured_authorizer_fails_closed(self, monkeypatch):
         monkeypatch.delenv("MCP_USER_POOL_ID", raising=False)
         monkeypatch.setenv("AWS_REGION", REGION)
-        with pytest.raises(authz.Unauthorized, match="not configured"):
+        with pytest.raises(Exception) as exc:
             authz.lambda_handler({"authorizationToken": "Bearer x"}, None)
+        assert str(exc.value) == "Unauthorized"
 
-    def test_the_exception_name_is_the_one_api_gateway_maps_to_401(self):
-        """The class name is the contract, not just a label."""
-        assert authz.Unauthorized.__name__ == "Unauthorized"
+    def test_the_handler_raises_exactly_the_word_api_gateway_maps(self, monkeypatch):
+        """The **message** is the contract, not the class name.
+
+        This was measured, not assumed, and the assumption it replaces was
+        wrong: a REST authorizer raising the bare word returns **401**, and
+        one raising a sentence returns **500**. The module previously
+        asserted `Unauthorized.__name__ == "Unauthorized"` and shipped
+        descriptive messages, so every real denial came back as a 500 --
+        which a client reads as a server fault and never re-authenticates
+        over, losing the whole point of preferring 401 to 403.
+        """
+        monkeypatch.delenv("MCP_USER_POOL_ID", raising=False)
+        monkeypatch.setenv("AWS_REGION", REGION)
+        with pytest.raises(Exception) as exc:
+            authz.lambda_handler({"authorizationToken": "Bearer x"}, None)
+        assert str(exc.value) == "Unauthorized", (
+            f"API Gateway maps only the exact string; {str(exc.value)!r} "
+            f"would surface as a 500"
+        )
+
+    def test_the_reason_still_reaches_the_log(self, monkeypatch, capsys):
+        """The other half of the split. Collapsing the message to the bare
+        word at the transport must not also blind the operator: the reason
+        a token was refused is the only thing that makes a denial
+        actionable, and it lives in CloudWatch."""
+        monkeypatch.delenv("MCP_USER_POOL_ID", raising=False)
+        monkeypatch.setenv("AWS_REGION", REGION)
+        with pytest.raises(Exception):
+            authz.lambda_handler({"authorizationToken": "Bearer x"}, None)
+        out = capsys.readouterr().out
+        assert "Unauthorized:" in out
+        assert "not configured" in out, "the log lost the reason"
+
+    def test_an_unexpected_error_is_not_dressed_up_as_a_401(self, monkeypatch):
+        """A bug in the authorizer is a server fault. Converting it to 401
+        would send a correctly-credentialled client into a re-auth loop
+        over a defect it cannot fix, so only Unauthorized is translated."""
+        monkeypatch.setenv("MCP_USER_POOL_ID", POOL)
+        monkeypatch.setenv("AWS_REGION", REGION)
+
+        def _boom(*a, **kw):
+            raise RuntimeError("jwks fetch exploded")
+
+        monkeypatch.setattr(authz, "authorize", _boom)
+        with pytest.raises(RuntimeError, match="exploded"):
+            authz.lambda_handler({"authorizationToken": "Bearer x"}, None)
 
 
 class TestTheAllowPolicyIsNotScopedToOnePath:

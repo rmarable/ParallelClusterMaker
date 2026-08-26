@@ -286,9 +286,13 @@ standing constraints for local development.
 - **Cognito access tokens carry no `aud` claim** — they carry `client_id`;
   only ID tokens have `aud`. `mcp_server/auth/authorizer_lambda.py`
   validates `client_id` and pins `token_use == "access"` so an ID token
-  cannot authorize a tool call. Never add an `aud` fallback. Every auth
-  failure raises `Unauthorized` (401, which prompts re-auth), never a Deny
-  policy (403, which does not).
+  cannot authorize a tool call. Never add an `aud` fallback, and never
+  return a Deny policy (403, which does not prompt re-auth).
+- **The 401 needs a REST API *and* the exact message `Unauthorized`** —
+  measured: REST maps the bare word to 401 and a sentence to 500; HTTP gives
+  500 for either. The authorizer logs the reason and re-raises the bare
+  word. An *unexpected* exception is not converted: a bug there is a server
+  fault, and dressing it as 401 loops a valid client.
 - The remote transport is a router plus four handler Lambdas split by IAM
   blast radius, one policy per tier in `templates/MCP*.json_src` — a third
   policy category, neither instance-reachable nor the operator's own. The

@@ -26,7 +26,11 @@ import tempfile
 sys.path.insert(0, _src_dir)
 sys.path.insert(0, _repo_root)
 
-from mcp_server.deploy import FUNCTION_NAMES, deploy_tier  # noqa: E402
+from mcp_server.deploy import (  # noqa: E402
+    FUNCTION_NAMES,
+    deploy_tier,
+    setup_gateway,
+)
 from mcp_server.packaging import (  # noqa: E402
     TIER_PACKAGES,
     ZIP_UNZIPPED_LIMIT_BYTES,
@@ -105,6 +109,29 @@ def _upload(s3, bucket, key, path):
     return {"S3Bucket": bucket, "S3Key": key}
 
 
+
+
+def _ensure_cognito_client(cog, pool_id, base_url, region):
+    """A Cognito domain and an app client, both required by the OAuth flow.
+
+    The domain is what serves /authorize and /token; without it the
+    discovery document points at endpoints that do not resolve. The client
+    is created by dynamic registration at run time for real callers -- this
+    one exists so the pool has a domain and so the flow can be exercised
+    before any client has registered.
+    """
+    domain = f"pclustermaker-mcp-{pool_id.split('_')[-1].lower()}"
+    try:
+        cog.create_user_pool_domain(Domain=domain, UserPoolId=pool_id)
+        print(f"  cognito domain {domain}")
+    except Exception as e:
+        if type(e).__name__ not in ("InvalidParameterException",
+                                    "ResourceConflictException"):
+            raise
+        print(f"  cognito domain {domain} (exists)")
+    return domain
+
+
 def main():
     p = argparse.ArgumentParser(
         description="Build and deploy the MCP remote transport's Lambda tiers.",
@@ -118,6 +145,11 @@ def main():
                         "(pcluster's create/update need Node.js on PATH)")
     p.add_argument("--dry-run", action="store_true",
                    help="build and report sizes; upload and deploy nothing")
+    p.add_argument("--setup-gateway", action="store_true",
+                   help="create the HTTP API, its Lambda authorizer and its "
+                        "routes, and the Cognito app client and domain the "
+                        "OAuth flow needs; idempotent. This is what makes "
+                        "the transport reachable from a browser.")
     p.add_argument("--setup-infra", action="store_true",
                    help="create the IAM roles and policies (and the Cognito "
                         "user pool if absent) before deploying; idempotent")
@@ -129,9 +161,15 @@ def main():
     account = sts.get_caller_identity()["Account"]
     bucket = _derive_locks_bucket(aws_account_id=account, region=args.region)
 
-    tiers = args.tier or [t for t, s in TIER_PACKAGES.items() if s["kind"] != "image"]
+    # --setup-gateway on its own is an infrastructure change, not a
+    # deployment: rebuilding six 146 MB artifacts to attach a route would be
+    # minutes of pip for nothing.
+    gateway_only = args.setup_gateway and not args.tier and not args.setup_infra
+    tiers = [] if gateway_only else (
+        args.tier or [t for t, s in TIER_PACKAGES.items() if s["kind"] != "image"]
+    )
     print(f"account {account}  region {args.region}  bucket {bucket}")
-    print(f"deploying: {', '.join(tiers)}\n")
+    print(f"deploying: {', '.join(tiers) if tiers else '(no tiers)'}\n")
 
     lam = boto3.client("lambda", region_name=args.region)
     s3 = boto3.client("s3", region_name=args.region)
@@ -195,6 +233,30 @@ def main():
 
         arn = deploy_tier(lam, tier, aws_account_id=account, code=code)
         print(f"  {arn}\n")
+
+    if args.setup_gateway and not args.dry_run:
+        cog = boto3.client("cognito-idp", region_name=args.region)
+        want = _derive_mcp_user_pool_name(aws_account_id=account, region=args.region)
+        pool_id = next(
+            (p["Id"] for p in cog.list_user_pools(MaxResults=60)["UserPools"]
+             if p["Name"] == want),
+            None,
+        )
+        if pool_id is None:
+            sys.exit(
+                f"ERROR: no Cognito user pool named {want!r}.\n"
+                f"  Run --setup-infra first; it creates the pool the "
+                f"authorizer validates against."
+            )
+        print(f"\nGateway (pool {pool_id}):")
+        domain = _ensure_cognito_client(cog, pool_id, None, args.region)
+        info = setup_gateway(
+            account=account, region=args.region, user_pool_id=pool_id,
+            cognito_domain=domain,
+        )
+        print(f"\n  MCP endpoint: {info['base_url']}/mcp")
+        print(f"  Discovery:    {info['base_url']}"
+              f"/.well-known/oauth-protected-resource")
 
     print("Done.")
 

@@ -23,6 +23,8 @@ trade; on a multi-tenant service it would not be.
 
 import json
 import os
+
+from mcp_server.auth import discovery
 import time
 
 # Cognito's own maximum is 10 years. Expressed in days with an explicit
@@ -160,6 +162,39 @@ def _response(status, body):
     }
 
 
+def _request_path(event):
+    """The path, across both API Gateway payload shapes.
+
+    HTTP APIs (payload 2.0) put it in `rawPath`; REST APIs and payload 1.0
+    use `path`. Reading only one yields an empty string, which would route
+    every request to registration -- including the two discovery documents,
+    which must never require a body.
+    """
+    return event.get("rawPath") or event.get("path") or ""
+
+
+def _discovery_response(path, *, user_pool_id, region):
+    """Serve the two metadata documents, or None if this is not one.
+
+    They live here rather than in their own function because they are the
+    same kind of endpoint as registration: public, unauthenticated, tiny,
+    and part of one OAuth flow. A separate tier would mean another Lambda,
+    role, policy and cold start to return a dict.
+    """
+    base = os.environ.get("MCP_API_BASE_URL", "")
+    domain = os.environ.get("MCP_COGNITO_DOMAIN", "")
+    if path.endswith("/.well-known/oauth-authorization-server"):
+        return _response(200, discovery.authorization_server_metadata(
+            region=region, user_pool_id=user_pool_id,
+            cognito_domain=domain, api_base_url=base,
+        ))
+    if path.endswith("/.well-known/oauth-protected-resource"):
+        return _response(200, discovery.protected_resource_metadata(
+            region=region, user_pool_id=user_pool_id, api_base_url=base,
+        ))
+    return None
+
+
 def lambda_handler(event, context):
     user_pool_id = os.environ.get("MCP_USER_POOL_ID")
     if not user_pool_id:
@@ -170,6 +205,13 @@ def lambda_handler(event, context):
             "error": "server_error",
             "error_description": "MCP_USER_POOL_ID is not configured on this function",
         })
+
+    region = os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION") or ""
+    served = _discovery_response(
+        _request_path(event), user_pool_id=user_pool_id, region=region,
+    )
+    if served is not None:
+        return served
 
     raw = event.get("body")
     try:

@@ -257,3 +257,192 @@ def deployment_plan(aws_account_id):
             )
         plan.append(entry)
     return plan
+
+
+# ---------------------------------------------------------------- gateway
+#
+# A **REST** API, not an HTTP API, and the reason is measured rather than
+# stylistic. The Lambda authorizer denies by raising, and only a REST API
+# maps an authorizer error to 401 -- an HTTP API turns the same exception
+# into a 500, which a client reads as a server fault and never
+# re-authenticates over. Probed both ways before choosing:
+#
+#     REST, authorizer raises "Unauthorized"    -> 401
+#     REST, authorizer raises a sentence        -> 500
+#     HTTP, authorizer raises anything          -> 500
+#
+# The second line is why authorizer_lambda logs the descriptive message and
+# raises the bare word: the mapping is on the *message*, not the class name.
+# A REST API also supports gateway responses, which is where a
+# WWW-Authenticate header can be attached to the 401.
+
+_API_NAME = "pclustermaker-mcp"
+_STAGE = "prod"
+
+_PUBLIC_PATHS = (
+    # Discovery and registration must be reachable *without* a token --
+    # they are how a client learns where to get one. An authorizer on them
+    # makes the flow unenterable.
+    (".well-known/oauth-authorization-server", "GET"),
+    (".well-known/oauth-protected-resource", "GET"),
+    ("register", "POST"),
+)
+
+
+def _lambda_uri(region, account, function_name):
+    arn = f"arn:aws:lambda:{region}:{account}:function:{function_name}"
+    return (f"arn:aws:apigateway:{region}:lambda:path/2015-03-31/functions/"
+            f"{arn}/invocations")
+
+
+def _allow_apigw_to_invoke(lam, function_name, *, region, account, api_id):
+    """API Gateway cannot invoke a function it lacks permission for, and the
+    failure is a 500 with nothing in the function's own log."""
+    try:
+        lam.add_permission(
+            FunctionName=function_name, StatementId=f"apigw-{api_id}",
+            Action="lambda:InvokeFunction",
+            Principal="apigateway.amazonaws.com",
+            SourceArn=f"arn:aws:execute-api:{region}:{account}:{api_id}/*")
+    except Exception as e:
+        if type(e).__name__ != "ResourceConflictException":
+            raise
+
+
+def _child(apigw, api_id, parent_id, part, index):
+    for item in index:
+        if item.get("parentId") == parent_id and item.get("pathPart") == part:
+            return item["id"]
+    created = apigw.create_resource(
+        restApiId=api_id, parentId=parent_id, pathPart=part)
+    index.append(created)
+    return created["id"]
+
+
+def _resource_for(apigw, api_id, path, root_id, index):
+    node = root_id
+    for part in path.split("/"):
+        node = _child(apigw, api_id, node, part, index)
+    return node
+
+
+def _wire(apigw, api_id, resource_id, method, uri, *, authorizer_id=None):
+    kwargs = dict(restApiId=api_id, resourceId=resource_id, httpMethod=method)
+    if authorizer_id:
+        kwargs.update(authorizationType="CUSTOM", authorizerId=authorizer_id)
+    else:
+        kwargs.update(authorizationType="NONE")
+    try:
+        apigw.put_method(**kwargs)
+    except Exception as e:
+        if type(e).__name__ != "ConflictException":
+            raise
+        apigw.update_method(
+            restApiId=api_id, resourceId=resource_id, httpMethod=method,
+            patchOperations=[
+                {"op": "replace", "path": "/authorizationType",
+                 "value": "CUSTOM" if authorizer_id else "NONE"},
+            ] + ([{"op": "replace", "path": "/authorizerId",
+                   "value": authorizer_id}] if authorizer_id else []))
+    apigw.put_integration(
+        restApiId=api_id, resourceId=resource_id, httpMethod=method,
+        type="AWS_PROXY", integrationHttpMethod="POST", uri=uri)
+
+
+def setup_gateway(*, account, region, user_pool_id, cognito_domain=None,
+                  apigw=None, lam=None, cog=None):
+    """Create (or reuse) the REST API, its authorizer, and its routes.
+
+    Idempotent in the same way _setup_mcp_infra is: an existing API,
+    resource or method is reused rather than treated as an error.
+    """
+    import boto3
+
+    apigw = apigw or boto3.client("apigateway", region_name=region)
+    lam = lam or boto3.client("lambda", region_name=region)
+
+    api_id = None
+    for page in apigw.get_paginator("get_rest_apis").paginate():
+        for api in page["items"]:
+            if api["name"] == _API_NAME:
+                api_id = api["id"]
+    if api_id is None:
+        api_id = apigw.create_rest_api(name=_API_NAME)["id"]
+    base_url = f"https://{api_id}.execute-api.{region}.amazonaws.com/{_STAGE}"
+    print(f"  REST API {_API_NAME} ({api_id})")
+
+    index = apigw.get_resources(restApiId=api_id, limit=500)["items"]
+    root_id = next(r["id"] for r in index if r["path"] == "/")
+
+    auth_fn = FUNCTION_NAMES["authorizer"]
+    existing = {a["name"]: a for a in
+                apigw.get_authorizers(restApiId=api_id, limit=500)["items"]}
+    if "cognito-jwt" in existing:
+        authorizer_id = existing["cognito-jwt"]["id"]
+    else:
+        authorizer_id = apigw.create_authorizer(
+            restApiId=api_id, name="cognito-jwt", type="TOKEN",
+            authorizerUri=_lambda_uri(region, account, auth_fn),
+            identitySource="method.request.header.Authorization",
+            # No caching: a cached decision would outlive a client deleted
+            # to revoke access, which is the revocation mechanism.
+            authorizerResultTtlInSeconds=0)["id"]
+    print(f"  authorizer cognito-jwt ({authorizer_id})")
+    _allow_apigw_to_invoke(lam, auth_fn, region=region, account=account, api_id=api_id)
+
+    public_uri = _lambda_uri(region, account, FUNCTION_NAMES["register"])
+    router_uri = _lambda_uri(region, account, FUNCTION_NAMES["router"])
+    _allow_apigw_to_invoke(lam, FUNCTION_NAMES["register"],
+                           region=region, account=account, api_id=api_id)
+    _allow_apigw_to_invoke(lam, FUNCTION_NAMES["router"],
+                           region=region, account=account, api_id=api_id)
+
+    for path, method in _PUBLIC_PATHS:
+        rid = _resource_for(apigw, api_id, path, root_id, index)
+        _wire(apigw, api_id, rid, method, public_uri)
+        print(f"  {method:<5} /{path:<44} public")
+
+    rid = _resource_for(apigw, api_id, "mcp", root_id, index)
+    _wire(apigw, api_id, rid, "POST", router_uri, authorizer_id=authorizer_id)
+    print(f"  POST  /mcp{'':<44} auth")
+
+    # The 401 body and its WWW-Authenticate header. A REST API lets an
+    # authorizer failure be shaped; an HTTP API does not, which is the other
+    # half of why this is a REST API.
+    if cognito_domain or base_url:
+        try:
+            apigw.put_gateway_response(
+                restApiId=api_id, responseType="UNAUTHORIZED",
+                statusCode="401",
+                responseParameters={
+                    "gatewayresponse.header.WWW-Authenticate":
+                        f"'Bearer resource_metadata=\"{base_url}"
+                        f"/.well-known/oauth-protected-resource\"'",
+                })
+            print("  gateway response UNAUTHORIZED -> 401 + WWW-Authenticate")
+        except Exception as e:
+            print(f"  WARNING: could not set the 401 gateway response: "
+                  f"{type(e).__name__}")
+
+    apigw.create_deployment(restApiId=api_id, stageName=_STAGE)
+    print(f"  deployed to stage {_STAGE}")
+
+    hosted_ui = (
+        f"https://{cognito_domain}.auth.{region}.amazoncognito.com"
+        if cognito_domain else ""
+    )
+    for fn in (FUNCTION_NAMES["register"],):
+        cfg = lam.get_function_configuration(FunctionName=fn)
+        env = dict((cfg.get("Environment") or {}).get("Variables") or {})
+        env.update(MCP_USER_POOL_ID=user_pool_id, MCP_API_BASE_URL=base_url)
+        if hosted_ui:
+            env["MCP_COGNITO_DOMAIN"] = hosted_ui
+        lam.update_function_configuration(
+            FunctionName=fn, Environment={"Variables": env})
+    cfg = lam.get_function_configuration(FunctionName=auth_fn)
+    env = dict((cfg.get("Environment") or {}).get("Variables") or {})
+    env.update(MCP_USER_POOL_ID=user_pool_id)
+    lam.update_function_configuration(
+        FunctionName=auth_fn, Environment={"Variables": env})
+
+    return {"api_id": api_id, "base_url": base_url, "authorizer_id": authorizer_id}
