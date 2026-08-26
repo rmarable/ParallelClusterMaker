@@ -2248,12 +2248,28 @@ def _mcp_policy_templates():
     return seen
 
 
-def _setup_mcp_infra(iam, *, aws_account_id, region, mcp_user_pool_id, templates_dir=None):
+def _setup_mcp_infra(iam, *, aws_account_id, region, mcp_user_pool_id, templates_dir=None,
+                     update_policies=False):
     """Create the MCP Lambda execution roles and their managed policies.
 
     Idempotent, like _setup_iam: an existing role or policy is reused
     rather than treated as an error, so a partially-completed run can be
     re-run. Returns {tier: role_name}.
+
+    **Reuse is not the same as convergence, and the difference is a naming
+    asymmetry.** _setup_iam's policies carry the cluster serial in their
+    name, so every build creates fresh ones and a stale document is
+    unreachable. The MCP policy names are fixed and long-lived, so the
+    first-ever create won forever: editing a templates/MCP*.json_src and
+    re-running changed nothing in the account and printed "Reusing existing
+    MCP policy", which reads as success. Three real IAM fixes had to be
+    pushed by hand because of it.
+
+    So an existing policy whose document differs is now reported, and with
+    update_policies=True it is pushed as a new default version. Detection
+    is the default because it needs only iam:GetPolicy/GetPolicyVersion,
+    which the operator policy already grants; applying additionally needs
+    iam:CreatePolicyVersion and iam:DeletePolicyVersion.
 
     mcp_user_pool_id is required, not defaulted: it is substituted into the
     two Cognito policies' ARNs, and an empty value there renders a policy
@@ -2276,7 +2292,38 @@ def _setup_mcp_infra(iam, *, aws_account_id, region, mcp_user_pool_id, templates
         '"Principal":{"Service":["lambda.amazonaws.com"]},"Action":"sts:AssumeRole"}]}'
     )
 
+    # The boundary comes first: a role cannot be created under one that
+    # does not exist yet, and every role below is created with it.
+    boundary_arn = _mcp_boundary_arn(aws_account_id)
+    boundary_doc = _render_policy(
+        os.path.join(templates_dir, _MCP_BOUNDARY_TEMPLATE),
+        aws_account_id, region, "", "", "", "", "", "", mcp_user_pool_id,
+    )
+    try:
+        iam.create_policy(PolicyName=_mcp_boundary_name(),
+                          PolicyDocument=boundary_doc)
+        print(f"  Created MCP permissions boundary: {_mcp_boundary_name()}")
+    except _ClientError as e:
+        if e.response["Error"]["Code"] != "EntityAlreadyExists":
+            raise
+        # Reported, never updated -- and that asymmetry with the tier
+        # policies is the point. A boundary the deploy credentials can
+        # rewrite is not a boundary, so MCPDeployPolicy denies versioning
+        # it; changing it is an administrator's action, out of band.
+        current, version_id = _mcp_policy_is_current(
+            iam, arn=boundary_arn, rendered=boundary_doc
+        )
+        if current:
+            print(f"  Reusing MCP permissions boundary: "
+                  f"{_mcp_boundary_name()} ({version_id}, current)")
+        else:
+            print(f"  *** WARNING *** MCP permissions boundary "
+                  f"{_mcp_boundary_name()} ({version_id}) does not match "
+                  f"{_MCP_BOUNDARY_TEMPLATE}. It is deliberately not updated "
+                  f"here; an administrator must change it out of band.")
+
     policy_arns = {}
+    stale_policies = []
     for basename in _mcp_policy_templates():
         rendered = _render_policy(
             os.path.join(templates_dir, basename),
@@ -2291,8 +2338,23 @@ def _setup_mcp_infra(iam, *, aws_account_id, region, mcp_user_pool_id, templates
         except _ClientError as e:
             if e.response["Error"]["Code"] != "EntityAlreadyExists":
                 raise
-            policy_arns[basename] = f"arn:aws:iam::{aws_account_id}:policy/{name}"
-            print(f"  Reusing existing MCP policy: {name}")
+            arn = f"arn:aws:iam::{aws_account_id}:policy/{name}"
+            policy_arns[basename] = arn
+            current, version_id = _mcp_policy_is_current(
+                iam, arn=arn, rendered=rendered
+            )
+            if current:
+                print(f"  Reusing existing MCP policy: {name} ({version_id}, current)")
+            elif update_policies:
+                new_id = _update_mcp_policy(iam, arn=arn, rendered=rendered)
+                stale_policies.append(name)
+                print(f"  Updated MCP policy: {name} ({version_id} -> {new_id})")
+            else:
+                stale_policies.append(name)
+                print(
+                    f"  *** STALE *** MCP policy {name} ({version_id}) does not "
+                    f"match {basename}"
+                )
 
     roles = {}
     for tier, (_fn, templates) in _MCP_LAMBDA_TIERS.items():
@@ -2302,16 +2364,33 @@ def _setup_mcp_infra(iam, *, aws_account_id, region, mcp_user_pool_id, templates
                 RoleName=role,
                 AssumeRolePolicyDocument=trust,
                 Description=f"ParallelClusterMaker MCP {tier} Lambda execution role",
+                PermissionsBoundary=boundary_arn,
             )
-            print(f"  Created MCP role: {role}")
+            print(f"  Created MCP role: {role} (bounded)")
         except _ClientError as e:
             if e.response["Error"]["Code"] != "EntityAlreadyExists":
                 raise
-            print(f"  Reusing existing MCP role: {role}")
+            # A role that predates the boundary would otherwise keep the
+            # unbounded permissions this whole mechanism exists to cap, and
+            # nothing downstream would notice.
+            iam.put_role_permissions_boundary(
+                RoleName=role, PermissionsBoundary=boundary_arn
+            )
+            print(f"  Reusing existing MCP role: {role} (boundary reasserted)")
         for basename in templates:
             iam.attach_role_policy(RoleName=role, PolicyArn=policy_arns[basename])
         iam.attach_role_policy(RoleName=role, PolicyArn=_MCP_BASIC_EXECUTION_ARN)
         roles[tier] = role
+    if stale_policies and not update_policies:
+        print("")
+        print(
+            f"*** WARNING *** {len(stale_policies)} MCP policy document(s) in the "
+            f"account do not match this checkout:"
+        )
+        for name in stale_policies:
+            print(f"    {name}")
+        print("Re-run with --update-policies to push them. Until then the "
+              "deployed permissions are NOT the ones in templates/.")
     return roles
 
 
@@ -2327,6 +2406,105 @@ class MCPTeardownResult:
     @property
     def ok(self):
         return not self.failed
+
+
+# IAM caps a customer-managed policy at five versions. Confirmed against
+# the service's own limits, not recalled: CreatePolicyVersion fails with
+# LimitExceeded once five exist, so a converging deploy has to make room.
+_IAM_POLICY_VERSION_LIMIT = 5
+
+
+def _decoded_policy_document(doc):
+    """botocore's `after-call.iam` handler URL-decodes a policy Document and
+    json.loads it, so it normally arrives as a dict -- but
+    `decode_quoted_jsondoc` swallows the error and returns the raw string
+    when that fails. Accept both rather than assuming the happy path."""
+    if isinstance(doc, dict):
+        return doc
+    try:
+        return json.loads(doc)
+    except (ValueError, TypeError):
+        import urllib.parse
+
+        return json.loads(urllib.parse.unquote(doc))
+
+
+def _mcp_policy_is_current(iam, *, arn, rendered):
+    """Does the deployed default version match what this repo renders?
+
+    Compared against AWS's own copy of the document rather than a stored
+    hash, tag or git ref. The deployed document is the truth; a marker
+    beside it is a second source that can be wrong about it, which is the
+    same failure the PCluster version pin had -- two surfaces agreeing on
+    a *label* while the things they named diverged.
+
+    Returns (is_current, deployed_version_id).
+    """
+    version_id = iam.get_policy(PolicyArn=arn)["Policy"]["DefaultVersionId"]
+    doc = iam.get_policy_version(
+        PolicyArn=arn, VersionId=version_id
+    )["PolicyVersion"]["Document"]
+    return _decoded_policy_document(doc) == json.loads(rendered), version_id
+
+
+def _update_mcp_policy(iam, *, arn, rendered):
+    """Push a changed document as the new default version.
+
+    Prunes oldest-first to stay under the five-version ceiling, and never
+    touches the default -- deleting the version currently in force would
+    leave the policy briefly unenforced.
+    """
+    versions = iam.list_policy_versions(PolicyArn=arn)["Versions"]
+    prunable = sorted(
+        (v for v in versions if not v["IsDefaultVersion"]),
+        key=lambda v: v["CreateDate"],
+    )
+    while len(versions) >= _IAM_POLICY_VERSION_LIMIT and prunable:
+        old = prunable.pop(0)
+        iam.delete_policy_version(PolicyArn=arn, VersionId=old["VersionId"])
+        versions = [v for v in versions if v["VersionId"] != old["VersionId"]]
+    resp = iam.create_policy_version(
+        PolicyArn=arn, PolicyDocument=rendered, SetAsDefault=True
+    )
+    return resp["PolicyVersion"]["VersionId"]
+
+
+def _delete_policy_with_versions(iam, arn):
+    """DeletePolicy refuses while any non-default version exists.
+
+    IAM's own model says so -- "you must delete all the policy's versions",
+    with DeleteConflictException as the error. A policy only ever has extra
+    versions once something has updated it, so this was unreachable until
+    _setup_mcp_infra learned to converge, and the two must land together:
+    teaching deploy to add versions without teaching teardown to remove
+    them strands every MCP policy in the account.
+    """
+    try:
+        versions = iam.list_policy_versions(PolicyArn=arn)["Versions"]
+    except Exception as e:
+        if not _is_missing_iam_entity(e):
+            raise
+        versions = []
+    for v in versions:
+        if not v["IsDefaultVersion"]:
+            iam.delete_policy_version(PolicyArn=arn, VersionId=v["VersionId"])
+    iam.delete_policy(PolicyArn=arn)
+
+
+# The permissions boundary every MCP Lambda role is created under, and the
+# one policy the deploy credentials may not rewrite. Deliberately named
+# outside the `pclustermaker-mcp-policy-*` pattern that MCPDeployPolicy's
+# lifecycle statement covers: a deployer who can version their own boundary
+# does not have one.
+_MCP_BOUNDARY_TEMPLATE = "MCPRoleBoundary.json_src"
+
+
+def _mcp_boundary_name():
+    return "pclustermaker-mcp-boundary"
+
+
+def _mcp_boundary_arn(aws_account_id):
+    return f"arn:aws:iam::{aws_account_id}:policy/{_mcp_boundary_name()}"
 
 
 def _is_missing_iam_entity(exc):
@@ -2400,7 +2578,10 @@ def _delete_mcp_infra(iam, *, aws_account_id, suppress=True, verbose=True):
                 raise
         _try(f"role: {role}", iam.delete_role, RoleName=role)
     for basename, arn in policy_arns.items():
-        _try(f"policy: {_mcp_policy_name(basename)}", iam.delete_policy, PolicyArn=arn)
+        _try(
+            f"policy: {_mcp_policy_name(basename)}",
+            _delete_policy_with_versions, iam, arn,
+        )
 
     if verbose:
         if result.failed:
@@ -3680,7 +3861,7 @@ def _update_compute_fleet_lib(cluster_name, region, status):
     except Exception as e:
         raise PClusterMakerError(
             f"update-compute-fleet failed for {cluster_name!r} in {region}: "
-            f"{type(e).__name__}: {e}"
+            f"{pcluster_exception_detail(e)}"
         )
 
 
@@ -3706,7 +3887,7 @@ def _update_cluster_lib(cluster_name, region, config_path):
     except Exception as e:
         raise PClusterMakerError(
             f"update-cluster failed for {cluster_name!r} in {region}: "
-            f"{type(e).__name__}: {e}"
+            f"{pcluster_exception_detail(e)}"
         )
 
 
@@ -3738,7 +3919,7 @@ def _describe_cluster_json(cluster_name, region):
     except Exception as e:
         raise PClusterMakerError(
             f"describe-cluster failed for {cluster_name!r} in {region}: "
-            f"{type(e).__name__}: {e}"
+            f"{pcluster_exception_detail(e)}"
         )
 
 

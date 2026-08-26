@@ -256,7 +256,10 @@ standing constraints for local development.
   nothing in it — which is what hid the event-loop failure. The detail is
   on `.content`: a `message`, and `configuration_validation_errors` naming
   the validator. `pcluster_exception_detail` extracts both, skips INFO,
-  and never returns an empty string.
+  and never returns an empty string — and **every `pcluster.lib` wrapper
+  must use it**, not only the create paths. The three update/describe
+  wrappers formatted with a bare `{e}` and reported `BadRequestException: `
+  with nothing after the colon, which is what hid the R4 version skew.
 - **`core_create_cluster` returns a `CreateClusterResult`; it must never
   `sys.exit`.** `SystemExit` is a `BaseException` and `create_cluster`
   cannot use `_cluster_lock`'s translation (it locks internally), so an
@@ -297,6 +300,55 @@ standing constraints for local development.
   blast radius, one policy per tier in `templates/MCP*.json_src` — a third
   policy category, neither instance-reachable nor the operator's own. The
   router must import no third-party package.
+- **A tier's policy has a floor as well as a ceiling.** Every MCP IAM
+  guard asked whether a tier could exceed its blast radius; none asked
+  whether it could reach its own. `fleet-toggle` could not:
+  `update-compute-fleet` parses the cluster config from PCluster's
+  per-cluster S3 bucket and reads/updates the fleet status item in the
+  `parallelcluster-<cluster>` DynamoDB table, and the tier granted neither,
+  so `stop_fleet`/`start_fleet` failed against every real cluster for the
+  tier's whole life. The S3 grant stays **read-only** — `s3:*` would have
+  satisfied the floor while letting a fleet toggle rewrite any cluster's
+  config — and the DynamoDB grant is scoped to `table/parallelcluster-*`.
+  The same blindness hid a second, wider gap: **no tier granted any
+  `elasticloadbalancing` action**, and a login-node pool sits behind an NLB
+  that `describe-cluster` reads, so *every* remote tier failed against any
+  cluster built with `--enable_loginnode true`. All four calls in
+  `pcluster/aws/elb.py` are needed (granting only `DescribeLoadBalancers`
+  moves the failure to the next one); describes take no resource-level
+  permission, so `Resource: "*"` is forced and read-only is the only bound
+  left. `TestEachTierCanActuallyDoItsJob` pins both directions for both
+  gaps. `MCPStackMutation.json_src` is now 5,935 bytes of the 6,144 limit.
+- **Reuse is not convergence, and the difference is a naming asymmetry.**
+  `_setup_iam`'s policies carry the cluster serial, so every build makes
+  fresh ones and a stale document is unreachable; the MCP policy names are
+  fixed and long-lived, so the first-ever create won forever — a
+  `templates/MCP*.json_src` edit changed nothing in the account and printed
+  "Reusing existing MCP policy". `_setup_mcp_infra` now compares the
+  rendered document against **AWS's own copy** (never a stored hash, tag or
+  git ref — a marker beside the truth is a second source that can be wrong
+  about it) and reports any mismatch; `--update-policies` pushes it as a new
+  default version, pruning oldest-first to stay under IAM's five-version
+  ceiling and never deleting the version in force.
+- **MCP deployment is its own permission set, not the operator's.**
+  `OperatorPolicy` scopes its IAM to `pclustermaker-policy-*` and
+  `pclustermaker-role-*`, which match no MCP name, and the full MCP grant
+  set appended to it measures 6,358 bytes against the 6,144 limit — so
+  widening it is not merely undesirable, it does not fit.
+  `MCPDeployPolicy.json_src` carries it instead, and every MCP role is
+  created under the `MCPRoleBoundary.json_src` permissions boundary:
+  `iam:CreateRole` is granted **only** under a `StringEquals` condition on
+  `iam:PermissionsBoundary`, and the deployer is explicitly denied
+  rewriting or detaching that boundary. Without the condition a deployer
+  creates an unbounded role and the ceiling never applies. Details in
+  `templates/CLAUDE.md`.
+- **Adding policy versions breaks teardown unless teardown prunes them.**
+  `DeletePolicy` refuses while any non-default version exists
+  (`DeleteConflictException` — botocore's own IAM model says "you must
+  delete all the policy's versions"), so the two halves must land together:
+  `_delete_policy_with_versions` deletes non-default versions first. This
+  was unreachable until deploy could version a policy, and it was reached
+  the same day — three MCP policies were left undeletable in the account.
 - **No tool on the `read-only` tier may write anything.** `add_queue`/
   `remove_queue` write `configs/<name>.yaml` and moved to `stack-mutation`,
   where the rest of the config's lifecycle already lives (apply reads it,
@@ -365,10 +417,17 @@ standing constraints for local development.
   `_create_locks_bucket` returns early on `head_bucket`; no handler tier
   may be granted `s3:CreateBucket`. `MCPClusterBuild.json_src` carries the
   build grants `MCPStackMutation` had no room for, on both tiers.
-- **The PCluster version is pinned at both ends**, upper bound included:
-  `PCLUSTER_REQUIREMENT` is the one spelling, and `requirements.txt` must
-  match it. A version skew between an artifact and the operator's venv
-  builds clusters neither can manage.
+- **The PCluster version is pinned **exactly** at every end** —
+  `PCLUSTER_REQUIREMENT`, `requirements.txt` and the generated
+  `requirements-lambda.txt`. A version skew between an artifact and the
+  operator's venv builds clusters neither can manage. **A bounded range is
+  not a pin and was the fix that failed**: `>=3.15,<3.17` is one string on
+  every surface, so an agreement test passes, while pip resolves it to
+  3.16.0 for an artifact built today against a venv holding 3.15.1 —
+  identical specifiers resolved at different times are not the same
+  version. Every remote tool then fails with "the update can be performed
+  only with the same ParallelCluster version". `test_the_pin_is_exact`
+  requires the operator set to be exactly `{"=="}`.
 - **A Lambda artifact must be pruned of bytecode.** `pip install --target`
   of the read-only tier is 241 MB against the 250 MB unzipped limit;
   removing `__pycache__`/`.pyc` takes it to 139 MB. `prune_for_lambda`

@@ -218,7 +218,7 @@
         {
             "Sid": "CloudWatchLogs",
             "Action": [
-                        "logs:PutRetentionPolicy",
+                "logs:PutRetentionPolicy",
                 "logs:DescribeLogGroups",
                 "logs:CreateLogGroup",
                 "logs:TagResource",
@@ -304,6 +304,17 @@
             ],
             "Resource": "arn:aws:iam::<AWS_ACCOUNT_ID>:instance-profile/pclustermaker-role-*",
             "Effect": "Allow"
+        },
+        {
+            "Sid": "MCPLoginNodeLoadBalancerRead",
+            "Action": [
+                "elasticloadbalancing:DescribeLoadBalancers",
+                "elasticloadbalancing:DescribeTags",
+                "elasticloadbalancing:DescribeTargetGroups",
+                "elasticloadbalancing:DescribeTargetHealth"
+            ],
+            "Effect": "Allow",
+            "Resource": "*"
         }
     ]
 }

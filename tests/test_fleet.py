@@ -521,3 +521,90 @@ class TestTheDescribeHelperFailsCatchably:
         monkeypatch.setitem(sys.modules, "pcluster.lib", fake)
         assert pcluster_core._describe_cluster_json("c", "r") == {"clusterStatus": "X"}
         assert called == [], "describe-cluster must not shell out"
+
+
+class TestALibraryFailureNamesItsCause:
+    """The three pcluster.lib wrappers formatted their exception with a bare
+    `{e}`, which is empty for every ParallelClusterApiException.
+
+    This is not a cosmetic defect. R4 drove stop_fleet ->
+    apply_cluster_update -> start_fleet against a live cluster and all three
+    failed with `BadRequestException: ` -- nothing after the colon. The
+    actual cause was a PCluster version skew between the Lambda artifact and
+    the cluster, and the blank message is what hid it: the run was recorded
+    as a pass on the strength of HTTP 200 and a CloudWatch REPORT line,
+    neither of which distinguishes a returned error from a completed
+    operation. Same shape as the event-loop failure `pcluster_exception_detail`
+    was written for, on the tiers where the operator has no other surface.
+
+    The exceptions here are the real ones from the installed package, not
+    fakes -- a fake would encode what the caller happens to need.
+    """
+
+    def _raising_lib(self, monkeypatch, name, exc):
+        import types as _types
+
+        fake = _types.ModuleType("pcluster.lib")
+
+        def _boom(*a, **k):
+            raise exc
+
+        setattr(fake, name, _boom)
+        monkeypatch.setitem(sys.modules, "pcluster.lib", fake)
+
+    def _bad_request(self):
+        from pcluster.api.errors import BadRequestException
+
+        return BadRequestException(
+            "the update can be performed only with the same ParallelCluster "
+            "version (3.15.1) used to create the cluster."
+        )
+
+    def test_the_premise_holds_str_is_empty(self, monkeypatch):
+        """Vacuity guard. If str() ever stops being empty the whole class is
+        testing nothing, and it must fail loudly rather than pass."""
+        monkeypatch.setenv("AWS_REGION", "us-east-1")
+        monkeypatch.setenv("AWS_DEFAULT_REGION", "us-east-1")
+        exc = self._bad_request()
+        assert str(exc) == "", (
+            "ParallelClusterApiException.__str__ is no longer empty; this "
+            "class's premise needs rechecking"
+        )
+        assert "version" in exc.content.message
+
+    @pytest.mark.parametrize(
+        "wrapper,libname,kwargs",
+        [
+            ("_update_compute_fleet_lib", "update_compute_fleet",
+             {"cluster_name": "c", "region": "us-east-1", "status": "STOP_REQUESTED"}),
+            ("_update_cluster_lib", "update_cluster",
+             {"cluster_name": "c", "region": "us-east-1", "config_path": "/tmp/x.yaml"}),
+        ],
+    )
+    def test_the_reason_reaches_the_operator(self, monkeypatch, wrapper,
+                                             libname, kwargs):
+        monkeypatch.setenv("AWS_REGION", "us-east-1")
+        monkeypatch.setenv("AWS_DEFAULT_REGION", "us-east-1")
+        self._raising_lib(monkeypatch, libname, self._bad_request())
+        with pytest.raises(pcluster_core.PClusterMakerError) as ei:
+            getattr(pcluster_core, wrapper)(**kwargs)
+        text = str(ei.value)
+        assert "the update can be performed only" in text, (
+            f"{wrapper} reported {text!r}, losing the reason -- this is the "
+            f"blank message that hid the R4 version skew"
+        )
+        assert not text.rstrip().endswith(":"), (
+            f"{wrapper} produced a message ending in a bare colon: {text!r}"
+        )
+
+    def test_no_wrapper_formats_a_library_exception_with_a_bare_e(self):
+        """The three sites are one edit apart from regressing, and a
+        behavioral test only covers the wrappers it drives."""
+        import io as _io
+
+        src = _io.open(pcluster_core.__file__, encoding="utf-8").read()
+        assert "{type(e).__name__}: {e}" not in src, (
+            "a pcluster.lib wrapper formats its exception with a bare {e}, "
+            "which is empty for every ParallelClusterApiException; use "
+            "pcluster_exception_detail(e)"
+        )

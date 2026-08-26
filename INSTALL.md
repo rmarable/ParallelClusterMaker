@@ -21,16 +21,25 @@
   * On Windows, use [Docker Desktop](https://www.docker.com/products/docker-desktop/) or [Rancher Desktop](https://rancherdesktop.io/) with the WSL2 backend, and build from inside a WSL2 shell rather than from PowerShell — the repository's build tooling is POSIX shell. Finch does not support Windows.
   * **Build for the Lambda function's architecture, not your laptop's.** An image built on Apple Silicon or an ARM Linux host defaults to `linux/arm64`, and Lambda rejects a mismatch at `CreateFunction` rather than at invocation. Pass `--platform linux/amd64` unless the function is configured for `arm64`.
   * **The ECR repository must exist before the first push.** `finch push` (and `docker push`) will not create it, and the failure names the wrong cause: ECR answers an unknown repository with `repository does not exist or may require authorization`, whose second half sends you auditing IAM for a permission that was never missing. Create it once with `aws ecr create-repository --repository-name pclustermaker-mcp-stack-mutation-node --region <region>`.
-  * **On Finch, `finch login` can succeed while `finch push` reports `no basic auth credentials`.** Finch runs containerd inside a Lima VM, and the push happens in the VM rather than on the host. `finch login` writes the credential to the host — by default handing it to the macOS keychain via `"credsStore": "osxkeychain"` in `~/.finch/config.json`, which leaves the `auths` entry empty — and the VM has no `~/.docker/config.json` of its own, so the pusher finds nothing. Removing `credsStore` so the token is written inline is *not* sufficient by itself; the credential has to reach the VM. Write it there directly, then scrub it afterward (the ECR token is short-lived, but it is still a credential at rest):
+  * **On Finch, `finch login` can succeed while `finch push` reports `no basic auth credentials`.** Finch runs containerd inside a Lima VM, and the push happens in the VM rather than on the host. `finch login` writes the credential to the host — by default handing it to the macOS keychain via `"credsStore": "osxkeychain"` in `~/.finch/config.json`, which leaves the `auths` entry empty — and the VM has no `~/.docker/config.json` of its own, so the pusher finds nothing. **Both halves are required, and neither alone works** — confirmed by testing each in isolation: removing `credsStore` and re-running `finch login` (so the host config carries an inline token) *and* writing the credential into the VM. With only the VM file the push still fails with the same message, so do not skip the host half on the reasoning that the push happens in the VM. Scrub both afterward (the ECR token is short-lived, but it is still a credential at rest):
 
     ```sh
     export LIMA_HOME=/Applications/Finch/lima/data
     LIMACTL=/Applications/Finch/lima/bin/limactl
-    AUTH=$(printf 'AWS:%s' "$(aws ecr get-login-password --region <region>)" | base64)
+
+    # host half: inline token rather than the macOS keychain
+    python3 -c "import json,os;p=os.path.expanduser('~/.finch/config.json');d=json.load(open(p));d.pop('credsStore',None);json.dump(d,open(p,'w'))"
+    aws ecr get-login-password --region <region> \
+      | finch login --username AWS --password-stdin <acct>.dkr.ecr.<region>.amazonaws.com
+
+    # VM half
+    AUTH=$(printf 'AWS:%s' "$(aws ecr get-login-password --region <region>)" | base64 | tr -d '\n')
     printf '{"auths":{"<acct>.dkr.ecr.<region>.amazonaws.com":{"auth":"%s"}}}' "$AUTH" \
       | $LIMACTL shell finch -- sh -c 'mkdir -p $HOME/.docker && cat > $HOME/.docker/config.json'
     finch push <acct>.dkr.ecr.<region>.amazonaws.com/pclustermaker-mcp-stack-mutation-node:latest
     $LIMACTL shell finch -- sh -c 'rm -f $HOME/.docker/config.json'
+    # and restore the host's keychain setting
+    python3 -c "import json,os;p=os.path.expanduser('~/.finch/config.json');d=json.load(open(p));d['credsStore']='osxkeychain';d['auths']={};json.dump(d,open(p,'w'))"
     ```
 
     This is a Finch-specific workaround, confirmed on Finch; the other runtimes were not tested against it. Docker Desktop and Rancher Desktop are not expected to need it, since their builder reads the same host credential store the CLI writes.

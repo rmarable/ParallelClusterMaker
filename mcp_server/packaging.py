@@ -69,15 +69,23 @@ EXCLUDED_FROM_LAMBDA = {
 # The router's empty requirement list is a load-bearing claim, not an
 # oversight -- see this module's docstring and
 # TestTheRouterPackageIsTiny.
-# Must stay byte-identical to requirements.txt's own line, and the upper
-# bound is the load-bearing half. Unpinned (">=3.15"), a Lambda artifact
-# built today resolved 3.16.0 while the operator's older venv sat at
-# 3.15.1, and PCluster refuses to manage a cluster created by a version it
-# does not recognize: the remote transport built a real cluster the
-# operator's own CLI could not describe or tear down. Two surfaces stating
+# Must stay byte-identical to requirements.txt's own line, and the pin
+# must be EXACT. PCluster refuses to manage a cluster created by a version
+# it does not recognize, so an artifact and the operator's venv holding
+# different versions means the remote transport builds real clusters the
+# local CLI cannot describe or tear down.
+#
+# A bounded range was the first fix and it does not work. ">=3.15,<3.17"
+# is one string on both surfaces, so the agreement test passed -- while
+# pip resolved it to 3.16.0 for an artifact built today and the venv still
+# held 3.15.1. Reproduced live in R4: every remote tool failed against a
+# cluster the local CLI had built, with "the update can be performed only
+# with the same ParallelCluster version used to create the cluster".
+# Identical range specifiers resolved at different times are not the same
+# version; only "==" makes both ends resolve alike. Two surfaces stating
 # one version is the pattern this repo pins by test --
 # TestBothSurfacesPinTheSamePclusterVersion.
-PCLUSTER_REQUIREMENT = "aws-parallelcluster>=3.15,<3.17"
+PCLUSTER_REQUIREMENT = "aws-parallelcluster==3.15.1"
 
 TIER_PACKAGES = {
     "router": {

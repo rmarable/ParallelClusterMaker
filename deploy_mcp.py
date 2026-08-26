@@ -132,6 +132,23 @@ def _ensure_cognito_client(cog, pool_id, base_url, region):
     return domain
 
 
+def tiers_to_deploy(args):
+    """Which tiers a run should build, given the flags.
+
+    An infrastructure flag on its own is not a deployment: rebuilding six
+    146 MB artifacts to attach a route, or to create a role, is minutes of
+    pip for nothing. `--setup-gateway` had this short-circuit;
+    `--setup-infra` did not, and so silently redeployed every zip tier as a
+    side effect of creating IAM. An explicit `--tier` always wins, so the
+    two can still be combined deliberately.
+    """
+    if (args.setup_gateway or args.setup_infra) and not args.tier:
+        return []
+    return args.tier or [
+        t for t, s in TIER_PACKAGES.items() if s["kind"] != "image"
+    ]
+
+
 def main():
     p = argparse.ArgumentParser(
         description="Build and deploy the MCP remote transport's Lambda tiers.",
@@ -152,7 +169,14 @@ def main():
                         "the transport reachable from a browser.")
     p.add_argument("--setup-infra", action="store_true",
                    help="create the IAM roles and policies (and the Cognito "
-                        "user pool if absent) before deploying; idempotent")
+                        "user pool if absent) before deploying; idempotent. "
+                        "Reports any policy whose deployed document no longer "
+                        "matches templates/, but does not change it")
+    p.add_argument("--update-policies", action="store_true",
+                   help="with --setup-infra, push a changed policy document as "
+                        "a new default version instead of only reporting it. "
+                        "Needs iam:CreatePolicyVersion and "
+                        "iam:DeletePolicyVersion")
     args = p.parse_args()
 
     import boto3
@@ -161,13 +185,7 @@ def main():
     account = sts.get_caller_identity()["Account"]
     bucket = _derive_locks_bucket(aws_account_id=account, region=args.region)
 
-    # --setup-gateway on its own is an infrastructure change, not a
-    # deployment: rebuilding six 146 MB artifacts to attach a route would be
-    # minutes of pip for nothing.
-    gateway_only = args.setup_gateway and not args.tier and not args.setup_infra
-    tiers = [] if gateway_only else (
-        args.tier or [t for t, s in TIER_PACKAGES.items() if s["kind"] != "image"]
-    )
+    tiers = tiers_to_deploy(args)
     print(f"account {account}  region {args.region}  bucket {bucket}")
     print(f"deploying: {', '.join(tiers) if tiers else '(no tiers)'}\n")
 
@@ -192,7 +210,7 @@ def main():
             print(f"reusing Cognito user pool {want} ({pool_id})")
         _setup_mcp_infra(
             boto3.client("iam"), aws_account_id=account, region=args.region,
-            mcp_user_pool_id=pool_id,
+            mcp_user_pool_id=pool_id, update_policies=args.update_policies,
         )
         print()
 

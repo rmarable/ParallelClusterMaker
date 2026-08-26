@@ -46,6 +46,30 @@ and deletes the five managed policies.
   Sids, no unsubstituted placeholders) plus a cross-check that every
   placeholder they use is actually substituted by `_render_policy`.
   `<MCP_USER_POOL_ID>` is theirs alone.
+- **`MCPDeployPolicy.json_src` and `MCPRoleBoundary.json_src` are a fourth
+  category** — what an administrator grants to whoever deploys the
+  transport, plus the permissions boundary every MCP role is created under.
+  Listed in `_MCP_DEPLOY_POLICY_FILES`; they get the same structural guards
+  (`_MCP_ALL_POLICY_FILES`) but are deliberately **outside**
+  `_BAN_APPLIES_TO` — the boundary *denies* `logs:DeleteLogGroup`, and that
+  ban reads every statement without looking at `Effect`, so a Deny would
+  trip it. Denying an action is the opposite of what the ban catches.
+- **The boundary is named `pclustermaker-mcp-boundary`, outside the
+  `pclustermaker-mcp-policy-*` pattern `MCPDeployPolicy`'s lifecycle
+  statement covers.** A deployer who can version their own boundary does
+  not have one. `MCPDeployPolicy` additionally *denies* `CreatePolicyVersion`/
+  `SetDefaultPolicyVersion`/`DeletePolicy` on it and
+  `DeleteRolePermissionsBoundary` on the roles, and grants `iam:CreateRole`
+  **only** under a `StringEquals` condition on `iam:PermissionsBoundary` —
+  without that condition the deployer creates an unbounded role and the
+  ceiling never applies. `_setup_mcp_infra` creates the boundary before any
+  role, passes `PermissionsBoundary=` on every `create_role`, and calls
+  `put_role_permissions_boundary` on a role that already existed.
+  Teardown deliberately leaves it: it is a durable account guardrail, and
+  `MCPDeployPolicy` cannot delete it.
+- **The boundary is reported on drift but never updated**, unlike the tier
+  policies, which `--update-policies` converges. That asymmetry is the
+  point — an administrator changes it out of band.
 - **`MCPRouterLambda.json_src` must stay near-zero: one action
   (`lambda:InvokeFunction`), four explicit handler ARNs, no wildcard, and
   nothing outside the `lambda:` service.** The router is the
@@ -98,4 +122,11 @@ and deletes the five managed policies.
   `iam:CreatePolicyVersion`/`DeletePolicyVersion` are intentionally
   **omitted** — the toolkit only ever calls `create_policy`/`delete_policy`,
   and granting version-management would let the operator rewrite any
-  cluster's policy in place.
+  cluster's policy in place. Pinned by
+  `test_operator_policy_omits_policy_version_management`; the older guard
+  covered `HeadNode-IAM` only. **`MCPDeployPolicy` does grant them and that
+  is not a contradiction**: scoped to `pclustermaker-mcp-policy-*`, needed
+  for `--setup-infra` to converge on a changed document, and every role
+  those policies attach to is bounded — which is the mitigation
+  `templates/CLAUDE.local.md` names for the cluster case and which no
+  cluster role has.

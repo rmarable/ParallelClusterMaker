@@ -28,6 +28,41 @@
             ],
             "Effect": "Allow",
             "Resource": "*"
+        },
+        {
+            "Sid": "MCPFleetClusterConfigRead",
+            "Action": [
+                "s3:GetObject",
+                "s3:GetObjectVersion",
+                "s3:ListBucket"
+            ],
+            "Effect": "Allow",
+            "Resource": [
+                "arn:aws:s3:::parallelcluster-*",
+                "arn:aws:s3:::parallelcluster-*/*"
+            ]
+        },
+        {
+            "Sid": "MCPFleetStatusTable",
+            "Action": [
+                "dynamodb:GetItem",
+                "dynamodb:PutItem",
+                "dynamodb:UpdateItem",
+                "dynamodb:DescribeTable"
+            ],
+            "Effect": "Allow",
+            "Resource": "arn:aws:dynamodb:<AWS_REGION>:<AWS_ACCOUNT_ID>:table/parallelcluster-*"
+        },
+        {
+            "Sid": "MCPLoginNodeLoadBalancerRead",
+            "Action": [
+                "elasticloadbalancing:DescribeLoadBalancers",
+                "elasticloadbalancing:DescribeTags",
+                "elasticloadbalancing:DescribeTargetGroups",
+                "elasticloadbalancing:DescribeTargetHealth"
+            ],
+            "Effect": "Allow",
+            "Resource": "*"
         }
     ]
 }

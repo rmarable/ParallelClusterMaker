@@ -1,0 +1,174 @@
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Sid": "MCPPolicyLifecycle",
+            "Action": [
+                "iam:CreatePolicy",
+                "iam:DeletePolicy",
+                "iam:GetPolicy",
+                "iam:GetPolicyVersion",
+                "iam:ListPolicyVersions",
+                "iam:ListEntitiesForPolicy",
+                "iam:CreatePolicyVersion",
+                "iam:DeletePolicyVersion"
+            ],
+            "Effect": "Allow",
+            "Resource": [
+                "arn:aws:iam::<AWS_ACCOUNT_ID>:policy/pclustermaker-mcp-policy-*"
+            ]
+        },
+        {
+            "Sid": "MCPCreateBoundedRoleOnly",
+            "Action": [
+                "iam:CreateRole",
+                "iam:PutRolePermissionsBoundary"
+            ],
+            "Effect": "Allow",
+            "Resource": [
+                "arn:aws:iam::<AWS_ACCOUNT_ID>:role/pclustermaker-mcp-*"
+            ],
+            "Condition": {
+                "StringEquals": {
+                    "iam:PermissionsBoundary": "arn:aws:iam::<AWS_ACCOUNT_ID>:policy/pclustermaker-mcp-boundary"
+                }
+            }
+        },
+        {
+            "Sid": "MCPRoleLifecycle",
+            "Action": [
+                "iam:DeleteRole",
+                "iam:GetRole",
+                "iam:TagRole",
+                "iam:AttachRolePolicy",
+                "iam:DetachRolePolicy",
+                "iam:ListAttachedRolePolicies",
+                "iam:PassRole"
+            ],
+            "Effect": "Allow",
+            "Resource": [
+                "arn:aws:iam::<AWS_ACCOUNT_ID>:role/pclustermaker-mcp-*"
+            ]
+        },
+        {
+            "Sid": "MCPBoundaryBootstrapReadAndCreate",
+            "Action": [
+                "iam:CreatePolicy",
+                "iam:GetPolicy",
+                "iam:GetPolicyVersion",
+                "iam:ListPolicyVersions"
+            ],
+            "Effect": "Allow",
+            "Resource": [
+                "arn:aws:iam::<AWS_ACCOUNT_ID>:policy/pclustermaker-mcp-boundary"
+            ]
+        },
+        {
+            "Sid": "MCPDenyWeakeningTheBoundary",
+            "Action": [
+                "iam:CreatePolicyVersion",
+                "iam:SetDefaultPolicyVersion",
+                "iam:DeletePolicyVersion",
+                "iam:DeletePolicy",
+                "iam:DeleteRolePermissionsBoundary"
+            ],
+            "Effect": "Deny",
+            "Resource": [
+                "arn:aws:iam::<AWS_ACCOUNT_ID>:policy/pclustermaker-mcp-boundary",
+                "arn:aws:iam::<AWS_ACCOUNT_ID>:role/pclustermaker-mcp-*"
+            ]
+        },
+        {
+            "Sid": "MCPLambdaLifecycle",
+            "Action": [
+                "lambda:CreateFunction",
+                "lambda:UpdateFunctionCode",
+                "lambda:UpdateFunctionConfiguration",
+                "lambda:GetFunction",
+                "lambda:GetFunctionConfiguration",
+                "lambda:DeleteFunction",
+                "lambda:AddPermission",
+                "lambda:RemovePermission",
+                "lambda:InvokeFunction",
+                "lambda:TagResource"
+            ],
+            "Effect": "Allow",
+            "Resource": [
+                "arn:aws:lambda:*:<AWS_ACCOUNT_ID>:function:pclustermaker-mcp-*"
+            ]
+        },
+        {
+            "Sid": "MCPGatewayLifecycle",
+            "Action": [
+                "apigateway:GET",
+                "apigateway:POST",
+                "apigateway:PUT",
+                "apigateway:PATCH",
+                "apigateway:DELETE"
+            ],
+            "Effect": "Allow",
+            "Resource": [
+                "arn:aws:apigateway:*::/restapis",
+                "arn:aws:apigateway:*::/restapis/*"
+            ]
+        },
+        {
+            "Sid": "MCPCognitoLifecycle",
+            "Action": [
+                "cognito-idp:CreateUserPool",
+                "cognito-idp:DeleteUserPool",
+                "cognito-idp:DescribeUserPool",
+                "cognito-idp:ListUserPools",
+                "cognito-idp:CreateUserPoolClient",
+                "cognito-idp:DeleteUserPoolClient",
+                "cognito-idp:ListUserPoolClients",
+                "cognito-idp:DescribeUserPoolClient",
+                "cognito-idp:CreateUserPoolDomain",
+                "cognito-idp:DeleteUserPoolDomain",
+                "cognito-idp:DescribeUserPoolDomain"
+            ],
+            "Effect": "Allow",
+            "Resource": "*"
+        },
+        {
+            "Sid": "MCPArtifactStaging",
+            "Action": [
+                "s3:PutObject",
+                "s3:GetObject",
+                "s3:DeleteObject",
+                "s3:ListBucket",
+                "s3:GetBucketLocation"
+            ],
+            "Effect": "Allow",
+            "Resource": [
+                "arn:aws:s3:::parallelclustermaker-locks-*",
+                "arn:aws:s3:::parallelclustermaker-locks-*/*"
+            ]
+        },
+        {
+            "Sid": "MCPImageTierEcr",
+            "Action": [
+                "ecr:GetAuthorizationToken",
+                "ecr:BatchCheckLayerAvailability",
+                "ecr:BatchGetImage",
+                "ecr:DescribeImages",
+                "ecr:DescribeRepositories",
+                "ecr:CreateRepository",
+                "ecr:InitiateLayerUpload",
+                "ecr:UploadLayerPart",
+                "ecr:CompleteLayerUpload",
+                "ecr:PutImage"
+            ],
+            "Effect": "Allow",
+            "Resource": "*"
+        },
+        {
+            "Sid": "MCPCallerIdentity",
+            "Action": [
+                "sts:GetCallerIdentity"
+            ],
+            "Effect": "Allow",
+            "Resource": "*"
+        }
+    ]
+}

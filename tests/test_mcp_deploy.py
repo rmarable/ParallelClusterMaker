@@ -406,13 +406,38 @@ class TestBothSurfacesPinTheSamePclusterVersion:
     def test_the_two_surfaces_agree(self):
         assert PCLUSTER_REQUIREMENT == self._requirements_line()
 
-    def test_the_pin_carries_an_upper_bound(self):
-        """The half that actually prevents the drift. A lower bound alone is
-        satisfied by every future release."""
-        assert "<" in PCLUSTER_REQUIREMENT, (
-            f"{PCLUSTER_REQUIREMENT!r} has no upper bound, so an artifact built "
-            f"later can resolve a PCluster the operator's CLI cannot manage"
+    def test_the_pin_is_exact(self):
+        """A bounded range is not enough, and believing it was is what let
+        R4 fail against a live cluster.
+
+        `>=3.15,<3.17` is a single string, so the agreement test above
+        passed -- and pip still resolved it to 3.16.0 for an artifact built
+        today while the operator's venv held 3.15.1. PCluster then refuses
+        the cluster the other end created. Two identical range specifiers
+        resolved at different times are not the same version, so the
+        property is exactness, not boundedness.
+        """
+        from packaging.requirements import Requirement
+
+        spec = Requirement(PCLUSTER_REQUIREMENT).specifier
+        operators = {s.operator for s in spec}
+        assert operators == {"=="}, (
+            f"{PCLUSTER_REQUIREMENT!r} uses {sorted(operators)}; only '==' makes "
+            f"the artifact and the operator's venv resolve the same version"
         )
+        version = next(iter(spec)).version
+        assert version.count(".") >= 2, (
+            f"{version!r} is not a full version, so it still admits a range"
+        )
+
+    def test_a_bounded_range_would_not_satisfy_the_guard(self):
+        """Vacuity guard: the shipped-and-broken spelling must fail the test
+        above. Written as the inverse rather than by calling it, since the
+        assertion reads PCLUSTER_REQUIREMENT directly."""
+        from packaging.requirements import Requirement
+
+        broken = Requirement("aws-parallelcluster>=3.15,<3.17").specifier
+        assert {s.operator for s in broken} != {"=="}
 
     def test_every_tier_that_ships_pcluster_uses_the_constant(self):
         """Four tiers named the version as a literal; one edited copy is the
@@ -492,3 +517,348 @@ class TestTheDeploymentHasAProductionCaller:
         src = self._source()
         assert "--image-uri" in src
         assert "ImageUri" in src
+
+
+# ---------------------------------------------------------------------------
+# Policy convergence and teardown pruning
+# ---------------------------------------------------------------------------
+
+import datetime as _datetime  # noqa: E402
+import json as _json  # noqa: E402
+
+from botocore.exceptions import ClientError as _ClientError_t  # noqa: E402
+
+import pcluster_core as _pc  # noqa: E402
+
+
+def _stamp(n):
+    return _datetime.datetime(2026, 1, 1) + _datetime.timedelta(days=n)
+
+
+class _FakeIam:
+    """IAM modelled on botocore's own iam/service-2.json, not on what the
+    caller needs.
+
+    Three rules are quoted from that model and are what let this fake
+    disagree with the code under test:
+
+      * CreatePolicyVersion -> LimitExceeded once five versions exist
+        ("A managed policy can have up to five versions").
+      * DeletePolicyVersion -> DeleteConflict on the default version
+        ("You cannot delete the default version ... using this operation").
+      * DeletePolicy -> DeleteConflict while any version remains
+        ("you must delete all the policy's versions").
+
+    The third is the one that matters: a fake that let DeletePolicy through
+    would have agreed with the shipped teardown by construction and could
+    never have shown it was broken.
+    """
+
+    def __init__(self):
+        self.policies = {}
+        self.roles = {}
+        self.calls = []
+
+    # -- helpers ------------------------------------------------------
+    @staticmethod
+    def _err(code, op):
+        return _ClientError_t({"Error": {"Code": code, "Message": code}}, op)
+
+    def _p(self, arn, op):
+        if arn not in self.policies:
+            raise self._err("NoSuchEntity", op)
+        return self.policies[arn]
+
+    def seed(self, arn, document, extra_versions=0):
+        vs = [{"VersionId": "v1", "IsDefaultVersion": extra_versions == 0,
+               "CreateDate": _stamp(1), "Document": document}]
+        for i in range(extra_versions):
+            vs.append({"VersionId": "v%d" % (i + 2),
+                       "IsDefaultVersion": i == extra_versions - 1,
+                       "CreateDate": _stamp(i + 2), "Document": document})
+        self.policies[arn] = {"versions": vs}
+
+    # -- policy API ---------------------------------------------------
+    def create_policy(self, PolicyName, PolicyDocument):
+        arn = "arn:aws:iam::123456789012:policy/" + PolicyName
+        self.calls.append(("create_policy", PolicyName))
+        if arn in self.policies:
+            raise self._err("EntityAlreadyExists", "CreatePolicy")
+        self.seed(arn, _json.loads(PolicyDocument))
+        return {"Policy": {"Arn": arn}}
+
+    def get_policy(self, PolicyArn):
+        p = self._p(PolicyArn, "GetPolicy")
+        d = next(v for v in p["versions"] if v["IsDefaultVersion"])
+        return {"Policy": {"DefaultVersionId": d["VersionId"]}}
+
+    def get_policy_version(self, PolicyArn, VersionId):
+        p = self._p(PolicyArn, "GetPolicyVersion")
+        v = next((x for x in p["versions"] if x["VersionId"] == VersionId), None)
+        if v is None:
+            raise self._err("NoSuchEntity", "GetPolicyVersion")
+        # botocore's after-call.iam handler hands this back already decoded.
+        return {"PolicyVersion": {"Document": v["Document"]}}
+
+    def list_policy_versions(self, PolicyArn):
+        p = self._p(PolicyArn, "ListPolicyVersions")
+        return {"Versions": [
+            {k: v[k] for k in ("VersionId", "IsDefaultVersion", "CreateDate")}
+            for v in p["versions"]
+        ]}
+
+    def create_policy_version(self, PolicyArn, PolicyDocument, SetAsDefault=False):
+        p = self._p(PolicyArn, "CreatePolicyVersion")
+        if len(p["versions"]) >= 5:
+            raise self._err("LimitExceeded", "CreatePolicyVersion")
+        nxt = max(int(v["VersionId"][1:]) for v in p["versions"]) + 1
+        vid = "v%d" % nxt
+        if SetAsDefault:
+            for v in p["versions"]:
+                v["IsDefaultVersion"] = False
+        p["versions"].append({"VersionId": vid, "IsDefaultVersion": bool(SetAsDefault),
+                              "CreateDate": _stamp(nxt),
+                              "Document": _json.loads(PolicyDocument)})
+        self.calls.append(("create_policy_version", PolicyArn, vid))
+        return {"PolicyVersion": {"VersionId": vid}}
+
+    def delete_policy_version(self, PolicyArn, VersionId):
+        p = self._p(PolicyArn, "DeletePolicyVersion")
+        v = next((x for x in p["versions"] if x["VersionId"] == VersionId), None)
+        if v is None:
+            raise self._err("NoSuchEntity", "DeletePolicyVersion")
+        if v["IsDefaultVersion"]:
+            raise self._err("DeleteConflict", "DeletePolicyVersion")
+        p["versions"].remove(v)
+        self.calls.append(("delete_policy_version", PolicyArn, VersionId))
+
+    def delete_policy(self, PolicyArn):
+        p = self._p(PolicyArn, "DeletePolicy")
+        if len(p["versions"]) > 1:
+            raise self._err("DeleteConflict", "DeletePolicy")
+        del self.policies[PolicyArn]
+        self.calls.append(("delete_policy", PolicyArn))
+
+    # -- role API -----------------------------------------------------
+    def create_role(self, RoleName, AssumeRolePolicyDocument, Description=""):
+        if RoleName in self.roles:
+            raise self._err("EntityAlreadyExists", "CreateRole")
+        self.roles[RoleName] = []
+
+    def attach_role_policy(self, RoleName, PolicyArn):
+        self.roles.setdefault(RoleName, []).append(PolicyArn)
+
+    def detach_role_policy(self, RoleName, PolicyArn):
+        if RoleName not in self.roles:
+            raise self._err("NoSuchEntity", "DetachRolePolicy")
+
+    def delete_role(self, RoleName):
+        if RoleName not in self.roles:
+            raise self._err("NoSuchEntity", "DeleteRole")
+        del self.roles[RoleName]
+
+
+class TestTheFakeEnforcesTheServiceContract:
+    """Vacuity guards. If the fake permits what IAM forbids, every test
+    below passes while the code stays broken -- which is exactly how the
+    shipped teardown survived until a live run."""
+
+    ARN = "arn:aws:iam::123456789012:policy/x"
+
+    def test_delete_policy_refuses_while_versions_remain(self):
+        iam = _FakeIam()
+        iam.seed(self.ARN, {"a": 1}, extra_versions=2)
+        with pytest.raises(_ClientError_t) as ei:
+            iam.delete_policy(PolicyArn=self.ARN)
+        assert ei.value.response["Error"]["Code"] == "DeleteConflict"
+
+    def test_delete_policy_version_refuses_the_default(self):
+        iam = _FakeIam()
+        iam.seed(self.ARN, {"a": 1}, extra_versions=1)
+        default = next(v["VersionId"] for v in iam.policies[self.ARN]["versions"]
+                       if v["IsDefaultVersion"])
+        with pytest.raises(_ClientError_t):
+            iam.delete_policy_version(PolicyArn=self.ARN, VersionId=default)
+
+    def test_create_policy_version_stops_at_five(self):
+        iam = _FakeIam()
+        iam.seed(self.ARN, {"a": 1}, extra_versions=4)
+        assert len(iam.policies[self.ARN]["versions"]) == 5
+        with pytest.raises(_ClientError_t) as ei:
+            iam.create_policy_version(PolicyArn=self.ARN,
+                                      PolicyDocument='{"b": 2}')
+        assert ei.value.response["Error"]["Code"] == "LimitExceeded"
+
+
+class TestAPolicyEditReachesTheAccount:
+    """`_setup_mcp_infra` reused an existing policy and never compared its
+    document, so editing a templates/MCP*.json_src changed nothing in the
+    account and the run still printed success. Three real IAM fixes had to
+    be pushed by hand because of it."""
+
+    ARN = "arn:aws:iam::123456789012:policy/p"
+    DOC = {"Version": "2012-10-17",
+           "Statement": [{"Effect": "Allow", "Action": "s3:GetObject",
+                          "Resource": "*"}]}
+
+    def test_an_unchanged_document_is_recognized_as_current(self):
+        iam = _FakeIam()
+        iam.seed(self.ARN, self.DOC)
+        current, vid = _pc._mcp_policy_is_current(
+            iam, arn=self.ARN, rendered=_json.dumps(self.DOC))
+        assert current is True and vid == "v1"
+
+    def test_a_changed_document_is_recognized_as_stale(self):
+        iam = _FakeIam()
+        iam.seed(self.ARN, self.DOC)
+        changed = _json.loads(_json.dumps(self.DOC))
+        changed["Statement"][0]["Action"] = "s3:PutObject"
+        current, _ = _pc._mcp_policy_is_current(
+            iam, arn=self.ARN, rendered=_json.dumps(changed))
+        assert current is False
+
+    def test_a_url_encoded_document_still_compares(self):
+        """botocore normally decodes Document, but decode_quoted_jsondoc
+        swallows a failure and hands back the raw string."""
+        import urllib.parse
+
+        iam = _FakeIam()
+        iam.seed(self.ARN, urllib.parse.quote(_json.dumps(self.DOC)))
+        current, _ = _pc._mcp_policy_is_current(
+            iam, arn=self.ARN, rendered=_json.dumps(self.DOC))
+        assert current is True
+
+    def test_the_update_becomes_the_new_default(self):
+        iam = _FakeIam()
+        iam.seed(self.ARN, self.DOC)
+        changed = {"Version": "2012-10-17", "Statement": []}
+        vid = _pc._update_mcp_policy(iam, arn=self.ARN,
+                                     rendered=_json.dumps(changed))
+        versions = iam.policies[self.ARN]["versions"]
+        assert vid == "v2"
+        assert [v["VersionId"] for v in versions if v["IsDefaultVersion"]] == ["v2"]
+        current, _ = _pc._mcp_policy_is_current(
+            iam, arn=self.ARN, rendered=_json.dumps(changed))
+        assert current is True
+
+    def test_the_five_version_ceiling_is_made_room_for(self):
+        """IAM allows five. Without pruning, the fifth edit of a policy
+        fails with LimitExceeded -- on a long-lived policy that is a
+        certainty, not an edge case."""
+        iam = _FakeIam()
+        iam.seed(self.ARN, self.DOC, extra_versions=4)
+        assert len(iam.policies[self.ARN]["versions"]) == 5
+        vid = _pc._update_mcp_policy(
+            iam, arn=self.ARN, rendered=_json.dumps({"Version": "2012-10-17",
+                                                     "Statement": []}))
+        versions = iam.policies[self.ARN]["versions"]
+        assert len(versions) <= 5
+        assert [v["VersionId"] for v in versions if v["IsDefaultVersion"]] == [vid]
+        # Oldest-first, and never the one in force.
+        assert ("delete_policy_version", self.ARN, "v1") in iam.calls
+
+
+class TestTeardownRemovesEveryPolicyVersion:
+    """DeletePolicy refuses while a non-default version exists, so the
+    moment deploy learned to add versions, teardown broke. Observed live:
+    three MCP policies left in the account.
+
+    The two halves must land together, which is why this asserts the
+    policy is *gone*, not that a particular call was made.
+    """
+
+    ARN = "arn:aws:iam::123456789012:policy/p"
+
+    def test_a_versioned_policy_is_deleted(self):
+        iam = _FakeIam()
+        iam.seed(self.ARN, {"a": 1}, extra_versions=3)
+        _pc._delete_policy_with_versions(iam, self.ARN)
+        assert self.ARN not in iam.policies
+
+    def test_a_single_version_policy_is_deleted(self):
+        iam = _FakeIam()
+        iam.seed(self.ARN, {"a": 1})
+        _pc._delete_policy_with_versions(iam, self.ARN)
+        assert self.ARN not in iam.policies
+
+    def test_an_absent_policy_is_not_an_error_to_the_caller(self):
+        """Teardown's _try classifies NoSuchEntity as absent; this must
+        raise it rather than swallow it, or a policy that was never there
+        is reported as deleted."""
+        iam = _FakeIam()
+        with pytest.raises(_ClientError_t) as ei:
+            _pc._delete_policy_with_versions(iam, self.ARN)
+        assert _pc._is_missing_iam_entity(ei.value)
+
+    def test_the_full_teardown_removes_versioned_policies(self):
+        iam = _FakeIam()
+        for basename in _pc._mcp_policy_templates():
+            arn = ("arn:aws:iam::123456789012:policy/"
+                   + _pc._mcp_policy_name(basename))
+            iam.seed(arn, {"a": 1}, extra_versions=2)
+        for tier in _pc._MCP_LAMBDA_TIERS:
+            iam.roles[_pc._mcp_role_name(tier)] = []
+
+        result = _pc._delete_mcp_infra(
+            iam, aws_account_id="123456789012", verbose=False)
+
+        assert not result.failed, result.failed
+        assert iam.policies == {}, "policies left behind: %s" % list(iam.policies)
+
+
+class TestAnInfrastructureFlagIsNotADeployment:
+    """`--setup-infra` redeployed every zip tier as a side effect of
+    creating IAM -- six 146 MB pip installs to attach a permissions
+    boundary. `--setup-gateway` had a short-circuit with a comment arguing
+    exactly this case; nothing carried it over to `--setup-infra`, and
+    nothing tested either.
+
+    The expression lived inside main(), after sts.get_caller_identity(), so
+    it was unreachable by any test the no-AWS guard would allow. It is a
+    module-level function now for that reason.
+    """
+
+    class _Args:
+        def __init__(self, tier=None, setup_infra=False, setup_gateway=False):
+            self.tier = tier
+            self.setup_infra = setup_infra
+            self.setup_gateway = setup_gateway
+
+    def _zips(self):
+        from mcp_server.packaging import TIER_PACKAGES
+
+        return [t for t, s in TIER_PACKAGES.items() if s["kind"] != "image"]
+
+    def test_setup_infra_alone_deploys_nothing(self):
+        import deploy_mcp
+
+        assert deploy_mcp.tiers_to_deploy(self._Args(setup_infra=True)) == []
+
+    def test_setup_gateway_alone_deploys_nothing(self):
+        import deploy_mcp
+
+        assert deploy_mcp.tiers_to_deploy(self._Args(setup_gateway=True)) == []
+
+    def test_an_explicit_tier_still_wins(self):
+        """The two are combinable on purpose: setting up IAM and deploying
+        the tier that needs it in one run is a real workflow."""
+        import deploy_mcp
+
+        args = self._Args(tier=["read-only"], setup_infra=True)
+        assert deploy_mcp.tiers_to_deploy(args) == ["read-only"]
+
+    def test_a_bare_run_still_deploys_every_zip_tier(self):
+        """Vacuity guard: the short-circuit must not have become
+        `always return []`, which would satisfy both tests above while
+        deploying nothing, ever."""
+        import deploy_mcp
+
+        assert deploy_mcp.tiers_to_deploy(self._Args()) == self._zips()
+        assert self._zips(), "no zip tiers at all -- the guard is vacuous"
+
+    def test_the_image_tier_is_never_implicit(self):
+        """It needs --image-uri, so including it in a bare run turns every
+        such run into an error."""
+        import deploy_mcp
+
+        assert "stack-mutation-node" not in deploy_mcp.tiers_to_deploy(self._Args())

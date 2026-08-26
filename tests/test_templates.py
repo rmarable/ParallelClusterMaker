@@ -519,6 +519,22 @@ _MCP_LAMBDA_POLICY_FILES = [
     "MCPAuthorizerLambda.json_src",
 ]
 
+# A fourth category: neither instance-reachable, nor a Lambda execution
+# role, nor the operator's own. These are what an administrator grants to
+# whoever deploys the transport, plus the permissions boundary every MCP
+# role is created under. They are deliberately outside _BAN_APPLIES_TO --
+# the boundary *denies* logs:DeleteLogGroup, and that ban reads every
+# statement without looking at Effect, so a Deny would trip it. Denying an
+# action is the opposite of the thing the ban exists to catch.
+_MCP_DEPLOY_POLICY_FILES = [
+    "MCPDeployPolicy.json_src",
+    "MCPRoleBoundary.json_src",
+]
+
+# Structural guards (valid JSON, the size limit, unique Sids, placeholder
+# substitution) apply to every MCP document regardless of category.
+_MCP_ALL_POLICY_FILES = _MCP_LAMBDA_POLICY_FILES + _MCP_DEPLOY_POLICY_FILES
+
 
 def _load_policy(fname):
     path = os.path.join(REPO_ROOT, "templates", fname)
@@ -598,6 +614,41 @@ def test_head_node_iam_policy_omits_put_role_policy():
     assert "iam:CreatePolicyVersion" not in actions
 
 
+def test_operator_policy_omits_policy_version_management():
+    """templates/CLAUDE.md states these are intentionally omitted from
+    OperatorPolicy, and until now only HeadNode-IAM was checked.
+
+    The reason is a privilege-escalation path: `iam:CreatePolicyVersion` on
+    `pclustermaker-policy-*` lets the holder rewrite any cluster's head-node
+    policy in place to `Action:"*" Resource:"*"`. Nothing in the toolkit
+    needs it there -- `_setup_iam` only ever calls create_policy and
+    delete_policy.
+
+    MCPDeployPolicy *does* grant these, and that is not a contradiction:
+    they are scoped to `pclustermaker-mcp-policy-*`, they are what makes
+    `--setup-infra` converge on a changed document, and every role those
+    policies attach to is created under a permissions boundary that caps
+    what they can confer. templates/CLAUDE.local.md names that exact
+    mitigation -- "gate it behind an iam:PermissionsBoundary condition".
+    No such boundary exists for the cluster roles, which is why the
+    omission stands here.
+    """
+    data = _load_policy("OperatorPolicy.json_src")
+    actions = {
+        a
+        for stmt in data["Statement"]
+        for a in (stmt["Action"] if isinstance(stmt["Action"], list)
+                  else [stmt["Action"]])
+    }
+    for banned in ("iam:CreatePolicyVersion", "iam:DeletePolicyVersion",
+                   "iam:SetDefaultPolicyVersion"):
+        assert banned not in actions, (
+            f"OperatorPolicy grants {banned}; it can now rewrite any "
+            f"cluster's head-node policy in place, and no permissions "
+            f"boundary caps a cluster role"
+        )
+
+
 class TestNoInstancePolicyCanDeleteALogGroup:
     """logs:DeleteLogGroup must not be reachable from any instance in the cluster.
 
@@ -663,6 +714,7 @@ class TestNoInstancePolicyCanDeleteALogGroup:
         classified = (
             set(_INSTANCE_REACHABLE_POLICY_FILES)
             | set(_MCP_LAMBDA_POLICY_FILES)
+            | set(_MCP_DEPLOY_POLICY_FILES)
             | {"OperatorPolicy.json_src"}
         )
         assert on_disk == classified, (
@@ -6775,13 +6827,13 @@ class TestMcpLambdaPolicies:
             f for f in os.listdir(os.path.join(REPO_ROOT, "templates"))
             if f.startswith("MCP") and f.endswith(".json_src")
         }
-        assert on_disk == set(_MCP_LAMBDA_POLICY_FILES)
+        assert on_disk == set(_MCP_ALL_POLICY_FILES)
 
-    @pytest.mark.parametrize("fname", _MCP_LAMBDA_POLICY_FILES)
+    @pytest.mark.parametrize("fname", _MCP_ALL_POLICY_FILES)
     def test_valid_json(self, fname):
         _load_policy(fname)
 
-    @pytest.mark.parametrize("fname", _MCP_LAMBDA_POLICY_FILES)
+    @pytest.mark.parametrize("fname", _MCP_ALL_POLICY_FILES)
     def test_under_the_managed_policy_size_limit(self, fname):
         """Measured minified, which is what _render_policy enforces. Worth
         stating because raw file size misleads here: MCPStackMutation is
@@ -6791,7 +6843,7 @@ class TestMcpLambdaPolicies:
         size = len(minified.encode("utf-8"))
         assert size <= _IAM_POLICY_LIMIT, f"{fname}: {size} > {_IAM_POLICY_LIMIT}"
 
-    @pytest.mark.parametrize("fname", _MCP_LAMBDA_POLICY_FILES)
+    @pytest.mark.parametrize("fname", _MCP_ALL_POLICY_FILES)
     def test_statement_keys_are_valid(self, fname):
         valid = {
             "Sid", "Effect", "Action", "NotAction",
@@ -6801,12 +6853,12 @@ class TestMcpLambdaPolicies:
             unknown = set(stmt) - valid
             assert not unknown, f"{fname}: statement {stmt.get('Sid')} has {unknown}"
 
-    @pytest.mark.parametrize("fname", _MCP_LAMBDA_POLICY_FILES)
+    @pytest.mark.parametrize("fname", _MCP_ALL_POLICY_FILES)
     def test_sids_are_unique(self, fname):
         sids = [s.get("Sid") for s in _load_policy(fname)["Statement"]]
         assert len(sids) == len(set(sids)), f"{fname}: duplicate Sids"
 
-    @pytest.mark.parametrize("fname", _MCP_LAMBDA_POLICY_FILES)
+    @pytest.mark.parametrize("fname", _MCP_ALL_POLICY_FILES)
     def test_no_unsubstituted_placeholders(self, fname):
         """Catches a placeholder _PLACEHOLDER_SUB does not know about --
         which is how <MCP_USER_POOL_ID> would otherwise have rendered
@@ -6846,6 +6898,123 @@ class TestMcpLambdaPolicies:
                 f"_render_policy does not substitute {token}, used by an MCP "
                 f"policy template -- it would render literally into an IAM ARN"
             )
+
+
+class TestEachTierCanActuallyDoItsJob:
+    """A tier's policy must grant what its own tools call, and nothing had
+    checked that for `fleet-toggle`.
+
+    `update-compute-fleet` does two things before it can toggle anything: it
+    parses the cluster configuration out of PCluster's own per-cluster S3
+    bucket, and it reads/updates the fleet status item in the DynamoDB table
+    `parallelcluster-<cluster>` (`ComputeFleetStatusManager`). The tier
+    granted neither, so `stop_fleet` and `start_fleet` failed against every
+    real cluster for the tier's whole life -- "Unable to access bucket
+    associated to the cluster", observed live in R4.
+
+    It went unseen because every guard here asked whether a tier could
+    exceed its blast radius, never whether it could reach its own floor, and
+    because the error that surfaced it was blank until
+    `pcluster_exception_detail` was wired into the wrappers.
+    """
+
+    def _actions(self, fname):
+        pol = _load_policy(fname)
+        out = []
+        for st in pol["Statement"]:
+            if st.get("Effect") != "Allow":
+                continue
+            acts = st.get("Action", [])
+            out += acts if isinstance(acts, list) else [acts]
+        return out
+
+    def _grants(self, fname, action):
+        return any(fnmatch.fnmatch(action, granted)
+                   for granted in self._actions(fname))
+
+    def test_fleet_toggle_can_read_the_cluster_configuration(self):
+        for action in ("s3:GetObject", "s3:ListBucket"):
+            assert self._grants("MCPFleetToggleLambda.json_src", action), (
+                f"fleet-toggle cannot {action}; update-compute-fleet parses "
+                f"the cluster config from PCluster's per-cluster bucket and "
+                f"fails with 'Unable to access bucket associated to the cluster'"
+            )
+
+    def test_fleet_toggle_can_read_and_update_the_fleet_status_item(self):
+        for action in ("dynamodb:GetItem", "dynamodb:UpdateItem"):
+            assert self._grants("MCPFleetToggleLambda.json_src", action), (
+                f"fleet-toggle cannot {action}; the compute fleet status "
+                f"lives in the parallelcluster-<cluster> DynamoDB table"
+            )
+
+    def test_fleet_toggle_still_cannot_write_a_cluster_configuration(self):
+        """The floor is not a licence to raise the ceiling: this tier
+        toggles a fleet, so its S3 grant stays read-only. `s3:*` would have
+        satisfied the two tests above while handing a fleet toggle the
+        ability to rewrite any cluster's configuration."""
+        for action in ("s3:PutObject", "s3:DeleteObject", "s3:DeleteBucket"):
+            assert not self._grants("MCPFleetToggleLambda.json_src", action), (
+                f"fleet-toggle grants {action}; it needs only to read the "
+                f"cluster config"
+            )
+
+    # Every tier serving a tool that calls describe_cluster. A login-node
+    # pool sits behind an NLB, and pcluster/aws/elb.py is reached during an
+    # ordinary describe -- so this is not a login-node-only tier's problem.
+    _DESCRIBE_CLUSTER_TIERS = [
+        "MCPReadOnlyLambda.json_src",
+        "MCPFleetToggleLambda.json_src",
+        "MCPStackMutation.json_src",
+    ]
+
+    @pytest.mark.parametrize("fname", _DESCRIBE_CLUSTER_TIERS)
+    def test_describe_cluster_works_on_a_login_node_cluster(self, fname):
+        """`--enable_loginnode true` puts the pool behind a load balancer,
+        and describe-cluster then reads it. No tier granted any
+        elasticloadbalancing action, so describe-cluster failed from every
+        remote tier against any login-node cluster -- observed live in R4 as
+        "not authorized to perform: elasticloadbalancing:DescribeLoadBalancers".
+
+        All four calls pcluster's elb.py makes are required; granting only
+        DescribeLoadBalancers moves the failure to the next one.
+        """
+        for action in ("elasticloadbalancing:DescribeLoadBalancers",
+                       "elasticloadbalancing:DescribeTags",
+                       "elasticloadbalancing:DescribeTargetGroups",
+                       "elasticloadbalancing:DescribeTargetHealth"):
+            assert self._grants(fname, action), (
+                f"{fname} cannot {action}; describe-cluster fails on any "
+                f"cluster built with --enable_loginnode true"
+            )
+
+    @pytest.mark.parametrize("fname", _DESCRIBE_CLUSTER_TIERS)
+    def test_the_load_balancer_grant_stays_read_only(self, fname):
+        """Describe actions take no resource-level permission, so this one
+        is necessarily `Resource: "*"` -- which makes keeping it read-only
+        the only bound left on it."""
+        for action in ("elasticloadbalancing:CreateLoadBalancer",
+                       "elasticloadbalancing:DeleteLoadBalancer",
+                       "elasticloadbalancing:ModifyTargetGroup",
+                       "elasticloadbalancing:RegisterTargets"):
+            assert not self._grants(fname, action), (
+                f"{fname} grants {action}; the tiers only ever read the "
+                f"login-node load balancer"
+            )
+
+    def test_the_dynamodb_grant_is_scoped_to_pclusters_own_tables(self):
+        pol = _load_policy("MCPFleetToggleLambda.json_src")
+        for st in pol["Statement"]:
+            acts = st.get("Action", [])
+            acts = acts if isinstance(acts, list) else [acts]
+            if not any(a.startswith("dynamodb:") for a in acts):
+                continue
+            res = st["Resource"]
+            for r in (res if isinstance(res, list) else [res]):
+                assert r != "*", "the DynamoDB grant is account-wide"
+                assert "table/parallelcluster-" in r, (
+                    f"DynamoDB grant on {r!r} reaches tables PCluster does "
+                    f"not own"
+                )
 
 
 class TestRouterPolicyStaysNearZero:
