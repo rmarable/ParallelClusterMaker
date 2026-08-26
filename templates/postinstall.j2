@@ -237,8 +237,21 @@ sudo chmod -R 755 "$SPACK_DIR"
 # was observed.  Nothing else in the toolkit calls bc.  It is on the Ubuntu arm
 # too even though that AMI happens to ship it, because "the base image happens to
 # carry it" is not a property worth depending on across image bumps.
-sudo apt-get -y update
-sudo apt-get -y install gcc git lua5.4 liblua5.4-dev lua-filesystem nfs-common parallel pigz tcl tcsh zsh lua-posix tcllib binutils bc
+# Bound and retry every fetch, for the reason preinstall.j2 documents at
+# length: an unbounded apt hangs the node, and a bare one dies on a
+# transient mirror error.  These packages are genuinely required -- Lmod
+# will not build without lua and bc -- so unlike preinstall's opportunistic
+# upgrade they cannot be made non-fatal; retrying is the only correct
+# answer.  Cluster stageb's third build died exactly here, on
+# `503 Service Unavailable` from us-east-1.ec2.ports.ubuntu.com for
+# liblua5.1-0, lua5.1, lua-socket, lua-sec and luarocks, after the same
+# mirror had already taken two earlier builds down.  Retries=5 rather than
+# preinstall's 3: this is the fatal path, and the extra attempts cost
+# nothing when the mirror is healthy.
+APT_TIMEOUTS="-o Acquire::Retries=5 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::ftp::Timeout=30"
+
+sudo apt-get -y $APT_TIMEOUTS update || echo "WARNING: apt index refresh failed; installs will use the AMI's index" >&2
+sudo apt-get -y $APT_TIMEOUTS install gcc git lua5.4 liblua5.4-dev lua-filesystem nfs-common parallel pigz tcl tcsh zsh lua-posix tcllib binutils bc
 {% elif 'alinux' in base_os %}
 # Install critical packages via dnf.  Same kernel exclusions and the same `bc`
 # requirement as the RHEL arm below -- read that comment for both.
@@ -358,7 +371,7 @@ if [ "$NODE_TYPE" == "HeadNode" ]; then
 # compiler error went nowhere and the log's last line is the luarocks banner.
 # LUA_VER below is read from the 5.1 interpreter, so the whole block is 5.1: do not
 # "fix" this by switching the rocks to 5.3 without changing that too.
-sudo apt-get install -y luarocks liblua5.1-0-dev
+sudo apt-get install -y $APT_TIMEOUTS luarocks liblua5.1-0-dev
 sudo luarocks install luaposix
 sudo luarocks install luafilesystem
 sudo luarocks install lua-term

@@ -7511,3 +7511,75 @@ class TestATransientMirrorCannotFailTheCluster:
             ln = self._line_for(rendered, needle)
             assert "WARNING" in ln, f"failure is swallowed silently: {ln}"
             assert ">&2" in ln, f"the warning does not reach stderr: {ln}"
+
+
+class TestPostinstallsRequiredInstallsRetry:
+    """postinstall.j2's package installs are *required* -- Lmod will not
+    build without lua and bc -- so unlike preinstall's opportunistic
+    upgrade they cannot be made non-fatal. Retrying is the only correct
+    answer to a transient mirror error, and they had neither retries nor
+    timeouts.
+
+    Cluster stageb's third build died here on `503 Service Unavailable`
+    from us-east-1.ec2.ports.ubuntu.com for liblua5.1-0, lua5.1,
+    lua-socket, lua-sec and luarocks -- the same mirror that had already
+    taken the two builds before it down, once by hanging and once by
+    failing the opportunistic upgrade.
+    """
+
+    def _render_postinstall(self, params):
+        env = _make_env(os.path.join(REPO_ROOT, "templates"))
+        return env.get_template("postinstall.j2").render(**params)
+
+    def _required_installs(self, rendered):
+        """The fatal apt lines: an install with no `||` guard."""
+        out = []
+        for ln in rendered.splitlines():
+            st = ln.strip()
+            if st.startswith("#") or "apt-get" not in st or " install" not in st:
+                continue
+            if "||" in st:          # the guarded, opportunistic ones
+                continue
+            out.append(st)
+        return out
+
+    def test_every_required_apt_install_retries(self, cluster_params):
+        lines = self._required_installs(self._render_postinstall(cluster_params))
+        assert lines, "no fatal apt install rendered -- the sweep is vacuous"
+        for ln in lines:
+            assert "$APT_TIMEOUTS" in ln, f"a required install with no retries: {ln}"
+
+    def test_the_retry_budget_is_defined_before_any_use(self, cluster_params):
+        """postinstall.j2 runs under `set -euo pipefail`. A reference on a
+        path where the variable was never assigned is an unbound-variable
+        error, which kills the node -- so the assignment must not sit
+        inside a node-type gate that its uses are outside of."""
+        rendered = self._render_postinstall(cluster_params)
+        lines = rendered.splitlines()
+        assign = next(i for i, ln in enumerate(lines)
+                      if ln.strip().startswith("APT_TIMEOUTS="))
+        uses = [i for i, ln in enumerate(lines)
+                if "$APT_TIMEOUTS" in ln and not ln.strip().startswith("#")]
+        assert uses, "the variable is assigned but never used"
+        assert min(uses) > assign, "used before assignment"
+
+    def test_the_budget_actually_bounds_and_retries(self, cluster_params):
+        rendered = self._render_postinstall(cluster_params)
+        assign = [ln for ln in rendered.splitlines()
+                  if ln.strip().startswith("APT_TIMEOUTS=")]
+        assert len(assign) == 1, f"expected one assignment, got {len(assign)}"
+        body = assign[0]
+        assert "Acquire::Retries" in body
+        assert "Acquire::http::Timeout" in body
+
+    def test_the_opportunistic_installs_stay_guarded(self, cluster_params_gpu_queue_enabled):
+        """The vacuity guard in the other direction: nvtop/htop are
+        diagnostics nothing in the job path imports, and they must stay
+        non-fatal. Making everything retry-and-fail would cost a compute
+        node its bootstrap over a missing diagnostic."""
+        rendered = self._render_postinstall(cluster_params_gpu_queue_enabled)
+        guarded = [ln.strip() for ln in rendered.splitlines()
+                   if "htop" in ln and "install" in ln and not ln.strip().startswith("#")]
+        assert guarded, "the GPU diagnostics block did not render"
+        for ln in guarded:
+            assert "||" in ln, f"a diagnostic install became fatal: {ln}"
