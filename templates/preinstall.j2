@@ -12,7 +12,25 @@ set -euo pipefail
 # Install Python3 and required libraries.
 {% if 'ubuntu' in base_os %}
 
-sudo apt-get -y update
+# Bound every apt network fetch.  apt's own defaults are effectively
+# unbounded, and this script runs as OnNodeStart on the *head node*, which is
+# the critical path for the whole cluster: nothing the head node exports
+# exists until it finishes.  A stalled mirror therefore does not merely slow
+# the build, it starves every node waiting on the head node -- observed on
+# cluster stageb, where `apt-get -y update` sat on the Ubuntu ARM ports
+# mirror for 16+ minutes while the login node's ASG abandoned instance after
+# instance on Heartbeat Timeout, unable to NFS-mount
+# /opt/parallelcluster/shared, with the stack never leaving
+# CREATE_IN_PROGRESS.  Failing fast is strictly better here: a retried,
+# bounded fetch either succeeds or surfaces a real error, where an unbounded
+# one produces a cluster that never finishes and never says why.
+APT_TIMEOUTS="-o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::ftp::Timeout=30"
+
+# Non-fatal, deliberately.  An index refresh is opportunistic: apt can still
+# install from the index the AMI shipped, and a mirror having a bad minute
+# must not fail a cluster.  This is the same call that returned 503 for
+# cluster stageb.
+sudo apt-get -y $APT_TIMEOUTS update || echo "WARNING: apt-get update failed; continuing with the AMI's package index" >&2
 
 # Hold the kernel back, but let userspace upgrade.  Two reasons, both learned the
 # hard way: a kernel bump triggers an initramfs rebuild whose runtime is
@@ -38,8 +56,20 @@ if [ -n "$_kernel_pkgs" ]; then
     sudo apt-mark hold $_kernel_pkgs
 fi
 
-sudo DEBIAN_FRONTEND=noninteractive apt-get -y dist-upgrade
-sudo apt-get -y install python3 python3-pip python3-dev unzip
+# Non-fatal for the same reason, and this one is the more important half.
+# The upgrade is opportunistic hardening, not a correctness requirement: the
+# AMI already boots and already carries a working toolchain, and the set apt
+# proposes here is largely desktop packages nothing on an HPC head node
+# imports -- libreoffice, remmina, transmission, gnome-control-center,
+# snapd, xserver-xephyr, 330 MB of it.  Losing a transient 503 on
+# `mutter-common-bin` should not cost an entire cluster, and on the head
+# node it costs more than the head node: every login and compute node waits
+# on the exports that never happen.  Precedent is the GPU monitoring-tool
+# installs in postinstall.j2, guarded the same way for the same reason.
+# The `install` line below stays fatal -- python3 and python3-dev are
+# genuinely required, and a cluster without them is not one.
+sudo DEBIAN_FRONTEND=noninteractive apt-get -y $APT_TIMEOUTS dist-upgrade || echo "WARNING: apt-get dist-upgrade failed; the AMI's package set is unchanged" >&2
+sudo apt-get -y $APT_TIMEOUTS install python3 python3-pip python3-dev unzip
 # Do NOT add --upgrade here. Debian's python3-pip ships
 # /usr/lib/python3/dist-packages/pip-<ver>.dist-info WITHOUT a RECORD file (only
 # INSTALLER, METADATA, WHEEL, entry_points.txt, top_level.txt -- verified on the

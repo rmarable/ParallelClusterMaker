@@ -7388,3 +7388,126 @@ class TestTheAccessScriptsPreferSSM:
         SSM assertions and strand anyone without the plugin."""
         body = self._render(template)
         assert "HEAD_NODE_IP" in body, template
+
+
+class TestNoAptFetchOnTheHeadNodeIsUnbounded:
+    """apt's network defaults are effectively unbounded, and preinstall.j2
+    runs as OnNodeStart on the *head node* -- the critical path for the
+    whole cluster, since nothing the head node exports exists until it
+    finishes.
+
+    Observed on cluster stageb: `apt-get -y update` ran for 17+ minutes
+    while both mirrors answered in under 90 ms. apt's http/https fetch
+    methods sat in CLOSE-WAIT -- the remotes had closed the connections and
+    apt never noticed -- so `/opt/parallelcluster/shared` was never
+    exported, the login node's ASG abandoned instance after instance on
+    Heartbeat Timeout unable to NFS-mount it, and the stack never left
+    CREATE_IN_PROGRESS. A hang on the head node is not a slow build; it is
+    every other node starved behind it.
+    """
+
+    _NEEDS_BOUND = ("update", "dist-upgrade", "install")
+
+    def _render_preinstall(self, params):
+        env = _make_env(os.path.join(REPO_ROOT, "templates"))
+        return env.get_template("preinstall.j2").render(**params)
+
+    def _apt_lines(self, rendered):
+        return [
+            ln.strip() for ln in rendered.splitlines()
+            if "apt-get" in ln and not ln.strip().startswith("#")
+        ]
+
+    def test_every_apt_get_carries_the_timeouts(self, cluster_params):
+        rendered = self._render_preinstall(cluster_params)
+        lines = self._apt_lines(rendered)
+        assert lines, "no apt-get call rendered -- the ubuntu arm did not render"
+        for ln in lines:
+            assert "$APT_TIMEOUTS" in ln, f"unbounded apt fetch: {ln}"
+
+    def test_the_timeouts_actually_bound_something(self, cluster_params):
+        """A variable that expands to nothing would satisfy the test above
+        while changing no behavior."""
+        rendered = self._render_preinstall(cluster_params)
+        assign = [
+            ln for ln in rendered.splitlines()
+            if ln.strip().startswith("APT_TIMEOUTS=")
+        ]
+        assert len(assign) == 1, f"expected one assignment, got {assign}"
+        body = assign[0]
+        assert "Acquire::http::Timeout" in body
+        assert "Acquire::https::Timeout" in body
+        assert "Acquire::Retries" in body
+
+    def test_a_retry_count_alone_is_not_enough(self, cluster_params):
+        """Retries without a timeout retries nothing: the first attempt
+        never returns, which is the exact failure. The timeout is the
+        load-bearing half."""
+        rendered = self._render_preinstall(cluster_params)
+        assign = [ln for ln in rendered.splitlines()
+                  if ln.strip().startswith("APT_TIMEOUTS=")][0]
+        timeouts = [t for t in assign.split() if "Timeout=" in t]
+        assert timeouts, "retries are set but nothing bounds a single attempt"
+
+    def test_the_dnf_arm_needs_no_equivalent(self, cluster_params_rhel):
+        """dnf carries its own timeouts and this arm has never hung; the
+        test exists to record that the asymmetry is deliberate rather than
+        an oversight, so nobody 'restores symmetry' with an untested
+        change."""
+        rendered = self._render_preinstall(cluster_params_rhel)
+        assert "apt-get" not in rendered
+        assert "dnf" in rendered
+
+
+class TestATransientMirrorCannotFailTheCluster:
+    """`apt-get update` and `dist-upgrade` are opportunistic; the `install`
+    of python3/python3-dev is not. Cluster stageb died twice on the EC2
+    regional Ubuntu ARM mirror -- once hanging in CLOSE-WAIT, then, with
+    timeouts added, failing fast on `503 Service Unavailable` for
+    mutter-common-bin, network-manager, gnome-control-center and snapd:
+    330 MB of desktop packages nothing on an HPC head node imports.
+
+    Losing that upgrade should cost nothing. On the *head node* it cost the
+    whole cluster, because every other node waits on exports that never
+    happen. Same guard, same reason, as the GPU monitoring-tool installs in
+    postinstall.j2.
+    """
+
+    def _render_preinstall(self, params):
+        env = _make_env(os.path.join(REPO_ROOT, "templates"))
+        return env.get_template("preinstall.j2").render(**params)
+
+    def _line_for(self, rendered, needle):
+        for ln in rendered.splitlines():
+            st = ln.strip()
+            if st.startswith("#") or "apt-get" not in st:
+                continue
+            if needle in st:
+                return st
+        raise AssertionError(f"no apt-get line containing {needle!r}")
+
+    def test_update_is_not_fatal(self, cluster_params):
+        ln = self._line_for(self._render_preinstall(cluster_params), " update")
+        assert "||" in ln, f"a failed index refresh would fail the node: {ln}"
+
+    def test_dist_upgrade_is_not_fatal(self, cluster_params):
+        ln = self._line_for(self._render_preinstall(cluster_params), "dist-upgrade")
+        assert "||" in ln, f"a transient 503 would fail the node: {ln}"
+
+    def test_the_required_install_is_still_fatal(self, cluster_params):
+        """The vacuity guard. python3 and python3-dev are genuinely
+        required -- a cluster without them is not one -- so making
+        *everything* non-fatal would turn a broken node into a silently
+        broken one."""
+        ln = self._line_for(self._render_preinstall(cluster_params), " install ")
+        assert "python3" in ln
+        assert "||" not in ln, f"a required install must still fail loudly: {ln}"
+
+    def test_the_warning_names_what_was_skipped(self, cluster_params):
+        """A silent `|| true` is worse than the failure: the operator has no
+        way to know the node is running the AMI's package set."""
+        rendered = self._render_preinstall(cluster_params)
+        for needle in (" update", "dist-upgrade"):
+            ln = self._line_for(rendered, needle)
+            assert "WARNING" in ln, f"failure is swallowed silently: {ln}"
+            assert ">&2" in ln, f"the warning does not reach stderr: {ln}"
