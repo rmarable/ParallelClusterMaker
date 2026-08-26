@@ -13,6 +13,10 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from entrypoint_harness import load_entrypoint  # noqa: E402
 
+sys.path.insert(0, os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src"))
+import pcluster_core  # noqa: E402
+
 class TestAnUnreachableStoreIsAnnounced:
     """There are two ways to lose the shared store and they took different
     paths. `_save_cluster_config` prints "Shared store unreachable" when it
@@ -75,3 +79,41 @@ class TestAnUnreachableStoreIsAnnounced:
         s3, bucket = mod._cluster_store("certify")
         assert bucket == "parallelclustermaker-locks-x"
         assert "WARNING" not in capsys.readouterr().out
+
+
+class TestTheQueueReminderReadsAsEnglish:
+    """`action` already carries its preposition, so the format string must
+    not add one. Both call sites printed "added to in <path>" and "removed
+    from in <path>" for the life of the script -- observed on cluster
+    stageb while certifying the store-unreachable warning.
+
+    Small, but this is the line an operator reads immediately after every
+    queue edit, and it is the one telling them which file to apply.
+    """
+
+    _ACTIONS = ("added to", "removed from")
+
+    def _reminder(self, action, capsys):
+        pcluster_core._print_update_reminder("c1", "us-east-1", "q1", action)
+        return capsys.readouterr().out
+
+    @pytest.mark.parametrize("action", _ACTIONS)
+    def test_no_doubled_preposition(self, action, capsys):
+        out = self._reminder(action, capsys)
+        assert f"{action} in " not in out, f'reads "{action} in <path>"'
+
+    @pytest.mark.parametrize("action", _ACTIONS)
+    def test_it_still_names_the_queue_and_the_file(self, action, capsys):
+        """The vacuity guard: deleting the sentence would also pass the
+        test above, and that sentence is what tells the operator which file
+        to hand to `pcluster update-cluster`."""
+        out = self._reminder(action, capsys)
+        assert '"q1"' in out
+        assert "active_clusters/c1/config.c1" in out
+        assert action in out
+
+    @pytest.mark.parametrize("action", _ACTIONS)
+    def test_the_whole_sentence_is_well_formed(self, action, capsys):
+        out = self._reminder(action, capsys)
+        expected = f'Queue "q1" {action} active_clusters/c1/config.c1'
+        assert expected in out, f"expected {expected!r}"

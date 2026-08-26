@@ -5655,7 +5655,10 @@ def _recovery_guidance(cluster_name, region, config_path, stage):
 
 def _print_update_reminder(cluster_name, region, queue_name, action):
     config_rel = f"active_clusters/{cluster_name}/config.{cluster_name}"
-    print(f'\nQueue "{queue_name}" {action} in {config_rel}\n')
+    # `action` already carries its preposition ("added to" / "removed
+    # from"), so this must not add one: both call sites printed "added to
+    # in <path>" and "removed from in <path>" for the life of the script.
+    print(f'\nQueue "{queue_name}" {action} {config_rel}\n')
     print("To apply this change:\n")
     print(
         f"1. Stop the compute fleet:\n"
