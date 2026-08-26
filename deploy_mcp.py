@@ -174,7 +174,7 @@ def main():
     p.add_argument("--dry-run", action="store_true",
                    help="build and report sizes; upload and deploy nothing")
     p.add_argument("--setup-gateway", action="store_true",
-                   help="create the HTTP API, its Lambda authorizer and its "
+                   help="create the REST API, its Lambda authorizer and its "
                         "routes, and the Cognito app client and domain the "
                         "OAuth flow needs; idempotent. This is what makes "
                         "the transport reachable from a browser.")

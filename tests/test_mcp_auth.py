@@ -556,3 +556,72 @@ class TestTheAuthPolicyScoping:
                 for res in stmt["Resource"]:
                     assert res.endswith("<MCP_USER_POOL_ID>"), (name, res)
                     assert "*" not in res, (name, res)
+
+
+class TestTheWwwAuthenticateHeaderHasOneSource:
+    """`www_authenticate_header` had no production caller.
+
+    Its docstring says it is "configured on API Gateway's UNAUTHORIZED
+    gateway response", and `setup_gateway` did configure one -- by building
+    the string inline instead of calling it. Two sources for one wire
+    format, which is the pattern CLAUDE.md pins by test everywhere else.
+
+    They had already diverged: the helper rstrips a trailing slash off the
+    base URL and the inline copy did not, so a base_url ending in "/" put a
+    doubled slash into the only header that tells a client where to
+    authenticate. Nothing would have reported that -- a malformed
+    resource_metadata URL fails at the client, during connector setup.
+    """
+
+    def test_setup_gateway_calls_the_helper_rather_than_rebuilding_it(self):
+        """AST, not a substring: the point is that no second construction of
+        this string exists, and a grep for the literal cannot tell a call
+        from a copy."""
+        import ast
+        import io
+        import os
+
+        path = os.path.join(REPO_ROOT, "mcp_server", "deploy.py")
+        tree = ast.parse(io.open(path, encoding="utf-8").read())
+
+        called = any(
+            isinstance(n, ast.Call)
+            and isinstance(n.func, ast.Name)
+            and n.func.id == "www_authenticate_header"
+            for n in ast.walk(tree)
+        )
+        assert called, (
+            "setup_gateway does not call www_authenticate_header; if it "
+            "builds the header itself there are two sources for one wire "
+            "format again"
+        )
+
+    def test_no_second_construction_of_the_scheme_remains(self):
+        """Vacuity guard for the test above: calling the helper *and*
+        keeping the old literal would satisfy it while leaving the
+        divergence in place."""
+        import io
+        import os
+
+        path = os.path.join(REPO_ROOT, "mcp_server", "deploy.py")
+        body = io.open(path, encoding="utf-8").read()
+        # The helper owns the scheme token and the parameter name; a second
+        # copy in this file necessarily repeats them together.
+        offenders = [
+            line for line in body.splitlines()
+            if "Bearer resource_metadata" in line
+        ]
+        assert not offenders, (
+            f"deploy.py still builds the header itself: {offenders}"
+        )
+
+    def test_a_trailing_slash_does_not_double(self):
+        """The divergence that existed. The helper is the only place this is
+        handled, so it has to keep handling it."""
+        from mcp_server.auth import discovery
+
+        header = discovery.www_authenticate_header(
+            api_base_url="https://example.execute-api.amazonaws.com/prod/")
+        assert "//.well-known" not in header
+        assert header.endswith(
+            '/.well-known/oauth-protected-resource"')

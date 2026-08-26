@@ -24,6 +24,7 @@ local-only; see `_LOCAL_ONLY` in `tools.py`.
 
 import os
 
+from .auth.discovery import www_authenticate_header
 from .packaging import TIER_PACKAGES, manifest
 from .tiers import FUNCTION_NAMES
 
@@ -415,9 +416,18 @@ def setup_gateway(*, account, region, user_pool_id, cognito_domain=None,
                 restApiId=api_id, responseType="UNAUTHORIZED",
                 statusCode="401",
                 responseParameters={
+                    # One source for the wire format. This was built inline
+                    # here while www_authenticate_header() -- whose docstring
+                    # says it is "configured on API Gateway's UNAUTHORIZED
+                    # gateway response" -- had no caller at all, and the two
+                    # had already diverged: the helper rstrips a trailing
+                    # slash off the base URL and this did not, so a base_url
+                    # ending in "/" produced a doubled slash in the only
+                    # header that tells a client where to authenticate.
+                    # API Gateway wants a static mapping value quoted.
                     "gatewayresponse.header.WWW-Authenticate":
-                        f"'Bearer resource_metadata=\"{base_url}"
-                        f"/.well-known/oauth-protected-resource\"'",
+                        "'" + www_authenticate_header(
+                            api_base_url=base_url) + "'",
                 })
             print("  gateway response UNAUTHORIZED -> 401 + WWW-Authenticate")
         except Exception as e:
