@@ -7583,3 +7583,88 @@ class TestPostinstallsRequiredInstallsRetry:
         assert guarded, "the GPU diagnostics block did not render"
         for ln in guarded:
             assert "||" in ln, f"a diagnostic install became fatal: {ln}"
+
+
+class TestEveryPackageManagerCallIsWallClockBounded:
+    """apt's own Acquire::* timeouts bound individual socket operations, not
+    the command, and that is not enough. Cluster stageb's fourth build ran
+    `apt-get update` for **30+ minutes with those options set** -- a mirror
+    that dribbles rather than stalling outright never trips them -- and
+    `|| echo WARNING` cannot help a process that never exits.
+
+    The head node is the critical path for the whole cluster, so a hang
+    there starves every login and compute node behind it. timeout(1) is the
+    guarantee; APT_TIMEOUTS is best-effort on top of it.
+
+    Semantics verified empirically before this was written, rather than
+    assumed: `timeout N cmd` exits 124 and kills the child; `|| echo` on a
+    timeout emits the warning; an unguarded timeout under `set -e` aborts;
+    `timeout N env VAR=x cmd` propagates the variable; and an unquoted
+    `$APT_TIMEOUTS` still word-splits into separate argv entries.
+    """
+
+    _TEMPLATES = ("preinstall.j2", "postinstall.j2")
+
+    def _render(self, name, params):
+        env = _make_env(os.path.join(REPO_ROOT, "templates"))
+        return env.get_template(name).render(**params)
+
+    def _pm_lines(self, rendered):
+        """Package-manager invocations that reach the network."""
+        out = []
+        for ln in rendered.splitlines():
+            st = ln.strip()
+            if st.startswith("#") or not st.startswith("sudo "):
+                continue
+            if "apt-get" not in st:
+                continue
+            if any(w in st for w in (" update", " install", "dist-upgrade")):
+                out.append(st)
+        return out
+
+    @pytest.mark.parametrize("template", _TEMPLATES)
+    def test_every_apt_call_carries_a_wall_clock_bound(self, template, cluster_params):
+        lines = self._pm_lines(self._render(template, cluster_params))
+        assert lines, f"{template} rendered no apt call -- the sweep is vacuous"
+        for ln in lines:
+            assert "timeout " in ln, f"{template}: unbounded wall clock: {ln}"
+
+    @pytest.mark.parametrize("template", _TEMPLATES)
+    def test_the_bound_precedes_the_command(self, template, cluster_params):
+        """`sudo timeout N apt-get ...`, not `sudo apt-get ... timeout`.
+        timeout must be the parent or it bounds nothing."""
+        for ln in self._pm_lines(self._render(template, cluster_params)):
+            before = ln.split("apt-get")[0]
+            assert "timeout " in before, f"{template}: timeout is not the parent: {ln}"
+
+    @pytest.mark.parametrize("template", _TEMPLATES)
+    def test_each_bound_is_a_positive_number_of_seconds(self, template, cluster_params):
+        import re
+
+        for ln in self._pm_lines(self._render(template, cluster_params)):
+            m = re.search(r"timeout (\d+)", ln)
+            assert m, f"{template}: no numeric bound: {ln}"
+            assert int(m.group(1)) > 0
+
+    def test_dist_upgrade_uses_env_not_a_bare_assignment(self, cluster_params):
+        """`timeout N DEBIAN_FRONTEND=x apt-get` is not valid: timeout execs
+        its argument directly and a VAR=VAL prefix is shell syntax, so the
+        variable would be treated as the program name. `env` is required."""
+        for ln in self._pm_lines(self._render("preinstall.j2", cluster_params)):
+            if "dist-upgrade" not in ln:
+                continue
+            assert "DEBIAN_FRONTEND" in ln
+            i_to, i_env = ln.index("timeout "), ln.index("DEBIAN_FRONTEND")
+            assert "env " in ln[i_to:i_env], f"needs env(1) after timeout: {ln}"
+
+    def test_the_required_installs_are_still_fatal(self, cluster_params):
+        """timeout(1) exits 124, which `set -e` treats as failure -- so a
+        bounded required install still fails the node rather than silently
+        continuing without python3 or lua."""
+        for template in self._TEMPLATES:
+            for ln in self._pm_lines(self._render(template, cluster_params)):
+                if " install " not in ln:
+                    continue
+                if any(p in ln for p in ("nvtop", "htop")):
+                    continue        # diagnostics, deliberately non-fatal
+                assert "||" not in ln, f"{template}: required install is guarded: {ln}"

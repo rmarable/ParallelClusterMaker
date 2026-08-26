@@ -250,8 +250,8 @@ sudo chmod -R 755 "$SPACK_DIR"
 # nothing when the mirror is healthy.
 APT_TIMEOUTS="-o Acquire::Retries=5 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::ftp::Timeout=30"
 
-sudo apt-get -y $APT_TIMEOUTS update || echo "WARNING: apt index refresh failed; installs will use the AMI's index" >&2
-sudo apt-get -y $APT_TIMEOUTS install gcc git lua5.4 liblua5.4-dev lua-filesystem nfs-common parallel pigz tcl tcsh zsh lua-posix tcllib binutils bc
+sudo timeout 300 apt-get -y $APT_TIMEOUTS update || echo "WARNING: apt index refresh failed or timed out; installs will use the AMI's index" >&2
+sudo timeout 900 apt-get -y $APT_TIMEOUTS install gcc git lua5.4 liblua5.4-dev lua-filesystem nfs-common parallel pigz tcl tcsh zsh lua-posix tcllib binutils bc
 {% elif 'alinux' in base_os %}
 # Install critical packages via dnf.  Same kernel exclusions and the same `bc`
 # requirement as the RHEL arm below -- read that comment for both.
@@ -371,7 +371,7 @@ if [ "$NODE_TYPE" == "HeadNode" ]; then
 # compiler error went nowhere and the log's last line is the luarocks banner.
 # LUA_VER below is read from the 5.1 interpreter, so the whole block is 5.1: do not
 # "fix" this by switching the rocks to 5.3 without changing that too.
-sudo apt-get install -y $APT_TIMEOUTS luarocks liblua5.1-0-dev
+sudo timeout 600 apt-get install -y $APT_TIMEOUTS luarocks liblua5.1-0-dev
 sudo luarocks install luaposix
 sudo luarocks install luafilesystem
 sudo luarocks install lua-term
