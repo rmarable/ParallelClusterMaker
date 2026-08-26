@@ -1044,3 +1044,72 @@ class TestTheGatewayIsRemoved:
         removed = delete_gateway(apigw, suppress=False)
         assert removed == ["pclustermaker-mcp"]
         assert [a["name"] for a in apigw._apis] == ["someone-elses-api"]
+
+
+class TestTheGatewayTimeoutIsTheRealCeiling:
+    """API Gateway REST caps an integration at 29s. That is far tighter than
+    the Lambda's 900s, and it governs every remote tool call.
+
+    CLAUDE.md described the 900s ceiling as the constraint that forces
+    `apply_queue_config` to be local-only, which is true but incomplete: a
+    remote call has ~29s. Past it the caller receives a timeout body while
+    the Lambda keeps running and the mutation *succeeds* -- so the failure
+    is not just a wrong answer, it is a wrong answer about a thing that
+    happened. A client that retries submits a second update against a stack
+    already updating.
+
+    Measured live: `apply_cluster_update` adding one queue ran 41,992 ms in
+    the Lambda; the caller saw failure at 29.4s; the update completed. R4's
+    earlier calls were 14-20s and stayed under it, which is why nothing
+    caught this.
+
+    The number was already in `deploy.py` -- in a comment explaining why the
+    authorizer's timeout is 10s -- and had never been generalized to the
+    tier tools. It is a named constant now so it is visible where
+    integrations are wired.
+    """
+
+    def test_the_constant_is_the_rest_maximum(self):
+        from mcp_server.deploy import GATEWAY_INTEGRATION_TIMEOUT_MS
+
+        assert GATEWAY_INTEGRATION_TIMEOUT_MS == 29_000, (
+            "29s is API Gateway REST's maximum integration timeout; a higher "
+            "value is not a parameter, it needs a service quota increase"
+        )
+
+    def test_every_integration_is_wired_with_it(self):
+        """Explicit, not inherited from the AWS default. Inherited, the real
+        ceiling on every remote call is invisible at the call site -- which
+        is how a 42s tool call came to be written in the first place."""
+        import ast
+        import io
+        import os
+
+        path = os.path.join(REPO_ROOT, "mcp_server", "deploy.py")
+        tree = ast.parse(io.open(path, encoding="utf-8").read())
+
+        calls = [
+            n for n in ast.walk(tree)
+            if isinstance(n, ast.Call)
+            and isinstance(n.func, ast.Attribute)
+            and n.func.attr == "put_integration"
+        ]
+        assert calls, "no put_integration call found -- the sweep is vacuous"
+        for c in calls:
+            names = [k.arg for k in c.keywords]
+            assert "timeoutInMillis" in names, (
+                "put_integration does not set timeoutInMillis; the 29s "
+                "ceiling then depends on an AWS default nothing states"
+            )
+
+    def test_the_lambda_ceiling_is_still_the_larger_one(self):
+        """Vacuity guard, and the point of the distinction: the Lambda may
+        legitimately run far longer than the gateway will wait. Both numbers
+        are real; they bound different things."""
+        from mcp_server.deploy import (
+            GATEWAY_INTEGRATION_TIMEOUT_MS,
+            LAMBDA_MAX_TIMEOUT_SECONDS,
+        )
+
+        assert LAMBDA_MAX_TIMEOUT_SECONDS * 1000 > GATEWAY_INTEGRATION_TIMEOUT_MS
+        assert LAMBDA_MAX_TIMEOUT_SECONDS == 900

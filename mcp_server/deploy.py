@@ -347,7 +347,8 @@ def _wire(apigw, api_id, resource_id, method, uri, *, authorizer_id=None):
                    "value": authorizer_id}] if authorizer_id else []))
     apigw.put_integration(
         restApiId=api_id, resourceId=resource_id, httpMethod=method,
-        type="AWS_PROXY", integrationHttpMethod="POST", uri=uri)
+        type="AWS_PROXY", integrationHttpMethod="POST", uri=uri,
+        timeoutInMillis=GATEWAY_INTEGRATION_TIMEOUT_MS)
 
 
 def setup_gateway(*, account, region, user_pool_id, cognito_domain=None,
@@ -457,6 +458,15 @@ def setup_gateway(*, account, region, user_pool_id, cognito_domain=None,
 
     return {"api_id": api_id, "base_url": base_url, "authorizer_id": authorizer_id}
 
+
+# API Gateway REST caps an integration at 29s and this is already the
+# maximum -- raising it needs a service quota increase, not a parameter.
+# Set explicitly rather than inherited, so the number is visible at the call
+# site: it is the real ceiling on every remote tool call, far tighter than
+# the Lambda's 900s, and it was invisible here until a 42s
+# apply_cluster_update returned a timeout to the caller while the update it
+# had already submitted ran to completion.
+GATEWAY_INTEGRATION_TIMEOUT_MS = 29_000
 
 _GATEWAY_NAME_PREFIX = "pclustermaker-mcp"
 

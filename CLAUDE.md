@@ -213,12 +213,22 @@ standing constraints for local development.
   functions as tools on two FastMCP instances: `build_local()` (stdio,
   full set) and `build_remote()` (restricted). The exclusions are data in
   `_LOCAL_ONLY`, never a second registration list.
-- **Lambda's function timeout is a hard 900s ceiling**, so no tool in
-  `TOOL_TIERS` may block on a cluster operation — past it the function is
-  killed mid-mutation, with the fleet stopped, an update in flight and the
-  S3 lock held by a dead process. `apply_queue_config` is local-only for
-  this reason; remote callers drive `stop_fleet` → `apply_cluster_update`
-  → `start_fleet`. Decompose such a tool, never delete the capability.
+- **Lambda's 900s ceiling is not the binding one; API Gateway's 29s
+  integration timeout is.** No tool in `TOOL_TIERS` may block on a cluster
+  operation: past 900s the function is killed mid-mutation, with the fleet
+  stopped, an update in flight and the S3 lock held by a dead process.
+  `apply_queue_config` is local-only for this reason; remote callers drive
+  `stop_fleet` → `apply_cluster_update` → `start_fleet`. Decompose such a
+  tool, never delete the capability. **But a remote call has ~29s, not
+  900s** — `GATEWAY_INTEGRATION_TIMEOUT_MS`, already the REST maximum;
+  raising it needs a service quota increase. Past it the caller gets a
+  timeout body while the Lambda runs on and the mutation *succeeds*, so a
+  client that retries submits a second update against a stack already
+  updating. Measured: `apply_cluster_update` took 41,992 ms adding one
+  queue and the caller saw failure at 29.4s while the update completed. R4's
+  14-20s calls stayed under it, which is why the ceiling went unrecorded.
+  `deploy.py` knew the number — in a comment justifying the authorizer's 10s
+  timeout — and it was never generalized to the tier tools.
 - **`delete_cluster` initiates a teardown; `finalize_cluster_teardown`
   finishes it.** `wait=False` returns on CloudFormation's acceptance and
   skips *every* teardown step, so one call leaves the IAM policies, the S3

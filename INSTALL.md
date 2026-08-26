@@ -21,7 +21,7 @@
   * On Windows, use [Docker Desktop](https://www.docker.com/products/docker-desktop/) or [Rancher Desktop](https://rancherdesktop.io/) with the WSL2 backend, and build from inside a WSL2 shell rather than from PowerShell — the repository's build tooling is POSIX shell. Finch does not support Windows.
   * **Build for the Lambda function's architecture, not your laptop's.** An image built on Apple Silicon or an ARM Linux host defaults to `linux/arm64`, and Lambda rejects a mismatch at `CreateFunction` rather than at invocation. Pass `--platform linux/amd64` unless the function is configured for `arm64`.
   * **The ECR repository must exist before the first push.** `finch push` (and `docker push`) will not create it, and the failure names the wrong cause: ECR answers an unknown repository with `repository does not exist or may require authorization`, whose second half sends you auditing IAM for a permission that was never missing. Create it once with `aws ecr create-repository --repository-name pclustermaker-mcp-stack-mutation-node --region <region>`.
-  * **On Finch, `finch login` can succeed while `finch push` reports `no basic auth credentials`.** Finch runs containerd inside a Lima VM, and the push happens in the VM rather than on the host. `finch login` writes the credential to the host — by default handing it to the macOS keychain via `"credsStore": "osxkeychain"` in `~/.finch/config.json`, which leaves the `auths` entry empty — and the VM has no `~/.docker/config.json` of its own, so the pusher finds nothing. **Both halves are required, and neither alone works** — confirmed by testing each in isolation: removing `credsStore` and re-running `finch login` (so the host config carries an inline token) *and* writing the credential into the VM. With only the VM file the push still fails with the same message, so do not skip the host half on the reasoning that the push happens in the VM. Scrub both afterward (the ECR token is short-lived, but it is still a credential at rest):
+  * **On Finch, `finch login` can succeed while `finch push` reports `no basic auth credentials`.** Finch runs containerd inside a Lima VM, and the push happens in the VM rather than on the host. `finch login` writes the credential to the host — by default handing it to the macOS keychain via `"credsStore": "osxkeychain"` in `~/.finch/config.json`, which leaves the `auths` entry empty — and the VM has no `~/.docker/config.json` of its own, so the pusher finds nothing. **Three locations are required and no two of them suffice** — each was tested in isolation. (1) the host config must carry an inline token, so `credsStore` is removed and `finch login` re-run; (2) the VM's `$HOME/.docker/config.json`; and (3) **the VM's `/root/.docker/config.json`, because containerd inside the VM runs as root and reads root's config, not the invoking user's**. Omitting the third fails with exactly the same `no basic auth credentials` as omitting all of them, which is indistinguishable from having done nothing — verified twice, once against a documented procedure that listed only the first two. Do not skip the host half on the reasoning that the push happens in the VM, and do not skip the root half on the reasoning that you already wrote a config into the VM. Scrub all three afterward (the ECR token is short-lived, but it is still a credential at rest):
 
     ```sh
     export LIMA_HOME=/Applications/Finch/lima/data
@@ -34,10 +34,15 @@
 
     # VM half
     AUTH=$(printf 'AWS:%s' "$(aws ecr get-login-password --region <region>)" | base64 | tr -d '\n')
-    printf '{"auths":{"<acct>.dkr.ecr.<region>.amazonaws.com":{"auth":"%s"}}}' "$AUTH" \
+    CFG=$(printf '{"auths":{"<acct>.dkr.ecr.<region>.amazonaws.com":{"auth":"%s"}}}' "$AUTH")
+    printf '%s' "$CFG" \
       | $LIMACTL shell finch -- sh -c 'mkdir -p $HOME/.docker && cat > $HOME/.docker/config.json'
+    # containerd in the VM runs as root and reads root's config, not yours
+    printf '%s' "$CFG" \
+      | $LIMACTL shell finch -- sudo sh -c 'mkdir -p /root/.docker && cat > /root/.docker/config.json'
     finch push <acct>.dkr.ecr.<region>.amazonaws.com/pclustermaker-mcp-stack-mutation-node:latest
     $LIMACTL shell finch -- sh -c 'rm -f $HOME/.docker/config.json'
+    $LIMACTL shell finch -- sudo sh -c 'rm -f /root/.docker/config.json'
     # and restore the host's keychain setting
     python3 -c "import json,os;p=os.path.expanduser('~/.finch/config.json');d=json.load(open(p));d['credsStore']='osxkeychain';d['auths']={};json.dump(d,open(p,'w'))"
     ```
