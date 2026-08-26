@@ -2033,6 +2033,54 @@ def build_make_cluster_params(
     return MakeClusterParams(**{k: v for k, v in values.items() if k in fields})
 
 
+_CLUSTER_BOUNDARY_TEMPLATE = "ClusterRoleBoundary.json_src"
+
+
+def _cluster_boundary_name():
+    return "pclustermaker-cluster-boundary"
+
+
+def _cluster_boundary_arn(aws_account_id):
+    return f"arn:aws:iam::{aws_account_id}:policy/{_cluster_boundary_name()}"
+
+
+def _ensure_cluster_boundary(iam, *, aws_account_id, region, templates_dir):
+    """Create the head node role's permissions boundary if it is absent, and
+    return its ARN.
+
+    Scope: the **head node role only**, and that asymmetry with the MCP side
+    is deliberate rather than an oversight. templates/config.pcluster.j2 gives
+    the head node `InstanceRole:` -- our own pclustermaker-role-<serial> -- but
+    gives every SlurmQueue and the LoginNodes pool `AdditionalIamPolicies:`
+    instead, so PCluster's CDK creates those roles, not this toolkit. There is
+    no create_role call to pass PermissionsBoundary= on and no role name known
+    ahead of time to put_role_permissions_boundary against, and conditioning
+    iam:CreateRole on iam:PermissionsBoundary in OperatorPolicy -- what
+    MCPDeployPolicy does for the roles it owns -- would refuse the CDK's own
+    unbounded CreateRole and break every cluster build. Compute and login
+    nodes are capped by ClusterNode-Deny instead, which they do carry.
+
+    Account-level, not per-serial: one boundary caps every cluster role in the
+    account and outlives all of them. Deliberately not versioned or updated
+    here, following _setup_mcp_infra -- an existing boundary is reused as-is
+    and changing it is an administrator's action, out of band.
+    """
+    boundary_arn = _cluster_boundary_arn(aws_account_id)
+    boundary_doc = _render_policy(
+        os.path.join(templates_dir, _CLUSTER_BOUNDARY_TEMPLATE),
+        aws_account_id, region, "", "", "", "", "", "",
+    )
+    try:
+        iam.create_policy(
+            PolicyName=_cluster_boundary_name(), PolicyDocument=boundary_doc
+        )
+        print(f"  Created cluster permissions boundary: {_cluster_boundary_name()}")
+    except _ClientError as e:
+        if e.response["Error"]["Code"] != "EntityAlreadyExists":
+            raise
+    return boundary_arn
+
+
 def _setup_iam(
     iam,
     ec2_iam_role,
@@ -2050,9 +2098,11 @@ def _setup_iam(
 ):
     """Create ec2_iam_role and attach managed policies. Idempotent.
 
-    Head node role gets: HeadNode-Compute, HeadNode-Storage, HeadNode-IAM, ComputeNode-Base
-    (+ HeadNode-Monitoring when enable_monitoring=True).
-    Every compute queue gets ComputeNode-Base via AdditionalIamPolicies in the cluster config.
+    Head node role gets: HeadNode-Compute, HeadNode-Storage, HeadNode-IAM, ComputeNode-Base,
+    ClusterNode-Deny (+ HeadNode-Monitoring when enable_monitoring=True), and is created
+    under the pclustermaker-cluster-boundary permissions boundary.
+    Every compute queue and the login node pool get ComputeNode-Base and ClusterNode-Deny
+    via AdditionalIamPolicies in the cluster config.
     """
     _role_existed = False
     _template_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -2062,15 +2112,27 @@ def _setup_iam(
     # enable_monitoring value — used to detect stale policies left over from
     # an earlier build (e.g. monitoring was enabled, then disabled on a
     # same-serial rebuild).
-    _ALL_SUFFIXES = ["-HeadNode-Compute", "-HeadNode-Storage", "-HeadNode-IAM", "-ComputeNode-Base", "-HeadNode-Monitoring"]
+    _ALL_SUFFIXES = ["-HeadNode-Compute", "-HeadNode-Storage", "-HeadNode-IAM", "-ComputeNode-Base", "-ClusterNode-Deny", "-HeadNode-Monitoring"]
 
-    _suffixes = ["-HeadNode-Compute", "-HeadNode-Storage", "-HeadNode-IAM", "-ComputeNode-Base"]
+    _suffixes = ["-HeadNode-Compute", "-HeadNode-Storage", "-HeadNode-IAM", "-ComputeNode-Base", "-ClusterNode-Deny"]
     if enable_monitoring:
         _suffixes.append("-HeadNode-Monitoring")
+
+    # Before anything else: a role cannot be created under a boundary that
+    # does not exist yet, and the reassert below has to happen ahead of the
+    # already-satisfied early return -- a role built by a toolkit that
+    # predates the boundary reaches that return on every subsequent build
+    # and would otherwise stay uncapped forever.
+    boundary_arn = _ensure_cluster_boundary(
+        iam, aws_account_id=aws_account_id, region=region, templates_dir=_tmpl
+    )
 
     try:
         iam.get_role(RoleName=ec2_iam_role)
         _role_existed = True
+        iam.put_role_permissions_boundary(
+            RoleName=ec2_iam_role, PermissionsBoundary=boundary_arn
+        )
         attached = {
             p["PolicyName"]
             for p in iam.list_attached_role_policies(RoleName=ec2_iam_role)[
@@ -2117,6 +2179,7 @@ def _setup_iam(
         ("-HeadNode-Storage",   os.path.join(_tmpl, "HeadNode-Storage.json_src")),
         ("-HeadNode-IAM",       os.path.join(_tmpl, "HeadNode-IAM.json_src")),
         ("-ComputeNode-Base",   os.path.join(_tmpl, "ComputeNode-Base.json_src")),
+        ("-ClusterNode-Deny",   os.path.join(_tmpl, "ClusterNode-Deny.json_src")),
     ]
     if enable_monitoring:
         policies.append(("-HeadNode-Monitoring", os.path.join(_tmpl, "HeadNode-Monitoring.json_src")))
@@ -2134,6 +2197,7 @@ def _setup_iam(
             RoleName=ec2_iam_role,
             AssumeRolePolicyDocument='{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Service":["ec2.amazonaws.com"]},"Action":"sts:AssumeRole"}]}',
             Description="ParallelClusterMaker EC2 IAM instance role",
+            PermissionsBoundary=boundary_arn,
         )
     for sfx, _ in policies:
         resp = iam.create_policy(
@@ -2142,7 +2206,7 @@ def _setup_iam(
         )
         iam.attach_role_policy(RoleName=ec2_iam_role, PolicyArn=resp["Policy"]["Arn"])
         print(f"  Created {sfx[1:]}: {ec2_iam_policy}{sfx}")
-    print(f"  Created ec2_iam_role: {ec2_iam_role}")
+    print(f"  Created ec2_iam_role: {ec2_iam_role} (bounded by {_cluster_boundary_name()})")
 
 
 # ---------------------------------------------------------------------------
@@ -2614,8 +2678,16 @@ def _delete_managed_policies(
     fsx_policy=None,
     enable_monitoring=False,
 ):
-    """Detach and delete managed cluster policies (and optional FSx inline policy)."""
-    suffixes = ["-HeadNode-Compute", "-HeadNode-Storage", "-HeadNode-IAM", "-ComputeNode-Base"]
+    """Detach and delete managed cluster policies (and optional FSx inline policy).
+
+    The pclustermaker-cluster-boundary permissions boundary is deliberately
+    NOT deleted here, for a stronger reason than the MCP boundary's: it is
+    account-level, so every other live cluster's role in this account is
+    bounded by the same document, and deleting it on one teardown would
+    uncap all of them. It costs nothing to leave and _setup_iam recreates
+    it only when absent.
+    """
+    suffixes = ["-HeadNode-Compute", "-HeadNode-Storage", "-HeadNode-IAM", "-ComputeNode-Base", "-ClusterNode-Deny"]
     if enable_monitoring:
         suffixes.append("-HeadNode-Monitoring")
     for sfx in suffixes:
@@ -6374,7 +6446,7 @@ def _collect_retained_resources(
         )
     retained.append(
         f"CloudWatch log groups /aws/parallelcluster/{cluster_name}-* "
-        f"(retained 180 days; the only record of a failed build)"
+        f"(retained 30 days; the only record of a failed build)"
     )
     return retained
 
@@ -10648,7 +10720,7 @@ def delete_cluster_record_step(s3, *, cf_delete_confirmed, locks_bucketname,
 # task carries no `when:` at all (the managed policies and the IAM role).
 # ---------------------------------------------------------------------------
 
-_MANAGED_POLICY_SUFFIXES = ["-HeadNode-Compute", "-HeadNode-Storage", "-HeadNode-IAM", "-ComputeNode-Base"]
+_MANAGED_POLICY_SUFFIXES = ["-HeadNode-Compute", "-HeadNode-Storage", "-HeadNode-IAM", "-ComputeNode-Base", "-ClusterNode-Deny"]
 
 
 def _delete_s3_bucket_step(s3, s3_bucketname):

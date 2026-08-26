@@ -63,6 +63,49 @@
             ]
         },
         {
+            "Sid": "IAMClusterBoundaryBootstrapReadAndCreate",
+            "Action": [
+                "iam:CreatePolicy",
+                "iam:GetPolicy",
+                "iam:GetPolicyVersion",
+                "iam:ListPolicyVersions"
+            ],
+            "Effect": "Allow",
+            "Resource": [
+                "arn:aws:iam::<AWS_ACCOUNT_ID>:policy/pclustermaker-cluster-boundary"
+            ]
+        },
+        {
+            "Sid": "IAMBoundClusterRoleOnly",
+            "Action": [
+                "iam:PutRolePermissionsBoundary"
+            ],
+            "Effect": "Allow",
+            "Resource": [
+                "arn:aws:iam::<AWS_ACCOUNT_ID>:role/pclustermaker-role-*"
+            ],
+            "Condition": {
+                "StringEquals": {
+                    "iam:PermissionsBoundary": "arn:aws:iam::<AWS_ACCOUNT_ID>:policy/pclustermaker-cluster-boundary"
+                }
+            }
+        },
+        {
+            "Sid": "IAMDenyWeakeningTheClusterBoundary",
+            "Action": [
+                "iam:CreatePolicyVersion",
+                "iam:SetDefaultPolicyVersion",
+                "iam:DeletePolicyVersion",
+                "iam:DeletePolicy",
+                "iam:DeleteRolePermissionsBoundary"
+            ],
+            "Effect": "Deny",
+            "Resource": [
+                "arn:aws:iam::<AWS_ACCOUNT_ID>:policy/pclustermaker-cluster-boundary",
+                "arn:aws:iam::<AWS_ACCOUNT_ID>:role/pclustermaker-role-*"
+            ]
+        },
+        {
             "Sid": "IAMInstanceProfile",
             "Action": [
                 "iam:CreateInstanceProfile",

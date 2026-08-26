@@ -475,6 +475,7 @@ _POLICY_FILES = [
     "HeadNode-Storage.json_src",
     "HeadNode-IAM.json_src",
     "ComputeNode-Base.json_src",
+    "ClusterNode-Deny.json_src",
     "HeadNode-Monitoring.json_src",
 ]
 
@@ -535,6 +536,28 @@ _MCP_DEPLOY_POLICY_FILES = [
 # substitution) apply to every MCP document regardless of category.
 _MCP_ALL_POLICY_FILES = _MCP_LAMBDA_POLICY_FILES + _MCP_DEPLOY_POLICY_FILES
 
+# A fifth category: the permissions boundary the head node's own role is
+# created under. It is neither a grant nor a document _setup_iam deletes,
+# so it cannot join _POLICY_FILES -- that list is pinned by equality to the
+# managed policies and cross-asserted against pcluster_core.py's suffix
+# lists, and the boundary has no suffix and outlives every cluster. It is
+# instance-reachable in the sense that matters here (it caps the head node
+# role), so it does sit inside _BAN_APPLIES_TO.
+_CLUSTER_BOUNDARY_POLICY_FILES = ["ClusterRoleBoundary.json_src"]
+
+# Everything the cluster-side structural guards (valid JSON, the 6,144-byte
+# minified limit, statement keys, unique Sids, placeholder substitution)
+# must read. The boundary is not a managed policy but IAM validates it the
+# same way and _render_policy enforces the same ceiling on it.
+_CLUSTER_STRUCTURAL_POLICY_FILES = _POLICY_FILES + _CLUSTER_BOUNDARY_POLICY_FILES
+
+# The two permissions boundaries, cluster-side and MCP-side. A boundary is a
+# ceiling rather than a grant, so its Allow statements are service wildcards
+# that would trip any ban written against grants; what makes it safe is the
+# unscoped Deny in the same document. Listed together so a guard can assert
+# that pairing rather than exempt the files.
+_BOUNDARY_POLICY_FILES = _CLUSTER_BOUNDARY_POLICY_FILES + ["MCPRoleBoundary.json_src"]
+
 
 def _load_policy(fname):
     path = os.path.join(REPO_ROOT, "templates", fname)
@@ -560,7 +583,7 @@ def _arn_matches(pattern, arn):
     return re.fullmatch(regex, arn) is not None
 
 
-@pytest.mark.parametrize("fname", _POLICY_FILES)
+@pytest.mark.parametrize("fname", _CLUSTER_STRUCTURAL_POLICY_FILES)
 def test_iam_policy_valid_json(fname):
     """Each IAM policy template must parse as valid JSON after placeholder substitution."""
     data = _load_policy(fname)
@@ -570,7 +593,7 @@ def test_iam_policy_valid_json(fname):
     assert len(data["Statement"]) > 0, f"{fname}: Statement list is empty"
 
 
-@pytest.mark.parametrize("fname", _POLICY_FILES)
+@pytest.mark.parametrize("fname", _CLUSTER_STRUCTURAL_POLICY_FILES)
 def test_iam_policy_under_size_limit(fname):
     """Each IAM managed policy must stay under the 6,144-byte IAM limit when minified."""
     data = _load_policy(fname)
@@ -581,7 +604,7 @@ def test_iam_policy_under_size_limit(fname):
     ), f"{fname}: minified size {size} bytes exceeds IAM limit of {_IAM_POLICY_LIMIT}"
 
 
-@pytest.mark.parametrize("fname", _POLICY_FILES + ["OperatorPolicy.json_src"])
+@pytest.mark.parametrize("fname", _CLUSTER_STRUCTURAL_POLICY_FILES + ["OperatorPolicy.json_src"])
 def test_iam_policy_statement_keys_are_valid(fname):
     """Only real IAM statement keys are allowed. A stray key (e.g. "Comment")
     makes AWS reject the whole policy at CreatePolicy time."""
@@ -591,7 +614,7 @@ def test_iam_policy_statement_keys_are_valid(fname):
         assert not bad, f"{fname}: statement {stmt.get('Sid')} has invalid keys: {sorted(bad)}"
 
 
-@pytest.mark.parametrize("fname", _POLICY_FILES + ["OperatorPolicy.json_src"])
+@pytest.mark.parametrize("fname", _CLUSTER_STRUCTURAL_POLICY_FILES + ["OperatorPolicy.json_src"])
 def test_iam_policy_sids_unique(fname):
     """Duplicate Sids within one policy are rejected by IAM."""
     sids = [s["Sid"] for s in _load_policy(fname)["Statement"] if "Sid" in s]
@@ -630,13 +653,20 @@ def test_operator_policy_omits_policy_version_management():
     policies attach to is created under a permissions boundary that caps
     what they can confer. templates/CLAUDE.local.md names that exact
     mitigation -- "gate it behind an iam:PermissionsBoundary condition".
-    No such boundary exists for the cluster roles, which is why the
-    omission stands here.
+    The head node role now has such a boundary, but the compute and login
+    node roles are PCluster's own and cannot, so the omission stands.
+
+    Only Allow statements are read. OperatorPolicy gained a Deny of these
+    same three actions on pclustermaker-cluster-boundary -- an operator who
+    can version the boundary they are bounded by does not have one -- and a
+    flat action set cannot tell that apart from the grant this bans. The
+    Deny is asserted for separately, below.
     """
     data = _load_policy("OperatorPolicy.json_src")
     actions = {
         a
         for stmt in data["Statement"]
+        if stmt["Effect"] == "Allow"
         for a in (stmt["Action"] if isinstance(stmt["Action"], list)
                   else [stmt["Action"]])
     }
@@ -644,8 +674,7 @@ def test_operator_policy_omits_policy_version_management():
                    "iam:SetDefaultPolicyVersion"):
         assert banned not in actions, (
             f"OperatorPolicy grants {banned}; it can now rewrite any "
-            f"cluster's head-node policy in place, and no permissions "
-            f"boundary caps a cluster role"
+            f"cluster's head-node policy in place"
         )
 
 
@@ -680,11 +709,64 @@ class TestNoInstancePolicyCanDeleteALogGroup:
     # on whether the principal is an EC2 instance. OperatorPolicy stays
     # out -- purging by hand under operator credentials is exactly what
     # the retained-log-group bullet expects.
-    _BAN_APPLIES_TO = _INSTANCE_REACHABLE_POLICY_FILES + _MCP_LAMBDA_POLICY_FILES
+    _BAN_APPLIES_TO = (
+        _INSTANCE_REACHABLE_POLICY_FILES
+        + _MCP_LAMBDA_POLICY_FILES
+        + _MCP_DEPLOY_POLICY_FILES
+        + _CLUSTER_BOUNDARY_POLICY_FILES
+    )
+
+    @staticmethod
+    def _denied_outright(policy, banned):
+        """True if the document itself denies `banned` on every resource.
+
+        IAM resolves an explicit Deny ahead of any Allow, so a permissions
+        boundary whose ceiling is `logs:*` and which then denies
+        logs:DeleteLogGroup on Resource "*" cannot confer the action -- and a
+        ban that read the ceiling alone would have to exclude every boundary
+        file, which is how MCPRoleBoundary escaped this check in the first
+        place. The Deny must be unscoped: one naming a single log group leaves
+        the wildcard Allow standing everywhere else.
+        """
+        for stmt in policy["Statement"]:
+            if stmt["Effect"] != "Deny":
+                continue
+            actions = (
+                stmt["Action"] if isinstance(stmt["Action"], list) else [stmt["Action"]]
+            )
+            if not any(fnmatch.fnmatch(banned, a) for a in actions):
+                continue
+            resources = (
+                stmt["Resource"] if isinstance(stmt["Resource"], list)
+                else [stmt["Resource"]]
+            )
+            if "*" in resources:
+                return True
+        return False
 
     @pytest.mark.parametrize("fname", _BAN_APPLIES_TO)
     def test_no_policy_on_an_instance_grants_it(self, fname):
-        for stmt in _load_policy(fname)["Statement"]:
+        """Only Allow statements are read, and that is what widened the list.
+
+        The ban used to read every statement regardless of Effect, which is
+        why _MCP_DEPLOY_POLICY_FILES had to be excluded from it: MCPRoleBoundary
+        *denies* logs:DeleteLogGroup, and a Deny of the banned action tripped a
+        check written to catch a grant of it. Excluding whole files to work
+        around that is the wrong lever -- it also stops the ban seeing an Allow
+        that later lands in the same file, which is the thing it exists for.
+        ClusterNode-Deny and ClusterRoleBoundary forced the question again, and
+        both are documents an instance carries, so exclusion was not available:
+        a cluster policy outside this ban is exactly the hole
+        test_every_policy_template_is_covered_by_this_ban was written after.
+        Reading Effect instead lets every policy document in the repo sit
+        inside the ban, MCPDeployPolicy included, which nothing checked before.
+        """
+        policy = _load_policy(fname)
+        if self._denied_outright(policy, self._BANNED):
+            return
+        for stmt in policy["Statement"]:
+            if stmt["Effect"] != "Allow":
+                continue
             actions = (
                 stmt["Action"] if isinstance(stmt["Action"], list) else [stmt["Action"]]
             )
@@ -695,6 +777,129 @@ class TestNoInstancePolicyCanDeleteALogGroup:
                 f"{fname}: statement {stmt.get('Sid')} grants {self._BANNED} "
                 f"via {matched} on {stmt['Resource']}"
             )
+
+    # (document, why it must still fail). Each is a shape one of the two new
+    # filters would wave through if it were slightly wrong.
+    _MUST_STILL_FAIL = {
+        "a plain Allow with no Deny anywhere": {
+            "Version": "2012-10-17",
+            "Statement": [
+                {"Sid": "Grant", "Action": ["logs:DeleteLogGroup"],
+                 "Effect": "Allow", "Resource": "*"},
+            ],
+        },
+        "an Allow reached only through a wildcard": {
+            "Version": "2012-10-17",
+            "Statement": [
+                {"Sid": "Grant", "Action": ["logs:*"],
+                 "Effect": "Allow", "Resource": "*"},
+            ],
+        },
+        "a Deny scoped to one log group, so the wildcard Allow stands elsewhere": {
+            "Version": "2012-10-17",
+            "Statement": [
+                {"Sid": "Grant", "Action": ["logs:*"],
+                 "Effect": "Allow", "Resource": "*"},
+                {"Sid": "NarrowDeny", "Action": ["logs:DeleteLogGroup"],
+                 "Effect": "Deny",
+                 "Resource": ["arn:aws:logs:*:123456789012:log-group:/x:*"]},
+            ],
+        },
+        "a Deny of a neighboring action only": {
+            "Version": "2012-10-17",
+            "Statement": [
+                {"Sid": "Grant", "Action": ["logs:*"],
+                 "Effect": "Allow", "Resource": "*"},
+                {"Sid": "WrongDeny", "Action": ["logs:DeleteLogStream"],
+                 "Effect": "Deny", "Resource": "*"},
+            ],
+        },
+    }
+
+    @pytest.mark.parametrize("case", sorted(_MUST_STILL_FAIL))
+    def test_the_ban_still_fails_a_real_grant(self, monkeypatch, case):
+        """Discrimination guard, driving the real assertion rather than a copy.
+
+        Both filters this class gained are ways for the ban to read nothing and
+        pass: `Effect != "Allow"` compared against a string no statement carries
+        skips every statement, and a _denied_outright that returns True too
+        eagerly returns before reading any of them. Neither shows up in any
+        other test here -- every real document passes the ban, so a ban that
+        checks nothing passes it too. Recomputing the comparison in this test
+        would have the same blind spot, so the real method is called with
+        _load_policy monkeypatched to hand it the document instead.
+        """
+        monkeypatch.setattr(
+            sys.modules[__name__], "_load_policy",
+            lambda _fname: self._MUST_STILL_FAIL[case],
+        )
+        with pytest.raises(AssertionError):
+            self.test_no_policy_on_an_instance_grants_it("synthetic.json_src")
+
+    def test_the_ban_passes_a_document_the_deny_actually_covers(self):
+        """The other direction: the filters must not have been made so strict
+        that a legitimately capped boundary now fails. Without this, deleting
+        _denied_outright entirely reads as a tightening rather than the change
+        that breaks every real boundary file."""
+        assert self._denied_outright(
+            {
+                "Version": "2012-10-17",
+                "Statement": [
+                    {"Sid": "Ceiling", "Action": ["logs:*"],
+                     "Effect": "Allow", "Resource": "*"},
+                    {"Sid": "Deny", "Action": ["logs:DeleteLogGroup"],
+                     "Effect": "Deny", "Resource": "*"},
+                ],
+            },
+            self._BANNED,
+        )
+        # A wildcard Deny covers the action too, which is why the Deny side is
+        # matched with fnmatch and not equality. Equality here reads clean and
+        # then reports a correctly capped boundary as granting the action.
+        assert self._denied_outright(
+            {
+                "Version": "2012-10-17",
+                "Statement": [
+                    {"Sid": "Ceiling", "Action": ["logs:*"],
+                     "Effect": "Allow", "Resource": "*"},
+                    {"Sid": "Deny", "Action": ["logs:Delete*"],
+                     "Effect": "Deny", "Resource": "*"},
+                ],
+            },
+            self._BANNED,
+        )
+
+    @pytest.mark.parametrize("fname", _BOUNDARY_POLICY_FILES)
+    def test_the_deny_is_what_lets_a_boundary_carry_a_logs_wildcard(self, fname):
+        """Vacuity guard for _denied_outright.
+
+        Both boundaries have `logs:*` in their ceiling, so the only reason
+        either passes the ban is the unscoped Deny beside it. Dropping that
+        Deny leaves a document whose ceiling permits erasing any log group in
+        the account, and the early return above would hide it -- so assert the
+        Deny directly rather than trusting the ban to notice its absence.
+        """
+        policy = _load_policy(fname)
+        assert self._denied_outright(policy, self._BANNED), (
+            f"{fname}: no unscoped Deny covers {self._BANNED}"
+        )
+        ceiling = [
+            stmt.get("Sid")
+            for stmt in policy["Statement"]
+            if stmt["Effect"] == "Allow"
+            and any(
+                fnmatch.fnmatch(self._BANNED, a)
+                for a in (
+                    stmt["Action"] if isinstance(stmt["Action"], list)
+                    else [stmt["Action"]]
+                )
+            )
+        ]
+        assert ceiling, (
+            f"{fname}: nothing in the ceiling matches {self._BANNED} any more, so "
+            f"this file no longer exercises the Deny-beats-Allow path and belongs "
+            f"in the plain ban instead"
+        )
 
     def test_every_policy_template_is_covered_by_this_ban(self):
         """A policy file in neither list is a file this ban never reads.
@@ -715,6 +920,7 @@ class TestNoInstancePolicyCanDeleteALogGroup:
             set(_INSTANCE_REACHABLE_POLICY_FILES)
             | set(_MCP_LAMBDA_POLICY_FILES)
             | set(_MCP_DEPLOY_POLICY_FILES)
+            | set(_CLUSTER_BOUNDARY_POLICY_FILES)
             | {"OperatorPolicy.json_src"}
         )
         assert on_disk == classified, (
@@ -2743,7 +2949,7 @@ class TestAmazonLinux2023InstallsOnlyWhatItPackages:
             )
 
 
-@pytest.mark.parametrize("fname", _POLICY_FILES)
+@pytest.mark.parametrize("fname", _CLUSTER_STRUCTURAL_POLICY_FILES)
 def test_iam_policy_no_unsubstituted_placeholders(fname):
     """No <PLACEHOLDER> tokens must remain after substitution — catches missing entries in _PLACEHOLDER_SUB."""
     import re
@@ -2796,7 +3002,15 @@ def _policy_suffixes_in_core():
         except (ValueError, SyntaxError):
             continue
         items = [v for v in vals if isinstance(v, str)]
-        if items and all(s.startswith(("-HeadNode-", "-ComputeNode-")) for s in items):
+        # "-ClusterNode-" is not decoration: _policy_suffixes_in_core finds a
+        # list only when *every* string in it looks like a policy suffix, so a
+        # prefix missing here silently drops the whole list from the sweep
+        # rather than failing -- and the three lists cross-assert each other,
+        # so dropping them all leaves nothing to disagree.
+        if items and all(
+            s.startswith(("-HeadNode-", "-ComputeNode-", "-ClusterNode-"))
+            for s in items
+        ):
             lists.append(set(items))
     return lists
 
@@ -2810,7 +3024,7 @@ def test_every_policy_template_is_created_and_deleted():
     expected = {"-" + f[: -len(".json_src")] for f in _POLICY_FILES}
     assert expected == {
         "-HeadNode-Compute", "-HeadNode-Storage", "-HeadNode-IAM",
-        "-ComputeNode-Base", "-HeadNode-Monitoring",
+        "-ComputeNode-Base", "-ClusterNode-Deny", "-HeadNode-Monitoring",
     }, f"policy template set changed: {sorted(expected)}"
 
     # Every suffix list in pcluster_core.py must be a subset of the template set:
@@ -3428,7 +3642,7 @@ class TestARetainedResourceIsReportedWithoutBeingCalledAnOrphan:
     registers as `\'\'` rather than `.failed` -- so `_rm_s3_bucket.failed |
     default(false)` was False, nothing reached `_orphaned_resources`, and teardown
     printed "has been deleted" over a bucket that was still there billing. The
-    benchmark results bucket and the 180-day log groups are the same shape: kept
+    benchmark results bucket and the 30-day log groups are the same shape: kept
     on purpose, invisible in the output, not free.
 
     The distinction is the whole fix. `_orphaned_resources` drives the non-zero
@@ -3872,9 +4086,17 @@ def test_no_new_unconditioned_wildcard_mutation_grants(fname):
     with a shell on the node — including via Slurm job submission. That is exactly
     how the Route53 zone-deletion hole got in. Read-only wildcards are fine;
     every mutating one needs either an ARN, a Condition, or an explicit entry in
-    _WILDCARD_MUTATION_ALLOWLIST justifying why neither is possible."""
+    _WILDCARD_MUTATION_ALLOWLIST justifying why neither is possible.
+
+    Only Allow statements are read. ClusterNode-Deny is nothing but mutating
+    actions on Resource "*" -- that is the whole document -- and a ratchet that
+    cannot tell a Deny from a grant would demand an allowlist entry for every
+    escalation primitive the file exists to refuse, turning the allowlist into
+    a list of things that are fine because they are forbidden."""
     offenders = []
     for stmt in _load_policy(fname)["Statement"]:
+        if stmt["Effect"] != "Allow":
+            continue
         resources = stmt["Resource"] if isinstance(stmt["Resource"], list) else [stmt["Resource"]]
         if "*" not in resources or "Condition" in stmt:
             continue
@@ -5055,6 +5277,146 @@ class TestHeadNodeBootstrapTimeoutReachesTheClusterConfig:
         with open(os.path.join(REPO_ROOT, "pcluster_defaults.yml")) as fh:
             defaults = yaml.safe_load(fh)
         assert defaults["head_node_bootstrap_timeout"] == 2100
+
+
+class TestTheLogGroupExpiresOnOurScheduleNotPClusters:
+    """The cluster's CloudWatch log group is still retained on teardown -- that is
+    CloudWatchLogs.__init__'s deletion_policy default of "Retain", which the
+    toolkit deliberately does not override, because the group is the only
+    surviving record of a failed build and a failed build is immediately followed
+    by a teardown.
+
+    What is no longer inherited is how long it lives. The block set `Enabled: true`
+    and nothing else, so retention fell through to PCluster's
+    CW_LOGS_RETENTION_DAYS_DEFAULT of 180 days; diagnosing a failed build is a
+    short-horizon activity, so `RetentionInDays: 30` covers it and cuts the
+    accumulation the operator has to purge by hand.
+
+    A substring match on "30" cannot tell a correctly-nested key from one at the
+    wrong depth or under a misspelled parent, and marshmallow ignores an unknown
+    key rather than rejecting it -- so the value is read out of the parsed YAML,
+    and again off PCluster's own loaded config object.
+    """
+
+    _OURS = 30
+
+    def _cloudwatch_logs(self, params):
+        env = _make_env(os.path.join(REPO_ROOT, "templates"))
+        parsed = yaml.safe_load(
+            env.get_template("config.pcluster.j2").render(**params)
+        )
+        return parsed["Monitoring"]["Logs"]["CloudWatch"]
+
+    def test_the_rendered_config_sets_a_thirty_day_retention(self, cluster_params):
+        block = self._cloudwatch_logs(cluster_params)
+        assert block["RetentionInDays"] == self._OURS, (
+            f"Monitoring/Logs/CloudWatch renders {block!r}"
+        )
+
+    def test_the_key_is_present_so_pclusters_default_cannot_apply(
+        self, cluster_params
+    ):
+        """Vacuity guard on the test above. A retention that silently reverts is
+        not a wrong number in the config -- it is no key at all, and the rendered
+        file then looks exactly as it did before this was a decision."""
+        from pcluster.constants import CW_LOGS_RETENTION_DAYS_DEFAULT
+
+        block = self._cloudwatch_logs(cluster_params)
+        assert "RetentionInDays" in block, (
+            "Monitoring/Logs/CloudWatch sets no RetentionInDays, so the group "
+            f"silently expires at PCluster's default of "
+            f"{CW_LOGS_RETENTION_DAYS_DEFAULT} days"
+        )
+        assert block["RetentionInDays"] != CW_LOGS_RETENTION_DAYS_DEFAULT, (
+            "the rendered retention is PCluster's own default, which is what "
+            "this block exists to override"
+        )
+
+    def test_the_rendered_value_is_an_integer_not_a_quoted_string(
+        self, cluster_params
+    ):
+        """The schema field is fields.Int; a quoted value is a load-time failure."""
+        value = self._cloudwatch_logs(cluster_params)["RetentionInDays"]
+        assert isinstance(value, int), f"rendered as {type(value).__name__}"
+
+    def test_the_deletion_policy_is_left_at_pclusters_retain_default(
+        self, cluster_params
+    ):
+        """Shortening the lifetime must not turn into deleting the group. The
+        toolkit sets no DeletionPolicy, so CloudWatchLogs.__init__'s "Retain"
+        applies -- read back off PCluster rather than restated here."""
+        from pcluster.config.cluster_config import CloudWatchLogs
+
+        block = self._cloudwatch_logs(cluster_params)
+        assert "DeletionPolicy" not in block, (
+            f"the config sets DeletionPolicy: {block.get('DeletionPolicy')!r}; "
+            "the retained-log-group rule expects PCluster's own default"
+        )
+        assert CloudWatchLogs().deletion_policy == "Retain"
+
+    def test_thirty_is_a_value_pcluster_accepts(self):
+        """Read out of the installed schema, never restated: retention_in_days is
+        a validate.OneOf, so a PCluster that drops 30 from the set has to fail
+        here rather than at cluster creation, twenty minutes into a build."""
+        from marshmallow import validate
+        from pcluster.schemas.cluster_schema import CloudWatchLogsSchema
+
+        field = CloudWatchLogsSchema._declared_fields["retention_in_days"]
+        choices = [
+            v.choices for v in field.validators if isinstance(v, validate.OneOf)
+        ]
+        assert len(choices) == 1, (
+            f"retention_in_days no longer carries exactly one OneOf: "
+            f"{field.validators}"
+        )
+        assert self._OURS in list(choices[0]), (
+            f"PCluster no longer accepts RetentionInDays: {self._OURS} -- "
+            f"allowed values are {list(choices[0])}"
+        )
+
+    def test_the_retention_can_be_changed_on_a_running_cluster(self):
+        """retention_in_days is UpdatePolicy.SUPPORTED while enabled is
+        UNSUPPORTED, so this is a knob an operator can turn on a live cluster
+        rather than a rebuild. The `enabled` half is the vacuity guard: it proves
+        the two policies are actually distinguishable through this reading."""
+        from pcluster.config.update_policy import UpdatePolicy
+        from pcluster.schemas.cluster_schema import CloudWatchLogsSchema
+
+        fields = CloudWatchLogsSchema._declared_fields
+        assert (
+            fields["retention_in_days"].metadata["update_policy"]
+            is UpdatePolicy.SUPPORTED
+        )
+        assert (
+            fields["enabled"].metadata["update_policy"] is UpdatePolicy.UNSUPPORTED
+        )
+
+    def test_pcluster_own_schema_reads_the_retention_back(
+        self, cluster_params, monkeypatch
+    ):
+        """The authoritative check: load the rendered config through PCluster's own
+        ClusterSchema. BaseSchema.on_bind_field derives the YAML key with
+        to_pascal_case(), so a casing typo is silently ignored by marshmallow and
+        the group quietly keeps the 180-day default."""
+        from pcluster.schemas.cluster_schema import ClusterSchema
+
+        # RootVolume.__init__ calls get_region(), which raises when boto3
+        # resolves no region; AWS_REGION outranks AWS_DEFAULT_REGION in botocore,
+        # so both are set rather than inherited from the operator's environment.
+        monkeypatch.setenv("AWS_REGION", "us-east-1")
+        monkeypatch.setenv("AWS_DEFAULT_REGION", "us-east-1")
+
+        params = dict(cluster_params)
+        params["subnet_id"] = "subnet-0abc1234"
+        params["compute_subnet_ids"] = ["subnet-0abc1234"]
+        params["gpu_subnet_ids"] = ["subnet-0abc1234"]
+        params["external_nfs_sg"] = {"group_id": "sg-0abc1234"}
+        env = _make_env(os.path.join(REPO_ROOT, "templates"))
+        parsed = yaml.safe_load(
+            env.get_template("config.pcluster.j2").render(**params)
+        )
+        config = ClusterSchema(cluster_name="test-cluster").load(parsed)
+        assert config.monitoring.logs.cloud_watch.retention_in_days == self._OURS
 
 
 def _run_preinstall(cluster_params, base_os, kernel_pkgs=("linux-image-6.8.0-1021-aws",),

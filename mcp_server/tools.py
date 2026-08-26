@@ -816,7 +816,7 @@ def register_tools(mcp, *, remote, tier=None):
             ),
             "will_retain": [
                 f"CloudWatch log groups /aws/parallelcluster/{cluster_name}-* "
-                f"(the only record of a failed build; expire after 180 days)",
+                f"(the only record of a failed build; expire after 30 days)",
             ],
             "confirmation_token": mint("delete_cluster", params),
             # Both halves are minted here rather than from a second preview

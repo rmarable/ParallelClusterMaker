@@ -70,6 +70,7 @@ LoginNodes:
       Iam:
         AdditionalIamPolicies:
           - Policy: arn:aws:iam::{{ aws_account_id }}:policy/{{ ec2_iam_policy }}-ComputeNode-Base
+          - Policy: arn:aws:iam::{{ aws_account_id }}:policy/{{ ec2_iam_policy }}-ClusterNode-Deny
       CustomActions:
 {{ on_node_configured() | indent(8, first=true) }}
 {% endif %}
@@ -114,6 +115,7 @@ Scheduling:
       Iam:
         AdditionalIamPolicies:
           - Policy: arn:aws:iam::{{ aws_account_id }}:policy/{{ ec2_iam_policy }}-ComputeNode-Base
+          - Policy: arn:aws:iam::{{ aws_account_id }}:policy/{{ ec2_iam_policy }}-ClusterNode-Deny
       CustomActions:
 {{ on_node_configured() | indent(8, first=true) }}
       ComputeResources:
@@ -164,6 +166,7 @@ Scheduling:
       Iam:
         AdditionalIamPolicies:
           - Policy: arn:aws:iam::{{ aws_account_id }}:policy/{{ ec2_iam_policy }}-ComputeNode-Base
+          - Policy: arn:aws:iam::{{ aws_account_id }}:policy/{{ ec2_iam_policy }}-ClusterNode-Deny
       CustomActions:
 {{ on_node_configured() | indent(8, first=true) }}
       ComputeResources:
@@ -257,6 +260,12 @@ Monitoring:
   Logs:
     CloudWatch:
       Enabled: true
+      # A failed build's log group is its only surviving record, so the group is
+      # still retained on teardown (PCluster's own DeletionPolicy default), but
+      # diagnosis is a short-horizon activity: 30 days covers it and cuts the
+      # accumulation the 180-day default leaves behind. UpdatePolicy.SUPPORTED,
+      # unlike Enabled, so this can be changed on a running cluster.
+      RetentionInDays: 30
 
 # PCluster creates the HeadNodeWaitCondition before the head node instance, so
 # EFS/FSx provisioning burns the bootstrap budget before preinstall starts.

@@ -1,0 +1,112 @@
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Sid": "BoundaryCeiling",
+            "Action": [
+                "autoscaling:*",
+                "cloudformation:*",
+                "cloudwatch:*",
+                "dynamodb:*",
+                "ec2:*",
+                "ec2messages:*",
+                "elasticfilesystem:*",
+                "elasticloadbalancing:*",
+                "fsx:*",
+                "iam:*",
+                "kms:*",
+                "lambda:*",
+                "logs:*",
+                "pricing:*",
+                "resource-groups:*",
+                "route53:*",
+                "s3:*",
+                "secretsmanager:*",
+                "sns:*",
+                "sqs:*",
+                "ssm:*",
+                "ssmmessages:*",
+                "sts:*",
+                "tag:*"
+            ],
+            "Effect": "Allow",
+            "Resource": "*"
+        },
+        {
+            "Sid": "BoundaryDenyPolicyAuthoring",
+            "Action": [
+                "iam:PutRolePolicy",
+                "iam:CreatePolicy",
+                "iam:CreatePolicyVersion",
+                "iam:SetDefaultPolicyVersion"
+            ],
+            "Effect": "Deny",
+            "Resource": "*"
+        },
+        {
+            "Sid": "BoundaryDenyPrincipalCreation",
+            "Action": [
+                "iam:CreateUser",
+                "iam:CreateAccessKey",
+                "iam:CreateLoginProfile",
+                "iam:UpdateLoginProfile",
+                "iam:AttachUserPolicy",
+                "iam:PutUserPolicy",
+                "iam:CreateGroup",
+                "iam:AttachGroupPolicy",
+                "iam:PutGroupPolicy",
+                "iam:AddUserToGroup",
+                "iam:CreateSAMLProvider",
+                "iam:UpdateSAMLProvider",
+                "iam:CreateOpenIDConnectProvider",
+                "iam:UpdateAssumeRolePolicy"
+            ],
+            "Effect": "Deny",
+            "Resource": "*"
+        },
+        {
+            "Sid": "BoundaryDenyBoundaryTampering",
+            "Action": [
+                "iam:PutRolePermissionsBoundary",
+                "iam:DeleteRolePermissionsBoundary",
+                "iam:PutUserPermissionsBoundary",
+                "iam:DeleteUserPermissionsBoundary"
+            ],
+            "Effect": "Deny",
+            "Resource": "*"
+        },
+        {
+            "Sid": "BoundaryDenyEditingItself",
+            "Action": [
+                "iam:CreatePolicyVersion",
+                "iam:SetDefaultPolicyVersion",
+                "iam:DeletePolicyVersion",
+                "iam:DeletePolicy"
+            ],
+            "Effect": "Deny",
+            "Resource": [
+                "arn:aws:iam::<AWS_ACCOUNT_ID>:policy/pclustermaker-cluster-boundary"
+            ]
+        },
+        {
+            "Sid": "BoundaryDenyLogGroupDeletion",
+            "Action": [
+                "logs:DeleteLogGroup"
+            ],
+            "Effect": "Deny",
+            "Resource": "*"
+        },
+        {
+            "Sid": "BoundaryDenyAccountLevel",
+            "Action": [
+                "organizations:*",
+                "account:*",
+                "billing:*",
+                "iam:DeleteAccountPasswordPolicy",
+                "iam:UpdateAccountPasswordPolicy"
+            ],
+            "Effect": "Deny",
+            "Resource": "*"
+        }
+    ]
+}

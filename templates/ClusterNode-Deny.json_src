@@ -1,0 +1,68 @@
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Sid": "ClusterNodeDenyPolicyAuthoring",
+            "Action": [
+                "iam:PutRolePolicy",
+                "iam:CreatePolicy",
+                "iam:CreatePolicyVersion",
+                "iam:SetDefaultPolicyVersion"
+            ],
+            "Effect": "Deny",
+            "Resource": "*"
+        },
+        {
+            "Sid": "ClusterNodeDenyPrincipalCreation",
+            "Action": [
+                "iam:CreateUser",
+                "iam:CreateAccessKey",
+                "iam:CreateLoginProfile",
+                "iam:UpdateLoginProfile",
+                "iam:AttachUserPolicy",
+                "iam:PutUserPolicy",
+                "iam:CreateGroup",
+                "iam:AttachGroupPolicy",
+                "iam:PutGroupPolicy",
+                "iam:AddUserToGroup",
+                "iam:CreateSAMLProvider",
+                "iam:UpdateSAMLProvider",
+                "iam:CreateOpenIDConnectProvider",
+                "iam:UpdateAssumeRolePolicy"
+            ],
+            "Effect": "Deny",
+            "Resource": "*"
+        },
+        {
+            "Sid": "ClusterNodeDenyBoundaryTampering",
+            "Action": [
+                "iam:PutRolePermissionsBoundary",
+                "iam:DeleteRolePermissionsBoundary",
+                "iam:PutUserPermissionsBoundary",
+                "iam:DeleteUserPermissionsBoundary"
+            ],
+            "Effect": "Deny",
+            "Resource": "*"
+        },
+        {
+            "Sid": "ClusterNodeDenyLogGroupDeletion",
+            "Action": [
+                "logs:DeleteLogGroup"
+            ],
+            "Effect": "Deny",
+            "Resource": "*"
+        },
+        {
+            "Sid": "ClusterNodeDenyAccountLevel",
+            "Action": [
+                "organizations:*",
+                "account:*",
+                "billing:*",
+                "iam:DeleteAccountPasswordPolicy",
+                "iam:UpdateAccountPasswordPolicy"
+            ],
+            "Effect": "Deny",
+            "Resource": "*"
+        }
+    ]
+}

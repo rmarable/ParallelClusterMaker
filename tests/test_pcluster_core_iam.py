@@ -580,6 +580,10 @@ class _FakeIAM:
         self.detached_policies = []
         self.deleted_policies = []
         self.deleted_role_policies = []
+        # {role_name: boundary_arn or None}. Recording the absence is what
+        # lets a test see an unbounded role rather than infer it.
+        self.boundaries = {}
+        self.reasserted_boundaries = []
 
     def get_role(self, RoleName):
         if not self._role_exists:
@@ -590,13 +594,20 @@ class _FakeIAM:
     def list_attached_role_policies(self, RoleName):
         return {"AttachedPolicies": [{"PolicyName": n} for n in self.attached_policies]}
 
-    def create_role(self, RoleName, AssumeRolePolicyDocument, Description=""):
+    def create_role(self, RoleName, AssumeRolePolicyDocument, Description="",
+                    PermissionsBoundary=None):
         if self._role_exists:
             from botocore.exceptions import ClientError
             raise ClientError({"Error": {"Code": "EntityAlreadyExists", "Message": ""}}, "CreateRole")
         self.created_roles.append(RoleName)
         self._role_exists = True
+        self.boundaries[RoleName] = PermissionsBoundary
         return {"Role": {"RoleName": RoleName}}
+
+    def put_role_permissions_boundary(self, RoleName, PermissionsBoundary):
+        self.boundaries[RoleName] = PermissionsBoundary
+        self.reasserted_boundaries.append((RoleName, PermissionsBoundary))
+        return {}
 
     def delete_role(self, RoleName):
         self._role_exists = False

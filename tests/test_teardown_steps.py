@@ -424,13 +424,18 @@ class TestDeleteGrafanaSsmParamStep:
 
 
 class TestDeleteManagedIamPoliciesStep:
-    def test_success_detaches_and_deletes_all_four(self):
+    def test_success_detaches_and_deletes_all_five(self):
+        """Five, not four: ClusterNode-Deny is unconditional, so it is a base
+        suffix alongside the original four rather than a monitoring-style
+        conditional one. A count left at four here still passes while the
+        deny policy is orphaned in the account on every teardown."""
         iam = _FakeIamForTeardown()
         result = _delete_managed_iam_policies_step(iam, "role", "test-policy", "123456789012")
         assert result.succeeded is True
-        assert len(iam.detached) == 4
-        assert len(iam.deleted_policies) == 4
+        assert len(iam.detached) == 5
+        assert len(iam.deleted_policies) == 5
         assert "arn:aws:iam::123456789012:policy/test-policy-HeadNode-Compute" in iam.detached
+        assert "arn:aws:iam::123456789012:policy/test-policy-ClusterNode-Deny" in iam.detached
 
     def test_already_absent_policies_are_not_a_failure(self):
         iam = _FakeIamForTeardown()
@@ -445,8 +450,8 @@ class TestDeleteManagedIamPoliciesStep:
         result = _delete_managed_iam_policies_step(iam, "role", "test-policy", "123456789012")
         assert result.succeeded is False
         assert "AccessDenied" in result.detail
-        # all four were still attempted despite the failures
-        assert len(iam.detached) == 4
+        # all five were still attempted despite the failures
+        assert len(iam.detached) == 5
 
 
 class TestDeleteMonitoringIamPolicyStep:

@@ -8,11 +8,11 @@ development only). The root `CLAUDE.md` holds everything else, including
 The IAM policy documents here are `.json_src` files rendered by Jinja2 and
 guarded by `tests/test_templates.py`; `generate_operator_policy.py` renders
 `OperatorPolicy.json_src`, and `_setup_iam` in `src/pcluster_core.py` creates
-and deletes the five managed policies.
+and deletes the six managed policies.
 
 ## Constraints
 
-- **Five managed IAM policies**, named `<ec2_iam_policy>-<suffix>`, all
+- **Six managed IAM policies**, named `<ec2_iam_policy>-<suffix>`, all
   deleted on teardown:
   - `HeadNode-Compute` — EC2, AutoScaling, LaunchTemplates, CreateFleet,
     DynamoDB lifecycle, SQS management, SNS, STS. Head node only.
@@ -23,8 +23,22 @@ and deletes the five managed policies.
   - `ComputeNode-Base` — S3 read, CloudWatch Logs/metrics, SSM, DynamoDB
     CRUD, SQS signals, STS. Attached to the head node role **and** every
     compute queue via `AdditionalIamPolicies`.
+  - `ClusterNode-Deny` — Deny statements only, no Allow. Attached to the
+    head node role **and** every queue and the login node pool, like
+    `ComputeNode-Base`, and **unconditional** — never gated on a flag.
   - `HeadNode-Monitoring` — Grafana/Prometheus. Head node only, created
     only when `enable_monitoring=true`.
+- **`ClusterNode-Deny` denies only escalation primitives that no
+  instance-reachable document grants**, so it hardens the posture without
+  changing behavior. An explicit Deny beats any Allow in any attached
+  policy — including one nobody added to a test list, which is what
+  `LustreS3HydrationPolicy` was — so it turns the repo's IAM bans into a
+  property of the account rather than of CI. Derive any addition from the
+  documents (`TestTheDenyPolicyDeniesOnlyThingsNothingGrants` re-runs that
+  derivation); denying something in use fails on a live node mid-bootstrap,
+  where no test can see it. Every statement is `Effect: Deny` on
+  `Resource: "*"` — a scoped Deny leaves the action reachable everywhere
+  else, which for an escalation primitive is the whole account.
 - **`logs:DescribeLogGroups` requires `Resource: "*"`** in every policy that
   grants it — the API call carries no log-group ARN at the IAM level. Keep
   it in its own statement, separate from scoped stream-level actions.
@@ -50,10 +64,54 @@ and deletes the five managed policies.
   category** — what an administrator grants to whoever deploys the
   transport, plus the permissions boundary every MCP role is created under.
   Listed in `_MCP_DEPLOY_POLICY_FILES`; they get the same structural guards
-  (`_MCP_ALL_POLICY_FILES`) but are deliberately **outside**
-  `_BAN_APPLIES_TO` — the boundary *denies* `logs:DeleteLogGroup`, and that
-  ban reads every statement without looking at `Effect`, so a Deny would
-  trip it. Denying an action is the opposite of what the ban catches.
+  (`_MCP_ALL_POLICY_FILES`). They used to sit **outside** `_BAN_APPLIES_TO`
+  because the boundary *denies* `logs:DeleteLogGroup` and the ban read every
+  statement without looking at `Effect`. The ban is `Effect`-aware now — it
+  reads Allow statements only, and returns early when the document denies the
+  action unscoped, which is IAM's own Deny-beats-Allow rule — so every policy
+  document in the repo is inside it, `MCPDeployPolicy` included. **Do not go
+  back to excluding files**: exclusion also stops the ban seeing an Allow that
+  later lands in the same file, which is the hole
+  `test_every_policy_template_is_covered_by_this_ban` exists to close.
+  `_denied_outright` requires the Deny's `Resource` to be `"*"` and matches
+  the action with `fnmatch`; `test_the_ban_still_fails_a_real_grant` drives the
+  real assertion with a synthetic document, because both filters are ways for
+  the ban to read nothing and pass.
+- **The head node role is created under `pclustermaker-cluster-boundary`
+  (`templates/ClusterRoleBoundary.json_src`), and only the head node role.**
+  `config.pcluster.j2` gives the head node `InstanceRole:` — a role
+  `_setup_iam` creates — but gives every `SlurmQueue` and the `LoginNodes`
+  pool `AdditionalIamPolicies:`, so PCluster's CDK creates those roles.
+  There is no `create_role` to pass `PermissionsBoundary=` on and no name
+  known ahead of time, and conditioning `iam:CreateRole` on
+  `iam:PermissionsBoundary` in `OperatorPolicy` — what `MCPDeployPolicy`
+  does for the roles it owns — would refuse the CDK its own unbounded
+  `CreateRole` and break every build. Compute and login nodes are capped by
+  `ClusterNode-Deny` instead. This asymmetry with the MCP side is
+  deliberate; document it, do not close it.
+- **The ceiling is the union of services the instance-reachable documents
+  actually grant**, plus four named margin services
+  (`elasticloadbalancing`, `secretsmanager`, `resource-groups`, `tag`)
+  pinned by equality. A boundary is an intersection, so a missing service
+  removes every grant in it — and not at deploy time: `CreatePolicy` and
+  `create_role` both succeed and the head node fails partway through
+  bootstrap. Be generous at `svc:*` and precise in the Deny statements.
+  `TestTheBoundaryCeilingCoversWhatTheClusterPoliciesGrant` re-derives it.
+- **The cluster boundary is account-level and teardown deliberately leaves
+  it**, for a stronger reason than the MCP boundary's: every other live
+  cluster's role in the account is bounded by the same document, so
+  deleting it on one teardown uncaps all of them. No teardown surface may
+  name it.
+- **`OperatorPolicy` gained `IAMClusterBoundaryBootstrapReadAndCreate`,
+  `IAMBoundClusterRoleOnly` and `IAMDenyWeakeningTheClusterBoundary`.** The
+  boundary's name is outside the `pclustermaker-policy-*` wildcard
+  `IAMManagedPolicyLifecycle` covers, deliberately — an operator who can
+  version their own boundary does not have one — so it needs its own
+  create/read grant. `iam:PutRolePermissionsBoundary` is conditioned on
+  `iam:PermissionsBoundary` equalling this boundary; `iam:CreateRole` is
+  **not** conditioned, per the bullet above. Residual, stated rather than
+  hidden: a `pclustermaker-role-*` role can still be created unbounded by
+  whoever holds these credentials.
 - **The boundary is named `pclustermaker-mcp-boundary`, outside the
   `pclustermaker-mcp-policy-*` pattern `MCPDeployPolicy`'s lifecycle
   statement covers.** A deployer who can version their own boundary does

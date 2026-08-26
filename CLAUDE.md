@@ -56,7 +56,9 @@ standing constraints for local development.
   `ARM_OSES`/`X86_OSES` in `pcluster_aux_data.py`, `_VALID_EC2_USERS` in
   and `diagnose_pcluster.py`.
 - IAM policy constraints live in `templates/CLAUDE.md` — read before touching
-  any `.json_src`.
+  any `.json_src`. Six managed policies now: `ClusterNode-Deny` is
+  Deny-only, unconditional, and on every node; the head node role alone is
+  created under the `pclustermaker-cluster-boundary` permissions boundary.
 - HPC benchmark constraints live in `hpc-benchmark/CLAUDE.md` — read before
   touching `hpc-benchmark/`.
 - The build summary names every filesystem's mount point on two live
@@ -86,8 +88,22 @@ standing constraints for local development.
 - Monitoring tooling: gated on `enable_monitoring`; downloaded once at build
   time and staged to S3 (never fetched from GitHub by a node, to support
   private subnets); checksum-verified via `monitoring_version_checksum`.
-  Creates a fifth managed IAM policy (`HeadNode-Monitoring`) and an SSM
+  Creates a sixth managed IAM policy (`HeadNode-Monitoring`) and an SSM
   Grafana password parameter — both must be deleted on teardown.
+- The cluster's CloudWatch log group is retained on teardown — PCluster's
+  own `deletion_policy` default of `"Retain"`, deliberately not
+  overridden, because the group is the only surviving record of a failed
+  build (cfn-init captures stdout only; node stderr reaches no stream) and
+  a failed build is immediately followed by a teardown. Never add a
+  log-group deletion task to `src/delete_pcluster.yml`, never set
+  `DeletionPolicy: Delete`, and never put a retained log group in
+  `_orphaned_resources`. Its *lifetime* is a decision, not an inheritance:
+  `config.pcluster.j2` sets `RetentionInDays: 30` over PCluster's default
+  of 180, because diagnosing a failed build is short-horizon work. That
+  field is `UpdatePolicy.SUPPORTED`, unlike `Enabled`, so it can be
+  changed on a running cluster, and 30 must stay in
+  `CloudWatchLogsSchema`'s `OneOf` set — read out of the installed package
+  by `TestTheLogGroupExpiresOnOurScheduleNotPClusters`, never restated.
 - GPU support is gated on `enable_gpu`; `is_gpu_instance()` in
   `pcluster_aux_data.py` detects GPU families by instance-type prefix and
   auto-enables the flag with an `*** INFO ***` message if needed.

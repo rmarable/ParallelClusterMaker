@@ -296,7 +296,7 @@ def cluster_params_retained_teardown(cluster_params):
             "S3 bucket parallelclustermaker-test-cluster-00001220260720 "
             "(--delete_s3_bucketname was not true)",
             "CloudWatch log groups /aws/parallelcluster/test-cluster-* "
-            "(retained 180 days; the only record of a failed build)",
+            "(retained 30 days; the only record of a failed build)",
         ],
     }
     return {**cluster_params, **overrides}

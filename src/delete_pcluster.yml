@@ -310,6 +310,7 @@
         - "{{ ec2_iam_policy }}-HeadNode-Storage"
         - "{{ ec2_iam_policy }}-HeadNode-IAM"
         - "{{ ec2_iam_policy }}-ComputeNode-Base"
+        - "{{ ec2_iam_policy }}-ClusterNode-Deny"
       ignore_errors: true
       register: _rm_iam_policies
 
@@ -404,7 +405,7 @@
                  if (delete_s3_bucketname != "true") else '',
                ('S3 bucket ' ~ results_bucketname ~ ' (benchmark results, shared by every cluster in this account and region)')
                  if (enable_hpc_benchmarks == "true") else '',
-               'CloudWatch log groups /aws/parallelcluster/' ~ cluster_name ~ '-* (retained 180 days; the only record of a failed build)',
+               'CloudWatch log groups /aws/parallelcluster/' ~ cluster_name ~ '-* (retained 30 days; the only record of a failed build)',
              ] | reject('equalto', '') | list }}
 
     - name: Stop the timer
