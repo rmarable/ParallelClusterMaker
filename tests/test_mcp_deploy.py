@@ -819,10 +819,16 @@ class TestAnInfrastructureFlagIsNotADeployment:
     """
 
     class _Args:
-        def __init__(self, tier=None, setup_infra=False, setup_gateway=False):
+        # Mirrors what argparse actually produces. A stub that lags the real
+        # namespace fails as an AttributeError inside tiers_to_deploy rather
+        # than as a statement about behavior, which is how a new flag looks
+        # like five broken tests.
+        def __init__(self, tier=None, setup_infra=False, setup_gateway=False,
+                     teardown=False):
             self.tier = tier
             self.setup_infra = setup_infra
             self.setup_gateway = setup_gateway
+            self.teardown = teardown
 
     def _zips(self):
         from mcp_server.packaging import TIER_PACKAGES
@@ -862,3 +868,179 @@ class TestAnInfrastructureFlagIsNotADeployment:
         import deploy_mcp
 
         assert "stack-mutation-node" not in deploy_mcp.tiers_to_deploy(self._Args())
+
+
+class TestTheTransportCanBeRemoved:
+    """`deploy_mcp.py` could build the whole transport and remove none of it.
+
+    `delete_mcp_functions` and `_delete_mcp_infra` existed but nothing called
+    either, and the REST API and Cognito user pool had no teardown code
+    anywhere -- so the internet-facing endpoint outlived every teardown. A
+    live teardown had to be driven from a scratchpad script, which is where
+    the ordering bug below was found.
+    """
+
+    class _Args:
+        def __init__(self, **kw):
+            self.tier = kw.get("tier")
+            self.setup_infra = kw.get("setup_infra", False)
+            self.setup_gateway = kw.get("setup_gateway", False)
+            self.teardown = kw.get("teardown", False)
+
+    def test_teardown_builds_nothing(self):
+        """Building a 146 MB artifact so the function it would deploy to can
+        be deleted is minutes of pip for a thing about to not exist."""
+        import deploy_mcp
+
+        assert deploy_mcp.tiers_to_deploy(self._Args(teardown=True)) == []
+
+    def test_teardown_builds_nothing_even_with_an_explicit_tier(self):
+        """`--tier` wins over the other infrastructure flags on purpose;
+        it must not win over this one."""
+        import deploy_mcp
+
+        args = self._Args(teardown=True, tier=["read-only"])
+        assert deploy_mcp.tiers_to_deploy(args) == []
+
+    def test_a_normal_run_still_deploys(self):
+        """Vacuity guard: the short-circuit must not have become
+        `return []` for every caller."""
+        import deploy_mcp
+
+        assert deploy_mcp.tiers_to_deploy(self._Args()) != []
+
+
+class _CognitoWithDomain:
+    """Modelled on the DeleteUserPool contract, not on the caller.
+
+    Real Cognito refuses to delete a pool that still has a domain, and the
+    error names no domain -- so a caller that guessed one from the pool name
+    deletes nothing and reports success on the retry. That is what happened
+    live; this fake reproduces it.
+    """
+
+    def __init__(self, pool_name, pool_id, domain):
+        self._pools = {pool_id: {"Name": pool_name, "Id": pool_id,
+                                 "Domain": domain}}
+        self.calls = []
+
+    def list_user_pools(self, MaxResults=60):
+        return {"UserPools": [{"Name": p["Name"], "Id": pid}
+                              for pid, p in self._pools.items()]}
+
+    def describe_user_pool(self, UserPoolId):
+        self.calls.append(("describe", UserPoolId))
+        return {"UserPool": dict(self._pools[UserPoolId])}
+
+    def delete_user_pool_domain(self, Domain, UserPoolId):
+        pool = self._pools[UserPoolId]
+        if pool.get("Domain") != Domain:
+            raise RuntimeError("no such domain: %r" % Domain)
+        pool["Domain"] = None
+        self.calls.append(("delete_domain", Domain))
+
+    def delete_user_pool(self, UserPoolId):
+        pool = self._pools[UserPoolId]
+        if pool.get("Domain"):
+            raise RuntimeError(
+                "User pool cannot be deleted. It has a domain configured "
+                "that should be deleted first.")
+        del self._pools[UserPoolId]
+        self.calls.append(("delete_pool", UserPoolId))
+
+
+class TestTheCognitoDomainGoesBeforeThePool:
+    """The ordering bug, found live.
+
+    `delete_user_pool` fails while a domain exists, and the domain string is
+    not the pool name -- the pool was `parallelclustermaker-mcp-<acct>-<region>`
+    while its domain was `pclustermaker-mcp-yqdbaeo8t`. A teardown that
+    guessed removed nothing.
+    """
+
+    POOL = "parallelclustermaker-mcp-123456789012-us-east-1"
+    PID = "us-east-1_AbCdEf"
+    DOMAIN = "pclustermaker-mcp-abcdef"
+
+    def test_the_pool_is_deleted_domain_first(self):
+        from mcp_server.deploy import delete_cognito_pool
+
+        cog = _CognitoWithDomain(self.POOL, self.PID, self.DOMAIN)
+        removed = delete_cognito_pool(
+            cog, pool_name_prefix="parallelclustermaker-mcp", suppress=False)
+        assert removed == [self.POOL]
+        assert cog._pools == {}, "the pool survived"
+        order = [c[0] for c in cog.calls]
+        assert order.index("delete_domain") < order.index("delete_pool"), (
+            "the pool delete was attempted before its domain was removed"
+        )
+
+    def test_the_domain_is_read_not_guessed(self):
+        """The domain is not derivable from the pool name; describe_user_pool
+        is the only authority for it."""
+        from mcp_server.deploy import delete_cognito_pool
+
+        cog = _CognitoWithDomain(self.POOL, self.PID, self.DOMAIN)
+        delete_cognito_pool(cog, pool_name_prefix="parallelclustermaker-mcp",
+                            suppress=False)
+        assert ("describe", self.PID) in cog.calls
+        assert ("delete_domain", self.DOMAIN) in cog.calls
+
+    def test_the_fake_refuses_a_pool_that_still_has_a_domain(self):
+        """Vacuity guard. If the fake allowed it, the ordering test above
+        would pass with the calls in either order."""
+        cog = _CognitoWithDomain(self.POOL, self.PID, self.DOMAIN)
+        with pytest.raises(RuntimeError, match="domain configured"):
+            cog.delete_user_pool(UserPoolId=self.PID)
+
+    def test_a_pool_without_a_domain_still_deletes(self):
+        from mcp_server.deploy import delete_cognito_pool
+
+        cog = _CognitoWithDomain(self.POOL, self.PID, None)
+        removed = delete_cognito_pool(
+            cog, pool_name_prefix="parallelclustermaker-mcp", suppress=False)
+        assert removed == [self.POOL]
+        assert "delete_domain" not in [c[0] for c in cog.calls]
+
+    def test_an_unrelated_pool_is_left_alone(self):
+        from mcp_server.deploy import delete_cognito_pool
+
+        cog = _CognitoWithDomain("someone-elses-pool", self.PID, None)
+        removed = delete_cognito_pool(
+            cog, pool_name_prefix="parallelclustermaker-mcp", suppress=False)
+        assert removed == []
+        assert cog._pools, "an unrelated user pool was deleted"
+
+
+class _Apigw:
+    def __init__(self, names):
+        self._apis = [{"name": n, "id": "id-%d" % i}
+                      for i, n in enumerate(names)]
+        self.deleted = []
+
+    def get_rest_apis(self):
+        return {"items": list(self._apis)}
+
+    def delete_rest_api(self, restApiId):
+        self._apis = [a for a in self._apis if a["id"] != restApiId]
+        self.deleted.append(restApiId)
+
+
+class TestTheGatewayIsRemoved:
+    def test_the_mcp_api_goes(self):
+        from mcp_server.deploy import delete_gateway
+
+        apigw = _Apigw(["pclustermaker-mcp"])
+        assert delete_gateway(apigw, suppress=False) == ["pclustermaker-mcp"]
+        assert apigw._apis == []
+
+    def test_someone_elses_api_stays(self):
+        """The API is found by name prefix because setup_gateway records no
+        id, so the match has to be narrow enough not to take an unrelated
+        REST API with it."""
+        from mcp_server.deploy import delete_gateway
+
+        apigw = _Apigw(["someone-elses-api", "pclustermaker-mcp"])
+        removed = delete_gateway(apigw, suppress=False)
+        assert removed == ["pclustermaker-mcp"]
+        assert [a["name"] for a in apigw._apis] == ["someone-elses-api"]

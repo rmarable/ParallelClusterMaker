@@ -1266,7 +1266,7 @@ class TestEveryRegionalBotoClientIsBoundToTheTargetRegion:
     _REGIONAL = {
         "s3", "ec2", "cloudformation", "logs", "secretsmanager", "lambda",
         "cognito-idp", "ce", "pricing", "fsx", "efs", "sns", "ssm",
-        "resourcegroupstaggingapi", "application-autoscaling",
+        "resourcegroupstaggingapi", "application-autoscaling", "apigateway",
     }
     # Global services: one endpoint, no region to bind.
     _GLOBAL = {"iam", "sts"}

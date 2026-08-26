@@ -446,3 +446,61 @@ def setup_gateway(*, account, region, user_pool_id, cognito_domain=None,
         FunctionName=auth_fn, Environment={"Variables": env})
 
     return {"api_id": api_id, "base_url": base_url, "authorizer_id": authorizer_id}
+
+
+_GATEWAY_NAME_PREFIX = "pclustermaker-mcp"
+
+
+def delete_gateway(apigw, *, suppress=True):
+    """Delete the REST API setup_gateway creates.
+
+    Nothing owned this before: the transport could be built and not removed,
+    so the internet-facing endpoint outlived every teardown. Named by prefix
+    because setup_gateway names the API rather than recording its id.
+    """
+    removed = []
+    for api in apigw.get_rest_apis().get("items", []):
+        if not api["name"].startswith(_GATEWAY_NAME_PREFIX):
+            continue
+        try:
+            apigw.delete_rest_api(restApiId=api["id"])
+            removed.append(api["name"])
+            print(f"  Deleted MCP REST API: {api['name']} ({api['id']})")
+        except Exception:
+            if not suppress:
+                raise
+    if not removed:
+        print("  No MCP REST API present")
+    return removed
+
+
+def delete_cognito_pool(cog, *, pool_name_prefix, suppress=True):
+    """Delete the user pool, its domain first.
+
+    **The domain must go before the pool.** DeleteUserPool fails with
+    InvalidParameterException -- "User pool cannot be deleted. It has a
+    domain configured that should be deleted first." -- and the message names
+    no domain, so a caller that guessed one from the pool name (they are not
+    the same string) deletes nothing and reports success on the retry.  The
+    domain is read off `describe_user_pool`, which is authoritative.
+    """
+    removed = []
+    for pool in cog.list_user_pools(MaxResults=60)["UserPools"]:
+        if not pool["Name"].startswith(pool_name_prefix):
+            continue
+        pid = pool["Id"]
+        try:
+            described = cog.describe_user_pool(UserPoolId=pid)["UserPool"]
+            domain = described.get("Domain")
+            if domain:
+                cog.delete_user_pool_domain(Domain=domain, UserPoolId=pid)
+                print(f"  Deleted Cognito domain: {domain}")
+            cog.delete_user_pool(UserPoolId=pid)
+            removed.append(pool["Name"])
+            print(f"  Deleted Cognito user pool: {pool['Name']} ({pid})")
+        except Exception:
+            if not suppress:
+                raise
+    if not removed:
+        print("  No MCP Cognito user pool present")
+    return removed

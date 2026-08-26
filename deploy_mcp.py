@@ -28,6 +28,9 @@ sys.path.insert(0, _repo_root)
 
 from mcp_server.deploy import (  # noqa: E402
     FUNCTION_NAMES,
+    delete_cognito_pool,
+    delete_gateway,
+    delete_mcp_functions,
     deploy_tier,
     setup_gateway,
 )
@@ -39,8 +42,10 @@ from mcp_server.packaging import (  # noqa: E402
     sources_for,
 )
 from pcluster_core import (  # noqa: E402
+    _delete_mcp_infra,
     _derive_locks_bucket,
     _derive_mcp_user_pool_name,
+    _mcp_boundary_name,
     _setup_mcp_infra,
 )
 
@@ -141,7 +146,13 @@ def tiers_to_deploy(args):
     `--setup-infra` did not, and so silently redeployed every zip tier as a
     side effect of creating IAM. An explicit `--tier` always wins, so the
     two can still be combined deliberately.
+
+    `--teardown` returns nothing unconditionally, `--tier` included:
+    building an artifact in order to delete the function it would have
+    been deployed to is minutes of pip for a thing about to not exist.
     """
+    if args.teardown:
+        return []
     if (args.setup_gateway or args.setup_infra) and not args.tier:
         return []
     return args.tier or [
@@ -172,6 +183,12 @@ def main():
                         "user pool if absent) before deploying; idempotent. "
                         "Reports any policy whose deployed document no longer "
                         "matches templates/, but does not change it")
+    p.add_argument("--teardown", action="store_true",
+                   help="remove the deployed transport: REST API, the seven "
+                        "Lambda functions, then the IAM roles and policies, "
+                        "then the Cognito user pool. Combine with --dry-run "
+                        "to list what would go without removing it. The "
+                        "permissions boundary is deliberately left behind")
     p.add_argument("--update-policies", action="store_true",
                    help="with --setup-infra, push a changed policy document as "
                         "a new default version instead of only reporting it. "
@@ -187,10 +204,60 @@ def main():
 
     tiers = tiers_to_deploy(args)
     print(f"account {account}  region {args.region}  bucket {bucket}")
-    print(f"deploying: {', '.join(tiers) if tiers else '(no tiers)'}\n")
+    if not args.teardown:
+        print(f"deploying: {', '.join(tiers) if tiers else '(no tiers)'}\n")
 
     lam = boto3.client("lambda", region_name=args.region)
     s3 = boto3.client("s3", region_name=args.region)
+
+    if args.teardown:
+        # Gateway first: it is the internet-facing surface, and removing it
+        # stops anything arriving while the rest is half torn down. Then the
+        # functions, then the IAM they run under, then the pool that
+        # authenticates callers -- each step leaving nothing that depends on
+        # something already gone.
+        apigw = boto3.client("apigateway", region_name=args.region)
+        cog = boto3.client("cognito-idp", region_name=args.region)
+        lam = boto3.client("lambda", region_name=args.region)
+        iam = boto3.client("iam")
+        pool_prefix = _derive_mcp_user_pool_name(
+            aws_account_id=account, region=args.region)
+
+        if args.dry_run:
+            print("would remove (dry run -- nothing deleted):")
+            for api in apigw.get_rest_apis().get("items", []):
+                if api["name"].startswith("pclustermaker-mcp"):
+                    print(f"  REST API   {api['name']} ({api['id']})")
+            for fn in FUNCTION_NAMES.values():
+                try:
+                    lam.get_function(FunctionName=fn)
+                    print(f"  function   {fn}")
+                except Exception:
+                    pass
+            for pool in cog.list_user_pools(MaxResults=60)["UserPools"]:
+                if pool["Name"].startswith(pool_prefix):
+                    print(f"  user pool  {pool['Name']} ({pool['Id']})")
+            print("  plus the MCP IAM roles and policies")
+            print(f"\nleft in place: {_mcp_boundary_name()}")
+            return 0
+
+        print("tearing down the MCP remote transport\n")
+        delete_gateway(apigw)
+        delete_mcp_functions(lam)
+        result = _delete_mcp_infra(iam, aws_account_id=account, verbose=True)
+        delete_cognito_pool(cog, pool_name_prefix=pool_prefix)
+
+        # Durable by design, and MCPDeployPolicy denies deleting it -- a
+        # deployer who can remove their own boundary does not have one. Say
+        # so rather than attempting it and reporting the denial as a
+        # teardown failure.
+        print(f"\nleft in place: {_mcp_boundary_name()} (permissions boundary, "
+              f"durable by design -- remove by hand if the account should be "
+              f"empty)")
+        if result.failed:
+            print(f"\n*** {len(result.failed)} IAM step(s) FAILED ***")
+            return 1
+        return 0
 
     if args.setup_infra and not args.dry_run:
         # The pool name is derived, never chosen: it is one account+region

@@ -346,6 +346,18 @@ standing constraints for local development.
   about it) and reports any mismatch; `--update-policies` pushes it as a new
   default version, pruning oldest-first to stay under IAM's five-version
   ceiling and never deleting the version in force.
+- **`deploy_mcp.py --teardown` removes the transport; nothing did before.**
+  `delete_mcp_functions` and `_delete_mcp_infra` existed and were called by
+  no entry point, and the REST API and Cognito pool had no teardown code at
+  all, so the internet-facing endpoint outlived every teardown. Order is
+  gateway, functions, IAM, pool — each step leaves nothing depending on
+  something already gone. **The Cognito domain must be deleted before the
+  pool**: `DeleteUserPool` fails while one exists, names no domain in the
+  error, and the domain string is not the pool name, so a caller that
+  guesses removes nothing and reports success on the retry. Read it off
+  `describe_user_pool`. Teardown deliberately leaves the permissions
+  boundary — `MCPDeployPolicy` denies deleting it, so attempting it reports
+  a denial as a teardown failure. `--dry-run` lists without removing.
 - **MCP deployment is its own permission set, not the operator's.**
   `OperatorPolicy` scopes its IAM to `pclustermaker-policy-*` and
   `pclustermaker-role-*`, which match no MCP name, and the full MCP grant
