@@ -1278,6 +1278,13 @@ client with a secret fails the token exchange. Consent is requested once,
 per connector — that is Anthropic's requirement, not something this deploy
 can skip.
 
+**Deleting or rotating the app client invalidates every session minted
+against it.** The connector then fails to reload its tools while every
+server-side check passes, because nothing is wrong with the server — the
+stored token refers to a client that no longer exists. **Disconnect and
+re-add the connector**; reloading reuses the dead token and keeps failing.
+The same applies after `--teardown`, which removes the pool entirely.
+
 **The first call after the transport has been idle can take ~9 seconds**,
 and claude.ai may give up on it with "your account was authorized, but
 ParallelClusterMaker didn't respond". That is a Lambda cold start, not a

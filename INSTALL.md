@@ -172,15 +172,44 @@ is re-set by re-running `--create-user`, never recovered.
 > [Adding cluster creation](#adding-cluster-creation-the-container-tier).
 > It is one command once a runtime is installed.
 
-Paste the printed `/mcp` URL into claude.ai under **Customize →
-Connectors**, using the **`+`** beside Connectors, and sign in with that
-user. On Team and Enterprise plans an Owner adds it under **Organization
-settings → Connectors → Add → Custom → Web** instead, and members then
-connect from their own **Customize → Connectors**.
+The deploy prints the three values this needs — the **MCP endpoint**, the
+**OAuth client** ID, and the Cognito username and password. Then, in
+claude.ai:
 
-In the advanced settings, set the **OAuth Client ID** to the `OAuth client`
-value the deploy printed and leave the **secret empty** — the connector is
-a public client using PKCE, and one with a secret fails the token exchange.
+1. **Customize → Connectors**, and click the **`+`** beside Connectors.
+   On Team and Enterprise plans an Owner adds it under **Organization
+   settings → Connectors → Add → Custom → Web** instead; members then
+   connect to it from their own **Customize → Connectors**.
+2. Give it a name, and paste the **MCP endpoint** — the `/mcp` URL, not
+   either discovery URL.
+3. Open **Advanced settings** and set **OAuth Client ID** to the `OAuth
+   client` value the deploy printed. Leave **OAuth Client Secret** empty.
+4. Click **Add**, then **Connect**, and sign in at the Cognito page with
+   the username and password from `--create-user`. Enter the username
+   exactly as created: the pool sets no `UsernameAttributes`, so an email
+   address is a literal username rather than an alias.
+5. Approve the consent screen. Claude asks once per connector.
+
+The tool list should show **13** tools, or **16** once the container tier
+is deployed. Asking Claude to list clusters is the quickest check — an
+**empty** answer is a successful one when no cluster exists.
+
+The secret is left empty because the connector is a public client using
+PKCE; one configured with a secret fails the token exchange.
+
+### If the connector stops working
+
+**Reloading the tool list is not the same as reconnecting.** A reload
+reuses the stored OAuth session, so it keeps failing whenever the problem
+*is* that session — most often because the Cognito app client it was minted
+against has been deleted or rotated, or because `--teardown` removed the
+pool. The symptom is "Couldn't reload tools from the server" while every
+server-side check passes, which it will, because nothing is wrong with the
+server. **Disconnect the connector and add it again.**
+
+The first call after the transport has been idle can also take several
+seconds and may report that the server did not respond; that one is a
+Lambda cold start and a retry answers immediately.
 
 The ID is supplied by hand because Cognito cannot register a client on
 demand. The `/register` endpoint here works when called directly, but no
