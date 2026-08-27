@@ -112,12 +112,126 @@
             "Effect": "Allow"
         },
         {
-            "Sid": "TagTheSshKeySecret",
+            "Sid": "TheSshKeySecret",
             "Action": [
+                "secretsmanager:CreateSecret",
+                "secretsmanager:PutSecretValue",
+                "secretsmanager:GetSecretValue",
+                "secretsmanager:DeleteSecret",
+                "secretsmanager:DescribeSecret",
                 "secretsmanager:TagResource"
             ],
             "Resource": "arn:aws:secretsmanager:*:<AWS_ACCOUNT_ID>:secret:parallelcluster/*",
             "Effect": "Allow"
+        },
+        {
+            "Sid": "IAMManagedPolicyLifecycle",
+            "Action": [
+                "iam:CreatePolicy",
+                "iam:DeletePolicy",
+                "iam:GetPolicy",
+                "iam:GetPolicyVersion",
+                "iam:ListPolicies",
+                "iam:ListPolicyVersions",
+                "iam:ListEntitiesForPolicy"
+            ],
+            "Effect": "Allow",
+            "Resource": [
+                "arn:aws:iam::<AWS_ACCOUNT_ID>:policy/pclustermaker-policy-*"
+            ]
+        },
+        {
+            "Sid": "IAMAttachDetachClusterPolicies",
+            "Action": [
+                "iam:AttachRolePolicy",
+                "iam:DetachRolePolicy",
+                "iam:ListAttachedRolePolicies"
+            ],
+            "Effect": "Allow",
+            "Resource": [
+                "arn:aws:iam::<AWS_ACCOUNT_ID>:role/pclustermaker-role-*"
+            ],
+            "Condition": {
+                "StringLike": {
+                    "iam:PolicyARN": "arn:aws:iam::<AWS_ACCOUNT_ID>:policy/pclustermaker-policy-*"
+                }
+            }
+        },
+        {
+            "Sid": "IAMRoleLifecycle",
+            "Action": [
+                "iam:CreateRole",
+                "iam:DeleteRole",
+                "iam:GetRole",
+                "iam:PutRolePolicy",
+                "iam:GetRolePolicy",
+                "iam:DeleteRolePolicy",
+                "iam:ListRolePolicies",
+                "iam:ListInstanceProfilesForRole",
+                "iam:TagRole",
+                "iam:PassRole"
+            ],
+            "Effect": "Allow",
+            "Resource": [
+                "arn:aws:iam::<AWS_ACCOUNT_ID>:role/pclustermaker-role-*"
+            ]
+        },
+        {
+            "Sid": "IAMClusterBoundaryBootstrapReadAndCreate",
+            "Action": [
+                "iam:CreatePolicy",
+                "iam:GetPolicy",
+                "iam:GetPolicyVersion",
+                "iam:ListPolicyVersions"
+            ],
+            "Effect": "Allow",
+            "Resource": [
+                "arn:aws:iam::<AWS_ACCOUNT_ID>:policy/pclustermaker-cluster-boundary"
+            ]
+        },
+        {
+            "Sid": "IAMBoundClusterRoleOnly",
+            "Action": [
+                "iam:PutRolePermissionsBoundary"
+            ],
+            "Effect": "Allow",
+            "Resource": [
+                "arn:aws:iam::<AWS_ACCOUNT_ID>:role/pclustermaker-role-*"
+            ],
+            "Condition": {
+                "StringEquals": {
+                    "iam:PermissionsBoundary": "arn:aws:iam::<AWS_ACCOUNT_ID>:policy/pclustermaker-cluster-boundary"
+                }
+            }
+        },
+        {
+            "Sid": "IAMDenyWeakeningTheClusterBoundary",
+            "Action": [
+                "iam:CreatePolicyVersion",
+                "iam:SetDefaultPolicyVersion",
+                "iam:DeletePolicyVersion",
+                "iam:DeletePolicy",
+                "iam:DeleteRolePermissionsBoundary"
+            ],
+            "Effect": "Deny",
+            "Resource": [
+                "arn:aws:iam::<AWS_ACCOUNT_ID>:policy/pclustermaker-cluster-boundary",
+                "arn:aws:iam::<AWS_ACCOUNT_ID>:role/pclustermaker-role-*"
+            ]
+        },
+        {
+            "Sid": "IAMInstanceProfile",
+            "Action": [
+                "iam:CreateInstanceProfile",
+                "iam:GetInstanceProfile",
+                "iam:DeleteInstanceProfile",
+                "iam:AddRoleToInstanceProfile",
+                "iam:RemoveRoleFromInstanceProfile"
+            ],
+            "Effect": "Allow",
+            "Resource": [
+                "arn:aws:iam::<AWS_ACCOUNT_ID>:instance-profile/pclustermaker-role-*"
+            ]
         }
     ]
 }

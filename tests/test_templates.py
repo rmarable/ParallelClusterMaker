@@ -7379,6 +7379,114 @@ class TestEachTierCanActuallyDoItsJob:
                 )
 
 
+class TestTheClusterBuildTierCanActuallyBuild:
+    """`MCPClusterBuild` granted IAM on PCluster's own CDK roles and nothing
+    for `_setup_iam`'s.
+
+    The first remote `create_cluster` got through VPC discovery, spot
+    pricing and OS resolution, then failed with `AccessDenied` on
+    `iam:CreatePolicy` for `pclustermaker-cluster-boundary`. The gap was not
+    one action: the whole toolkit-side grant set was absent -- the six
+    managed policies, the head node role, its instance profile, the
+    boundary, and the SSH key secret beyond `TagResource`.
+
+    Derived against `OperatorPolicy`, which does the same job from the CLI,
+    rather than listed here: a restated list is a second source, and the CLI
+    path is the one that has been exercised on live builds.
+    """
+
+    # What the CLI holds for its own resources. Not the whole operator
+    # policy -- the tier legitimately lacks Cost Explorer, pricing and the
+    # Route53 zone lifecycle, none of which _setup_iam touches.
+    _SHARED_SIDS = [
+        "IAMAttachDetachClusterPolicies",
+        "IAMRoleLifecycle",
+        "IAMClusterBoundaryBootstrapReadAndCreate",
+        "IAMBoundClusterRoleOnly",
+        "IAMDenyWeakeningTheClusterBoundary",
+        "IAMInstanceProfile",
+    ]
+
+    def _stmts(self, fname):
+        return {s.get("Sid"): s for s in _load_policy(fname)["Statement"]}
+
+    def _actions(self, stmt):
+        a = stmt.get("Action", [])
+        return set(a if isinstance(a, list) else [a])
+
+    @pytest.mark.parametrize("sid", _SHARED_SIDS)
+    def test_it_carries_the_operators_own_build_grant(self, sid):
+        tier = self._stmts("MCPClusterBuild.json_src")
+        operator = self._stmts("OperatorPolicy.json_src")
+        assert sid in tier, (
+            f"MCPClusterBuild has no {sid}; the CLI needs it to build a "
+            f"cluster, so a remote build fails partway through _setup_iam"
+        )
+        missing = self._actions(operator[sid]) - self._actions(tier[sid])
+        assert not missing, f"{sid} is missing {sorted(missing)}"
+
+    def test_the_boundary_bootstrap_can_create_not_only_read(self):
+        """`iam:GetPolicy` alone passes on any account that already has the
+        boundary and fails on a fresh one. The account this was found on had
+        none -- both durable boundaries had been removed by hand once
+        nothing was bound by them -- which is why the log named CreatePolicy
+        rather than GetPolicy."""
+        st = self._stmts("MCPClusterBuild.json_src")[
+            "IAMClusterBoundaryBootstrapReadAndCreate"]
+        assert "iam:CreatePolicy" in self._actions(st)
+
+    def test_it_can_manage_the_ssh_key_secret_not_only_tag_it(self):
+        acts = self._actions(
+            self._stmts("MCPClusterBuild.json_src")["TheSshKeySecret"])
+        for a in ("secretsmanager:CreateSecret", "secretsmanager:PutSecretValue",
+                  "secretsmanager:DeleteSecret"):
+            assert a in acts, f"the build creates the SSH key secret; {a} missing"
+
+    def test_role_creation_stays_bounded(self):
+        """The floor is not a licence to raise the ceiling. `iam:CreateRole`
+        reaches an internet-facing tier here, so the boundary condition is
+        what keeps it from creating an unbounded role."""
+        st = self._stmts("MCPClusterBuild.json_src")["IAMBoundClusterRoleOnly"]
+        cond = st["Condition"]["StringEquals"]["iam:PermissionsBoundary"]
+        assert cond.endswith("policy/pclustermaker-cluster-boundary")
+        for sid in ("IAMRoleLifecycle", "IAMAttachDetachClusterPolicies"):
+            for r in self._stmts("MCPClusterBuild.json_src")[sid]["Resource"]:
+                assert "role/pclustermaker-role-" in r, (
+                    f"{sid} reaches roles outside this toolkit's own: {r}")
+
+    def test_the_mcp_boundary_permits_exactly_the_one_rebind(self):
+        """A grant the boundary denies is a grant that does nothing.
+
+        `BoundaryDenyBoundaryTampering` denied `iam:PutRolePermissionsBoundary`
+        outright, so `_setup_iam`'s reassert -- the path that re-caps a head
+        node role built before the boundary existed -- would have failed
+        even with the grant above. It is now denied except when attaching
+        the cluster boundary, and always on an MCP role, so the transport
+        can never re-bound itself.
+        """
+        st = self._stmts("MCPRoleBoundary.json_src")
+        assert "iam:PutRolePermissionsBoundary" not in self._actions(
+            st["BoundaryDenyBoundaryTampering"]), (
+            "the blanket deny is back; the grant on the tier is inert")
+        gate = st["BoundaryOnlyEverAttachTheClusterBoundary"]
+        assert gate["Effect"] == "Deny" and gate["Resource"] == "*"
+        assert gate["Condition"]["StringNotEquals"][
+            "iam:PermissionsBoundary"].endswith(
+            "policy/pclustermaker-cluster-boundary")
+        mcp = st["BoundaryNeverRebindAnMcpRole"]
+        assert mcp["Effect"] == "Deny"
+        assert any("role/pclustermaker-mcp-" in r for r in mcp["Resource"])
+
+    def test_the_user_boundary_denials_are_untouched(self):
+        """Vacuity guard: the fix narrows one action, not the statement."""
+        acts = self._actions(
+            self._stmts("MCPRoleBoundary.json_src")["BoundaryDenyBoundaryTampering"])
+        for a in ("iam:DeleteRolePermissionsBoundary",
+                  "iam:PutUserPermissionsBoundary",
+                  "iam:DeleteUserPermissionsBoundary"):
+            assert a in acts
+
+
 class TestTheDeployPolicyCanActuallyDeploy:
     """`MCPDeployPolicy` has a floor too, and nothing was checking it.
 

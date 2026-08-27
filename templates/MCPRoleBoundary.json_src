@@ -51,13 +51,35 @@
         {
             "Sid": "BoundaryDenyBoundaryTampering",
             "Action": [
-                "iam:PutRolePermissionsBoundary",
                 "iam:DeleteRolePermissionsBoundary",
                 "iam:PutUserPermissionsBoundary",
                 "iam:DeleteUserPermissionsBoundary"
             ],
             "Effect": "Deny",
             "Resource": "*"
+        },
+        {
+            "Sid": "BoundaryOnlyEverAttachTheClusterBoundary",
+            "Action": [
+                "iam:PutRolePermissionsBoundary"
+            ],
+            "Effect": "Deny",
+            "Resource": "*",
+            "Condition": {
+                "StringNotEquals": {
+                    "iam:PermissionsBoundary": "arn:aws:iam::<AWS_ACCOUNT_ID>:policy/pclustermaker-cluster-boundary"
+                }
+            }
+        },
+        {
+            "Sid": "BoundaryNeverRebindAnMcpRole",
+            "Action": [
+                "iam:PutRolePermissionsBoundary"
+            ],
+            "Effect": "Deny",
+            "Resource": [
+                "arn:aws:iam::<AWS_ACCOUNT_ID>:role/pclustermaker-mcp-*"
+            ]
         },
         {
             "Sid": "BoundaryDenyEditingItself",
