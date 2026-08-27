@@ -661,3 +661,136 @@ def preflight_deploy_permissions(iam, *, caller_arn, aws_account_id, region):
     except Exception:
         return None
     return denied
+
+
+IMAGE_REPOSITORY = "pclustermaker-mcp-stack-mutation-node"
+IMAGE_PLATFORM = "linux/amd64"
+
+# In preference order. Finch first because it is AWS's own and the one the
+# Finch-specific push failure below was diagnosed against; nerdctl last
+# because a machine with it usually has one of the others too.
+CONTAINER_RUNTIMES = ("finch", "docker", "podman", "nerdctl")
+
+
+class ImageBuildError(RuntimeError):
+    """A build or push failed. Its own type so the caller can print the
+    remedy rather than a CalledProcessError's repr."""
+
+
+def detect_container_runtime(candidates=CONTAINER_RUNTIMES):
+    """The first container runtime on PATH, or None."""
+    import shutil as _shutil
+
+    for name in candidates:
+        if _shutil.which(name):
+            return name
+    return None
+
+
+def ensure_ecr_repository(ecr, *, repository=IMAGE_REPOSITORY):
+    """Create the image repository if absent. Returns (uri, created).
+
+    **The URI comes from AWS, never from f-string assembly.** The obvious
+    `{acct}.dkr.ecr.{region}.amazonaws.com/{name}` is right in the standard
+    partition and wrong in GovCloud and China, where the suffix differs --
+    and a registry host that is subtly wrong fails at `push` with an
+    authentication error rather than a name error. `repositoryUri` is on
+    both CreateRepository's and DescribeRepositories' Repository shape;
+    same reasoning as reading the Cognito domain off `describe_user_pool`.
+    """
+    try:
+        repo = ecr.create_repository(repositoryName=repository)["repository"]
+        return repo["repositoryUri"], True
+    except Exception as e:
+        if type(e).__name__ != "RepositoryAlreadyExistsException":
+            raise
+    repos = ecr.describe_repositories(repositoryNames=[repository])["repositories"]
+    return repos[0]["repositoryUri"], False
+
+
+def delete_ecr_repository(ecr, *, repository=IMAGE_REPOSITORY, suppress=True):
+    """Remove the image repository. Returns True if it was there.
+
+    **`force=True` is required, not convenience.** DeleteRepository raises
+    RepositoryNotEmptyException while any image remains, and a repository
+    this deploy created always holds at least the image it pushed -- so
+    without it teardown fails on every transport that ever deployed the
+    container tier, which is precisely the case it exists for.
+    """
+    try:
+        ecr.delete_repository(repositoryName=repository, force=True)
+        return True
+    except Exception as e:
+        if type(e).__name__ == "RepositoryNotFoundException":
+            return False
+        if not suppress:
+            raise
+        return False
+
+
+def ecr_login(ecr, runtime, *, run=None):
+    """Log the container runtime in to ECR. Returns the registry host.
+
+    The token is base64 of `user:password` per ECR's own contract, and the
+    password reaches the runtime on **stdin** rather than argv -- a
+    credential in a command line is visible to every other process on the
+    machine via `ps`.
+    """
+    import base64
+    import subprocess
+
+    run = run or subprocess.run
+    data = ecr.get_authorization_token()["authorizationData"][0]
+    user, _, password = base64.b64decode(data["authorizationToken"]).decode().partition(":")
+    registry = data["proxyEndpoint"].removeprefix("https://")
+    proc = run([runtime, "login", "--username", user, "--password-stdin", registry],
+               input=password, text=True, capture_output=True)
+    if proc.returncode != 0:
+        raise ImageBuildError(
+            f"{runtime} login to {registry} failed:\n{(proc.stderr or '').strip()}")
+    return registry
+
+
+_NO_AUTH = "no basic auth credentials"
+
+
+def build_and_push_image(runtime, *, image_uri, repo_root, dockerfile,
+                         platform=IMAGE_PLATFORM, run=None):
+    """Build the container tier's image and push it. Returns image_uri.
+
+    `--platform` is passed always, never left to the host's default: an
+    image built on Apple Silicon or an ARM Linux host is linux/arm64, and
+    Lambda rejects the mismatch at CreateFunction rather than at
+    invocation, long after the push.
+    """
+    import subprocess
+
+    run = run or subprocess.run
+    build = run([runtime, "build", "--platform", platform, "-f", dockerfile,
+                 "-t", image_uri, repo_root], text=True, capture_output=True)
+    if build.returncode != 0:
+        raise ImageBuildError(
+            f"{runtime} build failed:\n{(build.stderr or '').strip()[-2000:]}")
+
+    push = run([runtime, "push", image_uri], text=True, capture_output=True)
+    if push.returncode != 0:
+        err = (push.stderr or "").strip()
+        # Finch's three-location credential problem: `finch login` writes to
+        # the host while the push runs inside its Lima VM. Deliberately not
+        # automated -- the fix writes an ECR token into two paths inside the
+        # VM and both must be scrubbed afterward, so a process that dies
+        # between the two leaves a credential at rest. Name the remedy
+        # instead of half-applying it.
+        if _NO_AUTH in err:
+            raise ImageBuildError(
+                f"{runtime} push failed: {_NO_AUTH}.\n"
+                f"  On Finch the push happens inside its Lima VM, which does "
+                f"not see the\n"
+                f"  credential `finch login` wrote to the host. See "
+                f"\"If the push fails with\n"
+                f"  'no basic auth credentials'\" in INSTALL.md -- three "
+                f"locations are needed\n"
+                f"  and no two of them suffice."
+            )
+        raise ImageBuildError(f"{runtime} push failed:\n{err[-2000:]}")
+    return image_uri

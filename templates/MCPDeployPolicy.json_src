@@ -146,21 +146,31 @@
             ]
         },
         {
+            "Sid": "MCPImageTierEcrAuth",
+            "Action": [
+                "ecr:GetAuthorizationToken"
+            ],
+            "Effect": "Allow",
+            "Resource": "*"
+        },
+        {
             "Sid": "MCPImageTierEcr",
             "Action": [
-                "ecr:GetAuthorizationToken",
                 "ecr:BatchCheckLayerAvailability",
                 "ecr:BatchGetImage",
                 "ecr:DescribeImages",
                 "ecr:DescribeRepositories",
                 "ecr:CreateRepository",
+                "ecr:DeleteRepository",
                 "ecr:InitiateLayerUpload",
                 "ecr:UploadLayerPart",
                 "ecr:CompleteLayerUpload",
                 "ecr:PutImage"
             ],
             "Effect": "Allow",
-            "Resource": "*"
+            "Resource": [
+                "arn:aws:ecr:*:<AWS_ACCOUNT_ID>:repository/pclustermaker-mcp-*"
+            ]
         },
         {
             "Sid": "MCPCallerIdentity",

@@ -338,6 +338,17 @@ standing constraints for local development.
   `describe_user_pool`, never guess. Teardown deliberately leaves the
   permissions boundary; `MCPDeployPolicy` denies deleting it. `--dry-run`
   lists without removing.
+- **The deploy builds and pushes the container tier itself**
+  (`--tier stack-mutation-node`, no `--image-uri`), and `--teardown`
+  deletes the repository with **`force=True`** — one we created always
+  holds an image. Create and delete land together; creating without
+  deleting leaks one per account. Only `ecr:GetAuthorizationToken` may
+  keep `Resource: "*"` (it acts on the registry, not a repository); every
+  other ECR action is confined to `repository/pclustermaker-mcp-*`. The
+  registry URI is **read off `repositoryUri`**, never assembled — the
+  suffix differs in GovCloud and China. Password on **stdin**, never argv.
+  Finch's credential failure is named, never auto-applied. Detail:
+  `docs/sessions.md`, session 56.
 - **`--bootstrap` must be checked *before* the setup-flag short-circuit.**
   An infrastructure flag alone deploys no tiers on purpose, but
   `--bootstrap` normalizes to `--setup-infra --setup-gateway`, so checked

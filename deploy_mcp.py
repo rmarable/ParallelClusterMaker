@@ -27,12 +27,21 @@ sys.path.insert(0, _src_dir)
 sys.path.insert(0, _repo_root)
 
 from mcp_server.deploy import (  # noqa: E402
+    CONTAINER_RUNTIMES,
     FUNCTION_NAMES,
+    IMAGE_PLATFORM,
+    IMAGE_REPOSITORY,
+    ecr_login,
     delete_cognito_pool,
     delete_gateway,
     delete_mcp_functions,
+    build_and_push_image,
+    delete_ecr_repository,
     deploy_tier,
+    detect_container_runtime,
     ensure_cognito_user,
+    ensure_ecr_repository,
+    ImageBuildError,
     preflight_deploy_permissions,
     generate_user_password,
     setup_gateway,
@@ -203,9 +212,13 @@ def main():
                    help="tier to deploy (repeatable; default: every zip tier)")
     p.add_argument("--region", "-R", default=os.environ.get("AWS_REGION", "us-east-1"))
     p.add_argument("--image-uri",
-                   help="ECR image URI for the container tier; required to "
-                        "deploy stack-mutation-node, which cannot be a zip "
-                        "(pcluster's create/update need Node.js on PATH)")
+                   help="use an already-built image for the container tier "
+                        "instead of building one. Without it, deploying "
+                        "stack-mutation-node creates the ECR repository, "
+                        "builds the image and pushes it")
+    p.add_argument("--runtime", choices=CONTAINER_RUNTIMES,
+                   help="container runtime to build with (default: the "
+                        "first of %s found on PATH)" % ", ".join(CONTAINER_RUNTIMES))
     p.add_argument("--dry-run", action="store_true",
                    help="build and report sizes; upload and deploy nothing")
     p.add_argument("--setup-gateway", action="store_true",
@@ -294,6 +307,12 @@ def main():
             for pool in cog.list_user_pools(MaxResults=60)["UserPools"]:
                 if pool["Name"].startswith(pool_prefix):
                     print(f"  user pool  {pool['Name']} ({pool['Id']})")
+            try:
+                boto3.client("ecr", region_name=args.region).describe_repositories(
+                    repositoryNames=[IMAGE_REPOSITORY])
+                print(f"  ECR repo   {IMAGE_REPOSITORY}")
+            except Exception:
+                pass
             print("  plus the MCP IAM roles and policies")
             print(f"\nleft in place: {_mcp_boundary_name()}")
             return 0
@@ -301,6 +320,11 @@ def main():
         print("tearing down the MCP remote transport\n")
         delete_gateway(apigw)
         delete_mcp_functions(lam)
+        # After the functions, which reference the image, and before IAM,
+        # which is what grants the delete. A repository this deploy created
+        # always holds an image, so this needs force=True.
+        if delete_ecr_repository(boto3.client("ecr", region_name=args.region)):
+            print(f"  Deleted ECR repository: {IMAGE_REPOSITORY}")
         result = _delete_mcp_infra(iam, aws_account_id=account, verbose=True)
         delete_cognito_pool(cog, pool_name_prefix=pool_prefix)
 
@@ -369,15 +393,45 @@ def main():
         print(f"[{tier}] -> {FUNCTION_NAMES[tier]}")
 
         if spec["kind"] == "image":
-            if not args.image_uri:
-                sys.exit(
-                    f"ERROR: {tier} is a container image; pass --image-uri.\n"
-                    f"  Build it first (see INSTALL.md for the runtime, the\n"
-                    f"  --platform trap, and the ECR steps):\n"
-                    f"    finch build --platform linux/amd64 \\\n"
-                    f"      -f mcp_server/Dockerfile.{tier} -t {tier}:latest ."
-                )
-            code = {"ImageUri": args.image_uri}
+            # An explicit --image-uri is used exactly as given: someone who
+            # built elsewhere (CI, another architecture, a mirror) has
+            # already answered the question this branch exists to answer.
+            if args.image_uri:
+                code = {"ImageUri": args.image_uri}
+            else:
+                runtime = args.runtime or detect_container_runtime()
+                if runtime is None:
+                    sys.exit(
+                        f"ERROR: {tier} ships as a container image and no "
+                        f"container runtime\n"
+                        f"  was found on PATH (looked for: "
+                        f"{', '.join(CONTAINER_RUNTIMES)}).\n\n"
+                        f"  Install one (see \"Adding cluster creation\" in "
+                        f"INSTALL.md), or pass\n"
+                        f"  --image-uri for an image built elsewhere.\n\n"
+                        f"  Without this tier the transport still serves every "
+                        f"tool except\n"
+                        f"  create_cluster, apply_cluster_update and "
+                        f"preview_cluster_config."
+                    )
+                ecr = boto3.client("ecr", region_name=args.region)
+                uri, created = ensure_ecr_repository(ecr)
+                print(f"  ECR repository {'created' if created else 'exists'}: {uri}")
+                registry = ecr_login(ecr, runtime)
+                print(f"  {runtime} logged in to {registry}")
+                image_uri = f"{uri}:latest"
+                print(f"  building with {runtime} (--platform "
+                      f"{IMAGE_PLATFORM}); this takes a few minutes...")
+                try:
+                    build_and_push_image(
+                        runtime, image_uri=image_uri, repo_root=_repo_root,
+                        dockerfile=os.path.join(
+                            _repo_root, "mcp_server", f"Dockerfile.{tier}"),
+                    )
+                except ImageBuildError as e:
+                    sys.exit(f"ERROR: {e}")
+                print(f"  pushed {image_uri}")
+                code = {"ImageUri": image_uri}
         else:
             with tempfile.TemporaryDirectory() as build_dir:
                 zip_path = os.path.join(tempfile.gettempdir(), f"{tier}.zip")
@@ -466,13 +520,18 @@ def main():
             print("\nNo Cognito user exists to sign in as. Create one with")
             print("  deploy_mcp.py --create-user <username>")
         if "stack-mutation-node" not in tiers:
-            print("\nNot deployed: stack-mutation-node (container tier).")
-            print("  create_cluster, apply_cluster_update and "
+            print("\nThree tools are NOT in this deployment:")
+            print("  create_cluster, apply_cluster_update, "
                   "preview_cluster_config")
-            print("  will be absent from the tool list until it is deployed "
-                  "with")
-            print("  --tier stack-mutation-node --image-uri <ecr-uri> "
-                  "(see INSTALL.md).")
+            print("  -- i.e. you can inspect and operate clusters from the "
+                  "browser, but not")
+            print("  create or modify them. They live in the "
+                  "stack-mutation-node tier, which")
+            print("  ships as a container image. To add it:")
+            print("    ./deploy_mcp.py --tier stack-mutation-node")
+            found = detect_container_runtime()
+            print(f"  ({'using ' + found if found else 'needs a container '
+                  'runtime on PATH -- see INSTALL.md'})")
 
     print("Done.")
 

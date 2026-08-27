@@ -1559,3 +1559,251 @@ class TestTheDeploySaysWhatPermissionItIsMissing:
         arn = f"arn:aws:iam::{self.ACCT}:user/deployer"
         self._call(iam, arn=arn)
         assert set(iam.source_arns) == {arn}
+
+
+class _Ecr:
+    """Modelled on ECR's contract, read from botocore's service model.
+
+    What the contract forced, each because production depends on it:
+    CreateRepository raises **RepositoryAlreadyExistsException** (the
+    idempotency signal); the Repository shape carries **repositoryUri**, so
+    the caller never assembles a registry host; DeleteRepository raises
+    **RepositoryNotEmptyException** unless `force` is set, which is the
+    case that matters since a repository this deploy created always holds
+    an image; and `authorizationToken` is **base64 of `user:password`**.
+    """
+
+    class RepositoryAlreadyExistsException(Exception):
+        pass
+
+    class RepositoryNotFoundException(Exception):
+        pass
+
+    class RepositoryNotEmptyException(Exception):
+        pass
+
+    # A deliberately non-standard suffix: the point is that the caller must
+    # use what AWS returns rather than building <acct>.dkr.ecr.<region>.
+    HOST = "111122223333.dkr.ecr.us-gov-west-1.amazonaws.com"
+
+    def __init__(self, existing=None, images=0):
+        self.repos = dict(existing or {})
+        self.images = images
+        self.deleted = []
+
+    def create_repository(self, repositoryName, **kw):
+        if repositoryName in self.repos:
+            raise self.RepositoryAlreadyExistsException("already exists")
+        uri = f"{self.HOST}/{repositoryName}"
+        self.repos[repositoryName] = uri
+        return {"repository": {"repositoryName": repositoryName, "repositoryUri": uri}}
+
+    def describe_repositories(self, repositoryNames=None, **kw):
+        names = repositoryNames or list(self.repos)
+        missing = [n for n in names if n not in self.repos]
+        if missing:
+            raise self.RepositoryNotFoundException(str(missing))
+        return {"repositories": [{"repositoryName": n, "repositoryUri": self.repos[n]}
+                                 for n in names]}
+
+    def delete_repository(self, repositoryName, force=False, **kw):
+        if repositoryName not in self.repos:
+            raise self.RepositoryNotFoundException(repositoryName)
+        if self.images and not force:
+            raise self.RepositoryNotEmptyException("images still present")
+        del self.repos[repositoryName]
+        self.deleted.append(repositoryName)
+
+    def get_authorization_token(self, **kw):
+        import base64
+        tok = base64.b64encode(b"AWS:sekrit").decode()
+        return {"authorizationData": [
+            {"authorizationToken": tok, "proxyEndpoint": f"https://{self.HOST}"}]}
+
+
+class _Runner:
+    """Records subprocess invocations; scripted return codes by argv[1]."""
+
+    def __init__(self, fail_on=None, stderr=""):
+        self.calls = []
+        self.fail_on = fail_on
+        self.stderr = stderr
+
+    def __call__(self, argv, **kw):
+        self.calls.append((list(argv), kw))
+
+        class R:
+            pass
+        r = R()
+        r.returncode = 1 if (self.fail_on and argv[1] == self.fail_on) else 0
+        r.stdout = ""
+        r.stderr = self.stderr if r.returncode else ""
+        return r
+
+
+class TestTheDeployBuildsItsOwnImage:
+    """`--tier stack-mutation-node` used to require --image-uri and told the
+    operator to run finch build, aws ecr create-repository and finch push by
+    hand -- while MCPDeployPolicy already granted ecr:CreateRepository and
+    nothing ever called it.
+    """
+
+    def test_the_repository_uri_comes_from_aws(self):
+        """Never assembled as <acct>.dkr.ecr.<region>.amazonaws.com: that is
+        right in the standard partition and wrong in GovCloud and China,
+        where a subtly wrong registry host fails at push as an
+        authentication error rather than a name error."""
+        from mcp_server.deploy import IMAGE_REPOSITORY, ensure_ecr_repository
+
+        ecr = _Ecr()
+        uri, created = ensure_ecr_repository(ecr)
+        assert created is True
+        assert uri == f"{_Ecr.HOST}/{IMAGE_REPOSITORY}"
+
+    def test_an_existing_repository_is_reused_not_an_error(self):
+        from mcp_server.deploy import IMAGE_REPOSITORY, ensure_ecr_repository
+
+        ecr = _Ecr(existing={IMAGE_REPOSITORY: f"{_Ecr.HOST}/{IMAGE_REPOSITORY}"})
+        uri, created = ensure_ecr_repository(ecr)
+        assert created is False
+        assert uri == f"{_Ecr.HOST}/{IMAGE_REPOSITORY}"
+
+    def test_teardown_forces_the_delete(self):
+        """A repository this deploy created always holds the image it
+        pushed, and DeleteRepository raises RepositoryNotEmptyException
+        without force -- so an unforced delete fails on exactly the
+        transports that deployed this tier."""
+        from mcp_server.deploy import IMAGE_REPOSITORY, delete_ecr_repository
+
+        ecr = _Ecr(existing={IMAGE_REPOSITORY: "u"}, images=1)
+        assert delete_ecr_repository(ecr, suppress=False) is True
+        assert ecr.deleted == [IMAGE_REPOSITORY]
+
+    def test_the_fake_refuses_an_unforced_delete_of_a_nonempty_repo(self):
+        """Vacuity guard: without this the force assertion above passes
+        either way."""
+        ecr = _Ecr(existing={"r": "u"}, images=1)
+        with pytest.raises(_Ecr.RepositoryNotEmptyException):
+            ecr.delete_repository(repositoryName="r")
+
+    def test_deleting_an_absent_repository_is_not_a_failure(self):
+        from mcp_server.deploy import delete_ecr_repository
+
+        assert delete_ecr_repository(_Ecr(), suppress=False) is False
+
+    def test_the_password_never_reaches_argv(self):
+        """A credential in a command line is visible to every process on
+        the machine through `ps`. ECR's token decodes to user:password and
+        the password goes on stdin."""
+        from mcp_server.deploy import ecr_login
+
+        run = _Runner()
+        registry = ecr_login(_Ecr(), "finch", run=run)
+        assert registry == _Ecr.HOST, "the scheme must be stripped"
+        argv, kw = run.calls[0]
+        assert "sekrit" not in " ".join(argv)
+        assert kw["input"] == "sekrit"
+        assert "--password-stdin" in argv
+
+    def test_the_build_always_pins_the_platform(self):
+        """An image built on Apple Silicon defaults to linux/arm64 and
+        Lambda rejects the mismatch at CreateFunction, long after the
+        push."""
+        from mcp_server.deploy import IMAGE_PLATFORM, build_and_push_image
+
+        run = _Runner()
+        build_and_push_image("finch", image_uri="u:latest", repo_root="/r",
+                             dockerfile="/r/Dockerfile", run=run)
+        argv = run.calls[0][0]
+        assert argv[:2] == ["finch", "build"]
+        assert argv[argv.index("--platform") + 1] == IMAGE_PLATFORM
+
+    def test_it_pushes_what_it_built(self):
+        from mcp_server.deploy import build_and_push_image
+
+        run = _Runner()
+        build_and_push_image("finch", image_uri="u:latest", repo_root="/r",
+                             dockerfile="/r/Dockerfile", run=run)
+        assert run.calls[1][0] == ["finch", "push", "u:latest"]
+
+    def test_a_failed_build_does_not_push(self):
+        from mcp_server.deploy import ImageBuildError, build_and_push_image
+
+        run = _Runner(fail_on="build", stderr="compile error")
+        with pytest.raises(ImageBuildError, match="build failed"):
+            build_and_push_image("finch", image_uri="u:latest", repo_root="/r",
+                                 dockerfile="/r/Dockerfile", run=run)
+        assert [c[0][1] for c in run.calls] == ["build"], "pushed after a failed build"
+
+    def test_the_finch_credential_failure_names_the_remedy(self):
+        """`finch login` writes to the host and the push runs inside a Lima
+        VM. Deliberately not automated -- the fix writes an ECR token into
+        two paths inside the VM, both of which must be scrubbed, so a
+        process dying between them leaves a credential at rest."""
+        from mcp_server.deploy import ImageBuildError, build_and_push_image
+
+        run = _Runner(fail_on="push", stderr="failed: no basic auth credentials")
+        with pytest.raises(ImageBuildError, match="INSTALL.md"):
+            build_and_push_image("finch", image_uri="u:latest", repo_root="/r",
+                                 dockerfile="/r/Dockerfile", run=run)
+
+    def test_an_unrelated_push_failure_is_not_dressed_up_as_that_one(self):
+        from mcp_server.deploy import ImageBuildError, build_and_push_image
+
+        run = _Runner(fail_on="push", stderr="network unreachable")
+        with pytest.raises(ImageBuildError) as e:
+            build_and_push_image("finch", image_uri="u:latest", repo_root="/r",
+                                 dockerfile="/r/Dockerfile", run=run)
+        assert "network unreachable" in str(e.value)
+        assert "INSTALL.md" not in str(e.value)
+
+    def test_runtime_detection_prefers_the_first_present(self):
+        from mcp_server.deploy import detect_container_runtime
+
+        assert detect_container_runtime(candidates=("definitely-not-installed",)) is None
+        assert detect_container_runtime(candidates=("sh",)) == "sh"
+        assert detect_container_runtime(candidates=("definitely-not-installed", "sh")) == "sh"
+
+
+class TestTheEcrGrantMatchesWhatTheDeployDoes:
+    """Creating the repository and never deleting it leaks one per account;
+    the two halves have to land together. ecr:DeleteRepository was granted
+    nowhere before this."""
+
+    def _statements(self):
+        import json
+        import os
+
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        doc = json.load(open(os.path.join(root, "templates", "MCPDeployPolicy.json_src")))
+        return doc["Statement"]
+
+    def _granted(self):
+        out = {}
+        for st in self._statements():
+            if st.get("Effect") != "Allow":
+                continue
+            acts = st["Action"] if isinstance(st["Action"], list) else [st["Action"]]
+            res = st["Resource"] if isinstance(st["Resource"], list) else [st["Resource"]]
+            for a in acts:
+                out.setdefault(a, set()).update(res)
+        return out
+
+    def test_teardown_can_delete_the_repository_it_created(self):
+        assert "ecr:DeleteRepository" in self._granted()
+
+    def test_only_the_registry_wide_action_uses_a_wildcard_resource(self):
+        """GetAuthorizationToken operates on the registry and IAM rejects it
+        against a repository ARN, so it genuinely needs "*". Every other ECR
+        action is confined to this deploy's own repositories -- a blanket
+        wildcard would let the deployer delete any repository in the
+        account."""
+        granted = self._granted()
+        for action, resources in granted.items():
+            if not action.startswith("ecr:"):
+                continue
+            if action == "ecr:GetAuthorizationToken":
+                assert resources == {"*"}
+                continue
+            assert resources != {"*"}, f"{action} is granted on every repository"
+            assert all("repository/pclustermaker-mcp-" in r for r in resources), action
