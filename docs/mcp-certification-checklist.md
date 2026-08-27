@@ -92,15 +92,25 @@ carried Stages B and C. Between them sit `certify` (rebuilt more than once,
 which is why one note says monitoring was on and another says off) and
 `nodecert`, built through a deployed handler.
 
-**Two limitations are recorded and still stand** — they are at the end of
-this file and are easy to lose behind the completed tasks:
+**Both previously-recorded limitations are now CLOSED**, on throwaway
+cluster `ironclad` (2026-08-26, ubuntu2404arm, login nodes, monitoring):
 
-* **The CLI IAM hardening is not live-verified.** A wrong deny or a narrow
-  ceiling surfaces at node bootstrap, roughly 20 minutes into a build, and
-  the whole test suite is blind to it.
-* **`deploy_mcp.py --teardown` has been exercised only against an empty
-  account.** The delete paths have never run against live resources through
-  that code.
+* **The CLI IAM hardening is live-verified.** Head node bootstrapped under
+  `pclustermaker-cluster-boundary`; login node healthy behind its NLB; **a
+  compute node booted and ran a job under `ClusterNode-Deny`**; zero
+  `AccessDenied`/`not authorized`/`UnauthorizedOperation` anywhere in the
+  cluster's logs.
+* **`deploy_mcp.py --teardown` is live-verified.** It removed 25 real
+  resources — REST API, 7 functions, 7 roles, 10 policies, Cognito domain
+  **then** pool — and left the permissions boundary, as designed.
+
+**One limitation replaced them, found by that build:** a remote tool call has
+**~29s**, not 900s. API Gateway REST's integration timeout is already at its
+maximum, and past it the caller sees a timeout while the Lambda runs on and
+the mutation *succeeds* — so a retry double-submits. Measured:
+`apply_cluster_update` ran 41,992 ms; the caller failed at 29.4s; the stack
+reached `UPDATE_COMPLETE` anyway. R4's 14-20s calls stayed under it, which is
+why nothing caught it before.
 
 | Marker | Meaning |
 |---|---|
@@ -1583,9 +1593,8 @@ because the list is the record of what the certification campaign was for.
 6. ~~`deploy.py` has no production caller.~~ **Closed 2026-08-25** by
    `deploy_mcp.py` (task A1), which also gained `--teardown` on 2026-08-26,
    so the transport now has a removal path as well as a deployment one.
-   `--teardown` has been exercised **only against an empty account**: it
-   reports absence correctly and is idempotent, but the delete paths have
-   never run against live resources through that code.
+   `--teardown` is **live-verified** on `ironclad` (2026-08-26): 25 real
+   resources removed, Cognito domain before pool, boundary left in place.
 
 Both survivors need infrastructure that no longer exists: 4.7 needs a
 cluster and a trail, the browser session needs the transport redeployed.
@@ -1655,21 +1664,25 @@ did not, is below. The pre-session text is kept after it for the record.
    survived as long as it did. **Removal is no longer a scratchpad job
    either** — `--teardown` takes the gateway, the functions, the IAM and the
    pool, in that order, and deliberately leaves the permissions boundary
-   (`MCPDeployPolicy` denies deleting it). It has been exercised **only
-   against an empty account**.
+   (`MCPDeployPolicy` denies deleting it). **Live-verified** on `ironclad`:
+   25 resources removed, domain before pool.
 
-**Two recorded limitations that are not on this list and must not be read
-as closed:**
+**Both limitations recorded here are now closed** — see the header. They
+were closed on `ironclad` (2026-08-26), a cluster built for no other purpose,
+and closing them cost two defects that 3,238 tests could not see: the 29s
+gateway ceiling, and `INSTALL.md` documenting two ECR credential locations
+where three are required (containerd runs as root in the Lima VM).
 
-- **The CLI IAM hardening is not live-verified.** `ClusterNode-Deny` and
-  the `ClusterRoleBoundary` were derived from what the shipped documents
-  grant, so neither *should* change behavior — but a wrong deny or a narrow
-  ceiling surfaces at node bootstrap, roughly 20 minutes into a build, and
-  the whole test suite is blind to it.
-- **`deploy_mcp.py --teardown` has been run only against an empty account.**
-  It reports absence correctly and is idempotent; the delete paths have not
-  run against live resources through that code. Only the
-  domain-before-pool ordering is backed by a live failure.
+**What replaced them, and what is genuinely still open:**
+
+- **A remote call has ~29s, not 900s.** `GATEWAY_INTEGRATION_TIMEOUT_MS`,
+  already the REST maximum. Any tool that can block longer needs decomposing
+  the way `apply_queue_config` was, or the caller gets a timeout for work
+  that succeeded.
+- **Item 4.7's finalize half.** R5 proved the tier separation by policy
+  simulation and a runtime CloudTrail, but the specific claim that a
+  *finalize* call emits no `DeleteCluster`/`DeleteStack` was never measured.
+- **The browser session.** Needs the transport redeployed; it is torn down.
 
 ### Pre-session text, kept for the record
 
