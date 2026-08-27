@@ -59,12 +59,16 @@ appended within their phase.
 
 ---
 
-**What is true today (2026-08-26).** All 14 certification tasks are
-complete and **nothing is left standing**: cluster `stageb` (with the
-`r4probe` queue R4 added), the whole remote transport, the ECR repository,
-all 14 CloudWatch log groups and every object in the locks bucket are gone.
-The AWS account holds no ParallelClusterMaker resources; two buckets remain
-by design. So every item below that reads as a live prerequisite — "the
+**What is true today (2026-08-26, end of session).** All 14 certification
+tasks are complete and **nothing is left standing.** Two clusters were built
+and destroyed today: `stageb`, which carried L1-L5 and R1-R6 (and the
+`r4probe` queue R4 added), and then `ironclad`, built solely to live-verify
+the CLI IAM hardening and exercised with a rebuilt transport alongside it.
+Both are gone, along with both transport deployments, the ECR repository,
+every CloudWatch log group, both permissions boundaries and every
+locks-bucket object. The AWS account holds no ParallelClusterMaker
+resources; two buckets remain by design (PCluster's own regional system
+bucket, and the empty locks bucket). So every item below that reads as a live prerequisite — "the
 cluster is up", "keep it alive", "still running" — describes a state that
 no longer exists, and re-running any **CLUSTER** item means building one
 again.
@@ -1339,8 +1343,9 @@ interesting.
       **Verified as an outcome, not a status.** `apply_cluster_update`
       returned `UPDATE_IN_PROGRESS`; the stack's `LastUpdatedTime` advanced
       04:10:46 -> 17:10:43; the stack reached `UPDATE_COMPLETE`; and the
-      launch template **`stageb-r4probe-r4probe-resource`** exists in EC2 --
-      the update materialized resources, it was not merely accepted. Fleet
+      launch template **`stageb-r4probe-r4probe-resource`** existed in EC2
+      when checked -- the update materialized resources, it was not merely
+      accepted. Fleet
       `RUNNING` at the end.
 
       **This is what the 900s ceiling buys.** The operation still costs
