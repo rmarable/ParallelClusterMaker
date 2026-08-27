@@ -769,10 +769,14 @@ gate looked; a raw `TIMED_OUT` constant in the refusal) — both fixed.
 only time it can be run, since spending a token consumes what it
 authorizes. Both tokens were spent on the wrong tool and both refused;
 the correct token then succeeded, which is the vacuity guard. Detail is in
-L5 below. **4.7 still needs CloudTrail** in its own terms: R5 proved by
-`iam:SimulatePrincipalPolicy` and an ephemeral trail that a tier cannot
-exceed its IAM, but nothing has yet confirmed that a *finalize* call emits
-no `DeleteCluster`/`DeleteStack` event.
+L5 below.
+
+**Status 2026-08-27: 4.7 PASSED, retroactively and at no cost — phase 4 is
+8/8 and all four phases are complete.** The premise that closing it needed
+a new cluster with a trail standing was wrong: **CloudTrail Event history
+retains 90 days of management events with no trail configured at all**, and
+`cloudformation:DeleteStack` is a management event. `ironclad`'s finalize —
+2026-08-26, the day before — was therefore already on record. Detail in 4.7.
 
 **4.1 Preview mints a token bound to the options — CLUSTER.** Fresh token
 inside the 15-minute window.
@@ -811,12 +815,61 @@ with the `finalization_token`, and `finalize_cluster_teardown` with the
 `confirmation_token`. Both must be refused. One authorizes starting a stack
 delete; the other authorizes destroying the credentials.
 
-**4.7 `finalize_cluster_teardown` never issues a delete — CLUSTER.** The
-reason it exists rather than a second `delete_cluster`: that second call
-re-issues `delete-cluster` against the *name*, so if the name has been rebuilt
-since, it deletes the new cluster's stack. Not safely testable against a real
-rebuild; verify from CloudTrail that the finalize call produced **no**
-`DeleteCluster`/`DeleteStack` event.
+**4.7 `finalize_cluster_teardown` never issues a delete — PASS 2026-08-27,
+CLUSTER, no cluster required.** The reason it exists rather than a second
+`delete_cluster`: that second call re-issues `delete-cluster` against the
+*name*, so if the name has been rebuilt since, it deletes the new cluster's
+stack. Not safely testable against a real rebuild; verify from CloudTrail
+that the finalize call produced **no** `DeleteCluster`/`DeleteStack` event.
+
+**The item was scoped as needing a trail up *before* the finalize fires, and
+that is what kept it open — it is not what CloudTrail requires.** Event
+history covers **90 days of management events in every region with nothing
+configured**, so `ironclad`'s finalize (2026-08-26, through the local stdio
+server) was on record the whole time. Read back with `aws cloudtrail
+lookup-events` in `us-east-1`, whole window `00:10:30Z`-`00:13:00Z` on
+2026-08-27, no attribute filter — every management event, not a search for
+the one expected to be absent:
+
+    DeleteKeyPair    ironclad-09232226082026_us-east-1        00:11:00Z
+    DeleteSecret     .../ironclad-09232226082026/ssh-...      00:11:00Z
+    DeleteBucket     parallelclustermaker-ironclad-0923...    00:11:02Z
+    DeleteParameter  (the SSM Grafana password)              00:11:02Z
+    DetachRolePolicy x5 / DeletePolicy x5                     00:11:02-03Z
+    DeleteRole       pclustermaker-role-ironclad-0923...      00:11:04Z
+    DeleteTopic      sns_alerts_ironclad                      00:11:04Z
+    DescribeStacks   x2 (the `_confirm_stack_is_gone` probe)  00:10:59-11:00Z
+
+    DeleteStack      — absent.  DeleteCluster — absent.  UpdateStack — absent.
+
+**Three things make the negative non-vacuous**, which a bare "no event found"
+would not:
+
+1. **The same account, day and process *does* emit `DeleteStack`** — at
+   `2026-08-26T23:48:47Z`, `{"stackName": "ironclad"}`, 22 minutes before
+   the finalize. That is the `delete_cluster` half. So the event name is
+   one this tooling reaches, not one nothing ever emits.
+2. **The two calls carry a byte-identical `userAgent`** (`Boto3/1.43.65
+   md/Botocore#1.43.65 ua/2.1 os/macos#25.6.0 md/arch#arm64
+   lang/python#3.12.13`), so the delete and the finalize came from the same
+   process family — the trail is not blind to one of them.
+3. **Finalize's own `DescribeStacks` is in the window**, so the recording
+   demonstrably sees this call's traffic; an empty window would have been
+   the ambiguous result.
+
+`ironclad`'s teardown is the right specimen for a second reason:
+`finalize_cluster_teardown` ran there against a **stale stdio server** whose
+loaded code predated `ClusterNode-Deny`, so it left that sixth policy behind
+(deleted by hand at `00:12:16Z`, visible in the same window). A finalize that
+was already misbehaving in one respect still issued no delete.
+
+`stageb`'s finalize (2026-08-26 `19:31:50Z`) is on record too but is the
+weaker specimen: `deploy_mcp.py --teardown` was running in the same minutes,
+so its window mixes cluster teardown with transport teardown.
+
+**What this does not certify.** Event history holds management events only,
+and only for 90 days — after 2026-11-24 this specimen is gone and re-running
+the item does need a trail, or a fresh finalize read back inside the window.
 
 **4.8 Post-teardown the cluster is genuinely untracked — CLUSTER.**
 `check_cluster_health` → the 0.4 message, naming the region.
@@ -918,7 +971,7 @@ because Phases 2 and 3 were run and then lost to a conversation.
 | **R2** | API Gateway + Cognito | **BUILT + VERIFIED** | no | **remote only** | the transport is reachable over HTTPS (a Claude web session is still unrun) |
 | **R3** | Auth: `token_use`, `client_id`, 401-not-403 | **PASS** | no | **remote only** | the whole of Workstream 6 |
 | **R4** | 900s ceiling observed | **PASS** (4 defects found) | **yes** | **remote only** | the constraint behind the tier split |
-| **R5** | A tier cannot exceed its IAM (policy simulation) | **PASS** | no | **remote only** | 4.7 in part — the ceiling, not the finalize-emits-no-delete half |
+| **R5** | A tier cannot exceed its IAM (policy simulation) | **PASS** | no | **remote only** | 4.7 in part — the ceiling; the finalize-emits-no-delete half closed 08-27 from Event history |
 | **R6** | Every read-only tool driven remotely | **PASS** | **yes** | **remote only** | the tier's IAM floor, not just its ceiling |
 
 **14 of 14 done.** L5 closed at teardown, the only time it could be. **R6 was
@@ -1572,18 +1625,22 @@ ceiling. That number is also what closes the 900s gap this bullet used to
 point at; R4 measured the other direction (20.0s for the slowest remote
 call).
 
-### Phase 4 — 7 of 8
+### Phase 4 — 8 of 8
 
 `4.1`-`4.5`, `4.8` PASS on `osiris` (stack gone at 18m26s, finalize 5.7s,
 no orphans; 4.5 found two messaging defects, both fixed). **`4.6` PASS**
-live on `stageb`'s teardown, 2026-08-26 (task L5). **`4.7` still needs
-CloudTrail** — see the note under R5 for why R5's trail does not cover it.
+live on `stageb`'s teardown, 2026-08-26 (task L5). **`4.7` PASS**
+2026-08-27, read out of CloudTrail Event history against `ironclad`'s
+finalize of the day before — no trail, no cluster, no cost. R5's trail
+covered the ceiling; Event history covered this.
 
 ### What actually remains
 
-Everything below was open on 2026-08-25; all but 4.7 and the browser
-session closed on 2026-08-26. Kept with its outcome rather than deleted,
-because the list is the record of what the certification campaign was for.
+**One thing: a Claude web session driving the transport (item 1 below).**
+Everything else on this list is closed — all but 4.7 and the browser session
+on 2026-08-26, and 4.7 on 2026-08-27. Kept with its outcome rather than
+deleted, because the list is the record of what the certification campaign
+was for.
 
 1. ~~**Auth** -- API Gateway + Cognito, never stood up.~~ **Closed** by R2
    and R3: the gateway had to be *written* (none existed), then rebuilt as
@@ -1594,7 +1651,8 @@ because the list is the record of what the certification campaign was for.
 4. ~~**3.8's blocking path** and the **900s ceiling** as observed
    behavior.~~ **Closed** by L4 (30.5 min blocking) and R4 (20.0s slowest
    remote call).
-5. ~~**4.6** live~~ **closed** by L5; **4.7 via CloudTrail is still open.**
+5. ~~**4.6** live~~ **closed** by L5; ~~**4.7 via CloudTrail**~~ **closed**
+   2026-08-27 from Event history, which needed neither.
 6. ~~`deploy.py` has no production caller.~~ **Closed 2026-08-25** by
    `deploy_mcp.py` (task A1), which also gained `--teardown` on 2026-08-26,
    so the transport now has a removal path as well as a deployment one.
