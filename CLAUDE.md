@@ -364,7 +364,15 @@ standing constraints for local development.
   under the `MCPRoleBoundary.json_src` permissions boundary, with
   `iam:CreateRole` granted **only** under a `StringEquals` condition on
   `iam:PermissionsBoundary` — without it a deployer creates an unbounded
-  role and the ceiling never applies. Details in `templates/CLAUDE.md`.
+  role and the ceiling never applies. **`deploy_mcp.py` cannot create or
+  attach that policy and must not try** — a deploy tool able to grant
+  itself permissions has no ceiling. It preflights instead, naming missing
+  actions before the first mutation: probes are **unconditional grants
+  only** (a conditional one simulated without its context key reports
+  `implicitDeny` + `MissingContextValues`, which is not a denial), and an
+  unanswerable check warns rather than blocks, since
+  `iam:SimulatePrincipalPolicy` is itself ungranted. Details in
+  `templates/CLAUDE.md`.
 - **Adding policy versions breaks teardown unless teardown prunes them.**
   `DeletePolicy` refuses while any non-default version exists
   (`DeleteConflictException`), so the two halves must land together:

@@ -1406,3 +1406,156 @@ class TestBootstrapStandsUpTheWholeTransport:
         deploy_mcp.normalize_bootstrap(self._Args(), self._fail)
         deploy_mcp.normalize_bootstrap(self._Args(bootstrap=True), self._fail)
         deploy_mcp.normalize_bootstrap(self._Args(teardown=True), self._fail)
+
+
+class _SimulatingIam:
+    """Modelled on SimulatePrincipalPolicy's contract, not on the caller.
+
+    Read out of botocore's iam service model: PolicySourceArn and
+    ActionNames are required, EvaluationResults carries EvalActionName and
+    EvalDecision (one of allowed/explicitDeny/implicitDeny), and
+    MissingContextValues names condition keys the simulation was not given
+    -- which is how a *conditional* grant reports, and is not a denial.
+    """
+
+    def __init__(self, allowed=(), missing_context=(), raises=None):
+        self.allowed = set(allowed)
+        self.missing_context = set(missing_context)
+        self.raises = raises
+        self.source_arns = []
+
+    def simulate_principal_policy(self, **kw):
+        if self.raises:
+            raise self.raises
+        for required in ("PolicySourceArn", "ActionNames"):
+            if required not in kw:
+                raise AssertionError(f"{required} is required")
+        self.source_arns.append(kw["PolicySourceArn"])
+        results = []
+        for a in kw["ActionNames"]:
+            r = {"EvalActionName": a,
+                 "EvalDecision": "allowed" if a in self.allowed else "implicitDeny"}
+            if a in self.missing_context:
+                r["MissingContextValues"] = ["iam:PermissionsBoundary"]
+            results.append(r)
+        return {"EvaluationResults": results}
+
+
+class TestTheDeploySaysWhatPermissionItIsMissing:
+    """deploy_mcp.py cannot create MCPDeployPolicy -- under that policy
+    iam:CreatePolicy is scoped to pclustermaker-mcp-policy-*, which the
+    deploy policy's own name does not match, and nothing lets it attach a
+    policy to the caller's identity. That is deliberate: a deploy tool able
+    to grant itself permissions has no ceiling.
+
+    What it can do is stop before the first mutation and name the fix,
+    rather than failing six tiers in with an AccessDenied whose cause is a
+    missing policy on the operator's own identity.
+    """
+
+    ACCT = "123456789012"
+
+    def _all_probe_actions(self):
+        from mcp_server.deploy import _DEPLOY_PROBES
+
+        return [a for a, _r in _DEPLOY_PROBES]
+
+    def _call(self, iam, arn=None):
+        from mcp_server.deploy import preflight_deploy_permissions
+
+        return preflight_deploy_permissions(
+            iam, caller_arn=arn or f"arn:aws:iam::{self.ACCT}:user/deployer",
+            aws_account_id=self.ACCT, region="us-east-1",
+        )
+
+    def test_a_fully_permitted_identity_reports_nothing_missing(self):
+        iam = _SimulatingIam(allowed=self._all_probe_actions())
+        assert self._call(iam) == []
+
+    def test_a_denied_action_is_named(self):
+        actions = self._all_probe_actions()
+        iam = _SimulatingIam(allowed=[a for a in actions if a != "lambda:CreateFunction"])
+        assert self._call(iam) == ["lambda:CreateFunction"]
+
+    def test_an_unanswerable_check_is_none_not_a_denial(self):
+        """iam:SimulatePrincipalPolicy is itself a permission and
+        MCPDeployPolicy does not grant it, so an identity holding exactly
+        the right policy cannot run this check. None means "could not
+        tell"; the caller warns and proceeds. `_check_external_nfs_reachable`
+        set that precedent -- only a confirmed failure is fatal."""
+        iam = _SimulatingIam(raises=RuntimeError("AccessDenied: iam:SimulatePrincipalPolicy"))
+        assert self._call(iam) is None
+
+    def test_none_and_empty_are_distinguishable(self):
+        """Vacuity guard, and the bug this shape invites: `if not missing`
+        treats "could not tell" and "nothing missing" identically, while
+        `if missing` treats "could not tell" as fine. They are different
+        answers and the caller branches on both."""
+        assert self._call(_SimulatingIam(raises=RuntimeError("x"))) is None
+        assert self._call(_SimulatingIam(allowed=self._all_probe_actions())) == []
+
+    def test_a_conditional_grant_is_not_reported_as_denied(self):
+        """A grant conditional on iam:PermissionsBoundary simulated without
+        that context key comes back implicitDeny with the key in
+        MissingContextValues. Counting it as a denial would tell an
+        operator with the correct policy to go install the policy they
+        already have."""
+        actions = self._all_probe_actions()
+        iam = _SimulatingIam(allowed=[], missing_context=actions)
+        assert self._call(iam) == []
+
+    def test_no_probe_is_a_conditional_grant(self):
+        """The guard above handles it, but the probe set should not rely on
+        that: every probed action must come from a MCPDeployPolicy
+        statement carrying no Condition."""
+        import json
+        import os
+
+        from mcp_server.deploy import _DEPLOY_PROBES
+
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        doc = json.load(open(os.path.join(root, "templates", "MCPDeployPolicy.json_src")))
+        conditional = set()
+        for st in doc["Statement"]:
+            if not st.get("Condition"):
+                continue
+            acts = st["Action"] if isinstance(st["Action"], list) else [st["Action"]]
+            conditional.update(acts)
+        for action, _r in _DEPLOY_PROBES:
+            assert action not in conditional, f"{action} is a conditional grant"
+
+    def test_every_probe_is_actually_granted_by_the_policy(self):
+        """Vacuity guard the other way: a probe for an action the policy
+        never grants would fail every correctly-configured deploy."""
+        import json
+        import os
+
+        from mcp_server.deploy import _DEPLOY_PROBES
+
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        doc = json.load(open(os.path.join(root, "templates", "MCPDeployPolicy.json_src")))
+        granted = set()
+        for st in doc["Statement"]:
+            if st.get("Effect") != "Allow":
+                continue
+            acts = st["Action"] if isinstance(st["Action"], list) else [st["Action"]]
+            granted.update(acts)
+        for action, _r in _DEPLOY_PROBES:
+            assert action in granted, f"{action} is probed but never granted"
+
+    def test_an_assumed_role_arn_is_rewritten_to_its_role(self):
+        """SimulatePrincipalPolicy takes a role ARN, not a session ARN --
+        an SSO or assumed-role caller is the common case and would
+        otherwise fail with NoSuchEntity, which this check would then
+        report as "could not tell" on every such identity."""
+        iam = _SimulatingIam(allowed=self._all_probe_actions())
+        self._call(iam, arn=f"arn:aws:sts::{self.ACCT}:assumed-role/AdminRole/session-name")
+        assert iam.source_arns
+        for a in iam.source_arns:
+            assert a == f"arn:aws:iam::{self.ACCT}:role/AdminRole", a
+
+    def test_a_plain_user_arn_is_passed_through(self):
+        iam = _SimulatingIam(allowed=self._all_probe_actions())
+        arn = f"arn:aws:iam::{self.ACCT}:user/deployer"
+        self._call(iam, arn=arn)
+        assert set(iam.source_arns) == {arn}

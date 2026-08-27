@@ -33,6 +33,7 @@ from mcp_server.deploy import (  # noqa: E402
     delete_mcp_functions,
     deploy_tier,
     ensure_cognito_user,
+    preflight_deploy_permissions,
     generate_user_password,
     setup_gateway,
 )
@@ -314,6 +315,32 @@ def main():
             print(f"\n*** {len(result.failed)} IAM step(s) FAILED ***")
             return 1
         return 0
+
+    # Before the first mutation, not after: a deploy that gets six tiers in
+    # and then cannot create the gateway leaves a half-built transport whose
+    # cause -- a missing policy on the operator's own identity -- is not
+    # what the AccessDenied appears to be about.
+    if not args.dry_run and (args.setup_infra or args.setup_gateway or tiers):
+        missing = preflight_deploy_permissions(
+            boto3.client("iam"), caller_arn=sts.get_caller_identity()["Arn"],
+            aws_account_id=account, region=args.region,
+        )
+        if missing:
+            sys.exit(
+                "ERROR: this identity is missing permissions the deploy "
+                "needs:\n"
+                + "".join(f"  {a}\n" for a in missing)
+                + "\n  MCPDeployPolicy carries them, and the operator policy "
+                "does not\n"
+                "  (the two together exceed IAM's 6,144-byte limit). Create "
+                "and attach it:\n"
+                "    ./generate_operator_policy.py --mcp --create\n\n"
+                "  deploy_mcp.py cannot create it itself: a deploy tool able "
+                "to grant\n"
+                "  itself permissions has no ceiling."
+            )
+        if missing is None:
+            print("  (could not verify deploy permissions -- continuing)\n")
 
     if args.setup_infra and not args.dry_run:
         # The pool name is derived, never chosen: it is one account+region

@@ -603,3 +603,61 @@ def ensure_cognito_user(cog, *, pool_id, username, password):
         Password=password, Permanent=True,
     )
     return created
+
+
+# Probes for the deploy preflight: one representative action per
+# MCPDeployPolicy statement, chosen from the grants that carry **no
+# Condition**. iam:CreateRole is deliberately absent -- its grant is
+# conditional on iam:PermissionsBoundary, and a simulation that does not
+# supply that context key comes back implicitDeny with the key listed in
+# MissingContextValues, which is indistinguishable from a real denial
+# unless you look. Probing only unconditional grants keeps the check from
+# inventing failures.
+_DEPLOY_PROBES = (
+    ("iam:CreatePolicy", "arn:aws:iam::{acct}:policy/pclustermaker-mcp-policy-probe"),
+    ("iam:AttachRolePolicy", "arn:aws:iam::{acct}:role/pclustermaker-mcp-probe"),
+    ("lambda:CreateFunction", "arn:aws:lambda:{region}:{acct}:function:pclustermaker-mcp-probe"),
+    ("cognito-idp:CreateUserPool", "*"),
+)
+
+
+def preflight_deploy_permissions(iam, *, caller_arn, aws_account_id, region):
+    """Which of the deploy's own permissions the caller is missing.
+
+    Returns a list of denied action names -- empty when everything needed
+    is allowed -- or **None** when the question could not be answered.
+
+    None is not a failure. `iam:SimulatePrincipalPolicy` is itself a
+    permission, and MCPDeployPolicy does not grant it, so an identity
+    holding exactly the right policy cannot run this check. Following
+    `_check_external_nfs_reachable`: only a *confirmed* denial is fatal,
+    and everything else warns and lets the operator proceed. A preflight
+    that blocks the deploy because it could not see is worse than no
+    preflight.
+
+    An assumed-role ARN has to be rewritten to its role ARN --
+    SimulatePrincipalPolicy takes the role, not the session.
+    """
+    arn = caller_arn
+    if ":assumed-role/" in arn:
+        _, _, tail = arn.partition(":assumed-role/")
+        role = tail.split("/")[0]
+        arn = f"arn:aws:iam::{aws_account_id}:role/{role}"
+
+    denied = []
+    try:
+        for action, resource in _DEPLOY_PROBES:
+            res = resource.format(acct=aws_account_id, region=region)
+            resp = iam.simulate_principal_policy(
+                PolicySourceArn=arn, ActionNames=[action], ResourceArns=[res],
+            )
+            for r in resp.get("EvaluationResults") or []:
+                # A conditional grant simulated without its context key is
+                # not evidence of a denial.
+                if r.get("MissingContextValues"):
+                    continue
+                if r.get("EvalDecision") != "allowed":
+                    denied.append(r["EvalActionName"])
+    except Exception:
+        return None
+    return denied
