@@ -32,6 +32,8 @@ from mcp_server.deploy import (  # noqa: E402
     delete_gateway,
     delete_mcp_functions,
     deploy_tier,
+    ensure_cognito_user,
+    generate_user_password,
     setup_gateway,
 )
 from mcp_server.packaging import (  # noqa: E402
@@ -137,6 +139,31 @@ def _ensure_cognito_client(cog, pool_id, base_url, region):
     return domain
 
 
+def normalize_bootstrap(args, fail):
+    """Resolve `--bootstrap` into the flags main() already acts on.
+
+    It is deliberately a *spelling* of `--setup-infra --setup-gateway` plus
+    the default tier list rather than a fourth code path: a second
+    deployment sequence is a second thing to keep in step with the first,
+    and the ordering (IAM and pool, then functions, then the gateway that
+    routes to them) is already correct in main().
+
+    Module level, not inline, for the reason `tiers_to_deploy` is: inside
+    main() this sits past `sts.get_caller_identity()` and no test the no-AWS
+    guard allows can reach it. `fail` is `ArgumentParser.error` in
+    production -- passed in so a test can observe the rejection without
+    catching SystemExit and guessing which argument caused it.
+    """
+    if args.bootstrap:
+        if args.teardown:
+            fail("--bootstrap and --teardown are opposites; pick one")
+        args.setup_infra = True
+        args.setup_gateway = True
+    if args.create_user and args.teardown:
+        fail("--create-user creates a user in a pool --teardown deletes")
+    return args
+
+
 def tiers_to_deploy(args):
     """Which tiers a run should build, given the flags.
 
@@ -150,14 +177,21 @@ def tiers_to_deploy(args):
     `--teardown` returns nothing unconditionally, `--tier` included:
     building an artifact in order to delete the function it would have
     been deployed to is minutes of pip for a thing about to not exist.
+
+    `--bootstrap` is the one case that wants both an infrastructure flag
+    and the default tier list, so it is checked before that short-circuit.
+    Without it the short-circuit fires on the implied `--setup-infra` and
+    the run builds a gateway routing to functions that do not exist -- the
+    exact half-deployment the flag exists to prevent.
     """
     if args.teardown:
         return []
+    zips = [t for t, s in TIER_PACKAGES.items() if s["kind"] != "image"]
+    if args.bootstrap and not args.tier:
+        return zips
     if (args.setup_gateway or args.setup_infra) and not args.tier:
         return []
-    return args.tier or [
-        t for t, s in TIER_PACKAGES.items() if s["kind"] != "image"
-    ]
+    return args.tier or zips
 
 
 def main():
@@ -189,12 +223,33 @@ def main():
                         "then the Cognito user pool. Combine with --dry-run "
                         "to list what would go without removing it. The "
                         "permissions boundary is deliberately left behind")
+    p.add_argument("--bootstrap", action="store_true",
+                   help="stand the whole transport up in one run: the IAM "
+                        "and Cognito pool, every zip tier, then the REST "
+                        "API and its OAuth front end. Equivalent to "
+                        "--setup-infra --setup-gateway with every zip tier "
+                        "named explicitly, in that order. Idempotent, so it "
+                        "is also the update path. The container tier is not "
+                        "included -- it needs --image-uri and a runtime; "
+                        "without it the transport still serves every tool "
+                        "except create_cluster, apply_cluster_update and "
+                        "preview_cluster_config")
+    p.add_argument("--create-user", metavar="USERNAME",
+                   help="create a Cognito user to sign in as at the Hosted "
+                        "UI, with a permanent password; idempotent. Takes "
+                        "the password from MCP_USER_PASSWORD if set, "
+                        "otherwise generates one and prints it once. "
+                        "Nothing else creates a user, so without this a "
+                        "freshly deployed transport has nobody to "
+                        "authenticate")
     p.add_argument("--update-policies", action="store_true",
                    help="with --setup-infra, push a changed policy document as "
                         "a new default version instead of only reporting it. "
                         "Needs iam:CreatePolicyVersion and "
                         "iam:DeletePolicyVersion")
     args = p.parse_args()
+
+    normalize_bootstrap(args, p.error)
 
     import boto3
 
@@ -209,6 +264,7 @@ def main():
 
     lam = boto3.client("lambda", region_name=args.region)
     s3 = boto3.client("s3", region_name=args.region)
+    endpoint = None
 
     if args.teardown:
         # Gateway first: it is the internet-facing surface, and removing it
@@ -342,6 +398,54 @@ def main():
         print(f"\n  MCP endpoint: {info['base_url']}/mcp")
         print(f"  Discovery:    {info['base_url']}"
               f"/.well-known/oauth-protected-resource")
+        endpoint = f"{info['base_url']}/mcp"
+
+    if args.create_user and not args.dry_run:
+        cog = boto3.client("cognito-idp", region_name=args.region)
+        want = _derive_mcp_user_pool_name(aws_account_id=account, region=args.region)
+        pool_id = next(
+            (p["Id"] for p in cog.list_user_pools(MaxResults=60)["UserPools"]
+             if p["Name"] == want),
+            None,
+        )
+        if pool_id is None:
+            sys.exit(
+                f"ERROR: no Cognito user pool named {want!r}.\n"
+                f"  Run --setup-infra (or --bootstrap) first; it creates the "
+                f"pool the user lives in."
+            )
+        # An explicit password is the operator's own; a generated one is
+        # printed because it is the only time it can be. Cognito stores a
+        # hash, so a lost generated password is re-set by re-running this,
+        # never recovered.
+        supplied = os.environ.get("MCP_USER_PASSWORD")
+        password = supplied or generate_user_password()
+        created = ensure_cognito_user(
+            cog, pool_id=pool_id, username=args.create_user, password=password)
+        verb = "created" if created else "already existed; password reset"
+        print(f"\n  Cognito user: {args.create_user} ({verb})")
+        if supplied:
+            print("  Password:     from MCP_USER_PASSWORD (not shown)")
+        else:
+            print(f"  Password:     {password}")
+            print("  ^ generated, shown once, not recoverable -- save it now")
+
+    if args.bootstrap and not args.dry_run:
+        print("\nThe transport is up. To connect it from claude.ai:")
+        print("  1. Settings -> Connectors -> Add custom connector")
+        print(f"  2. Paste this URL: {endpoint}")
+        print("  3. Sign in at the Cognito Hosted UI when prompted")
+        if not args.create_user:
+            print("\nNo Cognito user exists to sign in as. Create one with")
+            print("  deploy_mcp.py --create-user <username>")
+        if "stack-mutation-node" not in tiers:
+            print("\nNot deployed: stack-mutation-node (container tier).")
+            print("  create_cluster, apply_cluster_update and "
+                  "preview_cluster_config")
+            print("  will be absent from the tool list until it is deployed "
+                  "with")
+            print("  --tier stack-mutation-node --image-uri <ecr-uri> "
+                  "(see INSTALL.md).")
 
     print("Done.")
 

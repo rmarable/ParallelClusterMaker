@@ -824,11 +824,12 @@ class TestAnInfrastructureFlagIsNotADeployment:
         # than as a statement about behavior, which is how a new flag looks
         # like five broken tests.
         def __init__(self, tier=None, setup_infra=False, setup_gateway=False,
-                     teardown=False):
+                     teardown=False, bootstrap=False):
             self.tier = tier
             self.setup_infra = setup_infra
             self.setup_gateway = setup_gateway
             self.teardown = teardown
+            self.bootstrap = bootstrap
 
     def _zips(self):
         from mcp_server.packaging import TIER_PACKAGES
@@ -886,6 +887,7 @@ class TestTheTransportCanBeRemoved:
             self.setup_infra = kw.get("setup_infra", False)
             self.setup_gateway = kw.get("setup_gateway", False)
             self.teardown = kw.get("teardown", False)
+            self.bootstrap = kw.get("bootstrap", False)
 
     def test_teardown_builds_nothing(self):
         """Building a 146 MB artifact so the function it would deploy to can
@@ -1113,3 +1115,294 @@ class TestTheGatewayTimeoutIsTheRealCeiling:
 
         assert LAMBDA_MAX_TIMEOUT_SECONDS * 1000 > GATEWAY_INTEGRATION_TIMEOUT_MS
         assert LAMBDA_MAX_TIMEOUT_SECONDS == 900
+
+
+class _CognitoUsers:
+    """Modelled on the AdminCreateUser/AdminSetUserPassword contract.
+
+    Read out of `botocore/data/cognito-idp/2016-04-18/service-2.json.gz`,
+    not recalled: `AdminCreateUser` requires `UserPoolId` and `Username` and
+    lists `UsernameExistsException` among its errors;
+    `AdminSetUserPassword` requires `UserPoolId`, `Username` and `Password`.
+    A fake that accepts whatever the caller happens to send agrees with the
+    caller by construction and cannot fail where the caller is wrong.
+    """
+
+    class UsernameExistsException(Exception):
+        pass
+
+    class InvalidParameterException(Exception):
+        pass
+
+    def __init__(self):
+        self.users = {}
+        self.calls = []
+
+    def admin_create_user(self, **kw):
+        for required in ("UserPoolId", "Username"):
+            if required not in kw:
+                raise self.InvalidParameterException(
+                    f"{required} is a required member of AdminCreateUserRequest")
+        self.calls.append(("create", dict(kw)))
+        name = kw["Username"]
+        if name in self.users:
+            raise self.UsernameExistsException("User account already exists")
+        # Without MessageAction=SUPPRESS, real Cognito mails an invitation
+        # and leaves the account in FORCE_CHANGE_PASSWORD.
+        self.users[name] = {
+            "status": ("CONFIRMED" if kw.get("MessageAction") == "SUPPRESS"
+                       else "FORCE_CHANGE_PASSWORD"),
+            "attrs": {a["Name"]: a["Value"] for a in kw.get("UserAttributes") or []},
+            "password": None,
+        }
+
+    def admin_set_user_password(self, **kw):
+        for required in ("UserPoolId", "Username", "Password"):
+            if required not in kw:
+                raise self.InvalidParameterException(
+                    f"{required} is a required member of "
+                    f"AdminSetUserPasswordRequest")
+        self.calls.append(("set_password", dict(kw)))
+        user = self.users[kw["Username"]]
+        user["password"] = kw["Password"]
+        if kw.get("Permanent"):
+            user["status"] = "CONFIRMED"
+
+
+class TestADeployedTransportHasSomeoneToSignInAs:
+    """Nothing in the deploy path ever created a Cognito user.
+
+    `--setup-infra` created the pool and `--setup-gateway` the Hosted UI
+    domain, and there it stopped: the connector reached a login page with no
+    account behind it. R3 minted its tokens against a user made out of band,
+    and that step appeared in no script and no document -- which is most of
+    why the browser session stayed unrun.
+    """
+
+    POOL = "us-east-1_AbCdEf"
+
+    def test_the_user_is_created_and_can_sign_in_immediately(self):
+        from mcp_server.deploy import ensure_cognito_user
+
+        cog = _CognitoUsers()
+        created = ensure_cognito_user(
+            cog, pool_id=self.POOL, username="ops@example.com", password="Aa1!aaaaaa")
+        assert created is True
+        assert cog.users["ops@example.com"]["status"] == "CONFIRMED"
+        assert cog.users["ops@example.com"]["password"] == "Aa1!aaaaaa"
+
+    def test_the_invitation_email_is_suppressed(self):
+        """`MessageAction="SUPPRESS"` is load-bearing, not tidiness. The
+        default mails through Cognito's own sender, which needs a verified
+        email attribute and is capped at 50 a day -- on a pool with no SES
+        configuration the create fails outright."""
+        from mcp_server.deploy import ensure_cognito_user
+
+        cog = _CognitoUsers()
+        ensure_cognito_user(cog, pool_id=self.POOL, username="ops",
+                            password="Aa1!aaaaaa")
+        create = dict(cog.calls[0][1])
+        assert create["MessageAction"] == "SUPPRESS"
+
+    def test_the_password_is_permanent(self):
+        """Without `Permanent=True` the account stays in
+        FORCE_CHANGE_PASSWORD and the Hosted UI demands a reset the operator
+        was never mailed -- the invitation having been suppressed above."""
+        from mcp_server.deploy import ensure_cognito_user
+
+        cog = _CognitoUsers()
+        ensure_cognito_user(cog, pool_id=self.POOL, username="ops",
+                            password="Aa1!aaaaaa")
+        setp = dict(cog.calls[1][1])
+        assert setp["Permanent"] is True
+
+    def test_the_fake_leaves_an_unsuppressed_user_unable_to_sign_in(self):
+        """Vacuity guard for the two tests above: if the fake ignored
+        MessageAction and Permanent, both would pass with either value."""
+        cog = _CognitoUsers()
+        cog.admin_create_user(UserPoolId=self.POOL, Username="ops")
+        assert cog.users["ops"]["status"] == "FORCE_CHANGE_PASSWORD"
+        cog.admin_set_user_password(UserPoolId=self.POOL, Username="ops",
+                                    Password="Aa1!aaaaaa")
+        assert cog.users["ops"]["status"] == "FORCE_CHANGE_PASSWORD"
+
+    def test_rerunning_resets_the_password_rather_than_failing(self):
+        """The reason to re-run this is almost always that the generated
+        password was lost, and Cognito stores a hash -- so the only remedy
+        is to set a new one. An existing user must not be an error."""
+        from mcp_server.deploy import ensure_cognito_user
+
+        cog = _CognitoUsers()
+        ensure_cognito_user(cog, pool_id=self.POOL, username="ops",
+                            password="Aa1!aaaaaa")
+        created = ensure_cognito_user(cog, pool_id=self.POOL, username="ops",
+                                      password="Bb2@bbbbbb")
+        assert created is False
+        assert cog.users["ops"]["password"] == "Bb2@bbbbbb"
+
+    def test_an_email_username_gets_the_email_attribute(self):
+        from mcp_server.deploy import ensure_cognito_user
+
+        cog = _CognitoUsers()
+        ensure_cognito_user(cog, pool_id=self.POOL, username="ops@example.com",
+                            password="Aa1!aaaaaa")
+        attrs = cog.users["ops@example.com"]["attrs"]
+        assert attrs == {"email": "ops@example.com", "email_verified": "true"}
+
+    def test_a_plain_username_gets_no_email_attribute(self):
+        """Setting `email` to something that is not an address is an
+        InvalidParameterException, and the pool does not require it."""
+        from mcp_server.deploy import ensure_cognito_user
+
+        cog = _CognitoUsers()
+        ensure_cognito_user(cog, pool_id=self.POOL, username="ops",
+                            password="Aa1!aaaaaa")
+        assert cog.users["ops"]["attrs"] == {}
+
+    def test_an_unrelated_failure_is_not_swallowed(self):
+        """The `except` catches UsernameExistsException by name. Widened to
+        a bare `except Exception`, a pool that does not exist would report a
+        user created."""
+        from mcp_server.deploy import ensure_cognito_user
+
+        class _Broken(_CognitoUsers):
+            def admin_create_user(self, **kw):
+                raise RuntimeError("ResourceNotFoundException: no such pool")
+
+        with pytest.raises(RuntimeError, match="no such pool"):
+            ensure_cognito_user(_Broken(), pool_id=self.POOL, username="ops",
+                                password="Aa1!aaaaaa")
+
+
+class TestTheGeneratedPasswordSatisfiesCognito:
+    """A generated password missing one character class fails at
+    `AdminSetUserPassword` with InvalidPasswordException -- after the user
+    already exists, so the run is half done and the remedy is not obvious.
+    """
+
+    def test_every_required_class_is_present(self):
+        import string
+
+        from mcp_server.deploy import _PASSWORD_SYMBOLS, generate_user_password
+
+        for _ in range(200):
+            pw = generate_user_password()
+            assert any(c in string.ascii_uppercase for c in pw)
+            assert any(c in string.ascii_lowercase for c in pw)
+            assert any(c in string.digits for c in pw)
+            assert any(c in _PASSWORD_SYMBOLS for c in pw)
+
+    def test_it_meets_the_minimum_length(self):
+        from mcp_server.deploy import generate_user_password
+
+        assert len(generate_user_password()) >= 8
+
+    def test_a_length_below_the_policy_minimum_is_refused(self):
+        """Rather than returning something Cognito will reject."""
+        from mcp_server.deploy import generate_user_password
+
+        with pytest.raises(ValueError, match="8 characters"):
+            generate_user_password(length=4)
+
+    def test_two_calls_do_not_agree(self):
+        """Vacuity guard: a constant would satisfy every assertion above."""
+        from mcp_server.deploy import generate_user_password
+
+        assert len({generate_user_password() for _ in range(50)}) == 50
+
+
+class TestBootstrapStandsUpTheWholeTransport:
+    """`--setup-infra --setup-gateway` deployed *no functions*.
+
+    An infrastructure flag suppresses the default tier list on purpose --
+    rebuilding six 146 MB artifacts to attach a route is minutes of pip for
+    nothing. But that makes the obvious one-command spelling of "stand it
+    all up" build a REST API routing to functions that do not exist, and
+    fail at the first call rather than at deploy. Every deploy so far was
+    driven by someone who already knew to name all six tiers.
+    """
+
+    class _Args:
+        def __init__(self, **kw):
+            self.tier = kw.get("tier")
+            self.setup_infra = kw.get("setup_infra", False)
+            self.setup_gateway = kw.get("setup_gateway", False)
+            self.teardown = kw.get("teardown", False)
+            self.bootstrap = kw.get("bootstrap", False)
+            self.create_user = kw.get("create_user")
+
+    def _zips(self):
+        from mcp_server.packaging import TIER_PACKAGES
+
+        return [t for t, s in TIER_PACKAGES.items() if s["kind"] != "image"]
+
+    def _fail(self, message):
+        raise AssertionError(message)
+
+    def test_bootstrap_deploys_every_zip_tier(self):
+        import deploy_mcp
+
+        args = deploy_mcp.normalize_bootstrap(
+            self._Args(bootstrap=True), self._fail)
+        assert deploy_mcp.tiers_to_deploy(args) == self._zips()
+
+    def test_bootstrap_survives_its_own_implied_setup_flags(self):
+        """The regression this flag is one line away from: normalization
+        sets `setup_infra`, and the short-circuit keyed on it then returns
+        [] unless `bootstrap` is checked first."""
+        import deploy_mcp
+
+        args = deploy_mcp.normalize_bootstrap(
+            self._Args(bootstrap=True), self._fail)
+        assert args.setup_infra is True and args.setup_gateway is True
+        assert deploy_mcp.tiers_to_deploy(args) != []
+
+    def test_the_short_circuit_is_still_there_without_bootstrap(self):
+        """Vacuity guard: the fix must not have been "stop short-circuiting",
+        which would restore the six-artifact rebuild on every --setup-infra."""
+        import deploy_mcp
+
+        assert deploy_mcp.tiers_to_deploy(self._Args(setup_infra=True)) == []
+        assert deploy_mcp.tiers_to_deploy(self._Args(setup_gateway=True)) == []
+
+    def test_bootstrap_never_pulls_in_the_container_tier(self):
+        """It needs --image-uri and a container runtime, so including it
+        would make the one-command path an error on every machine without
+        one -- and six of the seven tiers are zips, so the transport is
+        useful without it."""
+        import deploy_mcp
+
+        args = deploy_mcp.normalize_bootstrap(
+            self._Args(bootstrap=True), self._fail)
+        assert "stack-mutation-node" not in deploy_mcp.tiers_to_deploy(args)
+
+    def test_an_explicit_tier_still_wins(self):
+        import deploy_mcp
+
+        args = deploy_mcp.normalize_bootstrap(
+            self._Args(bootstrap=True, tier=["read-only"]), self._fail)
+        assert deploy_mcp.tiers_to_deploy(args) == ["read-only"]
+
+    def test_bootstrap_and_teardown_are_refused(self):
+        import deploy_mcp
+
+        with pytest.raises(AssertionError, match="opposites"):
+            deploy_mcp.normalize_bootstrap(
+                self._Args(bootstrap=True, teardown=True), self._fail)
+
+    def test_create_user_and_teardown_are_refused(self):
+        """Creating a user in the pool the same run deletes."""
+        import deploy_mcp
+
+        with pytest.raises(AssertionError, match="deletes"):
+            deploy_mcp.normalize_bootstrap(
+                self._Args(create_user="ops", teardown=True), self._fail)
+
+    def test_a_plain_run_is_not_rejected(self):
+        """Vacuity guard for the two refusals: `fail` must not fire on
+        every call."""
+        import deploy_mcp
+
+        deploy_mcp.normalize_bootstrap(self._Args(), self._fail)
+        deploy_mcp.normalize_bootstrap(self._Args(bootstrap=True), self._fail)
+        deploy_mcp.normalize_bootstrap(self._Args(teardown=True), self._fail)

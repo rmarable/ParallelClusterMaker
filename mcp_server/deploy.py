@@ -524,3 +524,82 @@ def delete_cognito_pool(cog, *, pool_name_prefix, suppress=True):
     if not removed:
         print("  No MCP Cognito user pool present")
     return removed
+
+
+# Cognito's default password policy: >= 8 characters, with an uppercase, a
+# lowercase, a number and a symbol. Read off CreateUserPool's own
+# PasswordPolicyType defaults rather than guessed -- a generated password
+# that misses one class fails at AdminSetUserPassword with
+# InvalidPasswordException, after the user already exists.
+_PASSWORD_SYMBOLS = "!@#$%^&*()-_=+[]{}"
+
+
+def generate_user_password(*, length=20):
+    """A password satisfying Cognito's default policy, from `secrets`.
+
+    One character drawn from each required class first, the rest from the
+    union, then shuffled -- rejection sampling on a random string would
+    loop, and taking the classes in a fixed order would put them in a fixed
+    position.
+    """
+    import secrets
+    import string
+
+    if length < 8:
+        raise ValueError("Cognito's default policy requires at least 8 characters")
+    classes = (string.ascii_uppercase, string.ascii_lowercase,
+               string.digits, _PASSWORD_SYMBOLS)
+    chars = [secrets.choice(c) for c in classes]
+    pool = "".join(classes)
+    chars += [secrets.choice(pool) for _ in range(length - len(classes))]
+    # SystemRandom.shuffle, not random.shuffle: the whole point is that the
+    # ordering is not predictable from a seed either.
+    secrets.SystemRandom().shuffle(chars)
+    return "".join(chars)
+
+
+def ensure_cognito_user(cog, *, pool_id, username, password):
+    """Create a Cognito user with a permanent password; idempotent.
+
+    Nothing in the deploy path ever created a user, so a freshly stood-up
+    transport reached the Hosted UI with nobody to log in as -- the one
+    manual step between `--setup-gateway` and a working browser connector.
+
+    **`MessageAction="SUPPRESS"` is required, not tidiness.** The default
+    sends an invitation through Cognito's own mailer, which needs a verified
+    `email` attribute and is capped at 50 messages a day; without SUPPRESS a
+    pool with no SES configuration fails the create outright. The password
+    is then set `Permanent=True`, which moves the user straight to
+    CONFIRMED -- the invitation flow would leave them in
+    FORCE_CHANGE_PASSWORD, where the Hosted UI demands a reset the operator
+    was never mailed.
+
+    Returns True if the user was created, False if it already existed. An
+    existing user still has its password set: the reason to re-run this is
+    usually that the password was lost.
+    """
+    created = True
+    attrs = []
+    if "@" in username:
+        # Only when it really is an address. Setting email to a non-address
+        # is an InvalidParameterException, and the pool does not require
+        # the attribute at all.
+        attrs = [{"Name": "email", "Value": username},
+                 {"Name": "email_verified", "Value": "true"}]
+    try:
+        cog.admin_create_user(
+            UserPoolId=pool_id,
+            Username=username,
+            UserAttributes=attrs,
+            MessageAction="SUPPRESS",
+        )
+    except Exception as e:
+        if type(e).__name__ != "UsernameExistsException":
+            raise
+        created = False
+
+    cog.admin_set_user_password(
+        UserPoolId=pool_id, Username=username,
+        Password=password, Permanent=True,
+    )
+    return created

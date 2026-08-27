@@ -338,12 +338,29 @@ standing constraints for local development.
   `describe_user_pool`, never guess. Teardown deliberately leaves the
   permissions boundary; `MCPDeployPolicy` denies deleting it. `--dry-run`
   lists without removing.
+- **`--bootstrap` must be checked *before* the setup-flag short-circuit.**
+  An infrastructure flag alone deploys no tiers on purpose, but
+  `--bootstrap` normalizes to `--setup-infra --setup-gateway`, so checked
+  second it builds a gateway routing to functions that do not exist. It is
+  a *spelling* of those flags, never a second deploy path;
+  `normalize_bootstrap` is module-level for the reason `tiers_to_deploy`
+  is. It excludes `stack-mutation-node` (needs a runtime; six of seven are
+  zips). `--create-user` is the other half — nothing created a Cognito
+  user, so a deployed transport had nobody to sign in as. Both
+  `MessageAction="SUPPRESS"` and `Permanent=True` are load-bearing, and
+  the second *because* of the first (suppressing the invitation without a
+  permanent password leaves the account in `FORCE_CHANGE_PASSWORD`).
+  Detail: `docs/sessions.md`, session 56.
 - **MCP deployment is its own permission set, not the operator's.**
   `OperatorPolicy` scopes its IAM to `pclustermaker-policy-*` and
   `pclustermaker-role-*`, which match no MCP name, and the full MCP grant
   set appended to it measures 6,358 bytes against the 6,144 limit — so
   widening it does not merely read badly, it does not fit.
-  `MCPDeployPolicy.json_src` carries it, and every MCP role is created
+  `MCPDeployPolicy.json_src` carries it — rendered by
+  `generate_operator_policy.py --mcp` as
+  `parallelcluster-mcp-deploy-pclustermaker`, a name kept outside
+  `_MCP_POLICY_NAME_PREFIX` because the deployer's own policy must survive
+  `--teardown`. Every MCP role is created
   under the `MCPRoleBoundary.json_src` permissions boundary, with
   `iam:CreateRole` granted **only** under a `StringEquals` condition on
   `iam:PermissionsBoundary` — without it a deployer creates an unbounded
