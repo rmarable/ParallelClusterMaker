@@ -1322,9 +1322,21 @@ def get_cluster_record(s3, *, locks_bucketname, cluster_name):
 
 
 def delete_cluster_record(s3, *, locks_bucketname, cluster_name):
-    """Remove a cluster's record. Idempotent -- S3 DeleteObject succeeds on
-    a key that is not there, which is what a re-run teardown needs."""
-    s3.delete_object(Bucket=locks_bucketname, Key=_records_key(cluster_name))
+    """Remove a cluster's record *and* its stored vars file. Idempotent --
+    S3 DeleteObject succeeds on a key that is not there, which is what a
+    re-run teardown needs.
+
+    Both keys, not just the record. `put_cluster_vars_file` writes a second
+    object beside it and this deleted only the first, so every torn-down
+    cluster left its vars file behind -- caught on the first real teardown
+    after that was added, with `connector1.yml` still in the store after
+    everything else had gone. Same coupling as adding policy versions
+    without teaching teardown to prune them, and as the forced ECR delete:
+    a create and its delete have to land together, or the leak is one per
+    cluster forever.
+    """
+    for key in (_records_key(cluster_name), _vars_file_key(cluster_name)):
+        s3.delete_object(Bucket=locks_bucketname, Key=key)
 
 
 def list_cluster_records(s3, *, locks_bucketname):

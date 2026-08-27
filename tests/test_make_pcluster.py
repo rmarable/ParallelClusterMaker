@@ -2240,6 +2240,41 @@ class TestTheClusterRecordStore:
         delete_cluster_record(s3, locks_bucketname="b", cluster_name="osiris")
         delete_cluster_record(s3, locks_bucketname="b", cluster_name="osiris")
 
+    def test_delete_removes_the_vars_file_too(self, tmp_path):
+        """Both objects, not just the record.
+
+        `put_cluster_vars_file` writes `vars/<name>.yml` beside
+        `vars/<name>.json`, and this deleted only the second -- so every
+        torn-down cluster left its vars file in the store. Found on the
+        first real teardown after that was added: everything else was gone
+        and `connector1.yml` was still there.
+
+        Same coupling as adding policy versions without teaching teardown
+        to prune them, and as the forced ECR delete. A create and its
+        delete land together or the leak is one per cluster, forever.
+        """
+        from pcluster_core import (delete_cluster_record, put_cluster_record,
+                                   put_cluster_vars_file, _records_key,
+                                   _vars_file_key)
+
+        s3 = self._S3()
+        vf = tmp_path / "osiris.yml"
+        vf.write_text("cluster_name: osiris\n")
+        put_cluster_record(s3, locks_bucketname="b", cluster_name="osiris",
+                           record={"cluster_name": "osiris"})
+        put_cluster_vars_file(s3, locks_bucketname="b", cluster_name="osiris",
+                              vars_file_path=str(vf))
+        for key in (_records_key("osiris"), _vars_file_key("osiris")):
+            assert key in s3.objects, f"{key} was never stored"
+
+        delete_cluster_record(s3, locks_bucketname="b", cluster_name="osiris")
+
+        assert _records_key("osiris") not in s3.objects
+        assert _vars_file_key("osiris") not in s3.objects, (
+            "the stored vars file outlived the cluster; the store leaks one "
+            "object per teardown"
+        )
+
     def test_listing_returns_cluster_names_not_keys(self):
         from pcluster_core import list_cluster_records, put_cluster_record
 
