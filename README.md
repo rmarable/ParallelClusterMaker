@@ -1104,8 +1104,9 @@ for the per-platform runtime choices. The other six are plain zips and need
 neither.
 
 You do not need that tier to stand the transport up. Without it every tool
-works except the three that reach Node — `create_cluster`,
-`apply_cluster_update` and `preview_cluster_config`.
+works except the four that reach Node — `create_cluster`,
+`apply_cluster_update`, `preview_cluster_config` and
+`finalize_cluster_build`.
 
 ### Installing into Claude Code
 
@@ -1191,6 +1192,31 @@ large one, and the tokens expire.
 Read-only tools (`list_clusters`, `check_cluster_health`,
 `get_cost_report`, `diagnose_cluster`, `list_queues`,
 `resolve_access_info`) are safe to hand to an agent freely.
+
+### Finishing a build
+
+`create_cluster` returns as soon as CloudFormation accepts the stack. It
+has to: a build takes 20–45 minutes and no single call can block that long.
+So the last steps — the build summary, and publishing the cluster record
+other machines discover it by — are left undone.
+
+**`finalize_cluster_build` does them**, once the stack reaches
+`CREATE_COMPLETE`. It refuses before that and never waits. It takes no
+confirmation token: it destroys nothing and only completes work you
+authorized by building. Re-running the build cannot substitute — that
+refuses on the vars file it wrote itself.
+
+It works from the connector as well as locally. The staging tree the head
+node needs is published to S3 *before* the stack is created and pulled by
+the node during its own bootstrap, so finishing a build reaches nothing and
+needs no SSH key — which is what lets a cluster built in the browser be
+finished there. The generated access scripts are still written on your own
+machine, because that is where you run them; `access_cluster.py` renders
+them on demand from the vars file, so they are never missing.
+
+If the pull fails, the node warns rather than dying, and
+`/opt/parallelcluster/shared/staging_tree_pulled` is absent — the cluster
+runs fine, but the convenience tree on the head node is not there.
 
 ### Node.js
 
@@ -1304,11 +1330,12 @@ localhost is not.
 container image, so it needs a container runtime, and `--bootstrap` leaves
 it out rather than requiring one on every machine.
 
-**Without it, three tools are missing from the connector** —
-`create_cluster`, `apply_cluster_update` and `preview_cluster_config`. You
-can **inspect and operate** clusters from the browser but **not create or
-modify** them. Everything else is present: listing, health, cost,
-diagnostics, queues, fleet start/stop, access info and teardown.
+**Without it, four tools are missing from the connector** —
+`create_cluster`, `apply_cluster_update`, `preview_cluster_config` and
+`finalize_cluster_build`. You can **inspect and operate** clusters from the
+browser but **not create or modify** them. Everything else is present:
+listing, health, cost, diagnostics, queues, fleet start/stop, access info
+and teardown.
 
 Install a container runtime, then one command — the deploy creates the ECR
 repository, logs in, builds for `linux/amd64` and pushes:

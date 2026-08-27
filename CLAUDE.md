@@ -276,15 +276,28 @@ standing constraints for local development.
   CLI shim converts `exit_code`. The shared validation helpers still exit,
   so the wrapper keeps a narrow `except SystemExit` net as a backstop.
 - **`finalize_cluster_build` is the create-side twin of
-  `finalize_cluster_teardown`.** `wait=False` returns before every step
-  needing a live head node, so the access scripts are rendered into
-  `stage_dir` and lost with the process, staging never reaches the node,
-  and no summary is sent — and re-running the build refuses on the vars
-  file it wrote. Gated on `CREATE_COMPLETE` (`_confirm_stack_is_built`,
+  `finalize_cluster_teardown`, and is reachable remotely.** `wait=False`
+  returns before every step needing a live head node, so no summary is
+  sent and no record published — and re-running the build refuses on the
+  vars file it wrote. Gated on `CREATE_COMPLETE` (`_confirm_stack_is_built`,
   one describe, never waits), it reads context from the **rendered vars
-  file**, not the build's in-memory state, and is **local-only** (writes
-  `active_clusters/`, scp's the local `.pem`). `stage_dir` is the literal
+  file**, not the build's in-memory state. `stage_dir` is the literal
   `/tmp`, never `tempfile.gettempdir()`.
+- **The staging tree is pulled by the node, never pushed to it** —
+  published to `s3://<s3_bucketname>/staging/` *before* the stack exists,
+  fetched by `postinstall.j2` under the head-node gate, non-fatal, marker
+  at `/opt/parallelcluster/shared/staging_tree_pulled`. That is what makes
+  finalize remotable. Never restore the push, and never grant a tier
+  `ssm:SendCommand` to do it: that is code execution on the head node from
+  an internet-facing Lambda. Detail: `templates/CLAUDE.local.md`.
+- **The vars file rides beside the record** at `vars/<name>.yml`, under the
+  prefix `MCPStateAccess*` already grants — a new prefix is AccessDenied
+  when deployed. Finalize reads **local first, store second**, like
+  `_read_cluster_record`; storing is best-effort *inside* the best-effort
+  publish.
+- **No `aws s3 sync` subprocess on a path the container tier runs** — its
+  image has no AWS CLI. Use `upload_directory_to_s3`, and keep the `*.pem`
+  exclusion in the one shared `_S3_UPLOAD_NEVER`.
 - **Access must not depend on the build having finished.**
   `access_cluster.py` and `grafana_tunnel.py` render their generated
   script on demand via `core_ensure_generated_script` when one is absent —

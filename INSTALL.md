@@ -29,7 +29,8 @@ toolkit:
 * **A container runtime** (Finch, Docker, Podman or Rancher) — only to
   create clusters *through the MCP connector*. Six of the transport's seven
   tiers are plain zips and need nothing; the seventh carries
-  `create_cluster`, `apply_cluster_update` and `preview_cluster_config`.
+  `create_cluster`, `apply_cluster_update`, `preview_cluster_config`
+  and `finalize_cluster_build`.
   See [Adding cluster creation](#adding-cluster-creation-the-container-tier).
 * **A modern `bash`, GNU `coreutils` and `shellcheck` on macOS** — only to
   run `make test`, `make lint` and `make shellcheck`. See
@@ -161,14 +162,15 @@ is re-set by re-running `--create-user`, never recovered.
 > container image, so it needs a container runtime, and `--bootstrap`
 > leaves it out rather than requiring one on every machine.
 >
-> **Without it, three tools are missing from the connector** —
-> `create_cluster`, `apply_cluster_update` and `preview_cluster_config`.
+> **Without it, four tools are missing from the connector** —
+> `create_cluster`, `apply_cluster_update`, `preview_cluster_config`
+> and `finalize_cluster_build`.
 > In other words you can **inspect and operate** clusters from the browser
 > but **not create or modify** them. Everything else is present: listing,
 > health, cost, diagnostics, queues, fleet start/stop, access info and
 > teardown.
 >
-> To get those three, see
+> To get those four, see
 > [Adding cluster creation](#adding-cluster-creation-the-container-tier).
 > It is one command once a runtime is installed.
 
@@ -235,7 +237,8 @@ purpose — a deployer who can delete their own boundary does not have one.
 
 Add this tier when you want to **create and modify clusters** through the
 connector, rather than only inspect and operate existing ones. It carries
-`create_cluster`, `apply_cluster_update` and `preview_cluster_config`, and
+`create_cluster`, `apply_cluster_update`, `preview_cluster_config` and
+`finalize_cluster_build`, and
 nothing else needs it.
 
 It ships as a container image because `pcluster`'s create and update paths

@@ -150,6 +150,24 @@ def _ensure_cognito_client(cog, pool_id, base_url, region):
     return domain
 
 
+def _container_tier_tools():
+    """The tools only the container tier serves, derived from the routing
+    table rather than restated.
+
+    It was written out in three places and went stale the moment a fourth
+    tool joined the tier -- the same multi-surface drift this repo pins by
+    test everywhere else, except a help string has no test to fail.
+    """
+    from mcp_server.tiers import TOOL_TIERS
+
+    return sorted(t for t, v in TOOL_TIERS.items() if v == "stack-mutation-node")
+
+
+def _container_tier_tools_phrase():
+    names = _container_tier_tools()
+    return ", ".join(names[:-1]) + " and " + names[-1]
+
+
 def normalize_bootstrap(args, fail):
     """Resolve `--bootstrap` into the flags main() already acts on.
 
@@ -247,8 +265,7 @@ def main():
                         "is also the update path. The container tier is not "
                         "included -- it needs --image-uri and a runtime; "
                         "without it the transport still serves every tool "
-                        "except create_cluster, apply_cluster_update and "
-                        "preview_cluster_config")
+                        "except those the container tier owns")
     p.add_argument("--create-user", metavar="USERNAME",
                    help="create a Cognito user to sign in as at the Hosted "
                         "UI, with a permanent password; idempotent. Takes "
@@ -413,8 +430,7 @@ def main():
                         f"  --image-uri for an image built elsewhere.\n\n"
                         f"  Without this tier the transport still serves every "
                         f"tool except\n"
-                        f"  create_cluster, apply_cluster_update and "
-                        f"preview_cluster_config."
+                        f"  {_container_tier_tools_phrase()}."
                     )
                 ecr = boto3.client("ecr", region_name=args.region)
                 uri, created = ensure_ecr_repository(ecr)
@@ -543,9 +559,9 @@ def main():
             print("\nNo Cognito user exists to sign in as. Create one with")
             print("  deploy_mcp.py --create-user <username>")
         if "stack-mutation-node" not in tiers:
-            print("\nThree tools are NOT in this deployment:")
-            print("  create_cluster, apply_cluster_update, "
-                  "preview_cluster_config")
+            _missing = _container_tier_tools()
+            print(f"\n{len(_missing)} tools are NOT in this deployment:")
+            print("  " + ", ".join(_missing))
             print("  -- i.e. you can inspect and operate clusters from the "
                   "browser, but not")
             print("  create or modify them. They live in the "
