@@ -298,6 +298,19 @@ standing constraints for local development.
 - **No `aws s3 sync` subprocess on a path the container tier runs** — its
   image has no AWS CLI. Use `upload_directory_to_s3`, and keep the `*.pem`
   exclusion in the one shared `_S3_UPLOAD_NEVER`.
+- **The CloudWatch-agent entry `postinstall.j2` appends must be a copy of
+  one the agent already accepts**, changing only `file_path` and
+  `log_stream_name`. Its schema validation is whole-config, so one unknown
+  key crash-loops the agent and the node ships **nothing** — `from_beginning`
+  did exactly that. **The contract rule is not just for botocore models**:
+  read a third-party schema, never recall it. Detail:
+  `templates/CLAUDE.local.md`.
+- **A remote `create_cluster` outlives the 29s gateway ceiling** — measured
+  43.6s, ~39s of it `pcluster create-cluster`'s CDK synthesis, so no
+  decomposition of our work fits it. The caller is cut off while the build
+  succeeds, so the vars-file guard asks whether the cluster is **already
+  building** first: "a vars file already exists" reads as a dead run whose
+  remedy is to clean up, and that inference was drawn against a live one.
 - **Access must not depend on the build having finished.**
   `access_cluster.py` and `grafana_tunnel.py` render their generated
   script on demand via `core_ensure_generated_script` when one is absent —

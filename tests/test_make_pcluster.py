@@ -4250,3 +4250,101 @@ class TestABuildFailureSaysWhatWentWrong:
             f"only {built} create-failure paths build a real message; "
             f"the others still return a constant"
         )
+
+
+class TestARetryAfterTheGatewayTimeoutIsNotToldToCleanUp:
+    """A remote `create_cluster` outlives API Gateway's 29s ceiling.
+
+    Measured on a live build: 43,615 ms, of which ~5s is this toolkit's own
+    work -- network resolution, IAM, bucket, keypair, secret, staging
+    upload -- and ~39s is inside `pcluster create-cluster`, where the CDK
+    synthesizes the template. The ceiling is already the REST maximum, so
+    the caller is cut off while the Lambda runs on and the build succeeds.
+
+    The obvious next move is to retry, and the retry lands on the
+    vars-file guard. Answering "a vars file for this cluster already
+    exists" is true and reads as a stale artifact from a dead run -- whose
+    remedy is to clean up. That inference was drawn on a live build, and
+    the only thing that prevented a teardown of a running cluster was
+    `finalize_cluster_teardown` refusing while a stack existed.
+    """
+
+    def _guarded(self, monkeypatch, status, tmp_path):
+        import pcluster_core as pc
+
+        monkeypatch.setattr(
+            pc, "_describe_cluster_status_quietly", lambda n, r: status)
+        return pc
+
+    def test_an_in_flight_build_says_so_and_says_not_to_clean_up(self):
+        import pcluster_core as pc
+
+        assert "CREATE_IN_PROGRESS" in pc._CLUSTER_BUILD_IN_FLIGHT
+
+    def test_a_finished_stack_also_counts_as_in_flight(self):
+        """`CREATE_COMPLETE` is not "safe to rebuild": the stack is there,
+        this call created nothing, and the remedy is finalize or poll --
+        never delete."""
+        import pcluster_core as pc
+
+        assert "CREATE_COMPLETE" in pc._CLUSTER_BUILD_IN_FLIGHT
+
+    def test_an_update_is_not_treated_as_a_build(self):
+        """A different operation with a different remedy. Widening this set
+        to every *_IN_PROGRESS would make create_cluster claim ownership of
+        states it knows nothing about."""
+        import pcluster_core as pc
+
+        for s in ("UPDATE_IN_PROGRESS", "DELETE_IN_PROGRESS",
+                  "CREATE_FAILED", "DELETE_FAILED", "ROLLBACK_COMPLETE"):
+            assert s not in pc._CLUSTER_BUILD_IN_FLIGHT, s
+
+    def test_an_unreadable_status_falls_back_rather_than_failing(self, monkeypatch):
+        """The lookup exists to make a refusal more informative. If it
+        cannot answer, the refusal must be exactly what it was -- a create
+        that errors because CloudFormation was briefly unreachable is worse
+        than a generic message.
+
+        The failure is injected rather than reached for real. Letting this
+        actually import `pcluster.lib` sets a global event loop that 21
+        later tests in another module then inherit and fail on -- which is
+        what the first version of this test did, and it only showed up in
+        the full-suite ordering, not in the file alone.
+        """
+        import sys
+        import types
+
+        import pcluster_core as pc
+
+        stub = types.ModuleType("pcluster.lib")
+        stub.describe_cluster = lambda **kw: (_ for _ in ()).throw(
+            RuntimeError("CloudFormation unreachable"))
+        monkeypatch.setitem(sys.modules, "pcluster.lib", stub)
+
+        assert pc._describe_cluster_status_quietly("nope", "us-east-1") == ""
+
+    def test_the_refusal_checks_the_status_before_the_generic_guidance(self):
+        """Order is the whole fix. The guidance prints and returns, so a
+        status check placed after it never runs."""
+        import ast
+        import io
+        import os
+
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        src = io.open(os.path.join(root, "src", "pcluster_core.py"),
+                      encoding="utf-8").read()
+        tree = ast.parse(src)
+        fn = next(n for n in ast.walk(tree)
+                  if isinstance(n, ast.FunctionDef) and n.name == "core_create_cluster")
+        status_at = [n.lineno for n in ast.walk(fn)
+                     if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+                     and n.func.id == "_describe_cluster_status_quietly"]
+        guidance_at = [n.lineno for n in ast.walk(fn)
+                       if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+                       and n.func.id == "existing_vars_file_guidance"]
+        assert status_at, "the in-flight check is gone"
+        assert guidance_at, "the guidance call is gone"
+        assert min(status_at) < min(guidance_at), (
+            "the status check runs after the guidance returns, so it never "
+            "runs at all"
+        )

@@ -65,10 +65,16 @@ except Exception:
     sys.exit(0)
 if not cl or any(e.get("file_path") == want for e in cl):
     sys.exit(0)
+# Modelled on an entry the agent already accepts, changing only the two
+# fields that must differ. Adding a key it does not accept fails schema
+# validation for the WHOLE config, and the agent then crash-loops shipping
+# nothing at all -- which is what `from_beginning` did here: it is not in
+# this agent's schema, and asserting otherwise from memory cost every log
+# stream on the node. A new file is read from the start by default, so it
+# bought nothing even had it been valid.
 entry = dict(cl[0])
 entry["file_path"] = want
 entry["log_stream_name"] = "{instance_id}.cfn-init-cmd"
-entry["from_beginning"] = True
 cl.append(entry)
 json.dump(d, open(cfg, "w"))
 PCM_CW_EOF

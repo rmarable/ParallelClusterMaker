@@ -8603,6 +8603,39 @@ def _build_failure_message(stage, exc, limit=600):
     return f"{stage}: {name}: {detail}"
 
 
+# CloudFormation states that mean "a build is in flight". UPDATE_* is not
+# here: an update is a different operation with a different remedy, and
+# create_cluster is not what a caller retries into one.
+_CLUSTER_BUILD_IN_FLIGHT = frozenset({
+    "CREATE_IN_PROGRESS",
+    "CREATE_COMPLETE",
+})
+
+
+def _describe_cluster_status_quietly(cluster_name, region):
+    """The cluster's status, or "" when it cannot be read.
+
+    Deliberately swallowing: this is consulted to make a refusal *more*
+    informative, so a failure to answer must leave the refusal exactly as
+    it was rather than turn it into a different error. A create that fails
+    because CloudFormation was briefly unreachable is worse than a message
+    that is merely generic.
+
+    `CREATE_COMPLETE` counts as in-flight for the caller's purposes: the
+    stack is there, this call created nothing, and the remedy is still
+    "poll or finalize", never "clean up".
+    """
+    try:
+        import pcluster.lib as pc
+        ensure_event_loop()
+
+        return pc.describe_cluster(
+            cluster_name=cluster_name, region=region
+        ).get("clusterStatus", "")
+    except Exception:
+        return ""
+
+
 def core_create_cluster(*, params, repo_root, region, cluster_build_command, ansible_version, wait=True):
     """Validate, provision IAM, render the vars file, and build a cluster.
 
@@ -8774,6 +8807,43 @@ def core_create_cluster(*, params, repo_root, region, cluster_build_command, ans
     # cluster identity and is removed by the pre-launch rollback, so its
     # absence beside a vars file means the rollback ran -- no stack exists.
     if os.path.isfile(vars_file_path):
+        # Before the generic guidance: is this cluster building *right now*?
+        #
+        # A remote create_cluster takes ~44s -- 5s of ours and ~39s inside
+        # `pcluster create-cluster`, where the CDK synthesizes the template --
+        # against API Gateway's 29s integration ceiling, which is already the
+        # REST maximum. So the caller is cut off while the Lambda runs on and
+        # the build succeeds, and the obvious next move is to retry. The retry
+        # lands here.
+        #
+        # Answering "a vars file already exists" then is true and actively
+        # misleading: it reads as a stale artifact from a dead run, and the
+        # remedy for a dead run is to clean up. That inference was drawn on a
+        # live build, and the only thing that stopped a teardown of a running
+        # cluster was finalize_cluster_teardown's own stack-exists guard.
+        #
+        # Best-effort, and never fatal: if the status cannot be read, fall
+        # through to the guidance that shipped. A build the caller cannot see
+        # is bad; a create that refuses because CloudFormation was briefly
+        # unreachable is worse.
+        _in_flight = _describe_cluster_status_quietly(cluster_name, region)
+        if _in_flight in _CLUSTER_BUILD_IN_FLIGHT:
+            print("")
+            print(f"*** ALREADY BUILDING ***")
+            print(f"  {cluster_name} is {_in_flight} in {region}.")
+            print("  Nothing was created by this call and nothing needs "
+                  "cleaning up.")
+            print("  Poll list_clusters(live=True) or check_cluster_health; "
+                  "a build takes 20-45 minutes.")
+            return CreateClusterResult(
+                cluster_name=cluster_name, success=False, exit_code=1,
+                kicked_off=True,
+                message=(
+                    f"{cluster_name} is already building ({_in_flight}); this "
+                    f"call created nothing and nothing needs cleaning up. Poll "
+                    f"for completion rather than retrying or deleting."
+                ),
+            )
         for _line in existing_vars_file_guidance(
             cluster_name=cluster_name, cluster_owner=cluster_owner, az=az,
             repo_root=repo_root, vars_file_path=vars_file_path,

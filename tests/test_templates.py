@@ -8490,11 +8490,29 @@ class TestTheLogThatSaysWhyABootstrapFailedIsShipped:
         return "\n".join(
             ln for ln in block.splitlines() if not ln.lstrip().startswith("#"))
 
-    def test_it_reads_the_whole_file_not_just_new_lines(self, cluster_params):
-        """`from_beginning` is why placing this late costs nothing. Without
-        it the agent tails from the end and everything preinstall and chef
-        wrote -- which is most of a bootstrap -- is never sent."""
-        assert "from_beginning" in self._code(cluster_params)
+    def test_it_adds_no_key_the_agent_does_not_already_accept(self, cluster_params):
+        """The entry is a copy of one the agent already validates, with two
+        fields changed. Anything else is a guess about a third-party schema.
+
+        `from_beginning` was such a guess -- asserted from memory, not read
+        from the contract, and rejected with `Additional property
+        from_beginning is not allowed`. Schema validation is whole-config,
+        so the agent crash-looped and shipped *nothing*: worse than the one
+        missing file this exists to add. A new file is tailed from the start
+        by default, so it bought nothing even had it been valid.
+        """
+        code = self._code(cluster_params)
+        assert "from_beginning" not in code, (
+            "from_beginning is not in the agent's schema; it fails "
+            "validation for the whole config"
+        )
+        assigned = [ln.split("]")[0].split("[")[-1].strip().strip('"\'')
+                    for ln in code.splitlines()
+                    if ln.strip().startswith("entry[")]
+        assert set(assigned) == {"file_path", "log_stream_name"}, (
+            f"the copied entry sets {sorted(assigned)}; only file_path and "
+            f"log_stream_name may differ from the entry it was modelled on"
+        )
 
     def test_it_appends_rather_than_replacing_the_agent_config(self, cluster_params):
         """That file is PCluster's. Rewriting it drops whatever the next
