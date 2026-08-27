@@ -42,7 +42,6 @@ CLAUDE.local.md
 templates/CLAUDE.local.md
 hpc-benchmark/CLAUDE.local.md
 CLAUDE-STATE.md
-docs/sessions.md
 
 # PR (Public Relations)
 docs/press-release-20260807.txt
@@ -55,7 +54,8 @@ docs/records-store-plan.md
 
 # Doc-hygiene tests that check properties of the files above -- gitignored
 # alongside them since they test content that isn't part of the public repo.
+# They read CLAUDE.local.md and its siblings, which stay private, so a
+# tracked copy would fail CI on files that are not there.
 tests/test_claude_docs_citations.py
 tests/test_claude_docs_line_citations.py
 tests/test_claude_docs_preamble_budget.py
-docs/mcp-certification-checklist.md
