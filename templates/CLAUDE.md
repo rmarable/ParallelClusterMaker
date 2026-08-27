@@ -60,6 +60,25 @@ and deletes the six managed policies.
   Sids, no unsubstituted placeholders) plus a cross-check that every
   placeholder they use is actually substituted by `_render_policy`.
   `<MCP_USER_POOL_ID>` is theirs alone.
+- **A tier's policy has a floor as well as a ceiling — the detail behind
+  the rule in the root `CLAUDE.md`.** Every MCP IAM guard asked whether a
+  tier could exceed its blast radius; none asked whether it could reach
+  its own, and two could not. `fleet-toggle`: `update-compute-fleet`
+  parses the cluster config from PCluster's per-cluster S3 bucket and
+  reads/updates the fleet status item in the `parallelcluster-<cluster>`
+  DynamoDB table, and the tier granted neither, so
+  `stop_fleet`/`start_fleet` failed against every real cluster for the
+  tier's whole life. The S3 grant stays **read-only** — `s3:*` would have
+  satisfied the floor while letting a fleet toggle rewrite any cluster's
+  config — and the DynamoDB grant is scoped to `table/parallelcluster-*`.
+  The same blindness hid a wider gap: **no tier granted any
+  `elasticloadbalancing` action**, and a login-node pool sits behind an
+  NLB that `describe-cluster` reads, so *every* remote tier failed against
+  any `--enable_loginnode` cluster. All four calls in `pcluster/aws/elb.py`
+  are needed (granting only `DescribeLoadBalancers` moves the failure to
+  the next one); describes take no resource-level permission, so
+  `Resource: "*"` is forced and read-only is the only bound left.
+  `TestEachTierCanActuallyDoItsJob` pins both directions for both gaps.
 - **`MCPDeployPolicy.json_src` and `MCPRoleBoundary.json_src` are a fourth
   category** — what an administrator grants to whoever deploys the
   transport, plus the permissions boundary every MCP role is created under.

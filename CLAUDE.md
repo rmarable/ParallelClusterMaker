@@ -90,20 +90,18 @@ standing constraints for local development.
   private subnets); checksum-verified via `monitoring_version_checksum`.
   Creates a sixth managed IAM policy (`HeadNode-Monitoring`) and an SSM
   Grafana password parameter — both must be deleted on teardown.
-- The cluster's CloudWatch log group is retained on teardown — PCluster's
-  own `deletion_policy` default of `"Retain"`, deliberately not
-  overridden, because the group is the only surviving record of a failed
-  build (cfn-init captures stdout only; node stderr reaches no stream) and
-  a failed build is immediately followed by a teardown. Never add a
+- The cluster's CloudWatch log group is **retained** on teardown —
+  PCluster's `deletion_policy` default of `"Retain"`, deliberately not
+  overridden: the group is the only surviving record of a failed build,
+  which is always immediately followed by a teardown. Never add a
   log-group deletion task to `src/delete_pcluster.yml`, never set
-  `DeletionPolicy: Delete`, and never put a retained log group in
-  `_orphaned_resources`. Its *lifetime* is a decision, not an inheritance:
-  `config.pcluster.j2` sets `RetentionInDays: 30` over PCluster's default
-  of 180, because diagnosing a failed build is short-horizon work. That
-  field is `UpdatePolicy.SUPPORTED`, unlike `Enabled`, so it can be
-  changed on a running cluster, and 30 must stay in
-  `CloudWatchLogsSchema`'s `OneOf` set — read out of the installed package
-  by `TestTheLogGroupExpiresOnOurScheduleNotPClusters`, never restated.
+  `DeletionPolicy: Delete`, never put a retained log group in
+  `_orphaned_resources`. Its *lifetime* is a decision, not an
+  inheritance: `config.pcluster.j2` sets `RetentionInDays: 30` over
+  PCluster's 180. That field is `UpdatePolicy.SUPPORTED` (unlike
+  `Enabled`), and 30 must stay in `CloudWatchLogsSchema`'s `OneOf` set —
+  read out of the installed package by
+  `TestTheLogGroupExpiresOnOurScheduleNotPClusters`, never restated.
 - GPU support is gated on `enable_gpu`; `is_gpu_instance()` in
   `pcluster_aux_data.py` detects GPU families by instance-type prefix and
   auto-enables the flag with an `*** INFO ***` message if needed.
@@ -181,11 +179,6 @@ standing constraints for local development.
   never `OnNodeStart` — that is `preinstall.j2` (full package upgrade, pip
   installs, awscli download), reserved for `HeadNode`. Giving login nodes
   `OnNodeStart` repeats all of that on every boot and every ASG replacement.
-- `monitoring-post-install-wrapper.j2`'s `LoginNode` arm polls (bounded,
-  `MONITORING_LOGIN_WAIT_SECONDS`/`_POLL_SECONDS`) for the head node's
-  `MONITORING_HOME` instead of failing immediately — PCluster's CDK gates
-  the login-node pool only on the head node's EC2 instance existing, not its
-  bootstrap completing, unlike `ComputeFleet`'s `clustermgtd` ordering.
 - `access_cluster.py`'s default node selection also requires
   `loginnode_count > 0` — `enable_loginnode=true` alone does not guarantee
   any login-node instance is actually running.
@@ -221,53 +214,43 @@ standing constraints for local development.
   `stop_fleet` → `apply_cluster_update` → `start_fleet`. Decompose such a
   tool, never delete the capability. **But a remote call has ~29s, not
   900s** — `GATEWAY_INTEGRATION_TIMEOUT_MS`, already the REST maximum;
-  raising it needs a service quota increase. Past it the caller gets a
-  timeout body while the Lambda runs on and the mutation *succeeds*, so a
-  client that retries submits a second update against a stack already
-  updating. Measured: `apply_cluster_update` took 41,992 ms adding one
-  queue and the caller saw failure at 29.4s while the update completed. R4's
-  14-20s calls stayed under it, which is why the ceiling went unrecorded.
-  `deploy.py` knew the number — in a comment justifying the authorizer's 10s
-  timeout — and it was never generalized to the tier tools.
+  raising it needs a service quota increase. Past it the caller times out
+  while the Lambda runs on and the mutation *succeeds*, so a retry submits
+  a second update against a stack already updating. Measured:
+  `apply_cluster_update` took 41,992 ms adding one queue and the caller
+  failed at 29.4s while the update completed.
 - **`delete_cluster` initiates a teardown; `finalize_cluster_teardown`
   finishes it.** `wait=False` returns on CloudFormation's acceptance and
-  skips *every* teardown step, so one call leaves the IAM policies, the S3
-  bucket, the credentials, the SNS topic and the store record behind. A
-  *second* `delete_cluster` does finish the job — an absent stack
-  classifies as `_CLUSTER_NOT_FOUND`, not `_KICKED_OFF` — but it gets
-  there by **issuing another delete-cluster against the name**, which
-  deletes the new stack if that name has since been rebuilt, and called
-  too early it silently no-ops and reports success, indistinguishable
-  from having finished.
-  `core_delete_cluster(finalize_only=True)` is the explicit second half:
-  it never calls delete-cluster and never waits, refusing unless the stack
-  is confirmed gone (`_confirm_stack_is_gone` — the wait loop at
-  `retries=1`, so the non-blocking guarantee is structural, not a
-  promise).
-  `DELETE_FAILED` refuses: the waiting path strips IAM and S3 there
-  deliberately, having just attempted the delete, but arriving *here*
-  means an earlier delete failed and the answer is to re-run it. That path
-  exits non-zero either way, so only asserting no teardown step ran can
-  see it. A failed describe propagates: a failed AWS call is not a deleted
-  stack. Both modes fall into **one** teardown body, and their two
-  tokens — both minted by `preview_cluster_delete` — are deliberately not
+  skips *every* teardown step, leaving the IAM policies, the S3 bucket,
+  the credentials, the SNS topic and the store record behind. A *second*
+  `delete_cluster` does finish the job — an absent stack classifies as
+  `_CLUSTER_NOT_FOUND`, not `_KICKED_OFF` — but it gets there by
+  **issuing another delete-cluster against the name**, which deletes the
+  new stack if that name has since been rebuilt, and called too early it
+  silently no-ops and reports success, indistinguishable from having
+  finished. `core_delete_cluster(finalize_only=True)` is the explicit
+  second half: it never calls delete-cluster and never waits, refusing
+  unless the stack is confirmed gone (`_confirm_stack_is_gone` — the wait
+  loop at `retries=1`, so the non-blocking guarantee is structural, not a
+  promise). `DELETE_FAILED` refuses too: arriving there means an earlier
+  delete failed and the answer is to re-run it, not to strip IAM and S3
+  the way the waiting path deliberately does. That path exits non-zero
+  either way, so only asserting no teardown step ran can see it. A failed
+  describe propagates: a failed AWS call is not a deleted stack. Both
+  modes fall into **one** teardown body, and their two tokens — both
+  minted by `preview_cluster_delete` — are deliberately not
   interchangeable.
 - **The monitoring wrapper must not run upstream's installer on a login
-  node.** `installer/install.sh` supports two node types and says so in its
-  own header — `case "${PLATFORM_NODE_TYPE}"` has arms for `HeadNode` and
-  `ComputeFleet` only. A login node falls through `verify_docker`, matches
-  nothing, and fails; the wrapper exits with the installer's status, so
-  that became the custom action's, the node was marked unhealthy, and its
-  Auto Scaling Group replaced it — forever. Observed live: three login
-  nodes abandoned on Heartbeat Timeout across 45 minutes with the stack
-  never leaving `CREATE_IN_PROGRESS`. The `LoginNode` arm now exits 0
-  immediately; Grafana runs on the head node and operators reach it through
-  `grafana_tunnel`, so there is no login-node half to install. That also
-  retires the bounded `MONITORING_HOME` poll, which only existed to let the
-  install proceed and cost every login node up to 300s of boot. Only the
-  *combination* fails, which is why neither a login-node cluster nor a
-  monitoring cluster caught it alone — and the harness stubs the installer,
-  so the guard asserts on the **execution trace**, not the exit status.
+  node.** `installer/install.sh`'s `case "${PLATFORM_NODE_TYPE}"` has arms
+  for `HeadNode` and `ComputeFleet` only; a login node falls through
+  `verify_docker`, matches nothing and fails, the wrapper exits with the
+  installer's status, and the node's Auto Scaling Group replaces it —
+  forever. The `LoginNode` arm exits 0 immediately: Grafana runs on the
+  head node and operators reach it through `grafana_tunnel`, so there is
+  no login-node half to install, and the bounded `MONITORING_HOME` poll
+  that existed to let it proceed is retired. The harness stubs the
+  installer, so the guard asserts on the **execution trace**, not the exit
+  status. Incident: `templates/CLAUDE.local.md`.
 - **Every `import pcluster.lib` must be followed by `ensure_event_loop()`.**
   PCluster's CDK layer calls `asyncio.get_event_loop()`, which returns a
   loop on the main thread and **raises** on any other; FastMCP dispatches
@@ -328,65 +311,49 @@ standing constraints for local development.
   router must import no third-party package.
 - **A tier's policy has a floor as well as a ceiling.** Every MCP IAM
   guard asked whether a tier could exceed its blast radius; none asked
-  whether it could reach its own. `fleet-toggle` could not:
-  `update-compute-fleet` parses the cluster config from PCluster's
-  per-cluster S3 bucket and reads/updates the fleet status item in the
-  `parallelcluster-<cluster>` DynamoDB table, and the tier granted neither,
-  so `stop_fleet`/`start_fleet` failed against every real cluster for the
-  tier's whole life. The S3 grant stays **read-only** — `s3:*` would have
-  satisfied the floor while letting a fleet toggle rewrite any cluster's
-  config — and the DynamoDB grant is scoped to `table/parallelcluster-*`.
-  The same blindness hid a second, wider gap: **no tier granted any
-  `elasticloadbalancing` action**, and a login-node pool sits behind an NLB
-  that `describe-cluster` reads, so *every* remote tier failed against any
-  cluster built with `--enable_loginnode true`. All four calls in
-  `pcluster/aws/elb.py` are needed (granting only `DescribeLoadBalancers`
-  moves the failure to the next one); describes take no resource-level
-  permission, so `Resource: "*"` is forced and read-only is the only bound
-  left. `TestEachTierCanActuallyDoItsJob` pins both directions for both
-  gaps. `MCPStackMutation.json_src` is now 5,935 bytes of the 6,144 limit.
+  whether it could reach its own, and two tiers could not —
+  `fleet-toggle` had no S3/DynamoDB grant for `update-compute-fleet`, and
+  **no tier granted any `elasticloadbalancing` action**, so every remote
+  tier failed `describe-cluster` against any `--enable_loginnode`
+  cluster. `TestEachTierCanActuallyDoItsJob` pins both directions for
+  both gaps. `MCPStackMutation.json_src` is now 5,935 bytes of the 6,144
+  limit. Which grants, and why each stays narrow: `templates/CLAUDE.md`.
 - **Reuse is not convergence, and the difference is a naming asymmetry.**
   `_setup_iam`'s policies carry the cluster serial, so every build makes
   fresh ones and a stale document is unreachable; the MCP policy names are
   fixed and long-lived, so the first-ever create won forever — a
   `templates/MCP*.json_src` edit changed nothing in the account and printed
-  "Reusing existing MCP policy". `_setup_mcp_infra` now compares the
-  rendered document against **AWS's own copy** (never a stored hash, tag or
-  git ref — a marker beside the truth is a second source that can be wrong
-  about it) and reports any mismatch; `--update-policies` pushes it as a new
-  default version, pruning oldest-first to stay under IAM's five-version
-  ceiling and never deleting the version in force.
+  "Reusing existing MCP policy". `_setup_mcp_infra` compares the rendered
+  document against **AWS's own copy** (never a stored hash, tag or git ref —
+  a marker beside the truth is a second source that can be wrong about it);
+  `--update-policies` pushes it as a new default version, pruning
+  oldest-first under IAM's five-version ceiling, never the version in force.
 - **`deploy_mcp.py --teardown` removes the transport; nothing did before.**
-  `delete_mcp_functions` and `_delete_mcp_infra` existed and were called by
-  no entry point, and the REST API and Cognito pool had no teardown code at
-  all, so the internet-facing endpoint outlived every teardown. Order is
-  gateway, functions, IAM, pool — each step leaves nothing depending on
-  something already gone. **The Cognito domain must be deleted before the
+  `delete_mcp_functions` and `_delete_mcp_infra` were called by no entry
+  point, and the REST API and Cognito pool had no teardown code at all, so
+  the internet-facing endpoint outlived every teardown. Order is gateway,
+  functions, IAM, pool. **The Cognito domain must be deleted before the
   pool**: `DeleteUserPool` fails while one exists, names no domain in the
-  error, and the domain string is not the pool name, so a caller that
-  guesses removes nothing and reports success on the retry. Read it off
-  `describe_user_pool`. Teardown deliberately leaves the permissions
-  boundary — `MCPDeployPolicy` denies deleting it, so attempting it reports
-  a denial as a teardown failure. `--dry-run` lists without removing.
+  error, and the domain string is not the pool name — read it off
+  `describe_user_pool`, never guess. Teardown deliberately leaves the
+  permissions boundary; `MCPDeployPolicy` denies deleting it. `--dry-run`
+  lists without removing.
 - **MCP deployment is its own permission set, not the operator's.**
   `OperatorPolicy` scopes its IAM to `pclustermaker-policy-*` and
   `pclustermaker-role-*`, which match no MCP name, and the full MCP grant
   set appended to it measures 6,358 bytes against the 6,144 limit — so
-  widening it is not merely undesirable, it does not fit.
-  `MCPDeployPolicy.json_src` carries it instead, and every MCP role is
-  created under the `MCPRoleBoundary.json_src` permissions boundary:
-  `iam:CreateRole` is granted **only** under a `StringEquals` condition on
-  `iam:PermissionsBoundary`, and the deployer is explicitly denied
-  rewriting or detaching that boundary. Without the condition a deployer
-  creates an unbounded role and the ceiling never applies. Details in
-  `templates/CLAUDE.md`.
+  widening it does not merely read badly, it does not fit.
+  `MCPDeployPolicy.json_src` carries it, and every MCP role is created
+  under the `MCPRoleBoundary.json_src` permissions boundary, with
+  `iam:CreateRole` granted **only** under a `StringEquals` condition on
+  `iam:PermissionsBoundary` — without it a deployer creates an unbounded
+  role and the ceiling never applies. Details in `templates/CLAUDE.md`.
 - **Adding policy versions breaks teardown unless teardown prunes them.**
   `DeletePolicy` refuses while any non-default version exists
-  (`DeleteConflictException` — botocore's own IAM model says "you must
-  delete all the policy's versions"), so the two halves must land together:
-  `_delete_policy_with_versions` deletes non-default versions first. This
-  was unreachable until deploy could version a policy, and it was reached
-  the same day — three MCP policies were left undeletable in the account.
+  (`DeleteConflictException`), so the two halves must land together:
+  `_delete_policy_with_versions` deletes non-default versions first. It
+  was unreachable until deploy could version a policy, and was reached the
+  same day — three MCP policies left undeletable in the account.
 - **No tool on the `read-only` tier may write anything.** `add_queue`/
   `remove_queue` write `configs/<name>.yaml` and moved to `stack-mutation`,
   where the rest of the config's lifecycle already lives (apply reads it,
