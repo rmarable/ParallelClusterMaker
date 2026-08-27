@@ -4499,6 +4499,29 @@ def _age_str(deployment_date, *, serial=None):
         return "?"
 
 
+# The spellings a describe uses when the cluster is not there. The delete
+# wait's own until:/failed_when: accept the same set, and it is a set rather
+# than one string because upstream says it two ways and puts it on either
+# stream.
+_CLUSTER_ABSENT_MARKERS = (
+    "ClusterNotFound",
+    "does not exist",
+)
+
+
+def _describe_says_cluster_is_absent(exc):
+    """True only when a describe failed *because the cluster is gone*.
+
+    Deliberately narrow. Any other failure -- expired credentials, a
+    throttle, an unreachable endpoint -- must not read as "deleted": that is
+    the same rule `_confirm_stack_is_gone` is built on, where a failed AWS
+    call is not evidence of absence. Widening this to "any describe error"
+    would report every cluster as DELETED the moment a token expires.
+    """
+    text = f"{type(exc).__name__}: {exc}"
+    return any(m.lower() in text.lower() for m in _CLUSTER_ABSENT_MARKERS)
+
+
 def _live_status(cluster_name, region, pcluster_bin):
     # Same suppression as the delete wait, and for the same reason: a
     # cluster mid-delete has already lost the config object version
@@ -4511,7 +4534,20 @@ def _live_status(cluster_name, region, pcluster_bin):
         cs = data.get("clusterStatus", "?")
         cfs = data.get("cloudFormationStackStatus", "?")
         return f"{cs} / {cfs}"
-    except (PClusterMakerError, OSError):
+    except (PClusterMakerError, OSError) as e:
+        # A cluster whose stack is gone is the *expected* end state of a
+        # delete, not a failure to read it -- and reporting "ERR" for the
+        # normal outcome trains a reader to discount the column. Observed:
+        # a caller correctly reasoned past it ("expected end state for a
+        # completed delete") but had to know that to do so, which is the
+        # part that does not survive the next reader.
+        #
+        # Only a *confirmed* not-found is reported as DELETED. Any other
+        # failure stays "ERR": a describe that could not be answered is not
+        # evidence a cluster is gone, which is the same rule
+        # _confirm_stack_is_gone is built on.
+        if _describe_says_cluster_is_absent(e):
+            return "DELETED"
         # "ERR" for this one cluster only -- core_list_clusters must never
         # let one unreachable cluster abort a listing of all the others.
         return "ERR"

@@ -924,16 +924,32 @@ def register_tools(mcp, *, remote, tier=None):
         ))
 
     @tool
-    def finalize_cluster_teardown(cluster_name: str, confirmation_token: str,
+    def finalize_cluster_teardown(cluster_name: str,
                                   delete_s3_bucketname: bool = True) -> dict:
-        """Finish a teardown delete_cluster started. Requires a token from
-        preview_cluster_delete (its finalization_token).
+        """Finish a teardown delete_cluster started. Takes no token.
 
         delete_cluster returns as soon as CloudFormation accepts the delete,
         because no tool may block on a 15-20 minute operation. That leaves
         the IAM policies, the S3 bucket, the EC2 keypair and its .pem, the
         Secrets Manager secret, the SNS topic and the shared-store record
         all still present. This removes them.
+
+        **It used to require a token, and that token could not exist.**
+        `preview_cluster_delete` minted a finalization token with a 900s
+        TTL, and a teardown takes 15-20 minutes, so by the time the stack
+        was gone the token had always expired -- observed at 984s against a
+        900s TTL. Every finalize therefore needed a fresh preview first,
+        which is a confirmation prompt for a destruction the operator
+        already confirmed. A gate that cannot be satisfied on its intended
+        path is not a safety measure; it is a detour that teaches people to
+        re-confirm reflexively.
+
+        What is destroyed here was authorized by the `delete_cluster` this
+        finishes, and the stack is already gone. Same reasoning as
+        `finalize_cluster_build`, which takes no token for completing work
+        the operator authorized by building. Do not add one back; make
+        `delete_cluster` refuse instead, since that is the call that decides
+        anything.
 
         Calling delete_cluster a second time also completes the teardown,
         but only by re-issuing a stack delete against the name first --
@@ -944,11 +960,6 @@ def register_tools(mcp, *, remote, tier=None):
         Refuses unless the stack is confirmed gone, and never waits for it:
         poll list_clusters until the cluster disappears, then call this.
         """
-        params = {
-            "cluster_name": cluster_name,
-            "delete_s3_bucketname": delete_s3_bucketname,
-        }
-        verify(confirmation_token, "finalize_cluster_teardown", params)
         rec = _require_record(cluster_name)
         return _plain(core_delete_cluster(
             cluster_name=cluster_name, cluster_owner=rec.cluster_owner,

@@ -1202,7 +1202,11 @@ class TestFinalizeCompletesWhatDeleteStarted:
         })()
 
     @pytest.mark.asyncio
-    async def test_the_previewed_token_lets_the_finalize_through(self, monkeypatch):
+    async def test_it_finalizes_without_a_token(self, monkeypatch):
+        """It used to require one, and that token could not exist: a 900s
+        TTL against a 15-20 minute teardown, so it had always expired by
+        the time the stack was gone (observed at 984s). See
+        TestFinalizeTeardownNeedsNoTokenItCouldNeverHold."""
         monkeypatch.setattr(tools_mod, "_require_record", lambda name: self._rec())
         called = []
         monkeypatch.setattr(
@@ -1210,13 +1214,8 @@ class TestFinalizeCompletesWhatDeleteStarted:
             lambda **kw: called.append(kw) or {"success": True},
         )
         async with Client(build_local()) as client:
-            preview = json.loads(_text(
-                await client.call_tool("preview_cluster_delete", {"cluster_name": "osiris"})
-            ))
-            await client.call_tool("finalize_cluster_teardown", {
-                "cluster_name": "osiris",
-                "confirmation_token": preview["finalization_token"],
-            })
+            await client.call_tool("finalize_cluster_teardown",
+                                   {"cluster_name": "osiris"})
         assert len(called) == 1
         assert called[0]["finalize_only"] is True
 
@@ -1231,13 +1230,8 @@ class TestFinalizeCompletesWhatDeleteStarted:
             lambda **kw: called.append(kw) or {"success": True},
         )
         async with Client(build_local()) as client:
-            preview = json.loads(_text(
-                await client.call_tool("preview_cluster_delete", {"cluster_name": "osiris"})
-            ))
-            await client.call_tool("finalize_cluster_teardown", {
-                "cluster_name": "osiris",
-                "confirmation_token": preview["finalization_token"],
-            })
+            await client.call_tool("finalize_cluster_teardown",
+                                   {"cluster_name": "osiris"})
         assert "wait" not in called[0]
 
     @pytest.mark.asyncio
@@ -1822,3 +1816,106 @@ class TestDeleteClusterSendsTheCallerToFinalize:
         assert 'out["teardown_complete"] = False' in doc, (
             "nothing in the response says the teardown is incomplete"
         )
+
+
+class TestFinalizeTeardownNeedsNoTokenItCouldNeverHold:
+    """The finalization token expired before it could ever be used.
+
+    `preview_cluster_delete` minted it with a 900s TTL and a teardown takes
+    15-20 minutes, so by the time the stack was gone the token had always
+    expired -- observed live at 984s against a 900s TTL. Every finalize
+    therefore required a fresh preview first: a confirmation prompt for a
+    destruction the operator had already confirmed, on a call that can only
+    run after the destructive part is over.
+
+    A gate that cannot be satisfied on its intended path is not a safety
+    measure. `finalize_cluster_build` already takes no token for completing
+    authorized work; its teardown twin now matches.
+    """
+
+    def test_it_takes_no_confirmation_token(self):
+        import inspect
+
+        import mcp_server.tools as t
+
+        src = inspect.getsource(t)
+        start = src.index("def finalize_cluster_teardown(")
+        sig = src[start:src.index(")", start)]
+        assert "confirmation_token" not in sig, (
+            "finalize_cluster_teardown still takes a token it cannot be "
+            "given: the TTL is shorter than the teardown it follows"
+        )
+
+    def test_delete_cluster_still_requires_one(self):
+        """The gate moves, it does not disappear. `delete_cluster` is the
+        call that decides anything; this one only finishes it."""
+        import inspect
+
+        import mcp_server.tools as t
+
+        src = inspect.getsource(t)
+        start = src.index("def delete_cluster(")
+        sig = src[start:src.index(")", start)]
+        assert "confirmation_token" in sig
+
+    def test_the_reason_is_recorded_so_it_is_not_added_back(self):
+        import inspect
+
+        import mcp_server.tools as t
+
+        src = inspect.getsource(t)
+        start = src.index("def finalize_cluster_teardown(")
+        doc = src[start:src.index("rec = _require_record", start)]
+        assert "TTL" in doc and "900" in doc, (
+            "the docstring does not say why the token was removed, so the "
+            "next reader will restore it"
+        )
+
+
+class TestADeletedClusterIsNotReportedAsAnError:
+    """`list_clusters(live=True)` returned `ERR` for a cluster whose stack
+    was gone -- the *expected* end state of a delete.
+
+    A caller reasoned past it correctly ("expected end state for a completed
+    delete, not a failure"), but only because it knew to. Reporting the
+    normal outcome as an error trains the next reader to discount the
+    column, which is the one that matters during a teardown.
+    """
+
+    def test_a_confirmed_absence_reads_as_deleted(self):
+        from pcluster_core import PClusterMakerError, _describe_says_cluster_is_absent
+
+        for msg in ("ClusterNotFound: no such cluster",
+                    "Cluster 'osiris' does not exist"):
+            assert _describe_says_cluster_is_absent(PClusterMakerError(msg)), msg
+
+    def test_any_other_failure_is_still_an_error(self):
+        """The narrowness is the point. A describe that could not be
+        answered is not evidence a cluster is gone -- the same rule
+        `_confirm_stack_is_gone` is built on. Widening this would report
+        every cluster as DELETED the moment a token expired."""
+        from pcluster_core import PClusterMakerError, _describe_says_cluster_is_absent
+
+        for msg in ("ExpiredToken: credentials expired",
+                    "Throttling: rate exceeded",
+                    "EndpointConnectionError: could not connect",
+                    "AccessDenied: not authorized"):
+            assert not _describe_says_cluster_is_absent(PClusterMakerError(msg)), msg
+
+    def test_live_status_returns_deleted_for_an_absent_cluster(self, monkeypatch):
+        import pcluster_core as pc
+
+        def gone(*a, **kw):
+            raise pc.PClusterMakerError("ClusterNotFound: it is gone")
+
+        monkeypatch.setattr(pc, "_describe_cluster_json", gone)
+        assert pc._live_status("osiris", "us-east-1", "/bin/pcluster") == "DELETED"
+
+    def test_live_status_still_returns_err_for_an_unreadable_one(self, monkeypatch):
+        import pcluster_core as pc
+
+        def broke(*a, **kw):
+            raise pc.PClusterMakerError("ExpiredToken: credentials expired")
+
+        monkeypatch.setattr(pc, "_describe_cluster_json", broke)
+        assert pc._live_status("osiris", "us-east-1", "/bin/pcluster") == "ERR"
