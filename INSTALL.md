@@ -27,9 +27,10 @@ Two things are needed only for specific tasks, not to install or operate the
 toolkit:
 
 * **A container runtime** (Finch, Docker, Podman or Rancher) — only to
-  deploy the MCP remote transport's optional seventh tier. Six of its seven
-  tiers are plain zips and need nothing. See
-  [The container tier](#the-container-tier).
+  create clusters *through the MCP connector*. Six of the transport's seven
+  tiers are plain zips and need nothing; the seventh carries
+  `create_cluster`, `apply_cluster_update` and `preview_cluster_config`.
+  See [Adding cluster creation](#adding-cluster-creation-the-container-tier).
 * **A modern `bash`, GNU `coreutils` and `shellcheck` on macOS** — only to
   run `make test`, `make lint` and `make shellcheck`. See
   [Development environment (macOS)](#development-environment-macos).
@@ -150,12 +151,26 @@ Then, one command:
 ```
 
 That creates the IAM roles and policies (each under a permissions
-boundary), the Cognito user pool, all six zip tiers, the REST API with its
-Lambda authorizer and routes, the Cognito app client and Hosted UI domain,
-and a user to sign in as. It prints the MCP endpoint and, unless you set
-`MCP_USER_PASSWORD`, a generated password **shown once** — Cognito stores a
-hash, so a lost one is re-set by re-running `--create-user`, never
-recovered.
+boundary), the Cognito user pool, the REST API with its Lambda authorizer
+and routes, the Cognito app client and Hosted UI domain, and a user to sign
+in as. It prints the MCP endpoint and, unless you set `MCP_USER_PASSWORD`,
+a generated password **shown once** — Cognito stores a hash, so a lost one
+is re-set by re-running `--create-user`, never recovered.
+
+> **`--bootstrap` deploys six of the seven tiers.** The seventh ships as a
+> container image, so it needs a container runtime, and `--bootstrap`
+> leaves it out rather than requiring one on every machine.
+>
+> **Without it, three tools are missing from the connector** —
+> `create_cluster`, `apply_cluster_update` and `preview_cluster_config`.
+> In other words you can **inspect and operate** clusters from the browser
+> but **not create or modify** them. Everything else is present: listing,
+> health, cost, diagnostics, queues, fleet start/stop, access info and
+> teardown.
+>
+> To get those three, see
+> [Adding cluster creation](#adding-cluster-creation-the-container-tier).
+> It is one command once a runtime is installed.
 
 Paste the printed `/mcp` URL into **Settings → Connectors → Add custom
 connector** in claude.ai and sign in with that user. Claude registers
@@ -168,16 +183,32 @@ Remove the whole transport with `./deploy_mcp.py --teardown` (add
 `--dry-run` to list first). The permissions boundary is left behind on
 purpose — a deployer who can delete their own boundary does not have one.
 
-### The container tier
+### Adding cluster creation (the container tier)
 
-**Optional.** `--bootstrap` leaves `stack-mutation-node` out so the deploy
-needs no container runtime. Without it the connector works and every tool
-is present except `create_cluster`, `apply_cluster_update` and
-`preview_cluster_config` — the three that reach Node.js, which AWS's Python
-Lambda runtimes do not ship and a zip artifact cannot add. That tier is
-built from `mcp_server/Dockerfile.stack-mutation-node` instead.
+Add this tier when you want to **create and modify clusters** through the
+connector, rather than only inspect and operate existing ones. It carries
+`create_cluster`, `apply_cluster_update` and `preview_cluster_config`, and
+nothing else needs it.
 
-**1. Install a runtime.**
+It ships as a container image because `pcluster`'s create and update paths
+require Node.js on `PATH`. AWS's Python Lambda runtimes have none, and a
+zip artifact cannot add one — so this tier is built from
+`mcp_server/Dockerfile.stack-mutation-node`.
+
+**Install a container runtime, then run one command.** The deploy creates
+the ECR repository, logs in, builds the image for `linux/amd64` and pushes
+it:
+
+```bash
+./deploy_mcp.py --tier stack-mutation-node
+```
+
+Use `--runtime` to choose among several installed, or `--image-uri` to
+deploy an image built elsewhere and skip the build entirely.
+`./deploy_mcp.py --teardown` removes the repository along with everything
+else.
+
+#### Choosing a runtime
 
 * macOS: [Finch](https://runfinch.com/) is the lightest and is AWS's own —
   `brew install --cask finch`, then `finch vm init` once (`finch vm start`
@@ -194,33 +225,24 @@ built from `mcp_server/Dockerfile.stack-mutation-node` instead.
   build from inside a WSL2 shell rather than PowerShell — the build tooling
   is POSIX shell. Finch does not support Windows.
 
-**2. Create the ECR repository.** It must exist before the first push:
-`finch push` and `docker push` will not create it, and the failure names
-the wrong cause — ECR answers an unknown repository with `repository does
-not exist or may require authorization`, whose second half sends you
-auditing an IAM permission that was never missing.
+#### What the deploy does for you
 
-```bash
-aws ecr create-repository \
-  --repository-name pclustermaker-mcp-stack-mutation-node --region <region>
-```
+Three things that used to be manual steps, kept here because each is a
+failure someone will otherwise hit head-on:
 
-**3. Build for Lambda's architecture, not your laptop's.** An image built
-on Apple Silicon or an ARM Linux host defaults to `linux/arm64`, and Lambda
-rejects a mismatch at `CreateFunction` rather than at invocation.
-
-```bash
-finch build --platform linux/amd64 \
-  -f mcp_server/Dockerfile.stack-mutation-node \
-  -t <acct>.dkr.ecr.<region>.amazonaws.com/pclustermaker-mcp-stack-mutation-node:latest .
-```
-
-**4. Push it, then deploy the tier.**
-
-```bash
-finch push <acct>.dkr.ecr.<region>.amazonaws.com/pclustermaker-mcp-stack-mutation-node:latest
-./deploy_mcp.py --tier stack-mutation-node --image-uri <ecr-uri>
-```
+* **The ECR repository is created if absent.** It must exist before the
+  first push — `finch push` and `docker push` will not create it, and the
+  failure names the wrong cause: ECR answers an unknown repository with
+  `repository does not exist or may require authorization`, whose second
+  half sends you auditing an IAM permission that was never missing. The
+  registry URI is read back from ECR rather than assembled, since the
+  hostname suffix differs in GovCloud and China.
+* **The image is built for `linux/amd64`, always.** An image built on
+  Apple Silicon or an ARM Linux host defaults to `linux/arm64`, and Lambda
+  rejects the mismatch at `CreateFunction` rather than at invocation — long
+  after the push, with nothing pointing at the cause.
+* **The ECR password reaches the runtime on stdin**, never in a command
+  line, where `ps` would show it to every other process on the machine.
 
 #### If the push fails with `no basic auth credentials`
 

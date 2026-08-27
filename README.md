@@ -1098,9 +1098,9 @@ for the hosted one.
 `assert_valid_node_js()` as their first statement and AWS's Python Lambda
 runtimes bundle no Node.js a zip could supply. That tier needs an **OCI
 container runtime** (Finch, Docker, Podman or Rancher) and an **ECR
-repository** — see [The container tier](INSTALL.md#the-container-tier) for
-the per-platform runtime recommendations, the `--platform linux/amd64`
-architecture trap, and the ECR steps. The other six are plain zips and need
+repository**, both handled by the deploy itself — see
+[Adding cluster creation](INSTALL.md#adding-cluster-creation-the-container-tier)
+for the per-platform runtime choices. The other six are plain zips and need
 neither.
 
 You do not need that tier to stand the transport up. Without it every tool
@@ -1261,18 +1261,29 @@ there is no client ID to copy anywhere. Consent is requested once, per
 connector — that is Anthropic's requirement, not something this deploy can
 skip.
 
-### The container tier
+### Adding cluster creation (the container tier)
 
-`--bootstrap` deliberately leaves out `stack-mutation-node`, so it does not
-require a container runtime on every machine. Without it the connector
-works and every tool is present **except** `create_cluster`,
-`apply_cluster_update` and `preview_cluster_config`.
+**`--bootstrap` deploys six of the seven tiers.** The seventh ships as a
+container image, so it needs a container runtime, and `--bootstrap` leaves
+it out rather than requiring one on every machine.
 
-To add it, follow [The container tier](INSTALL.md#the-container-tier), then:
+**Without it, three tools are missing from the connector** —
+`create_cluster`, `apply_cluster_update` and `preview_cluster_config`. You
+can **inspect and operate** clusters from the browser but **not create or
+modify** them. Everything else is present: listing, health, cost,
+diagnostics, queues, fleet start/stop, access info and teardown.
+
+Install a container runtime, then one command — the deploy creates the ECR
+repository, logs in, builds for `linux/amd64` and pushes:
 
 ```bash
-./deploy_mcp.py --tier stack-mutation-node --image-uri <ecr-uri>
+./deploy_mcp.py --tier stack-mutation-node
 ```
+
+`--runtime` chooses among several installed; `--image-uri` deploys an image
+built elsewhere and skips the build. Runtime choices per platform, and the
+Finch push failure worth knowing about, are in
+[INSTALL.md](INSTALL.md#adding-cluster-creation-the-container-tier).
 
 ### Removing it
 
