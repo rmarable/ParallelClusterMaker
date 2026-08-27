@@ -172,10 +172,17 @@ is re-set by re-running `--create-user`, never recovered.
 > [Adding cluster creation](#adding-cluster-creation-the-container-tier).
 > It is one command once a runtime is installed.
 
-Paste the printed `/mcp` URL into **Settings → Connectors → Add custom
-connector** in claude.ai and sign in with that user. Claude registers
+Paste the printed `/mcp` URL into claude.ai under **Customize →
+Connectors**, using the **`+`** beside Connectors, and sign in with that
+user. On Team and Enterprise plans an Owner adds it under **Organization
+settings → Connectors → Add → Custom → Web** instead, and members then
+connect from their own **Customize → Connectors**.
+
+Leave the advanced OAuth client ID and secret empty: Claude registers
 itself as an OAuth client automatically (RFC 7591), so there is no client
-ID to copy anywhere.
+ID to copy anywhere. Claude also reaches the server from Anthropic's cloud
+rather than from the browser's machine, so the endpoint must be reachable
+from the public internet — the deployed API Gateway is.
 
 `--bootstrap` is idempotent, so it is also the update path.
 

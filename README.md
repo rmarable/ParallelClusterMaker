@@ -81,8 +81,8 @@ so a browser session can reach them. One command:
 ./deploy_mcp.py --bootstrap --create-user you@example.com
 ```
 
-Then paste the MCP endpoint it prints into **Settings → Connectors → Add
-custom connector** in claude.ai, and sign in with the user it created.
+Then paste the MCP endpoint it prints into claude.ai under **Customize →
+Connectors → `+`**, and sign in with the user it created.
 
 Full detail, including the container tier and teardown:
 [Deploying the remote transport](#deploying-the-remote-transport).
@@ -1251,15 +1251,24 @@ time.
 
 ### Connecting it to claude.ai
 
-1. **Settings → Connectors → Add custom connector**
+1. **Customize → Connectors**, then the **`+`** beside Connectors. On Team
+   and Enterprise plans it is **Organization settings → Connectors → Add →
+   Custom → Web**, and only an Owner can add it; members then connect to it
+   from their own **Customize → Connectors**.
 2. Paste the **MCP endpoint** the deploy printed — the `/mcp` URL, not the
    discovery one.
-3. Sign in at the Cognito Hosted UI with the user you created.
+3. Leave the advanced OAuth client ID and secret **empty**.
+4. Sign in at the Cognito Hosted UI with the user you created.
 
 Claude registers itself as an OAuth client automatically (RFC 7591), so
-there is no client ID to copy anywhere. Consent is requested once, per
-connector — that is Anthropic's requirement, not something this deploy can
-skip.
+there is no client ID to copy anywhere — that is what the empty advanced
+fields are for. Consent is requested once, per connector — that is
+Anthropic's requirement, not something this deploy can skip.
+
+Claude reaches the server from Anthropic's cloud, not from the machine
+running the browser, so the endpoint has to be reachable from the public
+internet. The deployed API Gateway is; a server behind a VPN or bound to
+localhost is not.
 
 ### Adding cluster creation (the container tier)
 

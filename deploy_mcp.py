@@ -513,9 +513,12 @@ def main():
 
     if args.bootstrap and not args.dry_run:
         print("\nThe transport is up. To connect it from claude.ai:")
-        print("  1. Settings -> Connectors -> Add custom connector")
+        print("  1. Customize -> Connectors, then the '+' beside Connectors")
+        print("     (Team/Enterprise: an Owner adds it under Organization")
+        print("      settings -> Connectors -> Add -> Custom -> Web)")
         print(f"  2. Paste this URL: {endpoint}")
-        print("  3. Sign in at the Cognito Hosted UI when prompted")
+        print("  3. Leave the advanced OAuth client ID and secret empty")
+        print("  4. Sign in at the Cognito Hosted UI when prompted")
         if not args.create_user:
             print("\nNo Cognito user exists to sign in as. Create one with")
             print("  deploy_mcp.py --create-user <username>")
