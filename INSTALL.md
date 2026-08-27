@@ -14,8 +14,8 @@
   * On macOS, run `brew install node`.
   * On Debian/Ubuntu (`apt`), run `sudo apt-get install nodejs`, or follow [NodeSource's install instructions](https://github.com/nodesource/distributions) for a newer version than your distribution ships.
   * On RPM-based distributions, install the `nodejs` package with your package manager.
-* An OCI container runtime is required **only to deploy the MCP remote transport**, and only for one of its five tiers. Nothing in normal operation needs it: building, operating and tearing down clusters from the CLI, and running the MCP server locally over stdio, all work without a container runtime. Skip this unless you are standing up the hosted (browser-reachable) MCP topology described in `docs/parallelclustermaker-mcp-plan.md`.
-  * The `stack-mutation-node` tier ships as a container image rather than a zip, and the reason is Node.js again. `pcluster`'s `create_cluster()` and `update_cluster()` call `assert_valid_node_js()` as their first statement, which does `shutil.which("node")` and fails loudly without it. AWS's Python Lambda runtimes ship no Node and a zip artifact cannot add one, so that tier — which carries `create_cluster`, `apply_cluster_update` and `preview_cluster_config` — is built from `mcp_server/Dockerfile.stack-mutation-node` and pushed to ECR. The other four tiers are plain zips and need no runtime at all.
+* An OCI container runtime is required **only to deploy the MCP remote transport**, and only for one of its seven Lambda functions. Nothing in normal operation needs it: building, operating and tearing down clusters from the CLI, and running the MCP server locally over stdio, all work without a container runtime. It is also optional for the remote transport itself — six of the seven tiers are plain zips, and without the seventh every tool works except `create_cluster`, `apply_cluster_update` and `preview_cluster_config`. Skip this unless you want those three reachable from a browser; see [Installing the MCP server](#installing-the-mcp-server) below.
+  * The `stack-mutation-node` tier ships as a container image rather than a zip, and the reason is Node.js again. `pcluster`'s `create_cluster()` and `update_cluster()` call `assert_valid_node_js()` as their first statement, which does `shutil.which("node")` and fails loudly without it. AWS's Python Lambda runtimes ship no Node and a zip artifact cannot add one, so that tier — which carries `create_cluster`, `apply_cluster_update` and `preview_cluster_config` — is built from `mcp_server/Dockerfile.stack-mutation-node` and pushed to ECR. The other six tiers are plain zips and need no runtime at all.
   * On macOS, [Finch](https://runfinch.com/) is the lightest option and is AWS's own: `brew install --cask finch`, then `finch vm init` once (`finch vm start` on later boots). [Docker Desktop](https://www.docker.com/products/docker-desktop/), [Podman Desktop](https://podman-desktop.io/) and [Rancher Desktop](https://rancherdesktop.io/) all work equally well; Docker Desktop requires a paid subscription for larger organizations, which the others do not.
   * On Linux, install Docker Engine or Podman from your distribution's repositories — neither needs a virtual machine, so there is nothing to start first. Podman is rootless by default and is the simpler choice if you would rather not add your user to the `docker` group.
   * On Windows, use [Docker Desktop](https://www.docker.com/products/docker-desktop/) or [Rancher Desktop](https://rancherdesktop.io/) with the WSL2 backend, and build from inside a WSL2 shell rather than from PowerShell — the repository's build tooling is POSIX shell. Finch does not support Windows.
@@ -90,6 +90,99 @@ Run this to see all available options for `make_pcluster.py`:
 ./make_pcluster.py --help
 ```
 
+## Installing the MCP server
+
+Optional, and independent of everything above except the venv. The MCP
+server exposes the same `core_*` functions the CLI drives, so an AI agent
+can operate clusters directly. There are two surfaces and they do not
+depend on each other — install either, both, or neither.
+
+Both run against your own AWS account. There is no hosted service.
+
+### Locally, for Claude Code (stdio)
+
+Runs on this machine, deploys nothing to AWS, and is reachable only by the
+agent you attach it to. Run this **from the repository root** — the shell
+expands `$(pwd)` before Claude Code sees it, so what gets stored is an
+absolute path:
+
+```bash
+claude mcp add parallelclustermaker \
+  -e PYTHONPATH="$(pwd)" \
+  -- "$(pwd)/.venv/bin/python" -m mcp_server.server
+```
+
+Then **restart Claude Code** — a newly added stdio server is not picked up
+by the session that added it — and run `/mcp` to confirm the tools are
+listed. That is a stronger check than `claude mcp list` showing
+`Connected`: the process starting and its tools being callable are
+different claims.
+
+Three things that will waste your time:
+
+* **Do not invoke the script directly.** `python mcp_server/server.py` fails
+  with `ImportError: FastMCP server support is not installed` — misleading,
+  because `fastmcp` is installed. Running the file directly puts
+  `mcp_server/` at the front of `sys.path` and shadows its own imports. Use
+  `-m`.
+* **`PYTHONPATH` is required, not optional.** Claude Code does not run the
+  server from your project directory, and `-m mcp_server.server` needs the
+  repository root on `sys.path`.
+* **Do not use `--scope project`.** That writes `.mcp.json` into the
+  repository root, which is tracked — on a public fork you would publish
+  your own absolute paths.
+
+You do not need the venv activated, but you must use `.venv/bin/python`:
+`fastmcp`, `boto3` and `aws-parallelcluster` live only there.
+
+Remove it with `claude mcp remove parallelclustermaker`.
+
+### Remotely, for claude.ai (API Gateway + Cognito)
+
+Deploys seven Lambda functions, a REST API and a Cognito user pool **into
+your AWS account**, so a browser session can reach the same tools. One
+command:
+
+```bash
+source .venv/bin/activate
+./deploy_mcp.py --bootstrap --create-user you@example.com
+```
+
+That creates the IAM roles and policies (each under a permissions
+boundary), the Cognito user pool, all six zip tiers, the REST API with its
+Lambda authorizer and routes, the Cognito app client and Hosted UI domain,
+and a user to sign in as. It prints the MCP endpoint and, unless you set
+`MCP_USER_PASSWORD`, a generated password **shown once** — Cognito stores a
+hash, so a lost one is re-set by re-running `--create-user`, never
+recovered.
+
+Paste the printed `/mcp` URL into **Settings → Connectors → Add custom
+connector** in claude.ai and sign in with that user. Claude registers
+itself as an OAuth client automatically (RFC 7591), so there is no client
+ID to copy anywhere.
+
+`--bootstrap` is idempotent, so it is also the update path.
+
+**The seventh tier is opt-in.** `--bootstrap` leaves out
+`stack-mutation-node` so it does not require a container runtime on every
+machine. Without it the connector works and every tool is present except
+`create_cluster`, `apply_cluster_update` and `preview_cluster_config`. To
+add it, follow the container runtime and ECR steps in
+[Prerequisites](#prerequisites), then:
+
+```bash
+./deploy_mcp.py --tier stack-mutation-node --image-uri <ecr-uri>
+```
+
+Remove the whole transport with `./deploy_mcp.py --teardown` (add
+`--dry-run` to list first). The permissions boundary is left behind on
+purpose — a deployer who can delete their own boundary does not have one.
+
+**Deploying this needs more IAM than operating a cluster does** — a
+separate managed policy, generated with `./generate_operator_policy.py
+--mcp`. See [MCP deployment permissions](#mcp-deployment-permissions)
+below.
+
 ## VPC tagging
 
 Apply a Name tag to any VPC in regions where you plan to deploy cluster stacks. In the AWS Console, go to VPC → Your VPCs and edit the Name field. For example:
@@ -158,6 +251,44 @@ aws iam attach-role-policy \
   --role-name <YOUR_ROLE_NAME> \
   --policy-arn arn:aws:iam::<ACCOUNT_ID>:policy/parallelcluster-operator-pclustermaker
 ```
+
+### MCP deployment permissions
+
+**Only if you are deploying the remote transport.** The operator policy
+above does not cover it, and not by oversight: `OperatorPolicy` scopes its
+IAM statements to `pclustermaker-policy-*` and `pclustermaker-role-*`,
+which match no MCP resource name. Widening it is not an option either —
+the full MCP grant set appended to it measures 6,358 bytes against IAM's
+6,144-byte managed policy limit, so it does not fit.
+
+That permission set is `templates/MCPDeployPolicy.json_src`. It
+grants the Lambda, API Gateway, Cognito, ECR and IAM actions the deploy
+needs, and grants `iam:CreateRole` **only** under a `StringEquals`
+condition on `iam:PermissionsBoundary` — without that condition a deployer
+could create an unbounded role and the ceiling would never apply. It also
+denies deleting the boundary itself.
+
+Generate and attach it the same way as the operator policy, with `--mcp`:
+
+```bash
+source .venv/bin/activate
+
+# Print it:
+./generate_operator_policy.py --mcp
+
+# Create the managed policy in IAM:
+./generate_operator_policy.py --mcp --create
+```
+
+That creates `parallelcluster-mcp-deploy-pclustermaker`. Attach it to the
+identity that runs `deploy_mcp.py`, alongside the operator policy — the two
+are complementary, not alternatives, and `deploy_mcp.py` needs both if the
+same identity also builds clusters.
+
+The name is deliberately **not** of the form `pclustermaker-mcp-policy-*`:
+that is the namespace of the seven handler policies, which
+`deploy_mcp.py --teardown` removes. This one has to survive a teardown,
+since you need it to run one.
 
 ## Development environment (macOS)
 

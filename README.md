@@ -18,8 +18,74 @@ This codebase was co-written with [Claude Code](https://claude.ai/code) (Anthrop
 
 ## Installation
 
-See [INSTALL.md](INSTALL.md) for prerequisites, AWS account setup (VPC tagging, IAM
-permissions), and installation steps.
+There are three ways to install this toolkit. **Start with the CLI** —
+both MCP surfaces are deployed from that checkout and need it first. The
+two MCP options are independent of each other: add either, both, or
+neither.
+
+| | What it is | Who reaches it |
+|---|---|---|
+| **1. [The CLI](#1-the-cli-local-use)** | `make_pcluster.py` and the other entry points, run from your terminal | You, on this machine |
+| **2. [The MCP server in Claude Code](#2-the-mcp-server-in-claude-code)** | The same tools over stdio, on your machine | An agent in your terminal |
+| **3. [The MCP server in claude.ai](#3-the-mcp-server-in-claudeai)** | The same tools behind API Gateway and Cognito, in your AWS account | A browser session |
+
+**All three run against your own AWS account.** There is no hosted service,
+and nothing is shared with anyone — option 3 deploys the endpoint into your
+account, where you own it and tear it down.
+
+### 1. The CLI (local use)
+
+The base install, and a prerequisite for the other two.
+
+```bash
+git clone https://github.com/rmarable/ParallelClusterMaker.git
+cd ParallelClusterMaker
+python3.12 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+ansible-galaxy collection install -r requirements_ansible.yml
+```
+
+**Python 3.12 specifically** — `aws-parallelcluster` does not support 3.13
+or 3.14. You will also need **Node.js** on `PATH`, which ParallelCluster
+shells out to for CloudFormation synthesis.
+
+See [INSTALL.md](INSTALL.md) for the full prerequisites, the operator IAM
+permissions, and the VPC tagging step. Then go to
+[Building a Cluster](#building-a-cluster).
+
+### 2. The MCP server in Claude Code
+
+Runs on your machine over stdio and answers only to the agent you attach it
+to. Nothing is deployed to AWS and nothing is reachable from the network.
+
+```bash
+claude mcp add parallelclustermaker \
+  -e PYTHONPATH="$(pwd)" \
+  -- "$(pwd)/.venv/bin/python" -m mcp_server.server
+```
+
+Run it **from the repo root** — the shell expands `$(pwd)` before Claude
+Code sees it, so what gets stored is an absolute path. Then restart Claude
+Code and run `/mcp` to confirm the tools are listed.
+
+Full detail, including the three things that will waste your time:
+[MCP Server](#mcp-server).
+
+### 3. The MCP server in claude.ai
+
+Puts the same tools behind API Gateway and Cognito **in your AWS account**,
+so a browser session can reach them. One command:
+
+```bash
+./deploy_mcp.py --bootstrap --create-user you@example.com
+```
+
+Then paste the MCP endpoint it prints into **Settings → Connectors → Add
+custom connector** in claude.ai, and sign in with the user it created.
+
+Full detail, including the container tier and teardown:
+[Deploying the remote transport](#deploying-the-remote-transport).
 
 ---
 
@@ -1017,22 +1083,28 @@ inspect, cost, build and tear down clusters through the same
 MCP tools are thin wrappers, so anything the CLI can do the agent does
 identically, and a fix lands in both at once.
 
-A remote transport also exists in `mcp_server/` (a router plus tiered
-Lambda handlers behind API Gateway and Cognito). Its five Lambda tiers
-have been deployed and exercised against AWS; **the API Gateway and
-Cognito front end has not**, so the transport is not yet reachable from a
-browser and is deliberately not documented in full here. Everything below
-is the local stdio server, which needs none of it.
+A remote transport also exists in `mcp_server/` — a router plus tiered
+Lambda handlers behind API Gateway and Cognito, which is what makes the
+toolkit reachable from a browser rather than only from a local agent. It
+has been deployed and driven end to end against AWS: every tier, the REST
+API, the Lambda authorizer, and real Cognito tokens. Everything in
+"Installing into Claude Code" below is the **local stdio server**, which
+needs none of it; see [Deploying the remote transport](#deploying-the-remote-transport)
+for the hosted one.
 
-Deploying that transport has two prerequisites the local server does not:
-an **OCI container runtime** (Finch, Docker, Podman or Rancher) and an
-**ECR repository**. One of the five tiers, `stack-mutation-node`, ships as
-a container image rather than a zip because `pcluster`'s `create_cluster()`
-and `update_cluster()` call `assert_valid_node_js()` first, and AWS's
-Python Lambda runtimes bundle no Node.js that a zip could supply. See
-[INSTALL.md](INSTALL.md) for the runtime recommendations per platform, the
-`--platform linux/amd64` architecture trap, and the ECR repository and
-credential steps.
+**One of its seven tiers has prerequisites the other six do not.**
+`stack-mutation-node` ships as a container image rather than a zip, because
+`pcluster`'s `create_cluster()` and `update_cluster()` call
+`assert_valid_node_js()` as their first statement and AWS's Python Lambda
+runtimes bundle no Node.js a zip could supply. That tier needs an **OCI
+container runtime** (Finch, Docker, Podman or Rancher) and an **ECR
+repository** — see [INSTALL.md](INSTALL.md) for the per-platform runtime
+recommendations, the `--platform linux/amd64` architecture trap, and the
+ECR steps. The other six are plain zips and need neither.
+
+You do not need that tier to stand the transport up. Without it every tool
+works except the three that reach Node — `create_cluster`,
+`apply_cluster_update` and `preview_cluster_config`.
 
 ### Installing into Claude Code
 
@@ -1131,6 +1203,87 @@ If it is missing you will see `Unable to find node executable`. See
 ```bash
 claude mcp remove parallelclustermaker
 ```
+
+---
+
+## Deploying the remote transport
+
+The local stdio server above runs on your machine and answers only to the
+agent you attached it to. The **remote transport** puts the same tools
+behind API Gateway and Cognito, so a browser session can reach them. It is
+seven Lambda functions: a router, four handler tiers split by IAM blast
+radius, and two that serve the OAuth flow.
+
+Everything here runs from your own machine against your own AWS account.
+There is no hosted service and nothing is shared with anyone.
+
+### One command
+
+```bash
+./deploy_mcp.py --bootstrap --create-user you@example.com
+```
+
+That creates the IAM roles and policies (each under a permissions
+boundary), the Cognito user pool, all six zip tiers, the REST API with its
+Lambda authorizer and routes, the Cognito app client and Hosted UI domain,
+and a user to sign in as. It prints the MCP endpoint and, if it generated
+one, the password:
+
+```
+  MCP endpoint: https://<id>.execute-api.<region>.amazonaws.com/prod/mcp
+  Discovery:    https://<id>.execute-api.<region>.amazonaws.com/prod/.well-known/oauth-protected-resource
+
+  Cognito user: you@example.com (created)
+  Password:     <generated>
+  ^ generated, shown once, not recoverable -- save it now
+```
+
+**The password is shown once.** Cognito stores a hash, so a lost one is
+re-set by re-running `--create-user`, never recovered. To choose your own
+instead, export `MCP_USER_PASSWORD` before running.
+
+`--bootstrap` is idempotent, so it is also the update path: run it again
+after pulling changes and it redeploys the functions and reconciles the
+gateway. It is a spelling of `--setup-infra --setup-gateway` plus every zip
+tier — those flags still exist and still compose if you want one step at a
+time.
+
+### Connecting it to claude.ai
+
+1. **Settings → Connectors → Add custom connector**
+2. Paste the **MCP endpoint** the deploy printed — the `/mcp` URL, not the
+   discovery one.
+3. Sign in at the Cognito Hosted UI with the user you created.
+
+Claude registers itself as an OAuth client automatically (RFC 7591), so
+there is no client ID to copy anywhere. Consent is requested once, per
+connector — that is Anthropic's requirement, not something this deploy can
+skip.
+
+### The container tier
+
+`--bootstrap` deliberately leaves out `stack-mutation-node`, so it does not
+require a container runtime on every machine. Without it the connector
+works and every tool is present **except** `create_cluster`,
+`apply_cluster_update` and `preview_cluster_config`.
+
+To add it, follow the ECR steps in [INSTALL.md](INSTALL.md), then:
+
+```bash
+./deploy_mcp.py --tier stack-mutation-node --image-uri <ecr-uri>
+```
+
+### Removing it
+
+```bash
+./deploy_mcp.py --teardown              # add --dry-run to list first
+```
+
+Gateway first, then the functions, then the IAM they run under, then the
+user pool — each step leaving nothing that depends on something already
+gone. The permissions boundary is left behind on purpose: a deployer who
+can delete their own boundary does not have one. Remove it by hand if the
+account should be empty.
 
 ---
 
