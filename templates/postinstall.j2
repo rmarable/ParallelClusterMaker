@@ -594,6 +594,50 @@ fi  # end HeadNode-only alias and cleanup block
 # compute node that fails postinstall is already reported by ParallelCluster,
 # which fails the node's bootstrap on a non-zero exit.
 
+# Pull the staging tree the build published to S3 before this cluster was
+# created.  It used to be scp'd in afterwards, which put the operator's own
+# machine on the path: it needed the private key, a route to this node, and
+# a public IP -- so it could not work into a private subnet, and it could
+# not work at all from the MCP transport, where "the machine that built the
+# cluster" is a Lambda with neither the key nor a route.  Pulling needs
+# none of that.  The node already reads this bucket for preinstall,
+# postinstall and the monitoring tarball, so this is a grant it has.
+#
+# Head node only: $HOME and the staging tree are NFS-exported from here, so
+# every compute node pulling the same tree is a concurrent write to one
+# path for no gain.
+#
+# Non-fatal, deliberately.  This script runs under `set -euo pipefail` and
+# a non-zero exit fails the node's bootstrap -- for a compute node, into
+# clustermgtd's relaunch loop and the partition's 10-failure protected-mode
+# threshold.  The staging tree is convenience for the operator, not
+# something the cluster needs to run, so a failed pull warns and the marker
+# below is simply absent.  check_pcluster.py reports that absence; a node
+# that died over it would report nothing at all.
+
+if [ "$NODE_TYPE" == "HeadNode" ]
+then
+	_STAGE_DEST="{{ stage_dir }}"
+	mkdir -p "$_STAGE_DEST"
+	if aws s3 sync "s3://{{ s3_bucketname }}/staging/" "$_STAGE_DEST/" ; then
+		if [ -f "$_STAGE_DEST/sbatch_default_submission_script.sh" ]; then
+			cp "$_STAGE_DEST/sbatch_default_submission_script.sh" \
+				"{{ ec2_user_home }}/sbatch_default_submission_script.sh"
+			chmod +x "{{ ec2_user_home }}/sbatch_default_submission_script.sh"
+		fi
+{% if enable_hpc_benchmarks == 'true' %}
+		mkdir -p "{{ headnode_performance_dir_dest }}"
+		aws s3 sync "s3://{{ s3_bucketname }}/performance/" \
+			"{{ headnode_performance_dir_dest }}/" \
+			|| echo "WARNING: could not pull the performance tree from S3" >&2
+{% endif %}
+		sudo mkdir -p /opt/parallelcluster/shared
+		sudo touch /opt/parallelcluster/shared/staging_tree_pulled
+	else
+		echo "WARNING: could not pull the staging tree from s3://{{ s3_bucketname }}/staging/" >&2
+	fi
+fi
+
 if [ "$NODE_TYPE" == "HeadNode" ]
 then
 	sudo mkdir -p /opt/parallelcluster/shared

@@ -68,6 +68,7 @@ TOOL_TIERS = {
     "finalize_cluster_teardown": "stack-mutation",
     # create/update both call assert_valid_node_js() on their first line
     "create_cluster": "stack-mutation-node",
+    "finalize_cluster_build": "stack-mutation-node",
     "apply_cluster_update": "stack-mutation-node",
     "preview_cluster_config": "stack-mutation-node",
 }

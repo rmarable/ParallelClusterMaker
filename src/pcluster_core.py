@@ -9,6 +9,7 @@ venv guard that the main scripts enforce at import time.
 import asyncio
 import contextlib
 import copy
+import fnmatch
 import glob
 import hashlib
 import json
@@ -1122,6 +1123,25 @@ def _publish_cluster_record(s3, *, locks_bucketname, cluster_name, repo_root):
             s3, locks_bucketname=locks_bucketname,
             cluster_name=cluster_name, record=record,
         )
+        # The vars file rides along so a machine that did not build this
+        # cluster can still finalize it. Best-effort within a best-effort
+        # publish: the record is what every other consumer reads, and
+        # failing to store the vars file must not cost the operator the
+        # record too.
+        _vp = os.path.join(repo_root, "src", "vars_files", cluster_name + ".yml")
+        if os.path.isfile(_vp):
+            try:
+                put_cluster_vars_file(
+                    s3, locks_bucketname=locks_bucketname,
+                    cluster_name=cluster_name, vars_file_path=_vp,
+                )
+            except (_ClientError, BotoCoreError, NoCredentialsError, OSError) as e:
+                print(
+                    "*** WARNING ***\n"
+                    f"  Stored the record but not the vars file for "
+                    f"'{cluster_name}' ({type(e).__name__}); this cluster "
+                    f"can only be finalized on this machine."
+                )
         return True
     except (_ClientError, BotoCoreError, NoCredentialsError) as e:
         print(
@@ -1212,6 +1232,53 @@ def _s3_absence_or_raise(e, *, what):
 
 def _records_key(cluster_name):
     return f"vars/{cluster_name}.json"
+
+
+def _vars_file_key(cluster_name):
+    """Sibling of the JSON record, under the same prefix on purpose.
+
+    `vars/` is what every `MCPStateAccess*.json_src` grants, so a `.yml`
+    beside the `.json` needs no IAM change; a new prefix would read
+    perfectly and be AccessDenied on every deployed call.
+    """
+    return f"vars/{cluster_name}.yml"
+
+
+def put_cluster_vars_file(s3, *, locks_bucketname, cluster_name, vars_file_path):
+    """Store the rendered vars file so a machine that did not build the
+    cluster can finish the build.
+
+    The projection beside it is deliberately not this: it is the 34 fields
+    every consumer reads, while this is the playbook's whole input. What
+    needs the whole thing is `core_finalize_cluster_build`, which renders
+    the same templates the build did and therefore needs every key they
+    reference -- and which could not run remotely at all while this file
+    existed only on the operator's disk.
+
+    The operator-machine paths in it (`stage_dir`, `cluster_data_dir`) are
+    the reason it is not the projection; a remote finalize overrides them
+    for its own filesystem rather than trusting them.
+    """
+    with open(vars_file_path, "rb") as fh:
+        s3.put_object(
+            Bucket=locks_bucketname, Key=_vars_file_key(cluster_name),
+            Body=fh.read(),
+        )
+
+
+def get_cluster_vars_file(s3, *, locks_bucketname, cluster_name):
+    """The stored vars file as text, or None when there is none."""
+    try:
+        resp = s3.get_object(
+            Bucket=locks_bucketname, Key=_vars_file_key(cluster_name)
+        )
+    except Exception as e:
+        if _is_missing_key_rejection(e) or type(e).__name__ in (
+            "NoSuchKey", "NoSuchBucket", "ClientError"
+        ):
+            return None
+        raise
+    return resp["Body"].read().decode()
 
 
 def put_cluster_record(s3, *, locks_bucketname, cluster_name, record):
@@ -8288,23 +8355,84 @@ def print_cluster_launch_summary(ctx, *, launch_timestamp):
         print(line)
 
 
-def finalize_staging_directory(*, stage_dir, cluster_data_dir, s3_bucketname, region):
-    """boto3/Python twin of "Copy the custom scripts from stage_dir to
-    the cluster_data directory" + "Sync the cluster_data directory to
-    s3_bucketname" + "Remove the local staging directory". The S3 sync
-    stays a real `aws s3 sync` subprocess call excluding "*.pem" -- same
-    reasoning as the HPC driver upload above, and the one place this
-    toolkit must never let a private key reach S3
-    (TestCreatePlaybookExcludesPrivateKeyFromS3Sync, tests/test_templates.py,
-    pins the *.pem exclusion on the Ansible side; this is its Python
-    twin)."""
+# Never let a private key reach S3. This is the one exclusion the toolkit
+# cannot get wrong: TestCreatePlaybookExcludesPrivateKeyFromS3Sync pins it
+# on the Ansible side, and every uploader here shares this one tuple rather
+# than restating the pattern -- a second copy is a second thing to keep
+# true, and the cost of it drifting is a cluster's private key in a bucket.
+_S3_UPLOAD_NEVER = ("*.pem",)
+
+STAGING_PREFIX = "staging"
+PERFORMANCE_PREFIX = "performance"
+
+
+def upload_directory_to_s3(s3, *, local_dir, s3_bucketname, prefix,
+                           exclude=_S3_UPLOAD_NEVER):
+    """Upload a directory tree to S3 with boto3. Returns the keys written.
+
+    **boto3, not `aws s3 sync`.** The three subprocess calls this replaces
+    assume the AWS CLI is on PATH, which is true on an operator's machine
+    and false in the container tier's image -- so the create path shells out
+    to a binary that is not there whenever it runs remotely. That is
+    invisible until a remote build enables the benchmark tree, because the
+    only unconditional caller is on the finalize path.
+    """
+    written = []
+    root = local_dir.rstrip("/")
+    for dirpath, _dirnames, filenames in os.walk(root):
+        for name in sorted(filenames):
+            if any(fnmatch.fnmatch(name, pat) for pat in exclude):
+                continue
+            full = os.path.join(dirpath, name)
+            rel = os.path.relpath(full, root)
+            key = f"{prefix.rstrip('/')}/{rel}" if prefix else rel
+            s3.upload_file(full, s3_bucketname, key)
+            written.append(key)
+    return written
+
+
+def publish_staging_tree(s3, *, stage_dir, s3_bucketname,
+                         enable_hpc_benchmarks=False,
+                         performance_stage_dir=None):
+    """Publish the staging tree to S3 before the stack is created.
+
+    The head node fetches it during `OnNodeConfigured` rather than having it
+    scp'd in afterwards. Everything in the tree is derived from the vars
+    file, so it is complete before `create-cluster` is called -- it was only
+    ever pushed later because the transfer was a push.
+
+    Pulling instead of pushing removes the operator's machine from the path:
+    no ssh out of the process that builds the cluster, no private key
+    wherever that process runs, and it works into a private subnet, which a
+    push from outside the VPC does not. The node already reads this bucket
+    for `preinstall`, `postinstall` and the monitoring tarball, so it needs
+    no grant it does not have.
+    """
+    keys = upload_directory_to_s3(
+        s3, local_dir=stage_dir, s3_bucketname=s3_bucketname,
+        prefix=STAGING_PREFIX,
+    )
+    if enable_hpc_benchmarks and performance_stage_dir:
+        keys += upload_directory_to_s3(
+            s3, local_dir=performance_stage_dir,
+            s3_bucketname=s3_bucketname, prefix=PERFORMANCE_PREFIX,
+        )
+    return keys
+
+
+def finalize_staging_directory(s3, *, stage_dir, cluster_data_dir,
+                               s3_bucketname, region=None):
+    """Copy the staging tree into the cluster data directory, mirror it to
+    S3, and remove the staging directory.
+
+    The `*.pem` exclusion is the load-bearing part and is shared, not
+    restated -- see `_S3_UPLOAD_NEVER`. `region` is accepted and unused: it
+    was needed by the `aws s3 sync` subprocess this replaces, and callers
+    still pass it.
+    """
     shutil.copytree(stage_dir, cluster_data_dir, dirs_exist_ok=True)
-    subprocess.run(
-        [
-            "aws", "s3", "sync", cluster_data_dir, f"s3://{s3_bucketname}/",
-            "--exclude", "*.pem", "--region", region,
-        ],
-        check=True,
+    upload_directory_to_s3(
+        s3, local_dir=cluster_data_dir, s3_bucketname=s3_bucketname, prefix="",
     )
     shutil.rmtree(stage_dir, ignore_errors=True)
 
@@ -9906,6 +10034,18 @@ def core_create_cluster(*, params, repo_root, region, cluster_build_command, ans
 
         if enable_hpc_benchmarks:
             stage_and_upload_hpc_benchmark_driver(s3_client, ctx=_vars_file_context, region=region)
+
+        # Before the stack, not after it: the head node fetches this during
+        # OnNodeConfigured, so it has to be in the bucket before any node
+        # boots. The tree is complete by now -- every file in it renders
+        # from the vars file, which is why it can be published this early
+        # at all.
+        publish_staging_tree(
+            s3_client, stage_dir=stage_dir, s3_bucketname=s3_bucketname,
+            enable_hpc_benchmarks=enable_hpc_benchmarks,
+            performance_stage_dir=_vars_file_context.get("performance_stage_dir"),
+        )
+        print(f"  Published the staging tree to s3://{s3_bucketname}/{STAGING_PREFIX}/")
     except Exception as _early_e:
         print(f"\n*** ERROR ***\n  Exception before cluster launch: {_early_e}")
         print("Cleaning up everything this build has created so far:")
@@ -10018,23 +10158,12 @@ def core_create_cluster(*, params, repo_root, region, cluster_build_command, ans
     stop_stack_creation_timestamp = teardown_timestamp()
 
     try:
-        deploy_staging_and_performance_tree_to_head_node(
-            head_node_public_ip=outcome.head_node_public_ip,
-            ssh_keypair=_vars_file_context["ssh_keypair"],
-            ssh_known_hosts=_vars_file_context["ssh_known_hosts"],
-            ec2_user=ec2_user, ec2_user_home=ec2_user_home, stage_dir=stage_dir,
-            enable_hpc_benchmarks=enable_hpc_benchmarks,
-            performance_stage_dir=_vars_file_context.get("performance_stage_dir"),
-            headnode_performance_dir_dest=_vars_file_context.get("headnode_performance_dir_dest"),
-            ebs_hpc_performance_dir=_vars_file_context.get("ebs_hpc_performance_dir"),
-            enable_efs=enable_efs,
-            efs_hpc_performance_dir=_vars_file_context.get("efs_hpc_performance_dir"),
-            enable_fsx=enable_fsx,
-            fsx_hpc_performance_dir=_vars_file_context.get("fsx_hpc_performance_dir"),
-        )
-
+        # No scp here any more. The tree was published to S3 before the
+        # stack was created and the head node pulled it during
+        # OnNodeConfigured, so nothing has to reach the node from wherever
+        # this process happens to be running.
         finalize_staging_directory(
-            stage_dir=stage_dir, cluster_data_dir=cluster_data_dir,
+            s3_client, stage_dir=stage_dir, cluster_data_dir=cluster_data_dir,
             s3_bucketname=s3_bucketname, region=region,
         )
 
@@ -10284,6 +10413,7 @@ def _confirm_stack_is_built(describe_fn, cluster_name, region):
 
 def core_finalize_cluster_build(
     *, cluster_name, cluster_owner, region, repo_root, debug_mode=False,
+    s3=None, locks_bucketname=None,
 ):
     """Finish what a wait=False build started.
 
@@ -10316,23 +10446,58 @@ def core_finalize_cluster_build(
     )
     vars_file_path = os.path.join(src_dir, "vars_files", cluster_name + ".yml")
 
-    for _label, _path in (
-        ("vars file", vars_file_path),
-        ("serial file", cluster_serial_number_file),
-    ):
-        if not os.path.isfile(_path):
+    # Local first, store second -- the same order _read_cluster_record
+    # uses, and for the same reason: a machine that built the cluster has
+    # the authoritative copy, and reaching for S3 ahead of it would put a
+    # round trip in front of every CLI finalize and let a stale object
+    # shadow a fresh build.
+    if not os.path.isfile(vars_file_path):
+        _stored = None
+        if locks_bucketname:
+            try:
+                _stored = get_cluster_vars_file(
+                    s3 or boto3.client("s3", region_name=region),
+                    locks_bucketname=locks_bucketname, cluster_name=cluster_name,
+                )
+            except (_ClientError, BotoCoreError, NoCredentialsError) as e:
+                print(f"*** WARNING *** could not read the stored vars file: "
+                      f"{type(e).__name__}")
+        if _stored is None:
             print("")
             print("*** ERROR ***")
-            print(f"Cannot finalize the build of {cluster_name!r}: {_label} is missing")
-            print(f"  {_path}")
-            print("Only a cluster this machine built can be finalized here.")
+            print(f"Cannot finalize the build of {cluster_name!r}: no vars file")
+            print(f"  not on disk at {vars_file_path}")
+            print("  and not in the cluster record store")
             return CreateClusterResult(
                 cluster_name=cluster_name, success=False, exit_code=1,
-                message=f"{_label} is missing",
+                message="vars file is missing",
             )
+        os.makedirs(os.path.dirname(vars_file_path), exist_ok=True)
+        with open(
+            os.open(vars_file_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w"
+        ) as _vf:
+            _vf.write(_stored)
+        print(f"  Recovered the vars file for {cluster_name!r} from the store")
 
     with open(vars_file_path) as fh:
         ctx = yaml.safe_load(fh) or {}
+
+    # The serial lives beside the credentials on the building machine and
+    # in the record everywhere else. Recovering it from the record is what
+    # lets the directory be recreated rather than required.
+    if not os.path.isfile(cluster_serial_number_file):
+        _serial = ctx.get("cluster_serial_number")
+        if not _serial:
+            print("")
+            print("*** ERROR ***")
+            print(f"Cannot finalize the build of {cluster_name!r}: no serial")
+            return CreateClusterResult(
+                cluster_name=cluster_name, success=False, exit_code=1,
+                message="serial file is missing",
+            )
+        os.makedirs(cluster_data_dir, exist_ok=True)
+        with open(cluster_serial_number_file, "w") as _sf:
+            _sf.write(str(_serial))
     p_val("vars_file_path", debug_mode)
 
     def _flag(key):
@@ -10424,23 +10589,19 @@ def core_finalize_cluster_build(
                 _gf.write(_rendered)
             print("  Rendered the Grafana tunnel script")
 
-        deploy_staging_and_performance_tree_to_head_node(
-            head_node_public_ip=head_ip,
-            ssh_keypair=ctx["ssh_keypair"], ssh_known_hosts=ctx["ssh_known_hosts"],
-            ec2_user=ctx["ec2_user"], ec2_user_home=ctx["ec2_user_home"],
-            stage_dir=stage_dir,
+        # The staging tree reaches the head node by S3 pull during its own
+        # bootstrap, so finalizing needs no route to it and no private key.
+        # That is what lets this run somewhere other than the machine that
+        # built the cluster.
+        _s3 = boto3.client("s3", region_name=region)
+        publish_staging_tree(
+            _s3, stage_dir=stage_dir, s3_bucketname=ctx["s3_bucketname"],
             enable_hpc_benchmarks=_flag("enable_hpc_benchmarks"),
             performance_stage_dir=ctx.get("performance_stage_dir"),
-            headnode_performance_dir_dest=ctx.get("headnode_performance_dir_dest"),
-            ebs_hpc_performance_dir=ctx.get("ebs_hpc_performance_dir"),
-            enable_efs=_flag("enable_efs"),
-            efs_hpc_performance_dir=ctx.get("efs_hpc_performance_dir"),
-            enable_fsx=_flag("enable_fsx"),
-            fsx_hpc_performance_dir=ctx.get("fsx_hpc_performance_dir"),
         )
 
         finalize_staging_directory(
-            stage_dir=stage_dir, cluster_data_dir=cluster_data_dir,
+            _s3, stage_dir=stage_dir, cluster_data_dir=cluster_data_dir,
             s3_bucketname=ctx["s3_bucketname"], region=region,
         )
 

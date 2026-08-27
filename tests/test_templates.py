@@ -290,8 +290,24 @@ def test_template_renders_hpc_benchmarks_disabled(tdir, fname, cluster_params_hp
     rendered = env.get_template(fname).render(**cluster_params_hpc_benchmarks_disabled)
     assert isinstance(rendered, str)
     if fname == "postinstall.j2":
-        assert "aws s3 sync" not in rendered, \
-            "hpc-benchmark S3 sync command present when enable_hpc_benchmarks=false"
+        # Scoped to the sync *commands*, not to `aws s3 sync` as such and
+        # not to the substrings either. The staging tree is pulled with the
+        # same command and is unconditional -- it is how the head node gets
+        # the tree at all now that nothing scp's it in -- so a bare command
+        # ban forbids the thing it was never about; and "/hpc-benchmark/"
+        # appears in a .bashrc alias that renders either way, so a
+        # substring ban fails on content the gate does not govern.
+        syncs = [ln for ln in rendered.splitlines() if "aws s3 sync" in ln]
+        for ln in syncs:
+            for gated in ("/hpc-benchmark/", "/performance/"):
+                assert gated not in ln, (
+                    f"benchmark S3 sync present when "
+                    f"enable_hpc_benchmarks=false: {ln.strip()}"
+                )
+        assert any("/staging/" in ln for ln in syncs), (
+            "the staging tree pull is not gated on benchmarks and must "
+            "still be here"
+        )
 
 
 @pytest.mark.parametrize("tdir,fname", _collect_templates())

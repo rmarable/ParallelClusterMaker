@@ -1633,17 +1633,30 @@ class TestFinalizeStagingDirectory:
         (stage_dir / "f.sh").write_text("x")
         cluster_data_dir = tmp_path / "active_clusters" / "foo"
         cluster_data_dir.mkdir(parents=True)
-        runner = _RecordingRun()
-        monkeypatch.setattr(subprocess, "run", runner)
+        (stage_dir / "secret.pem").write_text("PRIVATE KEY")
+
+        uploads = []
+
+        class _S3:
+            def upload_file(self, filename, bucket, key):
+                uploads.append((filename, bucket, key))
+
         finalize_staging_directory(
-            stage_dir=str(stage_dir), cluster_data_dir=str(cluster_data_dir),
+            _S3(), stage_dir=str(stage_dir),
+            cluster_data_dir=str(cluster_data_dir),
             s3_bucketname="my-bucket", region="us-east-1",
         )
         assert (cluster_data_dir / "f.sh").exists()
         assert not stage_dir.exists()
-        cmd = runner.calls[0]
-        assert cmd[:3] == ["aws", "s3", "sync"]
-        assert "--exclude" in cmd and "*.pem" in cmd
+
+        keys = [k for _f, _b, k in uploads]
+        assert "f.sh" in keys
+        assert all(b == "my-bucket" for _f, b, _k in uploads)
+        # boto3 now, not `aws s3 sync`: the CLI is not in the container
+        # tier's image, so the subprocess this replaces was a dependency on
+        # a binary that is absent wherever this runs remotely.
+        assert not any(k.endswith(".pem") for k in keys), (
+            f"a private key reached S3: {keys}")
 
 
 class TestRenderAndPublishBuildSummaryReport:

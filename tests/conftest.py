@@ -233,6 +233,10 @@ def cluster_params():
         # Performance paths
         "performance_rootdir": "/home/testuser/ParallelClusterMaker/hpc-benchmark",
         "performance_stage_dir": "/tmp/_ParallelClusterMaker_stage/test-cluster-00001220260720/hpc-benchmark/slurm",
+        # Derived unconditionally by vars_file.j2 from ec2_user_home,
+        # cluster_name, cluster_owner and scheduler; postinstall.j2 pulls
+        # the performance tree into it from S3.
+        "headnode_performance_dir_dest": "/home/ubuntu/hpc-benchmark/test-cluster/testuser/slurm",
         # Performance
         "sid": "slurm-test-cluster",
         # Ansible registered vars (used by sns/access templates)
@@ -329,6 +333,7 @@ def cluster_params_rhel(cluster_params):
         "pcluster_os": "rhel9",
         "ec2_user": "ec2-user",
         "ec2_user_home": "/home/ec2-user",
+        "headnode_performance_dir_dest": "/home/ec2-user/hpc-benchmark/test-cluster/testuser/slurm",
         "ec2_user_src": "/home/ec2-user/src",
     }
     return {**cluster_params, **overrides}
@@ -347,6 +352,7 @@ def cluster_params_rhel_gpu_queue(cluster_params_gpu_queue_enabled):
         "pcluster_os": "rhel9",
         "ec2_user": "ec2-user",
         "ec2_user_home": "/home/ec2-user",
+        "headnode_performance_dir_dest": "/home/ec2-user/hpc-benchmark/test-cluster/testuser/slurm",
         "ec2_user_src": "/home/ec2-user/src",
     }
     return {**cluster_params_gpu_queue_enabled, **overrides}
@@ -367,6 +373,7 @@ def cluster_params_al2023(cluster_params):
         "pcluster_os": "alinux2023",
         "ec2_user": "ec2-user",
         "ec2_user_home": "/home/ec2-user",
+        "headnode_performance_dir_dest": "/home/ec2-user/hpc-benchmark/test-cluster/testuser/slurm",
         "ec2_user_src": "/home/ec2-user/src",
     }
     return {**cluster_params, **overrides}
@@ -386,6 +393,7 @@ def cluster_params_al2023_gpu_queue(cluster_params_gpu_queue_enabled):
         "pcluster_os": "alinux2023",
         "ec2_user": "ec2-user",
         "ec2_user_home": "/home/ec2-user",
+        "headnode_performance_dir_dest": "/home/ec2-user/hpc-benchmark/test-cluster/testuser/slurm",
         "ec2_user_src": "/home/ec2-user/src",
     }
     return {**cluster_params_gpu_queue_enabled, **overrides}

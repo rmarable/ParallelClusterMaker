@@ -85,11 +85,6 @@ from mcp_server.confirmation_token import mint, verify
 from mcp_server.tiers import TOOL_TIERS
 
 _LOCAL_ONLY = frozenset({
-    # Writes access scripts into the operator's active_clusters/ and scp's
-    # a local staging tree with the local .pem -- a remote handler has
-    # neither, and the scripts it renders are only useful on the machine
-    # that will run them. Same reasoning as rotate_cluster_key.
-    "finalize_cluster_build",
     "rotate_cluster_key",
     "manage_grafana_tunnel",
     "apply_queue_config",
@@ -867,24 +862,35 @@ def register_tools(mcp, *, remote, tier=None):
 
     @tool
     def finalize_cluster_build(cluster_name: str) -> dict:
-        """Finish a build that create_cluster started. LOCAL TRANSPORT ONLY.
+        """Finish a build that create_cluster started.
 
         create_cluster returns as soon as CloudFormation accepts the stack,
-        because no tool may block for a 20-45 minute build. Every step
-        after that needs a head node that answers, so none of it runs: the
-        access scripts are rendered to a temp directory and discarded, the
-        staging tree never reaches the head node, and the build summary is
-        never sent. Re-running the build cannot finish them -- it refuses
-        on the vars file it wrote itself.
+        because no tool may block for a 20-45 minute build, so the build
+        summary is never sent and the record is never published. Re-running
+        the build cannot finish them -- it refuses on the vars file it
+        wrote itself.
+
+        This used to be local-only, and no longer is. What made it local
+        was the staging tree being scp'd to the head node, which needed the
+        private key and a route: the tree is published to S3 before the
+        stack is created and the head node pulls it during its own
+        bootstrap, so finalizing reaches nothing. The vars file it reads
+        rides beside the record in the store for the same reason.
+
+        The operator's access scripts are still rendered locally only --
+        they are useful on the machine that runs them, and
+        access_cluster.py already renders them on demand.
 
         Takes no confirmation token: it destroys nothing and only completes
         work the operator already authorized by building. Refuses unless
         the stack is CREATE_COMPLETE, and never waits for it.
         """
         rec = _require_record(cluster_name)
+        s3, bucket = _record_store(rec.region)
         return _plain(core_finalize_cluster_build(
             cluster_name=cluster_name, cluster_owner=rec.cluster_owner,
             region=rec.region, repo_root=_repo_root(),
+            s3=s3, locks_bucketname=bucket,
         ))
 
     @tool

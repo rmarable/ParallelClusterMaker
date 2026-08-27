@@ -1602,31 +1602,49 @@ class TestCreateClusterCannotKillTheServer:
         assert payload["success"] is False and payload["exit_code"] == 1
 
 
-class TestFinalizeClusterBuildIsLocalOnly:
-    """The create-side twin of finalize_cluster_teardown, and unlike that
-    one it is local-only: it renders access scripts into the operator's
-    `active_clusters/` and scp's a local staging tree with the local
-    `.pem`. A remote handler has neither, and the scripts are only useful
-    on the machine that runs them -- the same reasoning that keeps
-    rotate_cluster_key local.
+class TestFinalizeClusterBuildIsReachableRemotely:
+    """It was local-only, and the reason stopped being true.
+
+    What made it local was the staging tree being scp'd to the head node:
+    that needed the private key and a route, neither of which a Lambda has.
+    The tree is now published to S3 before the stack is created and pulled
+    by the head node during its own bootstrap, so finalizing reaches
+    nothing -- and the vars file it reads rides beside the record in the
+    store rather than existing only on the building machine.
+
+    Without this, a cluster built from the browser could not be finished
+    from the browser, which is most of what building it there was for.
     """
 
     @pytest.mark.asyncio
-    async def test_the_local_transport_has_it(self):
-        async with Client(build_local()) as c:
-            names = {t.name for t in await c.list_tools()}
-        assert "finalize_cluster_build" in names
+    async def test_both_transports_have_it(self):
+        for build in (build_local, build_remote):
+            async with Client(build()) as c:
+                names = {t.name for t in await c.list_tools()}
+            assert "finalize_cluster_build" in names, (
+                f"missing from {build.__name__}")
 
-    @pytest.mark.asyncio
-    async def test_the_remote_transport_does_not(self):
-        async with Client(build_remote()) as c:
-            names = {t.name for t in await c.list_tools()}
-        assert "finalize_cluster_build" not in names
-
-    def test_it_is_declared_local_only_as_data(self):
+    def test_it_is_no_longer_declared_local_only(self):
         """The split is data in _LOCAL_ONLY, never a second registration
         list -- so the two transports cannot disagree."""
-        assert "finalize_cluster_build" in tools_mod._LOCAL_ONLY
+        assert "finalize_cluster_build" not in tools_mod._LOCAL_ONLY
+
+    def test_it_runs_on_the_tier_that_can_build(self):
+        """Same tier as create_cluster. It renders the same templates and
+        needs the same PCluster import, so a lighter tier would be a second
+        answer to the question create_cluster already settled."""
+        from mcp_server.tiers import TOOL_TIERS
+
+        assert TOOL_TIERS["finalize_cluster_build"] == "stack-mutation-node"
+        assert TOOL_TIERS["finalize_cluster_build"] == TOOL_TIERS["create_cluster"]
+
+    def test_the_local_only_set_is_still_the_three_that_cannot_work(self):
+        """Vacuity guard: the fix is removing one name, not emptying the
+        set. Each of these is useless remotely rather than merely awkward --
+        two write files the operator later needs, one blocks past Lambda's
+        ceiling."""
+        assert tools_mod._LOCAL_ONLY == frozenset(
+            {"rotate_cluster_key", "manage_grafana_tunnel", "apply_queue_config"})
 
     @pytest.mark.asyncio
     async def test_it_takes_no_confirmation_token(self, monkeypatch):
