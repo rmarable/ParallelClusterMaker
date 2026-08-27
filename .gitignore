@@ -42,6 +42,9 @@ CLAUDE.local.md
 templates/CLAUDE.local.md
 hpc-benchmark/CLAUDE.local.md
 CLAUDE-STATE.md
+# Untracked again after session 54: the working engineering log stays
+# local. Its content up to 483b6c5 remains in history and on GitHub.
+docs/sessions.md
 
 # PR (Public Relations)
 docs/press-release-20260807.txt
