@@ -522,6 +522,87 @@ class TestTheConnectorAppClientIsCreatedByTheDeploy:
         )
 
 
+class TestLambdaCanPullTheContainerImage:
+    """Pushing the image is not enough to deploy it.
+
+    Lambda fetches the image as **the Lambda service**, not as the deployer,
+    so the deployer's own ECR grants say nothing about whether the function
+    can be created. Nothing set a repository policy and nothing granted
+    `ecr:SetRepositoryPolicy`, so `--tier stack-mutation-node` had never
+    been able to finish: it created the repository, built and pushed 300 MB,
+    then failed `CreateFunction` with `AccessDeniedException: Lambda does
+    not have permission to access the ECR image`.
+
+    That message is identity-policy-shaped for a resource-policy problem,
+    which is what makes it slow to place. Found on the first live run of
+    this tier.
+    """
+
+    def _policy(self):
+        import json
+
+        from mcp_server.deploy import lambda_pull_policy
+        return json.loads(lambda_pull_policy(
+            aws_account_id="123456789012", region="us-east-1"))
+
+    def test_the_lambda_service_is_the_principal(self):
+        st = self._policy()["Statement"][0]
+        assert st["Principal"] == {"Service": "lambda.amazonaws.com"}
+        assert st["Effect"] == "Allow"
+
+    def test_it_grants_the_two_pull_actions_and_no_more(self):
+        """A repository policy is a grant to a service principal, so a wide
+        one is wide for everything that principal covers."""
+        assert set(self._policy()["Statement"][0]["Action"]) == {
+            "ecr:BatchGetImage", "ecr:GetDownloadUrlForLayer"}
+
+    def test_the_source_arn_is_scoped_to_this_toolkits_functions(self):
+        """AWS's own documented snippet uses `function:*`, which is every
+        function in the account. Without any condition it is every function
+        in every account."""
+        cond = self._policy()["Statement"][0]["Condition"]
+        arn = cond["StringLike"]["aws:SourceArn"]
+        assert arn.endswith(":function:pclustermaker-mcp-*"), arn
+        assert not arn.endswith(":function:*"), (
+            "SourceArn admits every function in the account")
+
+    def test_ensure_lambda_can_pull_sets_it_on_the_repository(self):
+        from mcp_server.deploy import IMAGE_REPOSITORY, ensure_lambda_can_pull
+
+        calls = []
+
+        class _Ecr:
+            def set_repository_policy(self, **kw):
+                calls.append(kw)
+                return {}
+
+        ensure_lambda_can_pull(_Ecr(), aws_account_id="123456789012",
+                               region="us-east-1")
+        assert len(calls) == 1
+        assert calls[0]["repositoryName"] == IMAGE_REPOSITORY
+        assert "lambda.amazonaws.com" in calls[0]["policyText"]
+
+    def test_the_policy_is_set_before_the_push_not_after(self):
+        """Ordering is the whole cost here. The push is minutes and ~300 MB;
+        discovering the permission gap afterwards throws all of it away for
+        a call that takes a second."""
+        import ast
+        import io
+        import os
+
+        path = os.path.join(REPO_ROOT, "deploy_mcp.py")
+        tree = ast.parse(io.open(path, encoding="utf-8").read())
+        lines = {}
+        for n in ast.walk(tree):
+            if isinstance(n, ast.Call) and isinstance(n.func, ast.Name):
+                lines.setdefault(n.func.id, []).append(n.lineno)
+        assert "ensure_lambda_can_pull" in lines, "the policy is never set"
+        assert min(lines["ensure_lambda_can_pull"]) < min(
+            lines["build_and_push_image"]), (
+            "the repository policy is set after the image is pushed; a "
+            "failure there discards the whole upload")
+
+
 class TestDeleteMcpFunctions:
     def test_it_deletes_every_tier(self):
         lam = _FakeLambda()

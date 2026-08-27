@@ -167,7 +167,9 @@
                 "ecr:InitiateLayerUpload",
                 "ecr:UploadLayerPart",
                 "ecr:CompleteLayerUpload",
-                "ecr:PutImage"
+                "ecr:PutImage",
+                "ecr:SetRepositoryPolicy",
+                "ecr:GetRepositoryPolicy"
             ],
             "Effect": "Allow",
             "Resource": [

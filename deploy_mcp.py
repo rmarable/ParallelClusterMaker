@@ -41,6 +41,7 @@ from mcp_server.deploy import (  # noqa: E402
     detect_container_runtime,
     ensure_cognito_user,
     ensure_ecr_repository,
+    ensure_lambda_can_pull,
     ImageBuildError,
     preflight_deploy_permissions,
     generate_user_password,
@@ -418,6 +419,12 @@ def main():
                 ecr = boto3.client("ecr", region_name=args.region)
                 uri, created = ensure_ecr_repository(ecr)
                 print(f"  ECR repository {'created' if created else 'exists'}: {uri}")
+                # Before the push, not after: the push is the slow part, and
+                # failing this afterwards means a 300 MB upload is thrown away
+                # on a permission the deploy could have checked in a second.
+                ensure_lambda_can_pull(
+                    ecr, aws_account_id=account, region=args.region)
+                print("  repository policy: lambda.amazonaws.com may pull")
                 registry = ecr_login(ecr, runtime)
                 print(f"  {runtime} logged in to {registry}")
                 image_uri = f"{uri}:latest"

@@ -22,6 +22,7 @@ exists. `apply_queue_config` was exactly that case, which is why it is
 local-only; see `_LOCAL_ONLY` in `tools.py`.
 """
 
+import json
 import os
 import time
 
@@ -847,6 +848,46 @@ def ensure_ecr_repository(ecr, *, repository=IMAGE_REPOSITORY):
             raise
     repos = ecr.describe_repositories(repositoryNames=[repository])["repositories"]
     return repos[0]["repositoryUri"], False
+
+
+def lambda_pull_policy(*, aws_account_id, region):
+    """The repository policy letting Lambda pull this tier's image.
+
+    Pushing an image is not enough to deploy it. Lambda fetches the image
+    as **the Lambda service, not as the deployer**, so the deployer's own
+    ECR grants are irrelevant to it and `CreateFunction` fails with
+    `AccessDeniedException: Lambda does not have permission to access the
+    ECR image` -- an identity-policy-shaped message for a resource-policy
+    problem, which is what makes it slow to place.
+
+    The `aws:SourceArn` condition is scoped to this toolkit's own function
+    names rather than left off. Without a condition any Lambda function in
+    any account could pull the image; AWS's own documented snippet uses
+    `function:*`, which is every function in this account.
+    """
+    return json.dumps({
+        "Version": "2012-10-17",
+        "Statement": [{
+            "Sid": "LambdaECRImageRetrievalPolicy",
+            "Effect": "Allow",
+            "Principal": {"Service": "lambda.amazonaws.com"},
+            "Action": ["ecr:BatchGetImage", "ecr:GetDownloadUrlForLayer"],
+            "Condition": {"StringLike": {"aws:SourceArn":
+                f"arn:aws:lambda:{region}:{aws_account_id}:function:"
+                f"{_GATEWAY_NAME_PREFIX}-*"}},
+        }],
+    })
+
+
+def ensure_lambda_can_pull(ecr, *, aws_account_id, region,
+                           repository=IMAGE_REPOSITORY):
+    """Put the pull policy on the repository. Idempotent -- SetRepositoryPolicy
+    replaces wholesale, so re-running converges rather than accumulating."""
+    ecr.set_repository_policy(
+        repositoryName=repository,
+        policyText=lambda_pull_policy(
+            aws_account_id=aws_account_id, region=region),
+    )
 
 
 def delete_ecr_repository(ecr, *, repository=IMAGE_REPOSITORY, suppress=True):
