@@ -392,6 +392,136 @@ class TestCreateFunctionWaitsOutIamPropagation:
         assert slept == []
 
 
+class _FakeCognitoClients:
+    """list/create for app clients, paginated the way Cognito's is.
+
+    `ListUserPoolClients` returns at most `MaxResults` per call and a
+    `NextToken` when more remain -- modelled from the service contract, not
+    from what the caller happens to need, because a single-page fake cannot
+    fail a single-page implementation.
+    """
+
+    def __init__(self, existing=(), page=60):
+        self.clients = [{"ClientName": n, "ClientId": i} for n, i in existing]
+        self.page = page
+        self.created = []
+
+    def list_user_pool_clients(self, **kw):
+        start = int(kw.get("NextToken") or 0)
+        end = start + min(int(kw["MaxResults"]), self.page)
+        out = {"UserPoolClients": self.clients[start:end]}
+        if end < len(self.clients):
+            out["NextToken"] = str(end)
+        return out
+
+    def create_user_pool_client(self, **kw):
+        self.created.append(kw)
+        cid = f"generated{len(self.created)}"
+        self.clients.append({"ClientName": kw["ClientName"], "ClientId": cid})
+        return {"UserPoolClient": {
+            "ClientId": cid,
+            "ClientName": kw["ClientName"],
+            "CallbackURLs": kw.get("CallbackURLs", []),
+        }}
+
+
+class TestTheConnectorAppClientIsCreatedByTheDeploy:
+    """Cognito cannot register a client on demand, so the deploy must.
+
+    The `/register` endpoint works when called directly but no client ever
+    calls it: the protected-resource document names Cognito as the
+    authorization server, and Cognito's own metadata advertises no
+    `registration_endpoint`. Client ID Metadata Documents are no escape --
+    they are an authorization-server feature, and Cognito rejects a
+    URL-formatted client_id with `invalid_request` (verified live). So the
+    operator supplies a client ID by hand, and the only question this class
+    settles is whether the deploy hands them one.
+    """
+
+    def test_it_creates_a_client_when_the_pool_has_none(self):
+        from mcp_server.deploy import (CONNECTOR_CLIENT_NAME,
+                                       ensure_connector_client)
+        from mcp_server.auth.discovery import CLAUDE_REDIRECT_URI
+
+        cog = _FakeCognitoClients()
+        cid, created = ensure_connector_client(cog, user_pool_id="p")
+
+        assert created is True
+        assert cid == "generated1"
+        kw = cog.created[0]
+        assert kw["ClientName"] == CONNECTOR_CLIENT_NAME
+        assert kw["CallbackURLs"] == [CLAUDE_REDIRECT_URI]
+
+    def test_the_client_is_a_public_pkce_client(self):
+        """Shape, not just existence. A generated secret cannot be kept by a
+        browser-side caller, and the connector dialog's secret field is left
+        empty -- a client with a secret fails the token exchange."""
+        from mcp_server.deploy import ensure_connector_client
+
+        cog = _FakeCognitoClients()
+        ensure_connector_client(cog, user_pool_id="p")
+        kw = cog.created[0]
+        assert kw["GenerateSecret"] is False
+        assert kw["AllowedOAuthFlows"] == ["code"]
+        assert kw["AllowedOAuthFlowsUserPoolClient"] is True
+
+    def test_it_reuses_an_existing_client(self):
+        """`--setup-gateway` is idempotent and `--bootstrap` is the update
+        path, so a create on every deploy would walk the pool into its
+        app-client limit and change the ID the operator already pasted."""
+        from mcp_server.deploy import (CONNECTOR_CLIENT_NAME,
+                                       ensure_connector_client)
+
+        cog = _FakeCognitoClients(existing=[(CONNECTOR_CLIENT_NAME, "old1")])
+        cid, created = ensure_connector_client(cog, user_pool_id="p")
+
+        assert (cid, created) == ("old1", False)
+        assert cog.created == [], "created a second client instead of reusing"
+
+    def test_an_existing_client_past_the_first_page_is_still_found(self):
+        """The reuse above is only as good as the pagination under it. With
+        a single unpaginated list call, a pool holding more than one page
+        looks empty past the first and every deploy mints another client."""
+        from mcp_server.deploy import (CONNECTOR_CLIENT_NAME,
+                                       ensure_connector_client)
+
+        filler = [(f"other{i}", f"id{i}") for i in range(5)]
+        cog = _FakeCognitoClients(
+            existing=filler + [(CONNECTOR_CLIENT_NAME, "buried")], page=2)
+        cid, created = ensure_connector_client(cog, user_pool_id="p")
+
+        assert (cid, created) == ("buried", False)
+        assert cog.created == []
+
+    def test_it_goes_through_register_rather_than_a_second_create_call(self):
+        """One definition of the client's shape.
+
+        `register()` sets refresh-token rotation, revocation and the
+        public-client fields; a second `create_user_pool_client` here would
+        be a copy that drifts, and a dynamically-registered client and a
+        pre-registered one would stop being the same thing.
+        """
+        import ast
+        import io
+        import os
+
+        path = os.path.join(REPO_ROOT, "mcp_server", "deploy.py")
+        tree = ast.parse(io.open(path, encoding="utf-8").read())
+        fn = next(n for n in ast.walk(tree)
+                  if isinstance(n, ast.FunctionDef)
+                  and n.name == "ensure_connector_client")
+
+        calls = [n.func.id for n in ast.walk(fn)
+                 if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)]
+        assert "register" in calls, "does not delegate to register()"
+
+        attrs = [n.func.attr for n in ast.walk(fn)
+                 if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)]
+        assert "create_user_pool_client" not in attrs, (
+            "builds the app client itself; register() is the one definition"
+        )
+
+
 class TestDeleteMcpFunctions:
     def test_it_deletes_every_tier(self):
         lam = _FakeLambda()

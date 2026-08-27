@@ -178,11 +178,23 @@ user. On Team and Enterprise plans an Owner adds it under **Organization
 settings → Connectors → Add → Custom → Web** instead, and members then
 connect from their own **Customize → Connectors**.
 
-Leave the advanced OAuth client ID and secret empty: Claude registers
-itself as an OAuth client automatically (RFC 7591), so there is no client
-ID to copy anywhere. Claude also reaches the server from Anthropic's cloud
-rather than from the browser's machine, so the endpoint must be reachable
-from the public internet — the deployed API Gateway is.
+In the advanced settings, set the **OAuth Client ID** to the `OAuth client`
+value the deploy printed and leave the **secret empty** — the connector is
+a public client using PKCE, and one with a secret fails the token exchange.
+
+The ID is supplied by hand because Cognito cannot register a client on
+demand. The `/register` endpoint here works when called directly, but no
+client reaches it: a client finds the authorization server through the
+protected-resource document, that document names Cognito, and Cognito
+advertises no `registration_endpoint`. Client ID Metadata Documents, which
+the MCP spec now prefers, are an authorization-server feature Cognito also
+lacks — it rejects a URL-formatted `client_id` outright. `--setup-gateway`
+therefore creates the app client and prints its ID; it reuses an existing
+one, so re-running does not change what you pasted.
+
+Claude also reaches the server from Anthropic's cloud rather than from the
+browser's machine, so the endpoint must be reachable from the public
+internet — the deployed API Gateway is.
 
 `--bootstrap` is idempotent, so it is also the update path.
 

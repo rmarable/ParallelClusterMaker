@@ -25,7 +25,7 @@ local-only; see `_LOCAL_ONLY` in `tools.py`.
 import os
 import time
 
-from .auth.discovery import www_authenticate_header
+from .auth.discovery import CLAUDE_REDIRECT_URI, www_authenticate_header
 from .packaging import TIER_PACKAGES, manifest
 from .tiers import FUNCTION_NAMES
 
@@ -409,6 +409,70 @@ def _wire(apigw, api_id, resource_id, method, uri, *, authorizer_id=None):
         timeoutInMillis=GATEWAY_INTEGRATION_TIMEOUT_MS)
 
 
+# The app client the connector signs in with, created at deploy time
+# because nothing else can create it.
+#
+# Cognito has no dynamic client registration and cannot be given any. The
+# `/register` shim in this repo works when called directly, but no client
+# ever calls it: the protected-resource document names Cognito as the
+# authorization server, so a client fetches Cognito's own metadata, which
+# advertises no `registration_endpoint`. Client ID Metadata Documents --
+# what the MCP spec now prefers over DCR -- are no escape either, since
+# they are an authorization-server feature and Cognito rejects a
+# URL-formatted client_id outright with `invalid_request` (verified against
+# a live pool). Implementing either would mean standing an authorization
+# server in front of Cognito.
+#
+# So the operator pastes a client ID into the connector dialog, and the
+# deploy's job is to make sure one exists and to say which.
+CONNECTOR_CLIENT_NAME = "pclustermaker-mcp-connector"
+
+
+def _find_user_pool_client(cog, *, user_pool_id, name):
+    """The app client with this name, or None. Paginated: a pool that has
+    accumulated clients would otherwise appear empty past the first page and
+    a second client would be created on every deploy."""
+    token = None
+    while True:
+        kwargs = {"UserPoolId": user_pool_id, "MaxResults": 60}
+        if token:
+            kwargs["NextToken"] = token
+        resp = cog.list_user_pool_clients(**kwargs)
+        for c in resp.get("UserPoolClients") or []:
+            if c.get("ClientName") == name:
+                return c["ClientId"]
+        token = resp.get("NextToken")
+        if not token:
+            return None
+
+
+def ensure_connector_client(cog, *, user_pool_id):
+    """Create the connector's app client, or reuse the existing one.
+
+    Delegates to `register()` -- the same function the `/register` endpoint
+    serves -- rather than making a second `create_user_pool_client` call, so
+    a client created here and one created dynamically are configured
+    identically. Refresh-token rotation, revocation and the PKCE-only
+    public-client shape all have one definition, and a change to any of them
+    cannot reach one path and miss the other.
+
+    Returns `(client_id, created)`.
+    """
+    from .auth.register_lambda import register
+
+    existing = _find_user_pool_client(
+        cog, user_pool_id=user_pool_id, name=CONNECTOR_CLIENT_NAME)
+    if existing:
+        return existing, False
+    doc = register(
+        {"client_name": CONNECTOR_CLIENT_NAME,
+         "redirect_uris": [CLAUDE_REDIRECT_URI]},
+        user_pool_id=user_pool_id,
+        cognito=cog,
+    )
+    return doc["client_id"], True
+
+
 def setup_gateway(*, account, region, user_pool_id, cognito_domain=None,
                   apigw=None, lam=None, cog=None):
     """Create (or reuse) the REST API, its authorizer, and its routes.
@@ -420,6 +484,7 @@ def setup_gateway(*, account, region, user_pool_id, cognito_domain=None,
 
     apigw = apigw or boto3.client("apigateway", region_name=region)
     lam = lam or boto3.client("lambda", region_name=region)
+    cog = cog or boto3.client("cognito-idp", region_name=region)
 
     api_id = None
     for page in apigw.get_paginator("get_rest_apis").paginate():
@@ -496,6 +561,22 @@ def setup_gateway(*, account, region, user_pool_id, cognito_domain=None,
     apigw.create_deployment(restApiId=api_id, stageName=_STAGE)
     print(f"  deployed to stage {_STAGE}")
 
+    # Deliberately not fatal. Every route above is already live, and a
+    # deploy that fails here has produced a working transport that the
+    # operator merely has to find a client ID for -- aborting would throw
+    # that away over the last, least step.
+    connector_client_id = None
+    try:
+        connector_client_id, made = ensure_connector_client(
+            cog, user_pool_id=user_pool_id)
+        print(f"  connector app client {CONNECTOR_CLIENT_NAME} "
+              f"({'created' if made else 'reusing'})")
+    except Exception as e:
+        print(f"  WARNING: could not create the connector app client: "
+              f"{type(e).__name__}: {e}")
+        print("  The transport is up; create one with "
+              "cognito-idp create-user-pool-client, or POST to /register.")
+
     hosted_ui = (
         f"https://{cognito_domain}.auth.{region}.amazoncognito.com"
         if cognito_domain else ""
@@ -514,7 +595,9 @@ def setup_gateway(*, account, region, user_pool_id, cognito_domain=None,
     lam.update_function_configuration(
         FunctionName=auth_fn, Environment={"Variables": env})
 
-    return {"api_id": api_id, "base_url": base_url, "authorizer_id": authorizer_id}
+    return {"api_id": api_id, "base_url": base_url,
+            "authorizer_id": authorizer_id,
+            "connector_client_id": connector_client_id}
 
 
 # API Gateway REST caps an integration at 29s and this is already the

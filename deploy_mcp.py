@@ -279,6 +279,7 @@ def main():
     lam = boto3.client("lambda", region_name=args.region)
     s3 = boto3.client("s3", region_name=args.region)
     endpoint = None
+    connector_client_id = None
 
     if args.teardown:
         # Gateway first: it is the internet-facing surface, and removing it
@@ -480,6 +481,9 @@ def main():
         print(f"  Discovery:    {info['base_url']}"
               f"/.well-known/oauth-protected-resource")
         endpoint = f"{info['base_url']}/mcp"
+        connector_client_id = info.get("connector_client_id")
+        if connector_client_id:
+            print(f"  OAuth client: {connector_client_id}")
 
     if args.create_user and not args.dry_run:
         cog = boto3.client("cognito-idp", region_name=args.region)
@@ -517,7 +521,16 @@ def main():
         print("     (Team/Enterprise: an Owner adds it under Organization")
         print("      settings -> Connectors -> Add -> Custom -> Web)")
         print(f"  2. Paste this URL: {endpoint}")
-        print("  3. Leave the advanced OAuth client ID and secret empty")
+        if connector_client_id:
+            print("  3. Open the advanced settings and set")
+            print(f"       OAuth Client ID:     {connector_client_id}")
+            print("       OAuth Client Secret: leave empty")
+            print("     Cognito cannot register a client on demand, so this")
+            print("     ID has to be supplied by hand; the secret is empty")
+            print("     because the connector is a public PKCE client.")
+        else:
+            print("  3. Set the advanced OAuth Client ID to a Cognito app")
+            print("     client for this pool; leave the secret empty")
         print("  4. Sign in at the Cognito Hosted UI when prompted")
         if not args.create_user:
             print("\nNo Cognito user exists to sign in as. Create one with")

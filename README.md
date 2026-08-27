@@ -1257,13 +1257,34 @@ time.
    from their own **Customize → Connectors**.
 2. Paste the **MCP endpoint** the deploy printed — the `/mcp` URL, not the
    discovery one.
-3. Leave the advanced OAuth client ID and secret **empty**.
+3. In the advanced settings, set **OAuth Client ID** to the `OAuth client`
+   value the deploy printed, and leave **OAuth Client Secret** empty.
 4. Sign in at the Cognito Hosted UI with the user you created.
 
-Claude registers itself as an OAuth client automatically (RFC 7591), so
-there is no client ID to copy anywhere — that is what the empty advanced
-fields are for. Consent is requested once, per connector — that is
-Anthropic's requirement, not something this deploy can skip.
+The client ID has to be supplied by hand because **Cognito cannot register
+a client on demand.** This server does serve a `/register` endpoint, and it
+works when called directly, but no client reaches it: a client discovers
+the authorization server from the protected-resource document, that
+document names Cognito, and Cognito's own metadata advertises no
+`registration_endpoint`. Client ID Metadata Documents — which the MCP spec
+now prefers over dynamic registration — are no escape either: they are an
+authorization-server feature, and Cognito rejects a URL-formatted
+`client_id` outright. Supporting either would mean running an
+authorization server in front of Cognito.
+
+So `--setup-gateway` creates the app client itself and prints its ID. The
+secret is empty because the connector is a public client using PKCE; a
+client with a secret fails the token exchange. Consent is requested once,
+per connector — that is Anthropic's requirement, not something this deploy
+can skip.
+
+**The first call after the transport has been idle can take ~9 seconds**,
+and claude.ai may give up on it with "your account was authorized, but
+ParallelClusterMaker didn't respond". That is a Lambda cold start, not a
+broken deployment: retry and it answers in about 20ms. Measured on the
+read-only tier at 8.6s cold against 15-23ms warm. Note that the reported
+`Init Duration` is only ~150ms — the tier imports ParallelCluster lazily
+inside the handler, so the init phase does not show this cost.
 
 Claude reaches the server from Anthropic's cloud, not from the machine
 running the browser, so the endpoint has to be reachable from the public
