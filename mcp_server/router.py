@@ -143,10 +143,34 @@ def handle(body, *, invoke):
         return _result(request_id, {})
 
     if method == "tools/list":
+        # Fanned out concurrently. Serially this is the sum of every
+        # handler's cold start, measured at **31.5s against API Gateway's
+        # 29s integration ceiling** -- which is already the REST maximum,
+        # so there is no timeout to raise. A cold `tools/list` therefore
+        # timed out and the connector reported "Couldn't reload tools from
+        # the server", while each tier individually looked healthy.
+        #
+        # It fit while there were three tiers; deploying the container tier
+        # is what pushed it over, so nothing could have shown this until
+        # the fourth tier existed. Concurrently the cost is the slowest
+        # tier (~8.5s), not the sum, which restores the headroom rather
+        # than spending it.
+        #
+        # Threads and stdlib only: the work is entirely waiting on Lambda
+        # invocations, and this module must not grow a third-party
+        # dependency (see the module docstring) -- that is what keeps its
+        # near-zero IAM meaningful.
+        from concurrent.futures import ThreadPoolExecutor
+
+        with ThreadPoolExecutor(max_workers=len(_FANOUT_TIERS)) as pool:
+            responses = list(pool.map(lambda t: invoke(t, body), _FANOUT_TIERS))
+
         tools = []
         seen = set()
-        for tier in _FANOUT_TIERS:
-            response = invoke(tier, body)
+        # Still consumed in _FANOUT_TIERS order: `map` yields in input
+        # order regardless of completion order, so the first-tier-wins
+        # dedup below means the same thing it did when this was serial.
+        for response in responses:
             for tool in (response or {}).get("result", {}).get("tools", []):
                 name = tool.get("name")
                 # A tool advertised by two tiers would otherwise appear

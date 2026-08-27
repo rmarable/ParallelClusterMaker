@@ -440,3 +440,99 @@ class TestAnInvokeThatFailsOutrightIsNotLeaked:
             "params": {"name": "list_clusters", "arguments": {}}})}
         out = router.lambda_handler(event, None)
         assert json.loads(out["body"])["result"] == {"ok": True}
+
+
+class TestToolsListFansOutConcurrently:
+    """`tools/list` invokes every handler tier, and serially that is the sum
+    of their cold starts.
+
+    Measured on the deployed transport once the container tier existed:
+    **31.5s against API Gateway's 29s integration ceiling**, which is
+    already the REST maximum, so there is no timeout left to raise. A cold
+    `tools/list` timed out and claude.ai reported "Couldn't reload tools
+    from the server" while every tier individually looked healthy and the
+    router's own logs showed a clean 20ms run.
+
+    It fit at three tiers. Deploying the fourth is what pushed it over, so
+    no test written before that tier existed could have caught it -- which
+    is the argument for pinning the shape now rather than the number.
+    """
+
+    def _slow_invoke(self, delay, tools_by_tier):
+        import time
+
+        def invoke(tier, body):
+            time.sleep(delay)
+            return {"jsonrpc": "2.0", "id": body.get("id"),
+                    "result": {"tools": tools_by_tier.get(tier, [])}}
+
+        return invoke
+
+    def test_the_tiers_are_not_invoked_one_after_another(self):
+        """The property is wall-clock, and nothing else can see it: a serial
+        implementation returns exactly the same tools in exactly the same
+        order."""
+        import time
+
+        n = len(router._FANOUT_TIERS)
+        assert n >= 3, "too few tiers for this measurement to mean anything"
+        delay = 0.25
+        invoke = self._slow_invoke(delay, {})
+
+        start = time.monotonic()
+        router.handle({"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
+                      invoke=invoke)
+        elapsed = time.monotonic() - start
+
+        serial = delay * n
+        assert elapsed < serial * 0.6, (
+            f"tools/list took {elapsed:.2f}s for {n} tiers at {delay}s each; "
+            f"serial would be {serial:.2f}s -- the fan-out is not concurrent, "
+            f"and on cold starts that is what exceeds the 29s gateway ceiling"
+        )
+
+    def test_every_tier_is_still_invoked(self):
+        """Concurrency must not become 'ask fewer tiers'."""
+        rec = _Recorder()
+        router.handle({"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
+                      invoke=rec)
+        assert sorted(t for t, _ in rec.calls) == sorted(router._FANOUT_TIERS)
+
+    def test_duplicate_tools_still_resolve_in_tier_order(self):
+        """`map` yields in input order regardless of completion order, so
+        first-tier-wins is unchanged. Were results consumed in completion
+        order instead, this would be a race that passes most runs."""
+        tiers = list(router._FANOUT_TIERS)
+        dupe = [{"name": "shared", "description": "from " + tiers[0]}]
+        later = [{"name": "shared", "description": "from " + tiers[-1]}]
+        rec = _Recorder(tools_by_tier={tiers[0]: dupe, tiers[-1]: later})
+
+        resp = router.handle({"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
+                             invoke=rec)
+        tools = resp["result"]["tools"]
+        assert [t["name"] for t in tools] == ["shared"]
+        assert tools[0]["description"] == "from " + tiers[0]
+
+    def test_the_router_imports_nothing_third_party_for_this(self):
+        """The concurrency must come from the stdlib. The router's near-zero
+        IAM is only meaningful while its deployment package stays free of
+        the pcluster dependency chain."""
+        import ast
+        import io
+
+        path = os.path.join(REPO_ROOT, "mcp_server", "router.py")
+        tree = ast.parse(io.open(path, encoding="utf-8").read())
+        mods = set()
+        for n in ast.walk(tree):
+            if isinstance(n, ast.Import):
+                mods.update(a.name.split(".")[0] for a in n.names)
+            elif isinstance(n, ast.ImportFrom) and n.module:
+                mods.add(n.module.split(".")[0])
+        assert "concurrent" in mods, "the fan-out is not using concurrent.futures"
+        # boto3 is the Lambda runtime's own SDK and is what `invoke` is
+        # built from; the ban the docstring states is on the pcluster /
+        # fastmcp dependency chain, which is what makes the package big.
+        assert mods <= {"json", "os", "sys", "concurrent", "boto3",
+                        "mcp_server"}, (
+            f"router imports something outside its allowed set: {mods}"
+        )
