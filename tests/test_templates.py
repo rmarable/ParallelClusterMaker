@@ -7379,6 +7379,132 @@ class TestEachTierCanActuallyDoItsJob:
                 )
 
 
+class TestTheDeployPolicyCanActuallyDeploy:
+    """`MCPDeployPolicy` has a floor too, and nothing was checking it.
+
+    `TestEachTierCanActuallyDoItsJob` asks whether each *tier* can reach its
+    own floor. Nobody asked it of the policy an administrator hands the
+    deployer -- so `--create-user` shipped granting the Cognito pool, client
+    and domain lifecycle but not `AdminCreateUser`, and every deploy under
+    the intended policy died after standing the whole transport up.
+
+    An admin identity cannot see this: it satisfies every call. It surfaced
+    the first time a deploy ran under a non-admin role, which is exactly why
+    the runbook insists on one.
+
+    The preflight cannot see it either, and that is structural, not a bug in
+    the probes: `_DEPLOY_PROBES` carries one representative action per
+    *statement*, to prove the statement is reachable. An action missing from
+    a statement entirely leaves the representative intact, so the probe
+    passes and the deploy still fails.
+
+    The grants are therefore derived from the calls, not restated. Scope is
+    the two modules that are purely MCP-deploy code; `pcluster_core.py` is
+    excluded because `_setup_iam` and `_setup_mcp_infra` share it and the
+    cluster half calls actions this policy rightly withholds.
+    """
+
+    # boto3 client variable -> IAM service prefix. apigateway is absent on
+    # purpose: its IAM actions are HTTP verbs (`apigateway:POST`), not
+    # method names, so the snake_case-to-action mapping does not hold. s3 is
+    # absent for a related reason -- `upload_file` is a transfer-manager
+    # helper, not an API call, and `head_bucket` authorizes as
+    # `s3:ListBucket`.
+    _CLIENTS = {
+        "cog": "cognito-idp",
+        "lam": "lambda",
+        "ecr": "ecr",
+        "iam": "iam",
+        "sts": "sts",
+    }
+
+    _SOURCES = ("deploy_mcp.py", os.path.join("mcp_server", "deploy.py"))
+
+    # Not API calls: botocore helpers that reach the service, if at all,
+    # through some other operation.
+    _NOT_AN_API_CALL = {"get_waiter", "get_paginator"}
+
+    # Called, deliberately ungranted. `preflight_deploy_permissions` is
+    # written to return None rather than fail when it cannot simulate, so an
+    # identity holding exactly this policy runs the deploy with the check
+    # degraded -- which is the documented behavior, not an oversight.
+    _DELIBERATELY_UNGRANTED = {"iam:SimulatePrincipalPolicy"}
+
+    def _called_actions(self):
+        pat = re.compile(r"\b(" + "|".join(self._CLIENTS) + r")\.([a-z_]+)\(")
+        found = set()
+        for rel in self._SOURCES:
+            with open(os.path.join(REPO_ROOT, rel)) as fh:
+                src = fh.read()
+            for var, method in pat.findall(src):
+                if method in self._NOT_AN_API_CALL:
+                    continue
+                action = "".join(p.title() for p in method.split("_"))
+                found.add(f"{self._CLIENTS[var]}:{action}")
+        return found
+
+    def _granted(self):
+        out = []
+        for st in _load_policy("MCPDeployPolicy.json_src")["Statement"]:
+            if st.get("Effect") != "Allow":
+                continue
+            acts = st.get("Action", [])
+            out += acts if isinstance(acts, list) else [acts]
+        return out
+
+    def test_every_action_the_deploy_calls_is_granted(self):
+        granted = self._granted()
+        missing = sorted(
+            a for a in self._called_actions()
+            if a not in self._DELIBERATELY_UNGRANTED
+            and not any(fnmatch.fnmatch(a, g) for g in granted)
+        )
+        assert not missing, (
+            f"MCPDeployPolicy does not grant {missing}; deploy_mcp.py calls "
+            f"them, so a deploy under this policy fails partway through with "
+            f"AccessDenied after creating real resources"
+        )
+
+    def test_the_create_user_path_is_granted(self):
+        """The two that shipped missing, pinned by name.
+
+        The derivation above would catch them again only while the calls stay
+        in a file it reads; these are the ones a live deploy actually died
+        on, so they are named as well as derived.
+        """
+        granted = self._granted()
+        for action in ("cognito-idp:AdminCreateUser",
+                       "cognito-idp:AdminSetUserPassword"):
+            assert any(fnmatch.fnmatch(action, g) for g in granted), (
+                f"MCPDeployPolicy does not grant {action}; --create-user "
+                f"fails after the whole transport is already deployed"
+            )
+
+    def test_the_derivation_reads_something(self):
+        """Vacuity guard: both filters above are ways to read nothing."""
+        called = self._called_actions()
+        assert "cognito-idp:AdminCreateUser" in called
+        assert "lambda:CreateFunction" in called
+        assert len(called) > 15, f"derivation found only {len(called)} calls"
+
+    def test_the_deploy_policy_still_cannot_manage_arbitrary_users(self):
+        """The floor is not a licence to raise the ceiling.
+
+        `cognito-idp:*` would satisfy both tests above while handing the
+        deployer every Cognito action in the account. The pool the grant
+        reaches is unscoped already (`Resource: "*"`, forced -- the pool ID
+        is not known until it is created), so the action list is the only
+        bound left.
+        """
+        for action in ("cognito-idp:AdminDeleteUser",
+                       "cognito-idp:AdminAddUserToGroup",
+                       "cognito-idp:AdminUpdateUserAttributes"):
+            assert not any(fnmatch.fnmatch(action, g) for g in self._granted()), (
+                f"MCPDeployPolicy grants {action}; the deploy only ever "
+                f"creates a user and sets its password"
+            )
+
+
 class TestRouterPolicyStaysNearZero:
     """The Router Lambda is the internet-facing endpoint behind API Gateway.
     The entire 5-Lambda split exists to keep blast radius off it: it parses
