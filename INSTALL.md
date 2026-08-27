@@ -2,52 +2,37 @@
 
 ## Prerequisites
 
-* Python 3.12 is required. See [Python version](#python-version) for why.
-* AWS CLI v2 must be installed and configured with credentials that have sufficient IAM permissions.
-* `git` must be installed.
-* System build dependencies must be installed. These are the compilers and libraries needed to build native Python and Ansible packages.
-  * On macOS, run `brew install autoconf automake gcc jq libtool make readline`.
-  * On Debian/Ubuntu (`apt`), run `sudo apt-get install autoconf automake gcc jq libtool make libreadline-dev`.
-  * On RPM-based distributions, install the equivalents with your package manager; use `readline-devel` instead of `libreadline-dev`.
-* macOS also needs a modern `bash`, GNU `coreutils`, and `shellcheck` to run the test suite. See [Development environment (macOS)](#development-environment-macos). These are not required to operate the toolkit itself — only `make test`, `make lint`, and `make shellcheck` need them.
-* Node.js >= 10.13.0 must be installed and on `PATH`. `pcluster create-cluster`/`update-cluster` shell out locally to the AWS CDK library ParallelCluster uses to synthesize the CloudFormation stack — this runs on the machine invoking `make_pcluster.py`, not on any cluster node, so it is not listed in `pcluster_defaults.yml`'s `base_os` package sets. Without it, `create-cluster` fails immediately with `Unable to find node executable`.
-  * On macOS, run `brew install node`.
-  * On Debian/Ubuntu (`apt`), run `sudo apt-get install nodejs`, or follow [NodeSource's install instructions](https://github.com/nodesource/distributions) for a newer version than your distribution ships.
-  * On RPM-based distributions, install the `nodejs` package with your package manager.
-* An OCI container runtime is required **only to deploy the MCP remote transport**, and only for one of its seven Lambda functions. Nothing in normal operation needs it: building, operating and tearing down clusters from the CLI, and running the MCP server locally over stdio, all work without a container runtime. It is also optional for the remote transport itself — six of the seven tiers are plain zips, and without the seventh every tool works except `create_cluster`, `apply_cluster_update` and `preview_cluster_config`. Skip this unless you want those three reachable from a browser; see [Installing the MCP server](#installing-the-mcp-server) below.
-  * The `stack-mutation-node` tier ships as a container image rather than a zip, and the reason is Node.js again. `pcluster`'s `create_cluster()` and `update_cluster()` call `assert_valid_node_js()` as their first statement, which does `shutil.which("node")` and fails loudly without it. AWS's Python Lambda runtimes ship no Node and a zip artifact cannot add one, so that tier — which carries `create_cluster`, `apply_cluster_update` and `preview_cluster_config` — is built from `mcp_server/Dockerfile.stack-mutation-node` and pushed to ECR. The other six tiers are plain zips and need no runtime at all.
-  * On macOS, [Finch](https://runfinch.com/) is the lightest option and is AWS's own: `brew install --cask finch`, then `finch vm init` once (`finch vm start` on later boots). [Docker Desktop](https://www.docker.com/products/docker-desktop/), [Podman Desktop](https://podman-desktop.io/) and [Rancher Desktop](https://rancherdesktop.io/) all work equally well; Docker Desktop requires a paid subscription for larger organizations, which the others do not.
-  * On Linux, install Docker Engine or Podman from your distribution's repositories — neither needs a virtual machine, so there is nothing to start first. Podman is rootless by default and is the simpler choice if you would rather not add your user to the `docker` group.
-  * On Windows, use [Docker Desktop](https://www.docker.com/products/docker-desktop/) or [Rancher Desktop](https://rancherdesktop.io/) with the WSL2 backend, and build from inside a WSL2 shell rather than from PowerShell — the repository's build tooling is POSIX shell. Finch does not support Windows.
-  * **Build for the Lambda function's architecture, not your laptop's.** An image built on Apple Silicon or an ARM Linux host defaults to `linux/arm64`, and Lambda rejects a mismatch at `CreateFunction` rather than at invocation. Pass `--platform linux/amd64` unless the function is configured for `arm64`.
-  * **The ECR repository must exist before the first push.** `finch push` (and `docker push`) will not create it, and the failure names the wrong cause: ECR answers an unknown repository with `repository does not exist or may require authorization`, whose second half sends you auditing IAM for a permission that was never missing. Create it once with `aws ecr create-repository --repository-name pclustermaker-mcp-stack-mutation-node --region <region>`.
-  * **On Finch, `finch login` can succeed while `finch push` reports `no basic auth credentials`.** Finch runs containerd inside a Lima VM, and the push happens in the VM rather than on the host. `finch login` writes the credential to the host — by default handing it to the macOS keychain via `"credsStore": "osxkeychain"` in `~/.finch/config.json`, which leaves the `auths` entry empty — and the VM has no `~/.docker/config.json` of its own, so the pusher finds nothing. **Three locations are required and no two of them suffice** — each was tested in isolation. (1) the host config must carry an inline token, so `credsStore` is removed and `finch login` re-run; (2) the VM's `$HOME/.docker/config.json`; and (3) **the VM's `/root/.docker/config.json`, because containerd inside the VM runs as root and reads root's config, not the invoking user's**. Omitting the third fails with exactly the same `no basic auth credentials` as omitting all of them, which is indistinguishable from having done nothing — verified twice, once against a documented procedure that listed only the first two. Do not skip the host half on the reasoning that the push happens in the VM, and do not skip the root half on the reasoning that you already wrote a config into the VM. Scrub all three afterward (the ECR token is short-lived, but it is still a credential at rest):
+These are what the CLI needs. Both MCP surfaces are installed from the same
+checkout, so everything here applies to them too.
 
-    ```sh
-    export LIMA_HOME=/Applications/Finch/lima/data
-    LIMACTL=/Applications/Finch/lima/bin/limactl
+* **Python 3.12.** Not 3.13 or 3.14 — see [Python version](#python-version).
+* **AWS CLI v2**, configured with credentials that have sufficient IAM
+  permissions. See [Operator IAM permissions](#operator-iam-permissions).
+* **`git`**.
+* **System build dependencies** — the compilers and libraries needed to
+  build native Python and Ansible packages.
+  * macOS: `brew install autoconf automake gcc jq libtool make readline`
+  * Debian/Ubuntu: `sudo apt-get install autoconf automake gcc jq libtool make libreadline-dev`
+  * RPM-based: the equivalents, with `readline-devel` for `libreadline-dev`.
+* **Node.js >= 10.13.0, on `PATH`.** `pcluster create-cluster`/`update-cluster`
+  shell out to the AWS CDK on the machine invoking `make_pcluster.py`, so
+  without it they fail immediately with `Unable to find node executable`.
+  * macOS: `brew install node`
+  * Debian/Ubuntu: `sudo apt-get install nodejs`, or
+    [NodeSource](https://github.com/nodesource/distributions) for a newer
+    version than your distribution ships.
+  * RPM-based: the `nodejs` package.
 
-    # host half: inline token rather than the macOS keychain
-    python3 -c "import json,os;p=os.path.expanduser('~/.finch/config.json');d=json.load(open(p));d.pop('credsStore',None);json.dump(d,open(p,'w'))"
-    aws ecr get-login-password --region <region> \
-      | finch login --username AWS --password-stdin <acct>.dkr.ecr.<region>.amazonaws.com
+Two things are needed only for specific tasks, not to install or operate the
+toolkit:
 
-    # VM half
-    AUTH=$(printf 'AWS:%s' "$(aws ecr get-login-password --region <region>)" | base64 | tr -d '\n')
-    CFG=$(printf '{"auths":{"<acct>.dkr.ecr.<region>.amazonaws.com":{"auth":"%s"}}}' "$AUTH")
-    printf '%s' "$CFG" \
-      | $LIMACTL shell finch -- sh -c 'mkdir -p $HOME/.docker && cat > $HOME/.docker/config.json'
-    # containerd in the VM runs as root and reads root's config, not yours
-    printf '%s' "$CFG" \
-      | $LIMACTL shell finch -- sudo sh -c 'mkdir -p /root/.docker && cat > /root/.docker/config.json'
-    finch push <acct>.dkr.ecr.<region>.amazonaws.com/pclustermaker-mcp-stack-mutation-node:latest
-    $LIMACTL shell finch -- sh -c 'rm -f $HOME/.docker/config.json'
-    $LIMACTL shell finch -- sudo sh -c 'rm -f /root/.docker/config.json'
-    # and restore the host's keychain setting
-    python3 -c "import json,os;p=os.path.expanduser('~/.finch/config.json');d=json.load(open(p));d['credsStore']='osxkeychain';d['auths']={};json.dump(d,open(p,'w'))"
-    ```
-
-    This is a Finch-specific workaround, confirmed on Finch; the other runtimes were not tested against it. Docker Desktop and Rancher Desktop are not expected to need it, since their builder reads the same host credential store the CLI writes.
+* **A container runtime** (Finch, Docker, Podman or Rancher) — only to
+  deploy the MCP remote transport's optional seventh tier. Six of its seven
+  tiers are plain zips and need nothing. See
+  [The container tier](#the-container-tier).
+* **A modern `bash`, GNU `coreutils` and `shellcheck` on macOS** — only to
+  run `make test`, `make lint` and `make shellcheck`. See
+  [Development environment (macOS)](#development-environment-macos).
 
 ## Python version
 
@@ -140,11 +125,27 @@ Remove it with `claude mcp remove parallelclustermaker`.
 ### Remotely, for claude.ai (API Gateway + Cognito)
 
 Deploys seven Lambda functions, a REST API and a Cognito user pool **into
-your AWS account**, so a browser session can reach the same tools. One
-command:
+your AWS account**, so a browser session can reach the same tools.
+
+**Once, before your first deploy**, create the deployment policy and attach
+it to the identity that will run `deploy_mcp.py`:
 
 ```bash
 source .venv/bin/activate
+./generate_operator_policy.py --mcp --create
+```
+
+It is separate from the operator policy because the two together exceed
+IAM's 6,144-byte managed policy limit, and `deploy_mcp.py` cannot create it
+itself — under that policy `iam:CreatePolicy` is scoped to
+`pclustermaker-mcp-policy-*`, which this name does not match, and nothing
+lets it attach a policy to your identity. That is deliberate: a deploy tool
+able to grant itself permissions has no ceiling. What it grants is in
+[MCP deployment permissions](#mcp-deployment-permissions).
+
+Then, one command:
+
+```bash
 ./deploy_mcp.py --bootstrap --create-user you@example.com
 ```
 
@@ -163,25 +164,117 @@ ID to copy anywhere.
 
 `--bootstrap` is idempotent, so it is also the update path.
 
-**The seventh tier is opt-in.** `--bootstrap` leaves out
-`stack-mutation-node` so it does not require a container runtime on every
-machine. Without it the connector works and every tool is present except
-`create_cluster`, `apply_cluster_update` and `preview_cluster_config`. To
-add it, follow the container runtime and ECR steps in
-[Prerequisites](#prerequisites), then:
-
-```bash
-./deploy_mcp.py --tier stack-mutation-node --image-uri <ecr-uri>
-```
-
 Remove the whole transport with `./deploy_mcp.py --teardown` (add
 `--dry-run` to list first). The permissions boundary is left behind on
 purpose — a deployer who can delete their own boundary does not have one.
 
-**Deploying this needs more IAM than operating a cluster does** — a
-separate managed policy, generated with `./generate_operator_policy.py
---mcp`. See [MCP deployment permissions](#mcp-deployment-permissions)
-below.
+### The container tier
+
+**Optional.** `--bootstrap` leaves `stack-mutation-node` out so the deploy
+needs no container runtime. Without it the connector works and every tool
+is present except `create_cluster`, `apply_cluster_update` and
+`preview_cluster_config` — the three that reach Node.js, which AWS's Python
+Lambda runtimes do not ship and a zip artifact cannot add. That tier is
+built from `mcp_server/Dockerfile.stack-mutation-node` instead.
+
+**1. Install a runtime.**
+
+* macOS: [Finch](https://runfinch.com/) is the lightest and is AWS's own —
+  `brew install --cask finch`, then `finch vm init` once (`finch vm start`
+  on later boots). [Docker Desktop](https://www.docker.com/products/docker-desktop/),
+  [Podman Desktop](https://podman-desktop.io/) and
+  [Rancher Desktop](https://rancherdesktop.io/) work equally well; Docker
+  Desktop requires a paid subscription for larger organizations, which the
+  others do not.
+* Linux: Docker Engine or Podman from your distribution's repositories.
+  Neither needs a virtual machine, so there is nothing to start first.
+  Podman is rootless by default and is simpler if you would rather not add
+  your user to the `docker` group.
+* Windows: Docker Desktop or Rancher Desktop with the WSL2 backend, and
+  build from inside a WSL2 shell rather than PowerShell — the build tooling
+  is POSIX shell. Finch does not support Windows.
+
+**2. Create the ECR repository.** It must exist before the first push:
+`finch push` and `docker push` will not create it, and the failure names
+the wrong cause — ECR answers an unknown repository with `repository does
+not exist or may require authorization`, whose second half sends you
+auditing an IAM permission that was never missing.
+
+```bash
+aws ecr create-repository \
+  --repository-name pclustermaker-mcp-stack-mutation-node --region <region>
+```
+
+**3. Build for Lambda's architecture, not your laptop's.** An image built
+on Apple Silicon or an ARM Linux host defaults to `linux/arm64`, and Lambda
+rejects a mismatch at `CreateFunction` rather than at invocation.
+
+```bash
+finch build --platform linux/amd64 \
+  -f mcp_server/Dockerfile.stack-mutation-node \
+  -t <acct>.dkr.ecr.<region>.amazonaws.com/pclustermaker-mcp-stack-mutation-node:latest .
+```
+
+**4. Push it, then deploy the tier.**
+
+```bash
+finch push <acct>.dkr.ecr.<region>.amazonaws.com/pclustermaker-mcp-stack-mutation-node:latest
+./deploy_mcp.py --tier stack-mutation-node --image-uri <ecr-uri>
+```
+
+#### If the push fails with `no basic auth credentials`
+
+**On Finch, `finch login` can succeed and `finch push` still report this.**
+Finch runs containerd inside a Lima VM, and the push happens in the VM
+rather than on the host. `finch login` writes the credential to the host —
+by default handing it to the macOS keychain via `"credsStore":
+"osxkeychain"` in `~/.finch/config.json`, which leaves the `auths` entry
+empty — and the VM has no `~/.docker/config.json` of its own, so the pusher
+finds nothing.
+
+**Three locations are required and no two of them suffice**, each tested in
+isolation: (1) the host config carrying an inline token, so `credsStore` is
+removed and `finch login` re-run; (2) the VM's `$HOME/.docker/config.json`;
+and (3) **the VM's `/root/.docker/config.json`, because containerd inside
+the VM runs as root and reads root's config, not the invoking user's**.
+Omitting the third fails with exactly the same message as omitting all
+three, which is indistinguishable from having done nothing — verified
+twice, once against a documented procedure that listed only the first two.
+Do not skip the host half on the reasoning that the push happens in the VM,
+and do not skip the root half on the reasoning that you already wrote a
+config into the VM.
+
+Scrub all three afterward. The ECR token is short-lived, but it is still a
+credential at rest:
+
+```sh
+export LIMA_HOME=/Applications/Finch/lima/data
+LIMACTL=/Applications/Finch/lima/bin/limactl
+
+# host half: inline token rather than the macOS keychain
+python3 -c "import json,os;p=os.path.expanduser('~/.finch/config.json');d=json.load(open(p));d.pop('credsStore',None);json.dump(d,open(p,'w'))"
+aws ecr get-login-password --region <region> \
+  | finch login --username AWS --password-stdin <acct>.dkr.ecr.<region>.amazonaws.com
+
+# VM half
+AUTH=$(printf 'AWS:%s' "$(aws ecr get-login-password --region <region>)" | base64 | tr -d '\n')
+CFG=$(printf '{"auths":{"<acct>.dkr.ecr.<region>.amazonaws.com":{"auth":"%s"}}}' "$AUTH")
+printf '%s' "$CFG" \
+  | $LIMACTL shell finch -- sh -c 'mkdir -p $HOME/.docker && cat > $HOME/.docker/config.json'
+# containerd in the VM runs as root and reads root's config, not yours
+printf '%s' "$CFG" \
+  | $LIMACTL shell finch -- sudo sh -c 'mkdir -p /root/.docker && cat > /root/.docker/config.json'
+finch push <acct>.dkr.ecr.<region>.amazonaws.com/pclustermaker-mcp-stack-mutation-node:latest
+$LIMACTL shell finch -- sh -c 'rm -f $HOME/.docker/config.json'
+$LIMACTL shell finch -- sudo sh -c 'rm -f /root/.docker/config.json'
+# and restore the host's keychain setting
+python3 -c "import json,os;p=os.path.expanduser('~/.finch/config.json');d=json.load(open(p));d['credsStore']='osxkeychain';d['auths']={};json.dump(d,open(p,'w'))"
+```
+
+This is a Finch-specific workaround, confirmed on Finch; the other runtimes
+were not tested against it. Docker Desktop and Rancher Desktop are not
+expected to need it, since their builder reads the same host credential
+store the CLI writes.
 
 ## VPC tagging
 
@@ -268,27 +361,22 @@ condition on `iam:PermissionsBoundary` — without that condition a deployer
 could create an unbounded role and the ceiling would never apply. It also
 denies deleting the boundary itself.
 
-Generate and attach it the same way as the operator policy, with `--mcp`:
-
-```bash
-source .venv/bin/activate
-
-# Print it:
-./generate_operator_policy.py --mcp
-
-# Create the managed policy in IAM:
-./generate_operator_policy.py --mcp --create
-```
-
-That creates `parallelcluster-mcp-deploy-pclustermaker`. Attach it to the
-identity that runs `deploy_mcp.py`, alongside the operator policy — the two
-are complementary, not alternatives, and `deploy_mcp.py` needs both if the
-same identity also builds clusters.
+`./generate_operator_policy.py --mcp --create` creates it, as
+`parallelcluster-mcp-deploy-pclustermaker`; `--mcp` alone prints it. Attach
+it to the identity that runs `deploy_mcp.py`, alongside the operator policy
+— the two are complementary, not alternatives, and an identity that both
+builds clusters and deploys the transport needs both.
 
 The name is deliberately **not** of the form `pclustermaker-mcp-policy-*`:
 that is the namespace of the seven handler policies, which
 `deploy_mcp.py --teardown` removes. This one has to survive a teardown,
 since you need it to run one.
+
+`deploy_mcp.py` checks for these before its first mutation and stops with
+the missing action names if any are absent, rather than failing partway
+through a half-built transport. The check needs
+`iam:SimulatePrincipalPolicy`, which this policy does not grant — when it
+cannot run, the deploy says so and continues.
 
 ## Development environment (macOS)
 

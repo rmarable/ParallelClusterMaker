@@ -1098,9 +1098,10 @@ for the hosted one.
 `assert_valid_node_js()` as their first statement and AWS's Python Lambda
 runtimes bundle no Node.js a zip could supply. That tier needs an **OCI
 container runtime** (Finch, Docker, Podman or Rancher) and an **ECR
-repository** — see [INSTALL.md](INSTALL.md) for the per-platform runtime
-recommendations, the `--platform linux/amd64` architecture trap, and the
-ECR steps. The other six are plain zips and need neither.
+repository** — see [The container tier](INSTALL.md#the-container-tier) for
+the per-platform runtime recommendations, the `--platform linux/amd64`
+architecture trap, and the ECR steps. The other six are plain zips and need
+neither.
 
 You do not need that tier to stand the transport up. Without it every tool
 works except the three that reach Node — `create_cluster`,
@@ -1267,7 +1268,7 @@ require a container runtime on every machine. Without it the connector
 works and every tool is present **except** `create_cluster`,
 `apply_cluster_update` and `preview_cluster_config`.
 
-To add it, follow the ECR steps in [INSTALL.md](INSTALL.md), then:
+To add it, follow [The container tier](INSTALL.md#the-container-tier), then:
 
 ```bash
 ./deploy_mcp.py --tier stack-mutation-node --image-uri <ecr-uri>
