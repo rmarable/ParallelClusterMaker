@@ -4149,3 +4149,104 @@ class TestAPclusterExceptionAlwaysSaysSomething:
 
         out = pcluster_exception_detail(RuntimeError("boom"))
         assert "RuntimeError" in out and "boom" in out
+
+
+class TestABuildFailureSaysWhatWentWrong:
+    """`create_cluster` returned `exit_code: 1` and no reason.
+
+    All three failure paths in `core_create_cluster` set
+    `message="build failed; see the messages above"`, and "above" is
+    stdout -- which on a Lambda is CloudWatch, where the caller cannot see
+    it. A remote `create_cluster` therefore reported `success: false,
+    exit_code: 1` and nothing else; diagnosing a plain AccessDenied on
+    `iam:CreatePolicy` meant reading the container tier's log group by
+    hand, twice.
+
+    The CLI was never affected, which is why it survived this long: the
+    operator is looking at the stdout the message points them to.
+    """
+
+    def test_the_exception_reaches_the_caller(self):
+        from pcluster_core import _build_failure_message
+
+        msg = _build_failure_message(
+            "IAM role/policy setup failed",
+            Exception("AccessDenied: iam:CreatePolicy on pclustermaker-cluster-boundary"),
+        )
+        assert "IAM role/policy setup failed" in msg
+        assert "AccessDenied" in msg
+        assert "iam:CreatePolicy" in msg
+
+    def test_it_names_the_type_when_the_text_is_empty(self):
+        """A bare `str()` is empty for at least one class this codebase
+        already works around -- `pcluster_exception_detail` exists because
+        `ParallelClusterApiException.__init__` passes no arguments to
+        `super().__init__()`. A message built only from the text is then a
+        sentence with nothing in it, which is the failure this replaces."""
+        from pcluster_core import _build_failure_message
+
+        class SilentBoom(Exception):
+            def __init__(self):
+                super().__init__()
+
+        msg = _build_failure_message("template render failed", SilentBoom())
+        assert "template render failed" in msg
+        assert "SilentBoom" in msg
+        assert msg.count("SilentBoom") == 1, (
+            f"the class name is repeated, which reads as two errors: {msg}")
+
+    def test_it_is_truncated(self):
+        """A message summarizes; the log is still printed in full."""
+        from pcluster_core import _build_failure_message
+
+        msg = _build_failure_message("x", Exception("y" * 5000))
+        assert len(msg) < 900
+        assert "[...]" in msg
+
+    def test_no_failure_path_still_returns_the_generic_string(self):
+        """The string that shipped, banned by name.
+
+        Three sites carried it and a fix to one reads as done. Anchored on
+        the literal so a fourth copy cannot appear either.
+        """
+        import io
+        import os
+
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        src = io.open(
+            os.path.join(root, "src", "pcluster_core.py"), encoding="utf-8"
+        ).read()
+        assert "build failed; see the messages above" not in src, (
+            "a build failure still tells a remote caller to read stdout it "
+            "cannot see"
+        )
+
+    def test_every_create_failure_path_builds_a_real_message(self):
+        """All three, not just the one that was diagnosed."""
+        import ast
+        import io
+        import os
+
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        src = io.open(
+            os.path.join(root, "src", "pcluster_core.py"), encoding="utf-8"
+        ).read()
+        tree = ast.parse(src)
+        fn = next(n for n in ast.walk(tree)
+                  if isinstance(n, ast.FunctionDef) and n.name == "core_create_cluster")
+        built = 0
+        for node in ast.walk(fn):
+            if not isinstance(node, ast.Call):
+                continue
+            if not (isinstance(node.func, ast.Name)
+                    and node.func.id == "CreateClusterResult"):
+                continue
+            for kw in node.keywords:
+                if kw.arg == "message" and isinstance(kw.value, ast.Call):
+                    f = kw.value.func
+                    if isinstance(f, ast.Name) and f.id == "_build_failure_message":
+                        built += 1
+        assert built >= 3, (
+            f"only {built} create-failure paths build a real message; "
+            f"the others still return a constant"
+        )

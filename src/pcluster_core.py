@@ -8569,6 +8569,40 @@ def existing_vars_file_guidance(
     return lines
 
 
+def _build_failure_message(stage, exc, limit=600):
+    """What a remote caller is told when a build fails.
+
+    The three failure paths in core_create_cluster all returned "build
+    failed; see the messages above", and "above" is stdout -- which on a
+    Lambda is CloudWatch, where the caller cannot see it. So an MCP
+    `create_cluster` reported `success: false, exit_code: 1` and nothing
+    else, and diagnosing it meant reading the container tier's log group by
+    hand. That happened, twice, for a plain AccessDenied.
+
+    The exception type is named as well as its text: a bare `str()` is empty
+    for at least one exception class this codebase already handles
+    (`pcluster_exception_detail` exists because
+    `ParallelClusterApiException.__init__` calls `super().__init__()` with no
+    arguments), so a message built only from the text can be a sentence with
+    nothing in it.
+
+    Truncated, because a message is a summary and not the log: the full
+    output is still printed, and still reaches CloudWatch.
+    """
+    name = type(exc).__name__
+    detail = pcluster_exception_detail(exc) or str(exc) or ""
+    detail = " ".join(detail.split())
+    if len(detail) > limit:
+        detail = detail[:limit] + " [...]"
+    if not detail:
+        return f"{stage}: {name} (no detail; see the cluster's CloudWatch logs)"
+    # pcluster_exception_detail already leads with the class name for the
+    # exceptions it understands; prefixing again reads as two errors.
+    if detail.startswith(name):
+        return f"{stage}: {detail}"
+    return f"{stage}: {name}: {detail}"
+
+
 def core_create_cluster(*, params, repo_root, region, cluster_build_command, ansible_version, wait=True):
     """Validate, provision IAM, render the vars file, and build a cluster.
 
@@ -9431,7 +9465,7 @@ def core_create_cluster(*, params, repo_root, region, cluster_build_command, ans
         s3_release_cluster_lock(_lock_s3, locks_bucketname=locks_bucketname, cluster_name=cluster_name)
         return CreateClusterResult(
             cluster_name=cluster_name, success=False, exit_code=1,
-            message="build failed; see the messages above",
+            message=_build_failure_message("IAM role/policy setup failed", _iam_e),
         )
 
     try:
@@ -9917,7 +9951,7 @@ def core_create_cluster(*, params, repo_root, region, cluster_build_command, ans
         s3_release_cluster_lock(_lock_s3, locks_bucketname=locks_bucketname, cluster_name=cluster_name)
         return CreateClusterResult(
             cluster_name=cluster_name, success=False, exit_code=1,
-            message="build failed; see the messages above",
+            message=_build_failure_message("template render failed", _render_e),
         )
 
     # Every remaining create_pcluster.yml task, wired straight to Python --
@@ -10076,7 +10110,7 @@ def core_create_cluster(*, params, repo_root, region, cluster_build_command, ans
         s3_release_cluster_lock(_lock_s3, locks_bucketname=locks_bucketname, cluster_name=cluster_name)
         return CreateClusterResult(
             cluster_name=cluster_name, success=False, exit_code=1,
-            message="build failed; see the messages above",
+            message=_build_failure_message("failed before cluster launch", _early_e),
         )
 
     # Print the pre-launch summary and open the Ctrl-C abort window right
