@@ -167,6 +167,16 @@ def make_lambda_handler(tier):
     nothing tier-specific about a handler except its name.
     """
     def lambda_handler(event, context):
+        # A teardown-completion poll arrives on the same function as a
+        # tools/call and is told apart by an explicit marker, never by the
+        # absence of one -- a malformed event must not be mistaken for a
+        # poll and start deleting things. See mcp_server/completion.py.
+        from mcp_server.completion import is_completion_event
+
+        if is_completion_event(event):
+            from mcp_server.completion_runner import run_completion_attempt
+
+            return run_completion_attempt(event)
         return handle(event, tier=tier)
 
     return lambda_handler

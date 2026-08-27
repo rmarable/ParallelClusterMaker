@@ -898,6 +898,9 @@ class TestEverySurfaceQuotesTheSameTeardownDuration:
         "src/delete_pcluster.yml": "approximately 15-20 minutes to complete",
         "mcp_server/server.py": "20-45 minutes and 15-20 ",
         "mcp_server/tools.py": "teardown takes 15-20 minutes",
+        # The automatic finisher states the same duration, and states
+        # it because the poll bounds are chosen against it.
+        "mcp_server/completion.py": "teardown is 15-20 minutes",
         # The README uses a typographic en dash throughout; keep its style
         # rather than normalising it to the ASCII form the code uses.
         "README.md": "Teardown takes 15–20 minutes.",

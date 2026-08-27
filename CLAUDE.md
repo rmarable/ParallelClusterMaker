@@ -305,6 +305,16 @@ standing constraints for local development.
   did exactly that. **The contract rule is not just for botocore models**:
   read a third-party schema, never recall it. Detail:
   `templates/CLAUDE.local.md`.
+- **A teardown finishes itself.** `delete_cluster` fires an
+  `InvocationType="Event"` invoke at its own function, which polls and then
+  runs `finalize_only` — an agent told to poll for 15-20 minutes has no
+  timer and correctly stops, so no wording closes that gap. **The loop's
+  bound lives in `mcp_server/completion.py`, which touches no AWS and no
+  clock**, so it is swept exhaustively; three bounds, and an unreadable
+  describe means keep waiting, never "it is gone". An Event invoke has no
+  caller, so every terminal outcome must reach the retained log group and
+  the cluster's SNS topic — silence would be indistinguishable from
+  success. Detail: `docs/async-teardown-and-build.md`.
 - **A remote `create_cluster` outlives the 29s gateway ceiling** — measured
   43.6s, ~39s of it `pcluster create-cluster`'s CDK synthesis, so no
   decomposition of our work fits it. The caller is cut off while the build

@@ -176,6 +176,16 @@
             "Effect": "Allow"
         },
         {
+            "Sid": "InvokeItselfToFinishATeardown",
+            "Action": [
+                "lambda:InvokeFunction"
+            ],
+            "Resource": [
+                "arn:aws:lambda:*:<AWS_ACCOUNT_ID>:function:pclustermaker-mcp-stack-mutation"
+            ],
+            "Effect": "Allow"
+        },
+        {
             "Sid": "S3ResourcesBucket",
             "Action": [
                 "s3:*"

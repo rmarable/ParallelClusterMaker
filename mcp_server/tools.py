@@ -377,6 +377,44 @@ def _require_record(cluster_name):
     return ClusterRecord.from_dict(rec)
 
 
+def _start_teardown_completion(rec, delete_s3_bucketname):
+    """Kick off the self-polling teardown finisher. Returns whether it started.
+
+    Best-effort by construction: the stack delete has already been accepted
+    when this runs, so failing to start the follow-up must not turn a
+    successful delete into an error. It changes what the caller is *told* --
+    the next_step above says "handled" or "you must act" on the strength of
+    this return value, which is the one thing that must never be guessed.
+
+    Local (stdio) runs get False: there is no Lambda to invoke, and the
+    operator is sitting at a terminal where the manual call is a keystroke.
+    """
+    import os
+
+    if not os.environ.get("AWS_LAMBDA_FUNCTION_NAME"):
+        return False
+    try:
+        import json
+
+        import boto3
+
+        from mcp_server.completion import make_completion_event
+
+        ev = make_completion_event(
+            cluster_name=rec.cluster_name, cluster_owner=rec.cluster_owner,
+            region=rec.region, delete_s3_bucketname=delete_s3_bucketname,
+        )
+        boto3.client("lambda", region_name=rec.region).invoke(
+            FunctionName=os.environ["AWS_LAMBDA_FUNCTION_NAME"],
+            InvocationType="Event", Payload=json.dumps(ev).encode(),
+        )
+        return True
+    except Exception as e:  # noqa: BLE001 - see docstring
+        print(f"could not start automatic teardown completion: "
+              f"{type(e).__name__}: {e}")
+        return False
+
+
 def register_tools(mcp, *, remote, tier=None):
     """Register the tool set on a FastMCP instance.
 
@@ -874,20 +912,40 @@ def register_tools(mcp, *, remote, tier=None):
             delete_s3_bucketname="true" if delete_s3_bucketname else "false",
             debug_mode=False, wait=False,
         ))
-        # In the response, not only the docstring. A tool description is
-        # read once when the tool list loads; this is read at the moment
-        # the caller decides what to do next, which is when it matters --
-        # the same reason preview_cluster_config carries a next_step.
+        # Finish the teardown without the caller having to come back.
+        #
+        # An agent told to poll for 15-20 minutes correctly says "ping me"
+        # and stops -- a conversational turn has no timer, and that was
+        # observed live from an agent that had read the instruction and
+        # quoted it back. So the server does it: an Event invocation
+        # returns in milliseconds and polls itself to completion.
+        # docs/async-teardown-and-build.md.
+        auto = _start_teardown_completion(rec, delete_s3_bucketname)
         out["teardown_complete"] = False
-        out["next_step"] = (
-            f"Only the CloudFormation stack is being deleted. Poll "
-            f"list_clusters until {cluster_name} is gone, then call "
-            f"finalize_cluster_teardown({cluster_name!r}) to remove the IAM "
-            f"policies, S3 bucket, SSH key secret, SNS topic and cluster "
-            f"record. Do not call delete_cluster again -- it finishes the "
-            f"job only by re-issuing a delete against the name, which "
-            f"destroys a rebuilt cluster of the same name."
-        )
+        out["auto_finalize_started"] = auto
+        if auto:
+            out["next_step"] = (
+                f"The stack delete is underway and the rest of the teardown "
+                f"will finish automatically -- no further call is needed. "
+                f"list_clusters will show {cluster_name} as DELETED once the "
+                f"stack is gone, and the leftovers are removed shortly after. "
+                f"If anything goes wrong you will get an SNS alert; "
+                f"finalize_cluster_teardown({cluster_name!r}) is the manual "
+                f"recovery."
+            )
+        else:
+            # Falling back is not a failure to report loudly, but it must
+            # not be silent either: the difference between "handled" and
+            # "you must act" is the whole point of this field.
+            out["next_step"] = (
+                f"Only the CloudFormation stack is being deleted, and "
+                f"automatic completion could not be started. Poll "
+                f"list_clusters until {cluster_name} is gone, then call "
+                f"finalize_cluster_teardown({cluster_name!r}). Do not call "
+                f"delete_cluster again -- it finishes the job only by "
+                f"re-issuing a delete against the name, which destroys a "
+                f"rebuilt cluster of the same name."
+            )
         return out
 
     @tool
