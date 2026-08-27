@@ -23,6 +23,7 @@ local-only; see `_LOCAL_ONLY` in `tools.py`.
 """
 
 import os
+import time
 
 from .auth.discovery import www_authenticate_header
 from .packaging import TIER_PACKAGES, manifest
@@ -165,7 +166,7 @@ def deploy_tier(lam, tier, *, aws_account_id, code, environment=None):
         tier, aws_account_id=aws_account_id, code=code, environment=environment,
     )
     try:
-        resp = lam.create_function(**kwargs)
+        resp = _create_function_once_the_role_exists(lam, kwargs)
         print(f"  Created MCP function: {kwargs['FunctionName']}")
         return resp["FunctionArn"]
     except Exception as e:
@@ -217,6 +218,63 @@ def _already_exists(exc):
     if not isinstance(resp, dict):
         return False
     return resp.get("Error", {}).get("Code") == "ResourceConflictException"
+
+
+# IAM is eventually consistent, and `--bootstrap` is the only path that
+# creates a role and then a function inside one process: every earlier
+# deploy ran --setup-infra and the tier deploys as separate invocations
+# minutes apart, so this could not surface until the first live bootstrap,
+# where it killed the run on the very first CreateFunction with the roles,
+# policies and boundary already made.
+ROLE_PROPAGATION_ATTEMPTS = 6
+ROLE_PROPAGATION_SLEEP = 5
+
+
+def _is_role_not_yet_assumable(exc):
+    """A propagation lag, not a wrong trust policy -- and the code alone
+    cannot tell them apart.
+
+    Lambda answers `InvalidParameterValueException` for both, so the
+    message is matched too. Retrying a genuinely wrong trust policy is
+    bounded and ends in the same error the deploy would have raised
+    immediately; treating every InvalidParameterValueException as
+    retryable would instead sit for half a minute on a real
+    misconfiguration.
+    """
+    resp = getattr(exc, "response", None)
+    if not isinstance(resp, dict):
+        return False
+    err = resp.get("Error", {})
+    return (
+        err.get("Code") == "InvalidParameterValueException"
+        and "cannot be assumed by Lambda" in (err.get("Message") or "")
+    )
+
+
+def _create_function_once_the_role_exists(lam, kwargs, *, sleep=None):
+    """create_function, retried while its execution role is still propagating.
+
+    `sleep` is injectable so a test can prove the retry without spending
+    the wall-clock; production passes nothing.
+    """
+    sleep = time.sleep if sleep is None else sleep
+    last = None
+    for attempt in range(ROLE_PROPAGATION_ATTEMPTS):
+        try:
+            return lam.create_function(**kwargs)
+        except Exception as e:
+            if not _is_role_not_yet_assumable(e):
+                raise
+            last = e
+            if attempt + 1 < ROLE_PROPAGATION_ATTEMPTS:
+                print(
+                    f"  {kwargs['FunctionName']}: execution role not assumable "
+                    f"yet (IAM propagation), retrying in "
+                    f"{ROLE_PROPAGATION_SLEEP}s "
+                    f"[{attempt + 1}/{ROLE_PROPAGATION_ATTEMPTS - 1}]"
+                )
+                sleep(ROLE_PROPAGATION_SLEEP)
+    raise last
 
 
 def _code_update(code):

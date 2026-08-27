@@ -290,6 +290,108 @@ class TestDeployTier:
         assert kw["Timeout"] == TIER_RUNTIME["stack-mutation"]["timeout"]
 
 
+class TestCreateFunctionWaitsOutIamPropagation:
+    """`--bootstrap` is the only path that creates a role and a function in
+    one process, and IAM is eventually consistent.
+
+    Every earlier deploy ran `--setup-infra` and the tier deploys as
+    separate invocations minutes apart, so the roles had always propagated
+    by the time any function was created. The first live `--bootstrap` died
+    on the very first `CreateFunction` -- "The role defined for the function
+    cannot be assumed by Lambda" -- with the boundary, ten policies and
+    seven roles already made. The trust policy was correct; the role was
+    seconds old.
+
+    Nothing stubbed could have caught it: the fake answers instantly and
+    IAM's own consistency is what is being waited on.
+    """
+
+    def _lag(self, times):
+        """A create_function that reports the role unassumable `times` times."""
+        state = {"n": 0}
+
+        def create(**kw):
+            state["n"] += 1
+            if state["n"] <= times:
+                err = Exception("InvalidParameterValueException")
+                err.response = {"Error": {
+                    "Code": "InvalidParameterValueException",
+                    "Message": ("The role defined for the function cannot be "
+                                "assumed by Lambda."),
+                }}
+                raise err
+            return {"FunctionArn": f"arn:aws:lambda:::{kw['FunctionName']}"}
+
+        return create, state
+
+    def test_a_propagating_role_is_waited_out(self, monkeypatch):
+        slept = []
+        monkeypatch.setattr("mcp_server.deploy.time.sleep", slept.append)
+        lam = _FakeLambda()
+        lam.create_function, state = self._lag(2)
+
+        arn = deploy_tier(lam, "router", aws_account_id=ACCOUNT,
+                          code={"S3Bucket": "b", "S3Key": "k"})
+
+        assert arn.endswith(FUNCTION_NAMES["router"])
+        assert state["n"] == 3, "the create was not retried to success"
+        assert len(slept) == 2, "retried without waiting between attempts"
+
+    def test_a_wrong_trust_policy_is_not_retried(self, monkeypatch):
+        """The discrimination that matters.
+
+        Lambda answers `InvalidParameterValueException` for a genuinely
+        wrong trust policy too, so retrying on the code alone would spend
+        the full backoff on every real misconfiguration. The message is
+        what separates them.
+        """
+        slept = []
+        monkeypatch.setattr("mcp_server.deploy.time.sleep", slept.append)
+        lam = _FakeLambda()
+
+        def boom(**kw):
+            err = Exception("bad runtime")
+            err.response = {"Error": {
+                "Code": "InvalidParameterValueException",
+                "Message": "Value not supported for Runtime",
+            }}
+            raise err
+
+        lam.create_function = boom
+        with pytest.raises(Exception, match="bad runtime"):
+            deploy_tier(lam, "router", aws_account_id=ACCOUNT,
+                        code={"S3Bucket": "b", "S3Key": "k"})
+        assert slept == [], "a non-propagation error was retried"
+
+    def test_the_retry_is_bounded_and_reraises(self, monkeypatch):
+        """A role that never becomes assumable must still fail, with the
+        service's own error rather than a timeout of our own invention."""
+        from mcp_server.deploy import ROLE_PROPAGATION_ATTEMPTS
+
+        monkeypatch.setattr("mcp_server.deploy.time.sleep", lambda _s: None)
+        lam = _FakeLambda()
+        lam.create_function, state = self._lag(10_000)
+
+        with pytest.raises(Exception, match="InvalidParameterValueException"):
+            deploy_tier(lam, "router", aws_account_id=ACCOUNT,
+                        code={"S3Bucket": "b", "S3Key": "k"})
+        assert state["n"] == ROLE_PROPAGATION_ATTEMPTS
+
+    def test_an_existing_function_still_takes_the_update_path(self, monkeypatch):
+        """Vacuity guard for the wrapper: `ResourceConflictException` must
+        pass straight through to the update branch, not be retried."""
+        slept = []
+        monkeypatch.setattr("mcp_server.deploy.time.sleep", slept.append)
+        lam = _FakeLambda(exists=True)
+
+        deploy_tier(lam, "router", aws_account_id=ACCOUNT,
+                    code={"S3Bucket": "b", "S3Key": "k"})
+
+        ops = [name for name, _ in lam.calls]
+        assert "update_function_configuration" in ops
+        assert slept == []
+
+
 class TestDeleteMcpFunctions:
     def test_it_deletes_every_tier(self):
         lam = _FakeLambda()
