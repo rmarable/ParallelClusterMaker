@@ -27,6 +27,54 @@ set +euo pipefail
 source /etc/profile
 set -euo pipefail
 
+# Ship the log that actually says why a bootstrap failed.
+#
+# The CloudWatch agent is configured by PCluster to ship /var/log/cfn-init.log
+# and not /var/log/cfn-init-cmd.log.  The first records *that* a step ran and
+# its return code; the second holds everything the step printed -- this script,
+# preinstall, the operator's own --pre_install_script/--post_install_script
+# hooks, and chef.  Confirmed by reading both on a live node.  Without this, a
+# failed node leaves a CloudWatch record saying a command exited non-zero and
+# nothing at all about why, and the evidence dies with the instance.
+#
+# Appended to the agent's config rather than replacing it: that file is
+# PCluster's, and rewriting it would silently drop whatever the next release
+# ships.  `from_beginning` is set explicitly so the whole file is sent even
+# though this runs late in the boot -- which is also why placing this early
+# would buy nothing.
+#
+# Entirely best-effort.  This script runs under `set -euo pipefail`, where a
+# non-zero exit fails the node's bootstrap and, on a compute node, feeds
+# clustermgtd's relaunch loop toward the partition's ten-failure protected-mode
+# threshold.  Losing a log must never be what costs a cluster, so every step
+# here is guarded and the block is skipped whole if the agent is not where it
+# was.
+
+PCM_CW_AGENT_CFG="/opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.d/file_amazon-cloudwatch-agent.json"
+if [ -f "$PCM_CW_AGENT_CFG" ]
+then
+	sudo python3 - "$PCM_CW_AGENT_CFG" <<'PCM_CW_EOF' 2>/dev/null || echo "WARNING: could not add cfn-init-cmd.log to the CloudWatch agent" >&2
+import json, sys
+
+cfg = sys.argv[1]
+want = "/var/log/cfn-init-cmd.log"
+try:
+    d = json.load(open(cfg))
+    cl = d["logs"]["logs_collected"]["files"]["collect_list"]
+except Exception:
+    sys.exit(0)
+if not cl or any(e.get("file_path") == want for e in cl):
+    sys.exit(0)
+entry = dict(cl[0])
+entry["file_path"] = want
+entry["log_stream_name"] = "{instance_id}.cfn-init-cmd"
+entry["from_beginning"] = True
+cl.append(entry)
+json.dump(d, open(cfg, "w"))
+PCM_CW_EOF
+	sudo systemctl restart amazon-cloudwatch-agent >/dev/null 2>&1 		|| echo "WARNING: could not restart the CloudWatch agent" >&2
+fi
+
 # Set values for some important variables. 
 
 EC2_HOME="{{ ec2_user_home }}"

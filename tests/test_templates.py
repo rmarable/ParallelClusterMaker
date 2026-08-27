@@ -8449,3 +8449,83 @@ class TestEveryPackageManagerCallIsWallClockBounded:
                 if any(p in ln for p in ("nvtop", "htop")):
                     continue        # diagnostics, deliberately non-fatal
                 assert "||" not in ln, f"{template}: required install is guarded: {ln}"
+
+
+class TestTheLogThatSaysWhyABootstrapFailedIsShipped:
+    """PCluster's CloudWatch agent ships `/var/log/cfn-init.log` and not
+    `/var/log/cfn-init-cmd.log`.
+
+    The first records *that* a custom action ran and its return code; the
+    second holds everything it printed -- postinstall, preinstall, the
+    operator's own hook scripts and chef. Read on a live node to confirm it,
+    rather than inferred: the shipped log had "Running command
+    runpostinstall" and a status, and the unshipped one had the awscli
+    unzip output and the operator hook's own echo.
+
+    So a failed node left a CloudWatch record saying a command exited
+    non-zero and nothing about why, and the evidence died with the
+    instance. `postinstall.j2` adds the file to the agent's collect_list.
+    """
+
+    def _rendered(self, cluster_params):
+        env = _make_env(os.path.join(REPO_ROOT, "templates"))
+        return env.get_template("postinstall.j2").render(**cluster_params)
+
+    def test_the_unshipped_log_is_added_to_the_agent(self, cluster_params):
+        r = self._rendered(cluster_params)
+        assert "/var/log/cfn-init-cmd.log" in r
+        assert "amazon-cloudwatch-agent.d" in r, (
+            "the agent config path is gone; nothing ships the file")
+
+    def _code(self, cluster_params):
+        """The block with comment lines stripped.
+
+        The prose above it names the same identifiers the code sets, so a
+        plain substring check passes with the code deleted -- which is
+        exactly what a mutation run showed before this existed.
+        """
+        r = self._rendered(cluster_params)
+        block = r[r.index("PCM_CW_AGENT_CFG="):]
+        block = block[:block.index("# Set values for some important")]
+        return "\n".join(
+            ln for ln in block.splitlines() if not ln.lstrip().startswith("#"))
+
+    def test_it_reads_the_whole_file_not_just_new_lines(self, cluster_params):
+        """`from_beginning` is why placing this late costs nothing. Without
+        it the agent tails from the end and everything preinstall and chef
+        wrote -- which is most of a bootstrap -- is never sent."""
+        assert "from_beginning" in self._code(cluster_params)
+
+    def test_it_appends_rather_than_replacing_the_agent_config(self, cluster_params):
+        """That file is PCluster's. Rewriting it drops whatever the next
+        release ships, silently, on every node."""
+        code = self._code(cluster_params)
+        assert "cl.append(entry)" in code, "no append; the config is being rebuilt"
+        assert 'entry = dict(cl[0])' in code, (
+            "the new entry is not modelled on an existing one, so it may "
+            "omit fields the agent requires")
+
+    def test_nothing_here_can_fail_the_node(self, cluster_params):
+        """The whole point is to preserve evidence of a failure. Becoming a
+        *cause* of one inverts that -- and on a compute node a non-zero exit
+        feeds clustermgtd's relaunch loop toward protected mode."""
+        r = self._rendered(cluster_params)
+        block = r[r.index("PCM_CW_AGENT_CFG="):]
+        block = block[:block.index("# Set values for some important")]
+        assert "|| echo" in block, "the python edit is not guarded"
+        assert block.count("|| echo") >= 2, (
+            "both the config edit and the agent restart must be non-fatal")
+        assert "2>/dev/null" in block
+        # Skipped whole when the agent is not where it was, rather than
+        # assuming the path.
+        assert 'if [ -f "$PCM_CW_AGENT_CFG" ]' in block
+
+    def test_it_is_not_gated_on_node_type(self, cluster_params):
+        """A compute node is the case that needs this most: it fails, is
+        relaunched, and takes its logs with it every time."""
+        r = self._rendered(cluster_params)
+        head = r.index('NODE_TYPE="HeadNode"')
+        blk = r.index("PCM_CW_AGENT_CFG=")
+        between = r[head:blk]
+        assert '== "HeadNode"' not in between.split("PCM_CW_AGENT_CFG")[0][-400:], (
+            "the block sits inside a head-node gate")
