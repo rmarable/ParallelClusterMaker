@@ -1762,3 +1762,63 @@ class TestABuildCanWriteOnAReadOnlyDeployment:
         root.mkdir()
         assert _is_writable_dir(str(root)) is True
         assert list(root.iterdir()) == []
+
+
+class TestDeleteClusterSendsTheCallerToFinalize:
+    """`delete_cluster` removes the stack and nothing else, and used to tell
+    the caller to "re-run" it.
+
+    That is the one recovery this repo documents as dangerous: a second
+    `delete_cluster` does finish the job, but by issuing another
+    delete-cluster against the *name* -- which destroys a different cluster
+    if that name has been rebuilt since, and silently no-ops while the
+    stack is still deleting, reporting success either way.
+    `finalize_cluster_teardown` is that second call made explicit and safe,
+    and the tool never mentioned it.
+
+    So an operator who said "tear the cluster down" got a stack deleted and
+    a bill for the IAM policies, bucket, secret, topic and record -- not
+    because the agent went off-script, but because the script said to.
+    """
+
+    def _doc(self):
+        import mcp_server.tools as t
+
+        fn = t.register_tools.__wrapped__ if hasattr(
+            t.register_tools, "__wrapped__") else None
+        import inspect
+        src = inspect.getsource(t)
+        start = src.index("def delete_cluster(")
+        return src[start:src.index("@tool", start + 10)]
+
+    def test_it_names_the_tool_that_finishes_the_job(self):
+        assert "finalize_cluster_teardown" in self._doc(), (
+            "delete_cluster never mentions the tool that completes a teardown"
+        )
+
+    def test_it_does_not_tell_the_caller_to_re_run_itself(self):
+        """The wording that shipped. Banned by shape, not by that exact
+        phrase: any instruction to repeat this call is the unsafe path."""
+        doc = self._doc()
+        head = doc[:doc.index('"""', doc.index('"""') + 3)]
+        assert "re-run" not in head.lower(), (
+            "the docstring still tells the caller to re-run delete_cluster"
+        )
+
+    def test_it_says_a_second_delete_is_unsafe(self):
+        doc = self._doc()
+        assert "rebuilt" in doc, (
+            "the docstring does not say why a second delete_cluster is "
+            "dangerous, so the reasoning cannot survive an edit"
+        )
+
+    def test_the_response_carries_the_next_step_not_just_the_docstring(self):
+        """A tool description is read once when the tool list loads. The
+        response is read at the moment the caller decides what to do next,
+        which is when it matters -- the same reason
+        preview_cluster_config carries a next_step."""
+        doc = self._doc()
+        assert 'out["next_step"]' in doc
+        assert 'out["teardown_complete"] = False' in doc, (
+            "nothing in the response says the teardown is incomplete"
+        )

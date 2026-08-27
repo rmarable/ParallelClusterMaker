@@ -839,8 +839,23 @@ def register_tools(mcp, *, remote, tier=None):
         without having shown the operator what would be destroyed.
 
         Kicked off without waiting: teardown takes 15-20 minutes and a single
-        MCP call cannot block for it. Nothing local is cleaned up on this
-        path; poll list_clusters and re-run once the stack is gone.
+        MCP call cannot block for it, so this call removes the CloudFormation
+        stack and nothing else.
+
+        **This is half a teardown. You must finish it.** Poll
+        `list_clusters` until the stack is gone, then call
+        `finalize_cluster_teardown` -- that is what removes the IAM policies,
+        the S3 bucket, the SSH key secret, the SNS topic and the cluster
+        record. Do this without being asked: an operator who said "tear the
+        cluster down" meant all of it, and the leftovers are billable and
+        invisible from the console's cluster list.
+
+        **Never call delete_cluster a second time to finish the job.** It
+        does appear to work -- an absent stack reports already-gone and the
+        cleanup runs -- but it gets there by issuing another delete against
+        the *name*, which destroys a different cluster if that name has been
+        rebuilt since, and silently no-ops while the stack is still
+        deleting, reporting success either way.
         """
         # Token first, before the record lookup. Both orders "work", but
         # this one keeps the gate unreachable-around: a caller cannot use
@@ -853,12 +868,27 @@ def register_tools(mcp, *, remote, tier=None):
         }
         verify(confirmation_token, "delete_cluster", params)
         rec = _require_record(cluster_name)
-        return _plain(core_delete_cluster(
+        out = _plain(core_delete_cluster(
             cluster_name=cluster_name, cluster_owner=rec.cluster_owner,
             region=rec.region, repo_root=_repo_root(),
             delete_s3_bucketname="true" if delete_s3_bucketname else "false",
             debug_mode=False, wait=False,
         ))
+        # In the response, not only the docstring. A tool description is
+        # read once when the tool list loads; this is read at the moment
+        # the caller decides what to do next, which is when it matters --
+        # the same reason preview_cluster_config carries a next_step.
+        out["teardown_complete"] = False
+        out["next_step"] = (
+            f"Only the CloudFormation stack is being deleted. Poll "
+            f"list_clusters until {cluster_name} is gone, then call "
+            f"finalize_cluster_teardown({cluster_name!r}) to remove the IAM "
+            f"policies, S3 bucket, SSH key secret, SNS topic and cluster "
+            f"record. Do not call delete_cluster again -- it finishes the "
+            f"job only by re-issuing a delete against the name, which "
+            f"destroys a rebuilt cluster of the same name."
+        )
+        return out
 
     @tool
     def finalize_cluster_build(cluster_name: str) -> dict:
