@@ -1114,6 +1114,12 @@ works except the four that reach Node — `create_cluster`,
 `apply_cluster_update`, `preview_cluster_config` and
 `finalize_cluster_build`.
 
+The rest of this section is how to install, connect, operate and remove
+the server.  The constraints that shaped it — why no tool may block, why
+there are four Lambda tiers with different permissions, why one deployment
+serves exactly one region, and what has actually been exercised against
+AWS — are in **[docs/README-MCP-SERVER.md](docs/README-MCP-SERVER.md)**.
+
 ### Installing into Claude Code
 
 Run this **from the repo root** — the shell expands `$(pwd)` before Claude
@@ -1223,6 +1229,50 @@ them on demand from the vars file, so they are never missing.
 If the pull fails, the node warns rather than dying, and
 `/opt/parallelcluster/shared/staging_tree_pulled` is absent — the cluster
 runs fine, but the convenience tree on the head node is not there.
+
+### Finishing a teardown
+
+You don't.  `delete_cluster` returns as soon as CloudFormation accepts the
+delete — it has to, for the same reason `create_cluster` does — but unlike
+a build, nothing is left for you to do.
+
+The server fires an asynchronous poller at itself, which watches the stack
+and runs the rest of the cleanup once it is gone: the IAM policies, the S3
+bucket, the SSH key secret, the SNS topic, the EC2 keypair and the cluster
+record.  **Read `auto_finalize_started` in the response.**  When it is
+true the teardown is handled and there is nothing to poll for.
+
+When it is false — the poller could not be started, or you are on the
+local stdio server where there is no Lambda to invoke —
+`finalize_cluster_teardown` does the same work on demand.  That is the
+only case where it is yours to call.
+
+**Never call `delete_cluster` a second time to finish the job.**  It
+appears to work, because an absent stack reports already-gone and the
+cleanup runs, but it gets there by issuing another delete against the
+*name* — which destroys a different cluster if that name has since been
+rebuilt.
+
+### When a build fails
+
+A remote `create_cluster` takes longer to return than API Gateway will
+wait, so the call may time out while the build is still running — and if
+the build fails, the error reaches your client no more reliably than the
+success would.
+
+**`get_build_status` is where the reason is.**  Every failure after the
+first AWS resource is created records the stage, the reason and the time,
+and this reads it back.  Call it whenever a build did not obviously
+succeed; the answer is there, not in the response to the call that failed.
+
+One field to read carefully: `failed: false` is only meaningful alongside
+`store_reachable: true`.  If the shared state store could not be read, the
+tool says so rather than reporting no failure — it will not tell you a
+build succeeded when it does not know.
+
+A failure that got far enough to create anything cleans up after itself,
+so retrying once you have addressed the cause is safe.  The record is
+cleared by the next successful build of the same name, and by teardown.
 
 ### Node.js
 
