@@ -314,8 +314,10 @@ standing constraints for local development.
   describe means keep waiting, never "it is gone". An Event invoke has no
   caller, so every terminal outcome must reach the retained log group and
   the cluster's SNS topic — silence would be indistinguishable from
-  success. Verified live on `connector4`: two calls, then
-  `retry`×3 → `finalize success=True`, every resource to zero unaided.
+  success. Verified live twice, most strongly on `joker` — a cluster that
+  reached `CREATE_COMPLETE` and ran: `retry`×3 → `finalize success=True`,
+  clearing bucket, 5 policies, 4 roles, SNS, secret, keypair and both
+  store objects 31s after the stack vanished, unaided.
   **When the behavior changed, three instruction surfaces did not** — the
   preview's `next_step`, the `finalization_token` it minted for a call that
   had stopped taking one, and `delete_cluster`'s docstring, still saying
@@ -343,7 +345,8 @@ standing constraints for local development.
 - **The build runs in an Event invocation; validation does not.** 43.6s
   against a 29s ceiling, ~39s of it CDK synthesis, so nothing of ours
   decomposes to fit — the tool validates (token, params, AZ via EC2),
-  fires at its own function, returns. Measured 36,572 → 198 ms.
+  fires at its own function, returns. Measured 36,572 → 177 ms, with the
+  build completing in a separate invocation 27.9s later (`joker`).
   `build_started` is a returned fact, false locally where the build runs
   inline. **`core_create_cluster` is deliberately not split** at the lock,
   the correct seam: 1,851 lines is more risk than the outcome needs, so

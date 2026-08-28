@@ -212,16 +212,27 @@ deployed and completely torn down, which exercised the forced ECR
 repository delete, the Cognito domain-before-pool ordering, and policy
 version pruning.
 
-The asynchronous build has been exercised as far as its mechanism goes:
-measured at 198 ms against the 36,572 ms the same call took inline, with
-the background invocation firing and its failure recorded and readable
-through `get_build_status`. It has **not** yet carried a build to
-completion — the first one died immediately on a wrong argument in the
-runner, which is what proved the failure-recording half. Standing the
-transport up also found three IAM grants that existed in a template but
-not in the account, or named the wrong function; each had passed a green
-test that asked whether a component could exceed its blast radius rather
-than reach it.
+One cluster exercised both asynchronous paths end to end from a
+browser-based client, and is the clearest evidence here.
+
+Building it, the tool call returned in **177 ms** where the same call had
+taken **36,572 ms** inline; a separate background invocation reported
+success 27.9 seconds later, and the stack reached `CREATE_COMPLETE`
+normally from there. Tearing it down, `delete_cluster` returned on
+CloudFormation's acceptance and the poller went `retry` three times, then
+`finalize success=True` — removing an S3 bucket, five IAM policies, four
+roles, an SNS topic, an SSH key secret, an EC2 keypair and two state
+objects. Thirty-one seconds separated the stack disappearing from the last
+of those going, and nothing issued a second call.
+
+An earlier build died immediately on a wrong argument in the runner, which
+is what proved the failure-recording half: the reason was in the store a
+second later and readable through `get_build_status`.
+
+Standing the transport up to test this found three IAM grants that existed
+in a template but not in the account, or named the wrong function. Each
+had passed a green test, and each of those tests asked whether a component
+could exceed its blast radius rather than whether it could reach it.
 
 Not exercised: the poll loop's bounds against a genuinely slow teardown.
 The stacks torn down so far reached `DELETE_COMPLETE` in about three
