@@ -1644,13 +1644,31 @@ class TestFinalizeClusterBuildIsReachableRemotely:
         assert TOOL_TIERS["finalize_cluster_build"] == "stack-mutation-node"
         assert TOOL_TIERS["finalize_cluster_build"] == TOOL_TIERS["create_cluster"]
 
-    def test_the_local_only_set_is_still_the_three_that_cannot_work(self):
+    def test_the_local_only_set_is_still_only_what_cannot_work_remotely(self):
         """Vacuity guard: the fix is removing one name, not emptying the
-        set. Each of these is useless remotely rather than merely awkward --
-        two write files the operator later needs, one blocks past Lambda's
-        ceiling."""
-        assert tools_mod._LOCAL_ONLY == frozenset(
-            {"rotate_cluster_key", "manage_grafana_tunnel", "apply_queue_config"})
+        set. Each of these is useless remotely rather than merely awkward
+        -- two write files the operator later needs, one blocks past
+        Lambda's ceiling, and `run_readwrite_slurm_command` submits
+        arbitrary code, which must never be reachable from an
+        internet-facing Lambda.
+
+        `run_readonly_slurm_command` was here and is deliberately no
+        longer: it reaches nodes through an SSM document whose
+        allowedValues admit three read commands, so the grant that carries
+        it cannot express anything else. That distinction -- bounded by
+        the document rather than by our own code -- is what let the read
+        half port while the write half stayed.
+
+        An equality pin rather than a subset check, because adding a name
+        here has to be argued: `check_cluster_health` and
+        `diagnose_cluster` are SSH-dependent too and are deliberately
+        absent, being mostly boto3 with an SSH tail where a partial answer
+        is still useful.
+        """
+        assert tools_mod._LOCAL_ONLY == frozenset({
+            "rotate_cluster_key", "manage_grafana_tunnel", "apply_queue_config",
+            "run_readwrite_slurm_command",
+        })
 
     @pytest.mark.asyncio
     async def test_it_takes_no_confirmation_token(self, monkeypatch):

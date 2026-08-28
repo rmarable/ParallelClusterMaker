@@ -77,7 +77,7 @@ fi
 rm -f "${AWS_STDERR}"
 
 if [[ ! -f "$SSH_KEYPAIR" ]]; then
-    echo "Local key not found — retrieving from Secrets Manager..."
+    echo "Local key not found — retrieving from Secrets Manager..." >&2
     bash "${RETRIEVE_SCRIPT}" --out "${SSH_KEYPAIR}"
 fi
 
@@ -93,7 +93,7 @@ fi
 # without the plugin still gets a shell, and is told why.
 if [[ -n "${INSTANCE_ID}" && "${INSTANCE_ID}" != "None" ]] \
    && command -v session-manager-plugin >/dev/null 2>&1; then
-    echo "Connecting to ${NODE_LABEL} of {{ cluster_name }} via SSM (${INSTANCE_ID})..."
+    echo "Connecting to ${NODE_LABEL} of {{ cluster_name }} via SSM (${INSTANCE_ID})..." >&2
     exec ssh -i "${SSH_KEYPAIR}" -o StrictHostKeyChecking=accept-new \
         -o ProxyCommand="aws ssm start-session --target %h --document-name AWS-StartSSHSession --parameters portNumber=%p --region {{ region }}" \
         "${EC2_USER}@${INSTANCE_ID}" "$@"
@@ -105,5 +105,5 @@ if ! command -v session-manager-plugin >/dev/null 2>&1; then
     echo "    brew install --cask session-manager-plugin" >&2
 fi
 
-echo "Connecting to ${NODE_LABEL} of {{ cluster_name }} at ${HEAD_NODE_IP}..."
+echo "Connecting to ${NODE_LABEL} of {{ cluster_name }} at ${HEAD_NODE_IP}..." >&2
 exec ssh -i "${SSH_KEYPAIR}" -o StrictHostKeyChecking=accept-new "${EC2_USER}@${HEAD_NODE_IP}" "$@"

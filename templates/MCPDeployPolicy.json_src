@@ -184,6 +184,19 @@
             ],
             "Effect": "Allow",
             "Resource": "*"
+        },
+        {
+            "Sid": "SlurmReadOnlyDocumentLifecycle",
+            "Action": [
+                "ssm:CreateDocument",
+                "ssm:GetDocument",
+                "ssm:DescribeDocument",
+                "ssm:UpdateDocument",
+                "ssm:UpdateDocumentDefaultVersion",
+                "ssm:DeleteDocument"
+            ],
+            "Resource": "arn:aws:ssm:*:<AWS_ACCOUNT_ID>:document/PClusterMakerSlurmReadOnly",
+            "Effect": "Allow"
         }
     ]
 }

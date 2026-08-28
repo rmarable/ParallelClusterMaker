@@ -22,7 +22,11 @@ here because it is the sort of thing that reads as arbitrary later:
   * manage_grafana_tunnel -- an SSH local port forward is only meaningful
     when "local" means the caller's own machine, which a remote dispatcher
     categorically is not. There is no safely-useful remote version.
-  * access_cluster -- same reasoning: it execs an interactive ssh session.
+  * access_cluster is not in this set because it is not a tool at all.
+    `access_cluster.py` is a CLI entry point that execs an interactive
+    ssh session, which has no expression as a tool-call result. The
+    remote-capable sibling is `resolve_access_info`, which returns the
+    connection details rather than the connection.
   * apply_queue_config -- the only exclusion that is a hard limit rather
     than a judgment. It blocks for up to ~30 minutes across three causally
     dependent phases, and every remote tool runs in a Lambda whose maximum
@@ -50,6 +54,8 @@ from pcluster_core import (
     _read_cluster_record,
     _validate_cluster_name,
     core_get_build_status,
+    core_run_slurm_command,
+    core_run_slurm_command_via_ssm,
     core_add_queue,
     core_apply_cluster_update,
     core_apply_queue_config,
@@ -89,6 +95,7 @@ _LOCAL_ONLY = frozenset({
     "rotate_cluster_key",
     "manage_grafana_tunnel",
     "apply_queue_config",
+    "run_readwrite_slurm_command",
 })
 
 # Cluster parameters the remote transport will not set, at the operator's
@@ -514,6 +521,67 @@ def register_tools(mcp, *, remote, tier=None):
         return core_get_build_status(
             cluster_name, s3=s3, locks_bucketname=bucket
         )
+
+    @tool
+    def run_readonly_slurm_command(cluster_name: str, command: str,
+                                   switches: str = "") -> dict:
+        """Run sinfo, squeue or scontrol show on a cluster and return the output.
+
+        Targets the login node when the cluster has one and the head node
+        otherwise. Switches are passed through -- phrase them as real
+        flags (`-N -l`, `--format='%.18i %.9P'`).
+
+        `scontrol` always runs as `scontrol show`; the subcommand is
+        written by this tool, not taken from the caller, so a write cannot
+        arrive through it.
+
+        A non-zero exit is a *result*, not an error: `success` is false and
+        Slurm's own stderr is returned. Local-only, because there is
+        nothing to degrade to without SSH.
+        """
+        rec = _require_record(cluster_name)
+        if remote:
+            # No SSH key on a Lambda, so the connection goes through the
+            # constrained SSM document instead. What bounds the command is
+            # the document's own allowedValues/allowedPattern, enforced by
+            # SSM before dispatch -- not this process.
+            return _plain(core_run_slurm_command_via_ssm(
+                cluster_record=rec, cluster_name=cluster_name,
+                command=command, switches=switches,
+            ))
+        return _plain(core_run_slurm_command(
+            cluster_data_root=os.path.join(_repo_root(), "active_clusters"),
+            cluster_name=cluster_name, cluster_record=rec,
+            repo_root=_repo_root(), command=command, switches=switches,
+            script=None, allow_writes=False,
+        ))
+
+    @tool
+    def run_readwrite_slurm_command(cluster_name: str, command: str,
+                                    switches: str = "",
+                                    script: str = "") -> dict:
+        """Run sbatch, scancel or scontrol on a cluster.
+
+        **`script` is arbitrary code.** For `sbatch` it is required and is
+        the job script body -- read a local file or an attachment and pass
+        its contents. `--wrap` is refused, so this parameter is the only
+        channel that carries code.
+
+        `scancel` takes explicit job IDs only. The filter switches (`-u`,
+        `--state`, `--partition`, ...) cancel *sets* of jobs and are
+        refused: this tool's commands are composed by a model, not typed
+        by the operator who would have inspected them.
+
+        On `sbatch`, `job_id` carries the submitted ID. If `timed_out` is
+        true the submission state is unknown -- check with squeue rather
+        than retrying.
+        """
+        return _plain(core_run_slurm_command(
+            cluster_data_root=os.path.join(_repo_root(), "active_clusters"),
+            cluster_name=cluster_name, cluster_record=_require_record(cluster_name),
+            repo_root=_repo_root(), command=command, switches=switches,
+            script=script or None, allow_writes=True,
+        ))
 
     @tool
     def check_cluster_health(cluster_name: str) -> dict:

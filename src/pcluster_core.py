@@ -15,6 +15,7 @@ import hashlib
 import json
 import logging
 import os
+import base64
 import re
 import shlex
 import shutil
@@ -2537,6 +2538,99 @@ def _mcp_policy_templates():
     return seen
 
 
+SLURM_READONLY_DOCUMENT = "PClusterMakerSlurmReadOnly"
+
+# Switches cross to the node base64-encoded, one argument per line. That
+# is not obfuscation -- it is what makes a Slurm format string safe to
+# pass. `sinfo -o "%P|%a|%D"` is the standard machine-readable idiom and
+# the pipe there is a field separator, but substituted as plain text into
+# a shell line it is a pipeline. A charset that excludes it rejects real
+# usage (found on a live cluster); one that permits it is an injection.
+#
+# Encoded, neither is true: the parameter is drawn from an alphabet with
+# no shell meaning, and on the node the decoded values reach the command
+# through a bash array, where metacharacters are literal because an
+# expanded variable is never re-parsed. Argument boundaries survive too,
+# so `--format=%.18i %.9P` stays one argument.
+_SLURM_B64_ALPHABET = re.compile(r"\A[A-Za-z0-9+/=]*\Z")
+
+
+def _encode_slurm_switches(switches):
+    """shlex-split switches to a base64 newline-separated argument list."""
+    args = shlex.split(switches or "")
+    if not args:
+        return ""
+    return base64.b64encode("\n".join(args).encode()).decode()
+
+
+def _slurm_document_body(templates_dir=None):
+    """The SSM document, read from templates/ rather than built here.
+
+    One source: the same file is what `create-document` uploads and what
+    the tests assert against, so a constraint cannot be tightened in one
+    and not the other.
+    """
+    d = templates_dir or os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "templates")
+    with open(os.path.join(d, "ssm_slurm_readonly.json")) as fh:
+        return fh.read()
+
+
+def ensure_slurm_document(ssm, *, templates_dir=None, verbose=True):
+    """Create or update the read-only Slurm SSM document. Returns its name.
+
+    Converges like the tier policies do: an existing document whose
+    content differs is updated, because the constraints in it *are* the
+    security boundary and a stale one silently keeps an older, looser set.
+    Compared against AWS's own copy, never a stored hash -- a marker
+    beside the truth is a second source that can be wrong about it.
+    """
+    body = _slurm_document_body(templates_dir)
+    try:
+        cur = ssm.get_document(Name=SLURM_READONLY_DOCUMENT)
+        if json.loads(cur["Content"]) == json.loads(body):
+            if verbose:
+                print(f"  Reusing existing SSM document: {SLURM_READONLY_DOCUMENT}")
+            return SLURM_READONLY_DOCUMENT
+        ssm.update_document(
+            Name=SLURM_READONLY_DOCUMENT, Content=body,
+            DocumentFormat="JSON", DocumentVersion="$LATEST",
+        )
+        ssm.update_document_default_version(
+            Name=SLURM_READONLY_DOCUMENT,
+            DocumentVersion=ssm.describe_document(
+                Name=SLURM_READONLY_DOCUMENT)["Document"]["LatestVersion"],
+        )
+        if verbose:
+            print(f"  Updated SSM document: {SLURM_READONLY_DOCUMENT}")
+        return SLURM_READONLY_DOCUMENT
+    except Exception as e:
+        if type(e).__name__ not in ("InvalidDocument", "DocumentNotFound"):
+            if "does not exist" not in str(e):
+                raise
+    ssm.create_document(
+        Name=SLURM_READONLY_DOCUMENT, Content=body,
+        DocumentType="Command", DocumentFormat="JSON",
+    )
+    if verbose:
+        print(f"  Created SSM document: {SLURM_READONLY_DOCUMENT}")
+    return SLURM_READONLY_DOCUMENT
+
+
+def delete_slurm_document(ssm, *, verbose=True):
+    """Remove the document. Safe when it was never created."""
+    try:
+        ssm.delete_document(Name=SLURM_READONLY_DOCUMENT)
+        if verbose:
+            print(f"  Deleted SSM document: {SLURM_READONLY_DOCUMENT}")
+        return True
+    except Exception as e:
+        if verbose and type(e).__name__ not in ("InvalidDocument",):
+            print(f"  SSM document {SLURM_READONLY_DOCUMENT}: "
+                  f"{type(e).__name__}")
+        return False
+
+
 def _setup_mcp_infra(iam, *, aws_account_id, region, mcp_user_pool_id, templates_dir=None,
                      update_policies=False):
     """Create the MCP Lambda execution roles and their managed policies.
@@ -4390,7 +4484,7 @@ def check_ssh(head_ip, ssh_keypair, ec2_user, timeout):
 _SLURM_BIN_DIR = "/opt/slurm/bin"
 
 
-def _slurm_remote_cmd(script):
+def _slurm_remote_cmd(script, *, exec_prefix=True):
     """A remote command that survives ssh's re-parsing and finds Slurm.
 
     Two things go wrong without this, and the second was live for as long
@@ -4415,7 +4509,14 @@ def _slurm_remote_cmd(script):
     a banner from any fragment lands in the output _classify_sinfo_nodes
     parses, where an unreadable line counts as an unusable node.
     """
-    return ["bash", "-c", shlex.quote(f"export PATH={_SLURM_BIN_DIR}:$PATH; exec {script}")]
+    # `exec` replaces the shell with a single command, which saves a
+    # process for the one-command callers this was written for. A compound
+    # script is not a single command: `exec tmp="$(mktemp)"; ...` makes
+    # bash try to execute a program named `tmp=/home/ubuntu/.pcm-...`,
+    # which is what sbatch did on a live node. Compound callers pass
+    # exec_prefix=False.
+    _run = f"exec {script}" if exec_prefix else script
+    return ["bash", "-c", shlex.quote(f"export PATH={_SLURM_BIN_DIR}:$PATH; {_run}")]
 
 
 def check_slurm(head_ip, ssh_keypair, ec2_user, timeout):
@@ -5240,6 +5341,367 @@ def core_exec_access_script(*, cluster_data_root, cluster_name, node_type):
     env = dict(os.environ, ACCESS_NODE_TYPE=node_type)
     result = subprocess.run(["bash", access_script], env=env)
     return result.returncode
+
+
+# sacct is deliberately absent. It is a read and would fit here, but
+# ParallelCluster does not enable Slurm accounting storage by default --
+# verified on a stock cluster, where `sacct` is installed and answers
+# "Slurm accounting storage is disabled" with no job history at all. A
+# tool that cannot answer on a default cluster is worse than no tool,
+# because its emptiness reads as "no jobs ran". Revisit if slurmdbd is
+# ever configured by this toolkit; `squeue -j <id>` covers the live case
+# in the meantime, and answers a different question from "did it finish".
+_READONLY_SLURM_COMMANDS = ("sinfo", "squeue", "scontrol")
+_READWRITE_SLURM_COMMANDS = ("sbatch", "scancel", "scontrol")
+
+# sbatch --wrap=<cmd> submits an arbitrary shell command with no script
+# file, which would make *switches* an arbitrary-code channel while
+# `script` is merely the documented one. Refusing it keeps the threat
+# model coherent: exactly one parameter carries code.
+_SBATCH_REFUSED_SWITCHES = ("--wrap",)
+
+# scancel's filter switches cancel *sets* of jobs. The model composes
+# these, not the operator, so a plausible-looking filter destroys work
+# nobody inspected. Explicit job IDs only.
+_SCANCEL_REFUSED_SWITCHES = (
+    "-u", "--user", "--state", "-t", "--partition", "-p",
+    "--qos", "-q", "--name", "-n", "--account", "-A", "--nodelist", "-w",
+)
+
+
+@dataclass(frozen=True)
+class SlurmCommandResult:
+    cluster_name: str
+    node_type: str
+    command: str
+    exit_code: int
+    stdout: str
+    stderr: str
+    success: bool
+    job_id: str | None = None
+    timed_out: bool = False
+    truncated: bool = False
+
+
+def _validate_slurm_command(command, switches, script, *, allow_writes):
+    """Return (argv, error). argv is the remote command as a token list.
+
+    `scontrol show` is *emitted*, never inferred. Deciding "is this a
+    read?" by scanning for the first non-flag token reimplements getopt
+    against a parser we do not control, and they only have to disagree
+    once: scontrol's -M takes a separate-word argument, so
+    `-M show update NodeName=x State=DRAIN` reads as `show` to such a
+    scanner and executes `update`. Writing `show` ourselves makes the
+    disagreement structurally impossible.
+    """
+    allowed = _READWRITE_SLURM_COMMANDS if allow_writes else _READONLY_SLURM_COMMANDS
+    if command not in allowed:
+        return None, (
+            f"ERROR: '{command}' is not available here. This tool runs: "
+            f"{', '.join(allowed)}."
+        )
+    try:
+        tokens = shlex.split(switches or "")
+    except ValueError as e:
+        return None, f"ERROR: could not parse switches: {e}"
+
+    if command == "scontrol":
+        if not allow_writes:
+            # Emitted, not inspected. `show` goes immediately after the
+            # binary, so it is always the first non-option argument and no
+            # caller token can displace it -- unlike scanning for "the
+            # first non-flag token", which scontrol's own getopt disagrees
+            # with the moment -M appears (it takes a separate-word value).
+            #
+            # -M/--cluster is refused outright as well. It redirects the
+            # query to a different cluster, which a tool scoped to a named
+            # one has no business doing, and refusing it removes the
+            # getopt question rather than reasoning about it.
+            for i, t in enumerate(tokens):
+                if t in ("-M", "--cluster") or t.startswith("--cluster="):
+                    return None, (
+                        "ERROR: -M/--cluster is refused. This tool runs "
+                        "against the cluster you named."
+                    )
+            return ["scontrol", "show"] + tokens, None
+        if not tokens:
+            return None, (
+                "ERROR: scontrol needs a subcommand -- bare scontrol is "
+                "interactive and would hang."
+            )
+    if command == "sbatch":
+        if not script:
+            return None, (
+                "ERROR: sbatch needs a script. Pass the script body as the "
+                "`script` parameter; with none, sbatch reads its standard "
+                "input, which is not a channel this tool provides."
+            )
+        for t in tokens:
+            if any(t == r or t.startswith(r + "=") for r in _SBATCH_REFUSED_SWITCHES):
+                return None, (
+                    f"ERROR: {t.split('=')[0]} is refused. It submits an "
+                    f"arbitrary command with no script file; pass the work "
+                    f"as `script` instead."
+                )
+    if command == "scancel":
+        for t in tokens:
+            if any(t == r or t.startswith(r + "=") for r in _SCANCEL_REFUSED_SWITCHES):
+                return None, (
+                    f"ERROR: {t.split('=')[0]} cancels a set of jobs rather "
+                    f"than a named one, and is refused. Pass explicit job IDs."
+                )
+        if not tokens:
+            return None, "ERROR: scancel needs at least one job ID."
+    return [command] + tokens, None
+
+
+def _sbatch_script_payload(argv, script):
+    """The remote shell for an sbatch whose body arrives as a string.
+
+    Base64, not a heredoc: a heredoc must pick a terminator the script
+    does not contain, survive parameter expansion and preserve line
+    structure, while the base64 alphabet contains no shell-meaningful
+    character, so all three problems cease to exist rather than being
+    escaped around.
+
+    `base64 -d`, never `-D`: macOS accepts `-D` and Linux does not, so the
+    wrong spelling passes on the developer's machine and fails on every
+    node.
+    """
+    body = script.replace("\r\n", "\n").replace("\r", "\n")
+    b64 = base64.b64encode(body.encode()).decode()
+    quoted = " ".join(shlex.quote(a) for a in argv)
+    # Cleanup is unconditional: chaining it behind && leaves the file when
+    # decoding fails and returns base64's status as though it were Slurm's.
+    return (
+        f'tmp="$(mktemp "$HOME/.pcm-sbatch-XXXXXX")"; '
+        f"printf %s {shlex.quote(b64)} | base64 -d > \"$tmp\"; "
+        f'rc=0; {quoted} "$tmp" || rc=$?; '
+        f'rm -f "$tmp"; exit $rc'
+    )
+
+
+_SBATCH_JOB_ID = re.compile(r"Submitted batch job (\d+)")
+
+
+def core_run_slurm_command(
+    *, cluster_data_root, cluster_name, cluster_record, repo_root,
+    command, switches="", script=None, allow_writes,
+    node_type=None, timeout=120, runner=None,
+):
+    """Run one Slurm command on a cluster node and return its output.
+
+    The connection is not reimplemented here. `access_cluster.<name>.sh`
+    already carries the SSM ProxyCommand, the plugin-absent fallback, key
+    retrieval from Secrets Manager and the rc/stderr diagnosis that tells
+    a failed AWS call apart from a stopped node -- and
+    `core_ensure_generated_script`'s own docstring says a second copy of
+    that in Python would drift. So this renders the script if absent, sets
+    ACCESS_NODE_TYPE, and hands it the command.
+
+    `runner` is an injectable seam for tests and for a future transport;
+    it takes (argv, env, timeout) and returns (rc, stdout, stderr).
+    """
+    argv, err = _validate_slurm_command(
+        command, switches, script, allow_writes=allow_writes
+    )
+    if err:
+        raise PClusterMakerError(err)
+
+    rec = cluster_record if isinstance(cluster_record, dict) else _dc_asdict(cluster_record)
+    if node_type is None:
+        node_type, node_err = _resolve_access_node_type(
+            rec, cluster_name, login_node_requested=False, head_node_requested=False
+        )
+        if node_err:
+            raise PClusterMakerError(node_err)
+
+    core_ensure_generated_script(
+        cluster_data_root=cluster_data_root, cluster_name=cluster_name,
+        repo_root=repo_root, template="access_cluster.j2",
+        dest_name=f"access_cluster.{cluster_name}.sh",
+    )
+    access_script = _resolve_access_script_path(cluster_data_root, cluster_name)
+
+    if command == "sbatch":
+        remote = _sbatch_script_payload(argv, script)
+        remote_cmd = _slurm_remote_cmd(remote, exec_prefix=False)
+    else:
+        remote_cmd = _slurm_remote_cmd(shlex.join(argv))
+
+    env = dict(os.environ, ACCESS_NODE_TYPE=node_type)
+    run = runner or _run_access_script
+    try:
+        rc, out, errtext = run(["bash", access_script] + remote_cmd, env, timeout)
+    except subprocess.TimeoutExpired:
+        return SlurmCommandResult(
+            cluster_name=cluster_name, node_type=node_type,
+            command=shlex.join(argv), exit_code=124, stdout="", stderr=(
+                f"ERROR: {command} did not finish within {timeout}s and was "
+                f"stopped here. Whether it reached the cluster is unknown -- "
+                f"check with squeue rather than retrying, which could submit "
+                f"or cancel a second time."
+            ),
+            success=False, timed_out=True,
+        )
+
+    job_id = None
+    if command == "sbatch":
+        m = _SBATCH_JOB_ID.search(out or "")
+        job_id = m.group(1) if m else None
+    return SlurmCommandResult(
+        cluster_name=cluster_name, node_type=node_type, command=shlex.join(argv),
+        exit_code=rc, stdout=out, stderr=errtext, success=(rc == 0), job_id=job_id,
+    )
+
+
+_SSM_TERMINAL = ("Success", "Cancelled", "TimedOut", "Failed", "Cancelling")
+
+# get-command-invocation truncates stdout at exactly 24000 bytes with an
+# in-band marker; measured, not assumed. squeue on a busy cluster exceeds
+# it, so the caller is told rather than left to wonder why output stops.
+_SSM_STDOUT_LIMIT = 24000
+
+
+def run_slurm_via_ssm(
+    *, ssm, ec2, cluster_name, node_type, command, switches, ec2_user,
+    timeout=25, poll=1.0, sleeper=None,
+):
+    """Run one read-only Slurm command through the constrained SSM document.
+
+    Returns (rc, stdout, stderr, truncated).
+
+    The document -- not this function -- is what bounds the command set,
+    the switch charset and the user: SSM enforces `allowedValues` and
+    `allowedPattern` server-side before dispatch (verified live), so they
+    hold against any caller of the document, including one holding this
+    tier's role. Validating here as well is the early, friendlier refusal,
+    not the boundary.
+
+    `timeout` defaults below the 29s API Gateway integration ceiling,
+    which is already the REST maximum. A command that outlives it returns
+    timed-out rather than blocking until the caller is cut off.
+    """
+    import time
+
+    sleeper = sleeper or time.sleep
+    instance_id = _slurm_node_instance_id(ec2, cluster_name, node_type)
+    if not instance_id:
+        raise PClusterMakerError(
+            f"ERROR: no running {node_type} found for cluster "
+            f"{cluster_name!r}. This is not a Slurm problem -- check "
+            f"./list_pcluster.py --live."
+        )
+    resp = ssm.send_command(
+        DocumentName=SLURM_READONLY_DOCUMENT,
+        InstanceIds=[instance_id],
+        Parameters={
+            "command": [command],
+            "switchesB64": [_encode_slurm_switches(switches)],
+            "user": [ec2_user],
+        },
+    )
+    command_id = resp["Command"]["CommandId"]
+
+    deadline = time.time() + timeout
+    while True:
+        try:
+            inv = ssm.get_command_invocation(
+                CommandId=command_id, InstanceId=instance_id
+            )
+        except Exception as e:
+            # InvocationDoesNotExist is normal for a moment after send.
+            if type(e).__name__ != "InvocationDoesNotExist":
+                raise
+            inv = {"Status": "Pending"}
+        if inv.get("Status") in _SSM_TERMINAL:
+            out = inv.get("StandardOutputContent", "") or ""
+            err = inv.get("StandardErrorContent", "") or ""
+            rc = inv.get("ResponseCode", -1)
+            return rc, out, err, len(out) >= _SSM_STDOUT_LIMIT
+        if time.time() >= deadline:
+            return 124, "", (
+                f"ERROR: the command did not finish within {timeout}s. It may "
+                f"still be running on the node; command id {command_id}."
+            ), False
+        sleeper(poll)
+
+
+def _slurm_node_instance_id(ec2, cluster_name, node_type):
+    """The running instance of one node type, by PCluster's own tags.
+
+    The same three-tag filter access_cluster.j2 uses, because it is
+    PCluster's tagging contract rather than this toolkit's choice.
+    """
+    resp = ec2.describe_instances(Filters=[
+        {"Name": "tag:parallelcluster:cluster-name", "Values": [cluster_name]},
+        {"Name": "tag:parallelcluster:node-type", "Values": [node_type]},
+        {"Name": "instance-state-name", "Values": ["running"]},
+    ])
+    for r in resp.get("Reservations", []):
+        for i in r.get("Instances", []):
+            return i.get("InstanceId")
+    return None
+
+
+def core_run_slurm_command_via_ssm(
+    *, cluster_record, cluster_name, command, switches="",
+    node_type=None, timeout=25, ssm=None, ec2=None,
+):
+    """The remote half of run_readonly_slurm_command.
+
+    Same validation and the same return shape as the SSH path, so the two
+    transports are one tool rather than two that happen to share a name.
+    Read-only by construction: it can only invoke a document whose
+    allowedValues admit three commands.
+    """
+    argv, err = _validate_slurm_command(command, switches, None, allow_writes=False)
+    if err:
+        raise PClusterMakerError(err)
+
+    rec = cluster_record if isinstance(cluster_record, dict) else _dc_asdict(cluster_record)
+    region = rec.get("region")
+    if node_type is None:
+        node_type, node_err = _resolve_access_node_type(
+            rec, cluster_name, login_node_requested=False, head_node_requested=False
+        )
+        if node_err:
+            raise PClusterMakerError(node_err)
+    ec2_user = rec.get("ec2_user") or _resolve_ec2_user(rec.get("base_os", ""))
+    if ec2_user not in _VALID_EC2_USERS:
+        raise PClusterMakerError(
+            f"ERROR: {ec2_user!r} is not a login user this toolkit creates. "
+            f"The SSM document accepts only {sorted(_VALID_EC2_USERS)}."
+        )
+
+    rc, out, errtext, truncated = run_slurm_via_ssm(
+        ssm=ssm or boto3.client("ssm", region_name=region),
+        ec2=ec2 or boto3.client("ec2", region_name=region),
+        cluster_name=cluster_name, node_type=node_type,
+        command=command, switches=switches, ec2_user=ec2_user,
+        timeout=timeout,
+    )
+    if truncated:
+        errtext = (errtext + "\n" if errtext else "") + (
+            f"NOTE: output was truncated at {_SSM_STDOUT_LIMIT} bytes by SSM. "
+            f"Narrow the query -- for example with --partition or --states."
+        )
+    return SlurmCommandResult(
+        cluster_name=cluster_name, node_type=node_type,
+        command=shlex.join(argv), exit_code=rc, stdout=out, stderr=errtext,
+        success=(rc == 0), timed_out=(rc == 124), truncated=truncated,
+    )
+
+
+def _run_access_script(argv, env, timeout):
+    """Run the access script, capturing output. stdin is closed: sbatch and
+    a bare scontrol read from it, and on the stdio server the inherited
+    stdin is the MCP JSON-RPC channel."""
+    r = subprocess.run(
+        argv, env=env, capture_output=True, text=True,
+        stdin=subprocess.DEVNULL, timeout=timeout,
+    )
+    return r.returncode, r.stdout, r.stderr
 
 
 # ---------------------------------------------------------------------------

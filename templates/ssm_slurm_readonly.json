@@ -1,0 +1,43 @@
+{
+  "schemaVersion": "2.2",
+  "description": "Run one read-only Slurm command on a ParallelClusterMaker node. The command set and the login user are closed sets enforced by SSM before dispatch; the switches arrive base64-encoded, so the parameter itself cannot carry a shell metacharacter and the decoded values are never re-parsed by the shell.",
+  "parameters": {
+    "command": {
+      "type": "String",
+      "description": "The Slurm command. scontrol always runs as 'scontrol show' -- the subcommand is written by this document, never taken from a parameter.",
+      "allowedValues": ["sinfo", "squeue", "scontrol"]
+    },
+    "switchesB64": {
+      "type": "String",
+      "description": "Switches as base64 of a newline-separated argument list. Base64 rather than plain text because a Slurm format string legitimately contains characters the shell would otherwise act on -- '-o %P|%a|%D' is the standard machine-readable idiom, and a pipe there is a field separator, not a pipeline. Encoded, the parameter is drawn from an alphabet with no shell meaning at all.",
+      "default": "",
+      "allowedPattern": "^[A-Za-z0-9+/=]*$"
+    },
+    "user": {
+      "type": "String",
+      "description": "The cluster login user to run as. SSM executes as root; these commands have no business doing so, and $HOME would be wrong.",
+      "allowedValues": ["ubuntu", "ec2-user"]
+    }
+  },
+  "mainSteps": [
+    {
+      "action": "aws:runShellScript",
+      "name": "runSlurmReadOnlyCommand",
+      "inputs": {
+        "timeoutSeconds": "60",
+        "runCommand": [
+          "#!/bin/bash",
+          "set -f",
+          "export PATH=/opt/slurm/bin:$PATH",
+          "ARGS=()",
+          "if [ -n \"{{ switchesB64 }}\" ]; then",
+          "  mapfile -t ARGS < <(printf %s '{{ switchesB64 }}' | base64 -d)",
+          "fi",
+          "SUB=()",
+          "if [ \"{{ command }}\" = \"scontrol\" ]; then SUB=(show); fi",
+          "exec runuser -u {{ user }} -- {{ command }} \"${SUB[@]}\" ${ARGS[@]+\"${ARGS[@]}\"}"
+        ]
+      }
+    }
+  ]
+}

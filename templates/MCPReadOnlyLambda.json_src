@@ -70,6 +70,39 @@
             ],
             "Effect": "Allow",
             "Resource": "*"
+        },
+        {
+            "Sid": "SlurmReadOnlyViaConstrainedDocument",
+            "Action": [
+                "ssm:SendCommand"
+            ],
+            "Resource": [
+                "arn:aws:ssm:*:<AWS_ACCOUNT_ID>:document/PClusterMakerSlurmReadOnly"
+            ],
+            "Effect": "Allow"
+        },
+        {
+            "Sid": "SlurmReadOnlyOnClusterNodesOnly",
+            "Action": [
+                "ssm:SendCommand"
+            ],
+            "Resource": [
+                "arn:aws:ec2:*:<AWS_ACCOUNT_ID>:instance/*"
+            ],
+            "Condition": {
+                "StringLike": {
+                    "ssm:resourceTag/parallelcluster:cluster-name": "*"
+                }
+            },
+            "Effect": "Allow"
+        },
+        {
+            "Sid": "SlurmReadOnlyResult",
+            "Action": [
+                "ssm:GetCommandInvocation"
+            ],
+            "Resource": "*",
+            "Effect": "Allow"
         }
     ]
 }

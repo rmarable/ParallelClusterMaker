@@ -45,6 +45,7 @@ FUNCTION_NAMES = {
 TOOL_TIERS = {
     "list_clusters": "read-only",
     "get_build_status": "read-only",
+    "run_readonly_slurm_command": "read-only",
     "check_cluster_health": "read-only",
     "get_cost_report": "read-only",
     "diagnose_cluster": "read-only",

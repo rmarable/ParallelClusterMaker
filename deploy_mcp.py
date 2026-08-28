@@ -60,6 +60,8 @@ from pcluster_core import (  # noqa: E402
     _derive_mcp_user_pool_name,
     _mcp_boundary_name,
     _setup_mcp_infra,
+    ensure_slurm_document,
+    delete_slurm_document,
 )
 
 # Lambda refuses a direct upload over 50 MB; every zip tier here exceeds it
@@ -344,6 +346,8 @@ def main():
         # always holds an image, so this needs force=True.
         if delete_ecr_repository(boto3.client("ecr", region_name=args.region)):
             print(f"  Deleted ECR repository: {IMAGE_REPOSITORY}")
+        delete_slurm_document(
+            boto3.client("ssm", region_name=args.region))
         result = _delete_mcp_infra(iam, aws_account_id=account, verbose=True)
         delete_cognito_pool(cog, pool_name_prefix=pool_prefix)
 
@@ -405,6 +409,10 @@ def main():
             boto3.client("iam"), aws_account_id=account, region=args.region,
             mcp_user_pool_id=pool_id, update_policies=args.update_policies,
         )
+        # The document is the read-only Slurm tool's security boundary:
+        # SSM enforces its allowedValues/allowedPattern before dispatch,
+        # so it bounds the tier's role rather than merely our code.
+        ensure_slurm_document(boto3.client("ssm", region_name=args.region))
         print()
 
     for tier in tiers:
