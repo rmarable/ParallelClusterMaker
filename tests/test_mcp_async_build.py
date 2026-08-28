@@ -232,6 +232,40 @@ class TestAFailureNobodyWaitsOnIsStillFound:
         assert seen["repo_root"] == "/tmp/repo"
         assert seen["wait"] is False, "a background build must never wait"
 
+    @pytest.mark.parametrize("exc,expected", [
+        (TypeError("f() missing 1 required positional argument"),
+         "TypeError: f() missing 1 required positional argument"),
+        (SystemExit("ERROR: that AZ does not exist"),
+         "SystemExit: ERROR: that AZ does not exist"),
+        (RuntimeError(""), "RuntimeError: no detail"),
+    ])
+    def test_the_recorded_message_names_the_type_exactly_once(
+            self, monkeypatch, exc, expected):
+        """`pcluster_exception_detail` returns "<Type>: <detail>" -- a whole
+        message, not a fragment. Prefixing the type onto it again produced
+        `TypeError: TypeError: ...` in the first failure this ever
+        recorded. Cosmetic alone, corrosive in aggregate: the record exists
+        to be believed by someone who was not there to watch the build, and
+        a message that looks broken invites doubt about the rest of it.
+
+        The third case is the one a naive fix breaks: an exception whose
+        str() is empty must still say something, since that is the shape
+        every pcluster.lib exception has.
+        """
+        from mcp_server import build_runner
+
+        monkeypatch.setattr(build_runner, "_record_failure_if_unrecorded",
+                            lambda p, m: True)
+
+        def _boom(p, r):
+            raise exc
+
+        out = build_runner.run_build(self._payload(), create=_boom)
+        assert out["message"] == expected
+        assert out["message"].count(type(exc).__name__) == 1, (
+            f"the type name appears more than once in {out['message']!r}"
+        )
+
     def test_a_success_records_nothing(self, monkeypatch):
         from mcp_server import build_runner
 

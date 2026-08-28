@@ -103,9 +103,18 @@ def run_build(payload, *, create=None):
         # reached the caller; here it would vanish.
         from pcluster_core import pcluster_exception_detail
 
-        detail = (pcluster_exception_detail(e) if isinstance(e, Exception)
-                  else "") or str(e) or type(e).__name__
-        message = f"{type(e).__name__}: {detail}".strip().rstrip(":")
+        # pcluster_exception_detail already returns "<Type>: <detail>" -- it
+        # is a whole message, not a fragment to prefix. Prefixing it again
+        # produced "TypeError: TypeError: ..." on the first real failure this
+        # recorded. A doubled type name is cosmetic on its own and corrosive
+        # in aggregate: the record exists to be believed by someone who was
+        # not there to watch the build.
+        if isinstance(e, Exception):
+            message = pcluster_exception_detail(e)
+        else:
+            # SystemExit and friends are not Exceptions, so the helper does
+            # not apply; str() carries the message the validator printed.
+            message = f"{type(e).__name__}: {str(e) or 'no detail'}"
         _log(payload, "exception", message)
         _record_failure_if_unrecorded(payload, message)
         return {"started": True, "success": False, "message": message}
