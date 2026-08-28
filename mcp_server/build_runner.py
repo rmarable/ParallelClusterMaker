@@ -78,14 +78,18 @@ def run_build(payload, *, create=None):
     region = payload.get("region")
 
     if create is None:
-        from pcluster_core import (
-            MakeClusterParams, core_create_cluster, resolve_writable_repo_root,
-        )
+        from pcluster_core import MakeClusterParams, core_create_cluster
+
+        # _repo_root(), not resolve_writable_repo_root(): that one takes the
+        # root as an argument and this module has none to give. The helper
+        # in tools.py resolves and caches it, which is what every other tool
+        # already uses.
+        from mcp_server.tools import _repo_root
 
         def create(p, r):
             return core_create_cluster(
                 params=MakeClusterParams(**p), region=r,
-                repo_root=payload.get("repo_root") or resolve_writable_repo_root(),
+                repo_root=payload.get("repo_root") or _repo_root(),
                 cluster_build_command=(
                     f"mcp create_cluster {p.get('cluster_name', '')}"),
                 ansible_version="", wait=False,

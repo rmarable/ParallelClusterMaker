@@ -1255,10 +1255,11 @@ rebuilt.
 
 ### When a build fails
 
-A remote `create_cluster` takes longer to return than API Gateway will
-wait, so the call may time out while the build is still running — and if
-the build fails, the error reaches your client no more reliably than the
-success would.
+A build takes longer than any single call can wait, so `create_cluster`
+starts it in the background and returns. Read `build_started`: when it is
+true the build is underway, and `list_clusters(live=True)` will show it
+shortly. Nothing is waiting on the build, so a failure has no call to
+report itself to.
 
 **`get_build_status` is where the reason is.**  Every failure after the
 first AWS resource is created records the stage, the reason and the time,

@@ -340,12 +340,23 @@ standing constraints for local development.
   **three** outcomes distinct — an unreachable store reports
   `store_reachable: false`, never "no failure". Cleared on the next
   successful build and by teardown.
-- **A remote `create_cluster` outlives the 29s gateway ceiling** — measured
-  43.6s, ~39s of it `pcluster create-cluster`'s CDK synthesis, so no
-  decomposition of our work fits it. The caller is cut off while the build
-  succeeds, so the vars-file guard asks whether the cluster is **already
-  building** first: "a vars file already exists" reads as a dead run whose
-  remedy is to clean up, and that inference was drawn against a live one.
+- **The build runs in an Event invocation; validation does not.** 43.6s
+  against a 29s ceiling, ~39s of it CDK synthesis, so nothing of ours
+  decomposes to fit — the tool validates (token, params, AZ via EC2),
+  fires at its own function, returns. Measured 36,572 → 198 ms.
+  `build_started` is a returned fact, false locally where the build runs
+  inline. **`core_create_cluster` is deliberately not split** at the lock,
+  the correct seam: 1,851 lines is more risk than the outcome needs, so
+  pre-lock validation now fails where nobody waits and `build_runner`
+  records it, reading first since a post-lock failure has already named
+  its stage. **`MaximumRetryAttempts` must be 0** — AWS retries a failed
+  Event invoke twice and a retried build launches a second cluster; the
+  lock is the inner guard. **A tier must be granted invoke on *itself***:
+  the grant named `-stack-mutation` while the build tier is
+  `-stack-mutation-node`, so every remote build fell back to inline,
+  visible only as one log line since the fallback is silent. The
+  vars-file guard still asks whether the cluster is **already building**
+  before treating a leftover file as a dead run.
 - **Access must not depend on the build having finished.**
   `access_cluster.py` and `grafana_tunnel.py` render their generated
   script on demand via `core_ensure_generated_script` when one is absent —

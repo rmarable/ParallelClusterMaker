@@ -198,6 +198,40 @@ class TestAFailureNobodyWaitsOnIsStillFound:
         assert out["success"] is False
         assert seen, "a sys.exit in the background left no record at all"
 
+    def test_the_real_closure_runs_at_least_once(self, monkeypatch):
+        """Every other test here injects `create`, so the default closure --
+        the one production uses -- was never executed, and it called
+        `resolve_writable_repo_root()` with no arguments against a signature
+        that takes the root positionally. It raised TypeError on the first
+        real remote build, after the whole async mechanism had worked.
+
+        The repo's own rule: when a test stubs the object under test, at
+        least one test must drive the real one. This stubs the *core* and
+        lets the closure itself run, so a wrong call inside it fails here
+        rather than in a background invocation nobody is watching.
+        """
+        import mcp_server.build_runner as br
+
+        seen = {}
+
+        class _R:
+            success = True
+            message = "cluster created"
+
+        def _core(**kw):
+            seen.update(kw)
+            return _R()
+
+        monkeypatch.setattr("pcluster_core.core_create_cluster", _core)
+        monkeypatch.setattr("mcp_server.tools._repo_root", lambda: "/tmp/repo")
+        monkeypatch.setattr("pcluster_core.MakeClusterParams", dict)
+
+        out = br.run_build(self._payload())
+        assert out["success"] is True
+        assert seen["region"] == "us-east-1"
+        assert seen["repo_root"] == "/tmp/repo"
+        assert seen["wait"] is False, "a background build must never wait"
+
     def test_a_success_records_nothing(self, monkeypatch):
         from mcp_server import build_runner
 

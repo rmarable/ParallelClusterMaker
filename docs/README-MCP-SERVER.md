@@ -47,10 +47,23 @@ add one queue. The caller failed at 29.4 seconds while the update
 completed — so a naive retry would have submitted a second update against
 a stack already updating.
 
-**`create_cluster` does not fit and cannot be made to.** It measured
+**`create_cluster` does not fit, and cannot be made to.** It measured
 **43.6 seconds**, of which roughly 39 are ParallelCluster's own CDK
 synthesis of the CloudFormation template. That is not our work to
-decompose. The call returns a timeout while the build proceeds normally.
+decompose.
+
+**So the build runs where nothing is waiting on it.** The tool validates
+what it can — the confirmation token, the parameters, and the availability
+zone, resolved by asking EC2, which also proves it exists — then fires an
+asynchronous invocation at its own function and returns. Measured: the
+call that took 36,572 ms now takes **198 ms**. Read `build_started` in the
+response; when it is true the build is underway and `list_clusters` will
+show it in a minute or two.
+
+Locally there is no function to invoke and no gateway ceiling to duck
+under, so the stdio server builds inline and an operator watching a
+terminal gets the progress output. `build_started` is false there, and
+that difference is reported rather than inferred.
 
 Two consequences worth knowing:
 
@@ -185,10 +198,6 @@ clusters are not.
 
 ## Known limits
 
-**A remote `create_cluster` returns a timeout, not a result.** The build
-proceeds and succeeds; `list_clusters` shows it and `get_build_status`
-explains any failure. But the call itself cannot report either.
-
 **Login node root volumes cannot be sized or encrypted.** ParallelCluster
 exposes no configuration key for it, so they always use the AMI default.
 This is an upstream limit, not a toolkit one.
@@ -202,6 +211,17 @@ objects with no second call from anyone. The transport itself has been
 deployed and completely torn down, which exercised the forced ECR
 repository delete, the Cognito domain-before-pool ordering, and policy
 version pruning.
+
+The asynchronous build has been exercised as far as its mechanism goes:
+measured at 198 ms against the 36,572 ms the same call took inline, with
+the background invocation firing and its failure recorded and readable
+through `get_build_status`. It has **not** yet carried a build to
+completion — the first one died immediately on a wrong argument in the
+runner, which is what proved the failure-recording half. Standing the
+transport up also found three IAM grants that existed in a template but
+not in the account, or named the wrong function; each had passed a green
+test that asked whether a component could exceed its blast radius rather
+than reach it.
 
 Not exercised: the poll loop's bounds against a genuinely slow teardown.
 The stacks torn down so far reached `DELETE_COMPLETE` in about three
