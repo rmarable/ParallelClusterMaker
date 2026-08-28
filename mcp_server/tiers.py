@@ -44,6 +44,7 @@ FUNCTION_NAMES = {
 # so a test can tell "not built yet" from "silently dropped".
 TOOL_TIERS = {
     "list_clusters": "read-only",
+    "get_build_status": "read-only",
     "check_cluster_health": "read-only",
     "get_cost_report": "read-only",
     "diagnose_cluster": "read-only",

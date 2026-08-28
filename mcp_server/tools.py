@@ -49,6 +49,7 @@ from pcluster_core import (
     PClusterMakerError,
     _read_cluster_record,
     _validate_cluster_name,
+    core_get_build_status,
     core_add_queue,
     core_apply_cluster_update,
     core_apply_queue_config,
@@ -453,6 +454,27 @@ def register_tools(mcp, *, remote, tier=None):
             region_filter=region, owner_filter=owner, live=live,
         )
         return [dataclasses.asdict(e) for e in entries]
+
+    @tool
+    def get_build_status(cluster_name: str) -> dict:
+        """Why a cluster build failed, for a caller who never saw the error.
+
+        A remote create_cluster measures 43.6s against API Gateway's 29s
+        integration timeout -- already the REST maximum -- so the caller is
+        disconnected before the return value exists, and the message it
+        carries reaches nobody. Every failure after the first AWS mutation
+        therefore records itself in the shared store, and this reads it
+        back.
+
+        Call it whenever a build did not obviously succeed: the reason is
+        here, not in the response to the call that failed. Read
+        `store_reachable` before believing `failed: false` -- an
+        unreachable store cannot tell you a build succeeded.
+        """
+        s3, bucket = _record_store()
+        return core_get_build_status(
+            cluster_name, s3=s3, locks_bucketname=bucket
+        )
 
     @tool
     def check_cluster_health(cluster_name: str) -> dict:

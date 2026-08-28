@@ -4234,6 +4234,20 @@ class TestABuildFailureSaysWhatWentWrong:
         tree = ast.parse(src)
         fn = next(n for n in ast.walk(tree)
                   if isinstance(n, ast.FunctionDef) and n.name == "core_create_cluster")
+        # The message may be built inline or bound to a name first -- the
+        # failure paths now compute it once so the same text can be
+        # published to the store *and* returned. Following the binding is
+        # what keeps this a test of the property rather than of the
+        # syntax: rejecting the variable form would have failed a refactor
+        # that strictly improved the thing being tested.
+        bound = {
+            t.id
+            for n in ast.walk(fn) if isinstance(n, ast.Assign)
+            for t in n.targets
+            if isinstance(t, ast.Name) and isinstance(n.value, ast.Call)
+            and isinstance(n.value.func, ast.Name)
+            and n.value.func.id == "_build_failure_message"
+        }
         built = 0
         for node in ast.walk(fn):
             if not isinstance(node, ast.Call):
@@ -4242,10 +4256,14 @@ class TestABuildFailureSaysWhatWentWrong:
                     and node.func.id == "CreateClusterResult"):
                 continue
             for kw in node.keywords:
-                if kw.arg == "message" and isinstance(kw.value, ast.Call):
-                    f = kw.value.func
-                    if isinstance(f, ast.Name) and f.id == "_build_failure_message":
-                        built += 1
+                if kw.arg != "message":
+                    continue
+                v = kw.value
+                if isinstance(v, ast.Call) and isinstance(v.func, ast.Name) \
+                        and v.func.id == "_build_failure_message":
+                    built += 1
+                elif isinstance(v, ast.Name) and v.id in bound:
+                    built += 1
         assert built >= 3, (
             f"only {built} create-failure paths build a real message; "
             f"the others still return a constant"
@@ -4348,3 +4366,238 @@ class TestARetryAfterTheGatewayTimeoutIsNotToldToCleanUp:
             "the status check runs after the guidance returns, so it never "
             "runs at all"
         )
+
+
+class TestAFailedBuildLeavesARecordTheCallerCanRead:
+    """The message was already good; nobody received it.
+
+    `_build_failure_message` names the exception type and uses
+    `pcluster_exception_detail`, and every `CreateClusterResult` carries a
+    message -- verified by AST, not by eye. But a remote `create_cluster`
+    measures 43.6s against API Gateway's 29s integration timeout, which is
+    already the REST maximum, so the caller is disconnected roughly
+    fourteen seconds before the return value exists. A better sentence
+    returned into a closed socket is still nothing.
+
+    So the outcome is written somewhere durable instead. These tests pin
+    the properties that make that worth relying on.
+    """
+
+    _S3 = TestTheClusterRecordStore._S3
+
+    def test_the_key_sits_under_the_prefix_iam_already_grants(self):
+        """`vars/`, not `builds/`. `MCPStateAccess*` grants `vars/*` and
+        `configs/*` and nothing else, so a new prefix reads perfectly in a
+        checkout and is AccessDenied on every deployed call -- a mistake
+        this repo has already made once, which is why the vars file rides
+        beside the record rather than anywhere tidier."""
+        from pcluster_core import _build_failure_key
+
+        key = _build_failure_key("osiris")
+        assert key.startswith("vars/"), key
+        assert "osiris" in key
+
+    def test_every_post_lock_failure_path_records_itself(self):
+        """The structural one. A failure path that returns without
+        publishing is invisible again, and it is invisible in exactly the
+        way that cost two rounds of diagnosis -- so this walks the AST
+        rather than trusting that the four sites stay wired.
+
+        Scoped to failures after the lock is taken, which is where the
+        first AWS mutation happens: before it, nothing was created and the
+        call returns fast enough that the caller still holds the
+        connection.
+        """
+        import ast
+        import io
+        import os
+
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        src = io.open(
+            os.path.join(root, "src", "pcluster_core.py"), encoding="utf-8"
+        ).read()
+        fn = next(n for n in ast.walk(ast.parse(src))
+                  if isinstance(n, ast.FunctionDef)
+                  and n.name == "core_create_cluster")
+        lock_line = min(
+            n.lineno for n in ast.walk(fn)
+            if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+            and n.func.attr == "client"
+            and any(isinstance(a, ast.Constant) and a.value == "s3"
+                    for a in n.args)
+        )
+        published = sorted(
+            n.lineno for n in ast.walk(fn)
+            if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+            and n.func.id == "_publish_build_failure"
+        )
+        failures = sorted(
+            n.lineno for n in ast.walk(fn)
+            if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+            and n.func.id == "CreateClusterResult"
+            and any(k.arg == "success"
+                    and isinstance(k.value, ast.Constant)
+                    and k.value.value is False for k in n.keywords)
+            and n.lineno > lock_line
+        )
+        assert failures, "no post-lock failure path found -- the scan is broken"
+        for line in failures:
+            near = [p for p in published if 0 < line - p <= 12]
+            assert near, (
+                f"the failure path returning at line {line} publishes no "
+                f"build-failure record, so a caller cut off at 29s has no "
+                f"way to learn why"
+            )
+
+    def test_recording_the_failure_can_never_replace_the_failure(self):
+        """Best-effort, and that is load-bearing rather than lax. The
+        caller is already on an error path and the printed output still
+        reaches CloudWatch; raising here would swap a real diagnosis for a
+        bookkeeping error. Same rule as the teardown poller's SNS notify.
+        """
+        from pcluster_core import _publish_build_failure
+
+        class _Boom:
+            def put_object(self, **kw):
+                raise RuntimeError("store is on fire")
+
+        ok = _publish_build_failure(
+            _Boom(), locks_bucketname="b", cluster_name="osiris",
+            region="us-east-1", cluster_owner="rmarable",
+            stage="IAM setup", message="AccessDenied",
+        )
+        assert ok is False
+
+    def test_no_store_is_a_no_op_rather_than_a_crash(self):
+        from pcluster_core import _publish_build_failure
+
+        assert _publish_build_failure(
+            None, locks_bucketname="b", cluster_name="osiris",
+            region="us-east-1", cluster_owner="rmarable",
+            stage="IAM setup", message="x") is False
+
+    def test_what_is_stored_is_what_is_read_back(self):
+        from pcluster_core import (
+            _publish_build_failure, get_build_failure, delete_build_failure,
+        )
+
+        s3 = self._S3()
+        _publish_build_failure(
+            s3, locks_bucketname="b", cluster_name="osiris",
+            region="us-east-1", cluster_owner="rmarable",
+            stage="IAM setup",
+            message="AccessDenied: iam:CreatePolicy on pclustermaker-policy-*",
+            serial="osiris-202608280001",
+        )
+        rec = get_build_failure(s3, locks_bucketname="b", cluster_name="osiris")
+        assert rec["stage"] == "IAM setup"
+        assert "AccessDenied" in rec["message"]
+        assert rec["cluster_serial_number"] == "osiris-202608280001"
+        assert rec["region"] == "us-east-1"
+        assert rec["failed_at"]
+
+        delete_build_failure(s3, locks_bucketname="b", cluster_name="osiris")
+        assert get_build_failure(
+            s3, locks_bucketname="b", cluster_name="osiris") is None
+
+    def test_deleting_an_absent_record_is_not_an_error(self):
+        """Called from the success path without a preceding read, so it has
+        to be safe on a key that was never written -- which is the vast
+        majority of builds."""
+        from pcluster_core import delete_build_failure
+
+        delete_build_failure(
+            self._S3(), locks_bucketname="b", cluster_name="never-failed")
+
+    def test_a_successful_build_clears_a_stale_record(self):
+        """Left behind, a previous attempt's reason answers the next
+        'why did my build fail?' -- with the wrong answer, confidently."""
+        import ast
+        import io
+        import os
+
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        src = io.open(
+            os.path.join(root, "src", "pcluster_core.py"), encoding="utf-8"
+        ).read()
+        fn = next(n for n in ast.walk(ast.parse(src))
+                  if isinstance(n, ast.FunctionDef)
+                  and n.name == "_publish_cluster_state")
+        called = {n.func.id for n in ast.walk(fn)
+                  if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)}
+        assert "delete_build_failure" in called, (
+            "the one publisher every create-path success goes through does "
+            "not clear a stale build-failure record"
+        )
+
+    def test_teardown_clears_it_too(self):
+        import ast
+        import io
+        import os
+
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        src = io.open(
+            os.path.join(root, "src", "pcluster_core.py"), encoding="utf-8"
+        ).read()
+        fn = next(n for n in ast.walk(ast.parse(src))
+                  if isinstance(n, ast.FunctionDef)
+                  and n.name == "delete_cluster_record_step")
+        called = {n.func.id for n in ast.walk(fn)
+                  if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)}
+        assert "delete_build_failure" in called
+
+
+class TestGetBuildStatusAnswersHonestly:
+    """The read side. Its whole value is that a caller can trust the
+    answer, so the three outcomes must stay distinguishable."""
+
+    _S3 = TestTheClusterRecordStore._S3
+
+    def test_an_unreachable_store_is_never_reported_as_success(self):
+        """The one that matters. Absence of evidence is not evidence of
+        success: reporting `failed: false` for a store we could not read
+        would be exactly the false reassurance this tool exists to
+        replace."""
+        from pcluster_core import core_get_build_status
+
+        out = core_get_build_status("osiris", s3=None, locks_bucketname=None)
+        assert out["failed"] is False
+        assert out["store_reachable"] is False
+        assert "not reachable" in out["detail"]
+
+    def test_a_reachable_store_with_no_record_says_so_differently(self):
+        from pcluster_core import core_get_build_status
+
+        out = core_get_build_status(
+            "osiris", s3=self._S3(), locks_bucketname="b")
+        assert out["failed"] is False
+        assert out["store_reachable"] is True
+        assert "list_clusters" in out["detail"]
+
+    def test_a_recorded_failure_is_reported_with_its_stage(self):
+        from pcluster_core import _publish_build_failure, core_get_build_status
+
+        s3 = self._S3()
+        _publish_build_failure(
+            s3, locks_bucketname="b", cluster_name="osiris",
+            region="us-east-1", cluster_owner="rmarable",
+            stage="cluster launch", message="Exception launching cluster: boom")
+        out = core_get_build_status("osiris", s3=s3, locks_bucketname="b")
+        assert out["failed"] is True
+        assert out["store_reachable"] is True
+        assert out["stage"] == "cluster launch"
+        assert "boom" in out["message"]
+
+    def test_it_validates_the_cluster_name(self):
+        """The name becomes an S3 key. Validation lives in the core, not
+        the shim, for the same reason build_make_cluster_params does."""
+        from pcluster_core import core_get_build_status
+
+        with pytest.raises(BaseException):
+            core_get_build_status(
+                "../../etc/passwd", s3=self._S3(), locks_bucketname="b")
+
+    def test_it_is_read_only_and_on_the_read_only_tier(self):
+        from mcp_server.tiers import TOOL_TIERS
+
+        assert TOOL_TIERS["get_build_status"] == "read-only"

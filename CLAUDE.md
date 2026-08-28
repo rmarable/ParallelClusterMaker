@@ -324,6 +324,22 @@ standing constraints for local development.
   return value, and it rots the same way. `next_step` and the docstring
   must agree, and the guard reads both. Bounds and reasoning:
   `mcp_server/completion.py`'s docstring.
+- **A build failure the caller never sees must still be written down.**
+  The message was never the defect — every `CreateClusterResult` carries
+  one — but a 43.6s call against a 29s ceiling disconnects the caller
+  before the return value exists, and no failure path recorded anything,
+  so CloudWatch was the only trace and a plain AccessDenied cost two
+  rounds. Every **post-lock** failure publishes via
+  `_publish_build_failure`; pre-lock ones created nothing and return while
+  the caller is still connected. Three rules: the key is
+  `vars/<name>.build-failure.json`, since `MCPStateAccess*` grants only
+  `vars/*` and `configs/*` and a new prefix is AccessDenied when deployed;
+  it is **not** the cluster record, which would make `list_clusters` report
+  a cluster that does not exist; and it never raises, the caller being
+  already on an error path. `core_get_build_status` reads it back and keeps
+  **three** outcomes distinct — an unreachable store reports
+  `store_reachable: false`, never "no failure". Cleared on the next
+  successful build and by teardown.
 - **A remote `create_cluster` outlives the 29s gateway ceiling** — measured
   43.6s, ~39s of it `pcluster create-cluster`'s CDK synthesis, so no
   decomposition of our work fits it. The caller is cut off while the build

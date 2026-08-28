@@ -1206,6 +1206,12 @@ def _publish_cluster_state(s3, *, locks_bucketname, cluster_name, repo_root):
         s3, locks_bucketname=locks_bucketname, cluster_name=cluster_name,
         repo_root=repo_root,
     )
+    # A build that got here succeeded, so any record of an earlier failure
+    # under this name is stale. Left behind, it would answer the next
+    # "why did my build fail?" with the previous attempt's reason.
+    delete_build_failure(
+        s3, locks_bucketname=locks_bucketname, cluster_name=cluster_name
+    )
 
 
 _S3_ABSENT_CODES = ("NoSuchKey", "NoSuchBucket", "404")
@@ -1279,6 +1285,146 @@ def get_cluster_vars_file(s3, *, locks_bucketname, cluster_name):
             return None
         raise
     return resp["Body"].read().decode()
+
+
+def _build_failure_key(cluster_name):
+    """Third sibling under `vars/`, for the same IAM reason as the other two.
+
+    Not `builds/`: `MCPStateAccess*` grants `vars/*` and `configs/*` and
+    nothing else, so a new prefix reads perfectly here and is AccessDenied
+    on every deployed call.
+    """
+    return f"vars/{cluster_name}.build-failure.json"
+
+
+def put_build_failure(s3, *, locks_bucketname, cluster_name, record):
+    """Record why a build failed, where a cut-off caller can still read it.
+
+    A remote `create_cluster` measures 43.6s against API Gateway's 29s
+    ceiling, so the caller is disconnected roughly fourteen seconds before
+    the return value exists. Every failure path already builds a good
+    message -- `_build_failure_message` names the exception type because a
+    pcluster.lib exception's `str()` is empty -- and every one of them
+    returned it into a socket nobody was holding. The only surviving trace
+    was stdout, which on a Lambda is CloudWatch, and diagnosing a plain
+    AccessDenied by hand cost two rounds.
+
+    This is deliberately not the cluster record: a failed build leaves no
+    cluster, and writing `vars/<name>.json` would make `list_clusters`
+    report one that does not exist.
+    """
+    body = json.dumps(record, sort_keys=True, default=str).encode()
+    s3.put_object(
+        Bucket=locks_bucketname, Key=_build_failure_key(cluster_name), Body=body
+    )
+
+
+def get_build_failure(s3, *, locks_bucketname, cluster_name):
+    """The stored failure record, or None when there is none."""
+    try:
+        resp = s3.get_object(
+            Bucket=locks_bucketname, Key=_build_failure_key(cluster_name)
+        )
+    except Exception as e:
+        if _is_missing_key_rejection(e) or type(e).__name__ in (
+            "NoSuchKey", "NoSuchBucket", "ClientError"
+        ):
+            return None
+        raise
+    try:
+        return json.loads(resp["Body"].read().decode())
+    except ValueError:
+        return None
+
+
+def delete_build_failure(s3, *, locks_bucketname, cluster_name):
+    """Clear a stale failure record. Safe on an absent key -- S3's
+    DeleteObject succeeds either way, which is what makes this callable
+    from the success path without a preceding read."""
+    with contextlib.suppress(Exception):
+        s3.delete_object(
+            Bucket=locks_bucketname, Key=_build_failure_key(cluster_name)
+        )
+
+
+def _publish_build_failure(s3, *, locks_bucketname, cluster_name, region,
+                           cluster_owner, stage, message, serial=None):
+    """Best-effort publish of a build failure. Never raises.
+
+    A failure to record the failure must not replace it: the caller is
+    already on an error path, and the printed output still reaches
+    CloudWatch. Same rule as `_notify` in the teardown completion runner,
+    and for the same reason -- this is the second-best record, not the
+    only one.
+    """
+    if s3 is None or not locks_bucketname:
+        return False
+    try:
+        put_build_failure(
+            s3, locks_bucketname=locks_bucketname, cluster_name=cluster_name,
+            record={
+                "cluster_name": cluster_name,
+                "region": region,
+                "cluster_owner": cluster_owner,
+                "cluster_serial_number": serial,
+                "stage": stage,
+                "message": message,
+                "failed_at": teardown_timestamp(),
+            },
+        )
+        return True
+    except Exception as _e:  # noqa: BLE001 - see docstring
+        print(f"WARNING: could not record the build failure: "
+              f"{type(_e).__name__}: {_e}", file=sys.stderr)
+        return False
+
+
+def core_get_build_status(cluster_name, *, s3, locks_bucketname):
+    """What a caller who never saw the error can still be told.
+
+    The three outcomes are deliberately distinguishable. A recorded
+    failure is reported with the stage that produced it. No record with a
+    reachable store means the build either succeeded or died in validation
+    before anything was created -- `list_clusters` separates those, and
+    saying so is better than implying success. An unreachable store is its
+    own answer: absence of evidence there is not evidence of success, and
+    reporting it as "no failure" would be a lie of exactly the kind this
+    tool exists to stop.
+    """
+    _validate_cluster_name(cluster_name)
+    if s3 is None or not locks_bucketname:
+        return {
+            "cluster_name": cluster_name, "failed": False,
+            "store_reachable": False,
+            "detail": "the shared record store is not reachable from here, "
+                      "so whether this build failed cannot be determined",
+        }
+    rec = get_build_failure(
+        s3, locks_bucketname=locks_bucketname, cluster_name=cluster_name
+    )
+    if not rec:
+        return {
+            "cluster_name": cluster_name, "failed": False,
+            "store_reachable": True,
+            "detail": "no build failure is recorded for this cluster in this "
+                      "account and region. Either the build succeeded, or it "
+                      "failed validation before anything was created -- "
+                      "list_clusters shows which.",
+        }
+    return {
+        "cluster_name": cluster_name, "failed": True,
+        "store_reachable": True,
+        "stage": rec.get("stage", ""),
+        "message": rec.get("message", ""),
+        "failed_at": rec.get("failed_at", ""),
+        "region": rec.get("region", ""),
+        "cluster_serial_number": rec.get("cluster_serial_number") or "",
+        "detail": (
+            "The build cleaned up what it had created, so retrying is safe "
+            "once the cause above is addressed. This record is cleared by "
+            "the next successful build of the same name, and by teardown."
+        ),
+    }
 
 
 def put_cluster_record(s3, *, locks_bucketname, cluster_name, record):
@@ -9591,10 +9737,17 @@ def core_create_cluster(*, params, repo_root, region, cluster_build_command, ans
             iam, ec2_iam_role, ec2_iam_policy, aws_account_id,
             enable_monitoring=enable_monitoring,
         )
+        _fail_msg = _build_failure_message("IAM role/policy setup failed", _iam_e)
+        _publish_build_failure(
+            _lock_s3, locks_bucketname=locks_bucketname,
+            cluster_name=cluster_name, region=region,
+            cluster_owner=cluster_owner, stage="IAM setup", message=_fail_msg,
+            serial=cluster_serial_number,
+        )
         s3_release_cluster_lock(_lock_s3, locks_bucketname=locks_bucketname, cluster_name=cluster_name)
         return CreateClusterResult(
             cluster_name=cluster_name, success=False, exit_code=1,
-            message=_build_failure_message("IAM role/policy setup failed", _iam_e),
+            message=_fail_msg,
         )
 
     try:
@@ -10077,10 +10230,17 @@ def core_create_cluster(*, params, repo_root, region, cluster_build_command, ans
             print(f"  Deleted IAM role: {ec2_iam_role}")
         with contextlib.suppress(FileNotFoundError):
             os.remove(cluster_serial_number_file)
+        _fail_msg = _build_failure_message("template render failed", _render_e)
+        _publish_build_failure(
+            _lock_s3, locks_bucketname=locks_bucketname,
+            cluster_name=cluster_name, region=region,
+            cluster_owner=cluster_owner, stage="template render", message=_fail_msg,
+            serial=cluster_serial_number,
+        )
         s3_release_cluster_lock(_lock_s3, locks_bucketname=locks_bucketname, cluster_name=cluster_name)
         return CreateClusterResult(
             cluster_name=cluster_name, success=False, exit_code=1,
-            message=_build_failure_message("template render failed", _render_e),
+            message=_fail_msg,
         )
 
     # Every remaining create_pcluster.yml task, wired straight to Python --
@@ -10140,6 +10300,15 @@ def core_create_cluster(*, params, repo_root, region, cluster_build_command, ans
             print(f"  Warning: could not delete role {ec2_iam_role}: {_e}")
         print("Run kill_pcluster.py to tear down any partial stack before retrying:")
         print(f"  ./kill_pcluster.py -N {cluster_name} -O {cluster_owner} -A {az}")
+        # The one failure the caller provably never sees: this is reached
+        # after `pcluster create-cluster` returns, and that call alone
+        # measured ~39s of the 43.6s total against a 29s gateway ceiling.
+        _publish_build_failure(
+            _lock_s3, locks_bucketname=locks_bucketname,
+            cluster_name=cluster_name, region=region,
+            cluster_owner=cluster_owner, stage="cluster launch",
+            message=reason, serial=cluster_serial_number,
+        )
         s3_release_cluster_lock(_lock_s3, locks_bucketname=locks_bucketname, cluster_name=cluster_name)
         # Returned, not exited -- and every call site returns it onward.
         # This is nested, so a bare return here would only leave the helper
@@ -10236,10 +10405,17 @@ def core_create_cluster(*, params, repo_root, region, cluster_build_command, ans
             os.remove(vars_file_path)
         shutil.rmtree(cluster_data_dir, ignore_errors=True)
         print(f"  Removed local state: {os.path.relpath(vars_file_path, repo_root)}")
+        _fail_msg = _build_failure_message("failed before cluster launch", _early_e)
+        _publish_build_failure(
+            _lock_s3, locks_bucketname=locks_bucketname,
+            cluster_name=cluster_name, region=region,
+            cluster_owner=cluster_owner, stage="pre-launch", message=_fail_msg,
+            serial=cluster_serial_number,
+        )
         s3_release_cluster_lock(_lock_s3, locks_bucketname=locks_bucketname, cluster_name=cluster_name)
         return CreateClusterResult(
             cluster_name=cluster_name, success=False, exit_code=1,
-            message=_build_failure_message("failed before cluster launch", _early_e),
+            message=_fail_msg,
         )
 
     # Print the pre-launch summary and open the Ctrl-C abort window right
@@ -11037,6 +11213,14 @@ def delete_cluster_record_step(s3, *, cf_delete_confirmed, locks_bucketname,
         )
     try:
         delete_cluster_record(
+            s3, locks_bucketname=locks_bucketname, cluster_name=cluster_name
+        )
+        # Any build-failure record under this name goes with it. A torn-down
+        # cluster leaving one behind would answer a later "why did my build
+        # fail?" with a reason from a cluster that no longer exists. This is
+        # suppressed rather than checked: it is housekeeping, and failing the
+        # record deletion over it would misreport the step that matters.
+        delete_build_failure(
             s3, locks_bucketname=locks_bucketname, cluster_name=cluster_name
         )
         return TeardownStepResult(name, True)

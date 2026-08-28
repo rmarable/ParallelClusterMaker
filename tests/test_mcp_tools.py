@@ -1001,8 +1001,15 @@ class TestTheStoreIsAddressedInTheClustersRegion:
         assert passed, "no call site passes a region"
         # The two legitimate bare calls: _load_records (enumeration) and
         # _require_record's fallback for a cluster with no local record.
-        assert len(bare) == 2, (
-            f"expected exactly 2 region-less _record_store() calls, found "
+        # Three, and the third is the same documented exemption as the
+        # other two: there is no cluster to ask for a region. get_build_status
+        # answers for a build that *failed*, so no cluster record exists to
+        # carry one -- requiring the caller to supply a region would mean
+        # demanding a detail from someone whose whole problem is not knowing
+        # what happened. _store_region() is right here for the reason one
+        # server manages one region.
+        assert len(bare) == 3, (
+            f"expected exactly 3 region-less _record_store() calls, found "
             f"{len(bare)} at lines {bare}"
         )
         assert os.path.basename(t.__file__) == "tools.py"
