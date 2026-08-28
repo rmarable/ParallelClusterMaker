@@ -150,6 +150,15 @@ Then, one command:
 ./deploy_mcp.py --bootstrap --create-user you@example.com
 ```
 
+> **Check the region before you run it.** `--region` defaults to
+> `AWS_REGION` if that variable is set, and to `us-east-1` otherwise. It
+> does **not** read `AWS_DEFAULT_REGION`, and it does not read the region
+> configured in your AWS profile. A server manages exactly one region by
+> design — each tier's IAM policy names a single bucket — so a transport
+> deployed into the wrong region cannot see your clusters at all. Pass
+> `--region` explicitly, or export `AWS_REGION`, if `us-east-1` is not
+> where you want it.
+
 That creates the IAM roles and policies (each under a permissions
 boundary), the Cognito user pool, the REST API with its Lambda authorizer
 and routes, the Cognito app client and Hosted UI domain, and a user to sign
@@ -191,7 +200,7 @@ claude.ai:
    address is a literal username rather than an alias.
 5. Approve the consent screen. Claude asks once per connector.
 
-The tool list should show **13** tools, or **16** once the container tier
+The tool list should show **13** tools, or **17** once the container tier
 is deployed. Asking Claude to list clusters is the quickest check — an
 **empty** answer is a successful one when no cluster exists.
 
@@ -254,7 +263,9 @@ it:
 ```
 
 Use `--runtime` to choose among several installed, or `--image-uri` to
-deploy an image built elsewhere and skip the build entirely.
+deploy an image built elsewhere and skip the build entirely. This command
+resolves its region the same way as the bootstrap above, so pass
+`--region` here too if you are not deploying to `us-east-1`.
 `./deploy_mcp.py --teardown` removes the repository along with everything
 else.
 
@@ -383,7 +394,7 @@ The generated policy (`parallelcluster-operator-pclustermaker`) covers the follo
 
 | Statement | Purpose |
 |---|---|
-| `IAMManagedPolicyLifecycle` | Create/delete the 4–5 cluster managed policies (head node + compute) |
+| `IAMManagedPolicyLifecycle` | Create/delete the 5–6 cluster managed policies (head node + compute; the sixth only when monitoring is enabled) |
 | `IAMListEntitiesForPolicy` | Enumerate what a `pclustermaker-policy-*` policy is attached to |
 | `IAMAttachDetachClusterPolicies` | Attach/detach those policies to the cluster IAM role; scoped to `pclustermaker-policy-*` policy ARNs only |
 | `IAMRoleLifecycle` | Create, delete, and configure the cluster EC2 IAM role; `PassRole` to EC2 |
@@ -402,6 +413,9 @@ The generated policy (`parallelcluster-operator-pclustermaker`) covers the follo
 | `CostExplorer` | `cost_pcluster.py` spend reporting |
 | `Route53ClusterHostedZone` | Private hosted zone lifecycle for cluster DNS; zone IDs are AWS-generated, so this cannot be scoped per cluster |
 | `STSCallerIdentity` | Account ID resolution |
+| `IAMClusterBoundaryBootstrapReadAndCreate` | Create and read `policy/pclustermaker-cluster-boundary`, the permissions boundary the head node role is created under. Its name falls outside the `pclustermaker-policy-*` wildcard above on purpose: an operator who can rewrite their own boundary does not really have one |
+| `IAMBoundClusterRoleOnly` | Set a role's permissions boundary, conditional on it being that boundary and no other |
+| `IAMDenyWeakeningTheClusterBoundary` | The one `Deny` in the document. Refuses any attempt to delete the boundary or detach it from a role |
 
 After generating the policy, attach it to your identity:
 
@@ -440,8 +454,9 @@ it to the identity that runs `deploy_mcp.py`, alongside the operator policy
 builds clusters and deploys the transport needs both.
 
 The name is deliberately **not** of the form `pclustermaker-mcp-policy-*`:
-that is the namespace of the seven handler policies, which
-`deploy_mcp.py --teardown` removes. This one has to survive a teardown,
+that is the namespace of the ten handler policies, which
+`deploy_mcp.py --teardown` removes. There are seven Lambda tiers but ten
+policies, because one policy is minted per template rather than per tier. This one has to survive a teardown,
 since you need it to run one.
 
 `deploy_mcp.py` checks for these before its first mutation and stops with
@@ -452,7 +467,7 @@ cannot run, the deploy says so and continues.
 
 ## Development environment (macOS)
 
-Running `make test`, `make lint`, and `make shellcheck` on macOS requires a modern `bash`, GNU `coreutils`, and `shellcheck`. None of these ship with the OS.
+Running `make test` on macOS requires a modern `bash` and GNU `coreutils`, and `make shellcheck` requires `shellcheck`. None of these ship with the OS. (`make lint` runs `ansible-lint` only and needs none of them.)
 
 * macOS's `/bin/bash` is frozen at version 3.2, from 2007, for licensing reasons, and the shell-surface tests require bash 4+/5 features such as `mapfile`.
 * `nproc` is a GNU coreutils command, not part of the BSD userland macOS ships, and `hpc-benchmark.sh` calls it directly.

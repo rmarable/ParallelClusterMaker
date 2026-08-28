@@ -1235,41 +1235,22 @@ class TestFinalizeCompletesWhatDeleteStarted:
         assert "wait" not in called[0]
 
     @pytest.mark.asyncio
-    async def test_a_delete_token_does_not_authorize_a_finalize(self, monkeypatch):
-        """The two tokens bind the same parameters but different actions,
-        and they must not be interchangeable: one authorizes initiating a
-        stack delete, the other authorizes destroying the credentials and
-        the S3 bucket. A single token covering both would make the second,
-        irreversible half reachable on the strength of consent to the
-        first."""
-        monkeypatch.setattr(tools_mod, "_require_record", lambda name: self._rec())
-        called = []
-        monkeypatch.setattr(tools_mod, "core_delete_cluster", lambda **kw: called.append(kw))
-        async with Client(build_local()) as client:
-            preview = json.loads(_text(
-                await client.call_tool("preview_cluster_delete", {"cluster_name": "osiris"})
-            ))
-            result = await client.call_tool("finalize_cluster_teardown", {
-                "cluster_name": "osiris",
-                "confirmation_token": preview["confirmation_token"],
-            }, raise_on_error=False)
-        assert result.is_error
-        assert called == []
+    async def test_a_token_minted_for_another_action_does_not_authorize_a_delete(
+            self, monkeypatch):
+        """A token binds an action as well as parameters. delete_cluster is
+        the only tool left that takes one, so the interchangeability that
+        used to be tested between the delete and finalize tokens is now
+        tested against any other action's token."""
+        from mcp_server.confirmation_token import mint
 
-    @pytest.mark.asyncio
-    async def test_a_finalize_token_does_not_authorize_a_delete(self, monkeypatch):
-        """The other direction, which is the one an 'accept either' fix
-        would leave open."""
         monkeypatch.setattr(tools_mod, "_require_record", lambda name: self._rec())
         called = []
         monkeypatch.setattr(tools_mod, "core_delete_cluster", lambda **kw: called.append(kw))
+        params = {"cluster_name": "osiris", "delete_s3_bucketname": True}
         async with Client(build_local()) as client:
-            preview = json.loads(_text(
-                await client.call_tool("preview_cluster_delete", {"cluster_name": "osiris"})
-            ))
             result = await client.call_tool("delete_cluster", {
                 "cluster_name": "osiris",
-                "confirmation_token": preview["finalization_token"],
+                "confirmation_token": mint("finalize_cluster_teardown", params),
             }, raise_on_error=False)
         assert result.is_error
         assert called == []
@@ -1283,18 +1264,42 @@ class TestFinalizeCompletesWhatDeleteStarted:
             preview = json.loads(_text(
                 await client.call_tool("preview_cluster_delete", {"cluster_name": "osiris"})
             ))
-            result = await client.call_tool("finalize_cluster_teardown", {
+            result = await client.call_tool("delete_cluster", {
                 "cluster_name": "production",
-                "confirmation_token": preview["finalization_token"],
+                "confirmation_token": preview["confirmation_token"],
             }, raise_on_error=False)
         assert result.is_error
         assert called == []
 
     @pytest.mark.asyncio
-    async def test_finalize_without_a_token_is_rejected_by_the_schema(self):
+    async def test_the_preview_mints_no_token_for_a_call_that_takes_none(
+            self, monkeypatch):
+        """It minted a `finalization_token` and its next_step told the
+        caller to pass it to finalize_cluster_teardown, which stopped
+        accepting a token when auto-finalize landed -- so an agent that
+        followed the instructions got a schema error. Wrong instructions on
+        the surface an agent reads to decide what to do next are worse than
+        no instructions."""
+        monkeypatch.setattr(tools_mod, "_require_record", lambda name: self._rec())
         async with Client(build_local()) as client:
-            with pytest.raises(ToolError):
-                await client.call_tool("finalize_cluster_teardown", {"cluster_name": "osiris"})
+            preview = json.loads(_text(
+                await client.call_tool("preview_cluster_delete", {"cluster_name": "osiris"})
+            ))
+        assert "finalization_token" not in preview
+        assert "finalization_token" not in preview["next_step"]
+
+    @pytest.mark.asyncio
+    async def test_finalize_takes_no_token_at_all(self, monkeypatch):
+        """The inverse of the requirement this class used to encode: a
+        token here could not be satisfied on its intended path, because a
+        teardown outlives the 900s TTL of the token minted before it."""
+        monkeypatch.setattr(tools_mod, "_require_record", lambda name: self._rec())
+        monkeypatch.setattr(tools_mod, "core_delete_cluster",
+                            lambda **kw: {"success": True})
+        async with Client(build_local()) as client:
+            tool = {t.name: t for t in await client.list_tools()}["finalize_cluster_teardown"]
+            assert "confirmation_token" not in tool.inputSchema.get("properties", {})
+            await client.call_tool("finalize_cluster_teardown", {"cluster_name": "osiris"})
 
     @pytest.mark.asyncio
     async def test_the_remote_transport_gets_it_too(self):
@@ -1881,6 +1886,30 @@ class TestADeletedClusterIsNotReportedAsAnError:
     normal outcome as an error trains the next reader to discount the
     column, which is the one that matters during a teardown.
     """
+
+    def test_an_exception_whose_str_is_empty_is_still_recognized(self):
+        """The failure this actually had. A pcluster.lib exception's `str()`
+        is empty -- `ParallelClusterApiException.__init__` calls
+        `super().__init__()` with no arguments -- so a predicate built on
+        `str(exc)` sees "NotFoundException: " and matches nothing.
+
+        It cost a live teardown: every describe of an already-deleted stack
+        read as "unreadable", so the poller never finalized and ran to its
+        bound instead. CLAUDE.md names this trap; this is the guard that
+        makes it fail here rather than in production.
+        """
+        from pcluster_core import _describe_says_cluster_is_absent
+
+        class NotFoundException(Exception):
+            def __init__(self):
+                super().__init__()
+
+        e = NotFoundException()
+        assert str(e) == "", "the fixture is not reproducing the trap"
+        assert _describe_says_cluster_is_absent(e), (
+            "absence is decided from str(exc), which is empty for exactly "
+            "the exception that means absence"
+        )
 
     def test_a_confirmed_absence_reads_as_deleted(self):
         from pcluster_core import PClusterMakerError, _describe_says_cluster_is_absent

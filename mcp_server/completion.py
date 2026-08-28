@@ -10,7 +10,7 @@ Nobody could. A conversational agent has no timer: told to poll and come
 back, it correctly says "ping me and I'll poll" and stops. That was observed
 live, by an agent that had read the instruction, quoted it back, and refused
 the unsafe shortcut -- so the gap is not comprehension and no wording closes
-it. See `docs/async-teardown-and-build.md`.
+it.
 
 So the server finishes the job. `delete_cluster` fires this handler with
 `InvocationType="Event"`, which returns in milliseconds; the handler polls

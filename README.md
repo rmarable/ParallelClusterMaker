@@ -143,14 +143,14 @@ Full detail, including the container tier and teardown:
 
 ## Defaults
 
-All optional parameters have hardcoded defaults and can also be persisted in a YAML defaults file.  `pcluster_defaults.yml` is the template — **copy the file before use**; the tracked version is shared and may be overwritten by updates, so never pass that one directly.  The most commonly referenced defaults:
+Most optional parameters have hardcoded defaults, and all of them can be persisted in a YAML defaults file.  Where the two differ, the table below says so — the hardcoded default is what you get with no defaults file present.  `pcluster_defaults.yml` is the template — **copy the file before use**; the tracked version is shared and may be overwritten by updates, so never pass that one directly.  The most commonly referenced defaults:
 
 | Parameter | Default |
 |---|---|
 | `base_os` | ubuntu2404 (hardcoded); `pcluster_defaults.yml` ships ubuntu2404arm to match the Graviton head node.  Valid: `ubuntu2204`, `ubuntu2404`, `ubuntu2204arm`, `ubuntu2404arm`, `rhel9`, `rhel9arm`, `alinux2023`, `alinux2023arm` |
 | `scheduler` | slurm |
-| `headnode_instance_type` | c8g.xlarge (required — no default fallback) |
-| `compute_instance_type` | c8g.2xlarge, c7g.2xlarge, c6g.2xlarge (comma list; empty = no CPU queue) |
+| `headnode_instance_type` | **no hardcoded default — required unless a defaults file supplies one**; `pcluster_defaults.yml` ships c8g.xlarge |
+| `compute_instance_type` | hardcoded default is empty (no CPU queue); `pcluster_defaults.yml` ships c8g.2xlarge, c7g.2xlarge, c6g.2xlarge (comma list) |
 | `gpu_instance_type` | _(empty)_ — set to create a GPU queue (e.g. `p3.2xlarge,g5.2xlarge`) |
 | `gpu_root_volume_size` | 250 GB (gp3) |
 | `cluster_type` | spot |
@@ -350,24 +350,31 @@ Teardown is always manual and at your discretion — nothing in this toolkit sch
 
 ### When Cleanup Leaves Something Behind
 
-Teardown deletes ten kinds of resource after the CloudFormation stack is gone: the S3 bucket, the FSx hydration policy, the Grafana SSM parameter, the Secrets Manager secret, four managed IAM policies, the monitoring policy, the IAM role and its instance profile, the external NFS security group, and the SNS topic.  Each step tolerates its own failure so that one AWS error cannot abandon the other nine — but every ignored failure is collected and reported, and teardown then exits non-zero:
+Once the CloudFormation stack is gone, teardown removes everything the build created outside it.  Some steps always run — the five managed IAM policies, the cluster IAM role and its instance profile, and the SNS topic — while the rest are gated on the features the cluster actually used: the S3 bucket, the FSx hydration policy, the Grafana SSM parameter and the monitoring IAM policy, and the external NFS security group.
+
+A second group is gated on positive confirmation that the stack is really gone, because these are the only remaining ways into a running head node: the EC2 keypair, the local `.pem`, the Secrets Manager secret holding the SSH key, the `active_clusters/<cluster>/` directory, and the cluster's record and configuration in the shared store.  A wait that merely timed out does not satisfy that gate, so a still-running cluster keeps its credentials.
+
+Each step tolerates its own failure so that one AWS error cannot abandon the others — but every ignored failure is collected and reported, and teardown then exits non-zero:
 
 ```
-=================================================================
+================================================================================
 
 Initiated shutdown: 2026-08-03 @ 01:33:12
 Completed shutdown: 2026-08-03 @ 01:41:48
 
-Cluster osiris has been deleted, but 2 cleanup step(s) FAILED.
+Cluster osiris has been deleted.
+2 cleanup step(s) FAILED.
 The following resources are still in the account and must be
 removed by hand -- re-running kill_pcluster.py will not retry them
 once osiris.serial has been deleted:
 
-  - IAM managed policies pclustermaker-policy-osiris-00000000000000-{HeadNode-Compute,HeadNode-Storage,HeadNode-IAM,ComputeNode-Base}
-  - IAM role and instance profile pclustermaker-role-osiris-00000000000000
+  - Detach and delete managed IAM policies associated with the cluster stack -- AccessDenied
+  - Delete the cluster IAM role and its instance profile -- AccessDenied
 
-Serial number: osiris-00000000000000
-=================================================================
+Retained in the account on purpose (not failures, still billing):
+
+  - CloudWatch log group /aws/parallelcluster/osiris-202608030133 (expires after 30 days)
+================================================================================
 ```
 
 The same list is included in the SNS destruction report.  Act on it before the run's serial file is gone: `kill_pcluster.py` reads the cluster's serial number to build these resource names, so once `active_clusters/<cluster>/` is removed there is nothing left to retry with and the leftovers have to be found by hand.  The usual cause is a missing operator IAM permission — see [Operator IAM permissions](INSTALL.md#operator-iam-permissions).
@@ -442,7 +449,7 @@ Checks performed in order:
 2. **CloudFormation status** — `pcluster describe-cluster` returns `clusterStatus=CREATE_COMPLETE`
 3. **Head node IP** — public or private IP present in the describe-cluster response
 4. **SSH reachability** — `ssh … echo OK` succeeds
-5. **Slurm** — `sinfo -s` exits 0
+5. **Slurm** — `sinfo -h -o '%D %T'` reports at least one usable node.  Exit status alone is not the criterion: a cluster whose entire fleet is `down`, `drained` or `unknown` answers successfully, and that is exactly the state a bootstrap failure leaves behind.  Empty or unparseable output fails.  A partly degraded fleet passes with a note naming the counts
 6. **Postinstall complete** — custom action marker file `/opt/parallelcluster/shared/custom_action_done` is present on the head node
 7. **Grafana health** — `curl -sk https://localhost:443/grafana/api/health` returns `"database":"ok"` (checked only when `enable_monitoring=true`)
 8. **S3 bucket** — `s3.head_bucket` succeeds (always run, independent of SSH)
@@ -457,9 +464,9 @@ Checking cluster: my-cluster
   [PASS] CloudFormation status: CREATE_COMPLETE
   [PASS] head node IP: 54.1.2.3
   [PASS] SSH reachability
-  [PASS] Slurm (sinfo -s)
+  [PASS] Slurm
   [PASS] postinstall complete
-  [PASS] S3 bucket: my-cluster-parallelcluster-bucket
+  [PASS] S3 bucket: parallelclustermaker-my-cluster-00000000000000
 
 All checks passed — my-cluster is healthy.
 ```
@@ -638,7 +645,7 @@ The three accepted cases:
 
 An unset `--fsx_s3_import_bucket` with `--enable_fsx_hydration=true` is an error — there is nothing to hydrate from.  Use `--enable_fsx=true` on its own for an empty Lustre filesystem.
 
-Both sides are validated before the build starts: the bucket must exist (`head_bucket`, with a distinct error for a 403 so an access-denied bucket policy is not reported as a missing bucket), and the prefix must contain at least one object.  An empty or misspelled path fails immediately rather than at FSx creation time.
+Both buckets are validated before the build starts with `head_bucket`, which reports a 403 distinctly so that an access-denied bucket policy is not mistaken for a missing bucket.  The **import** prefix must also contain at least one object, so an empty or misspelled hydration source fails immediately rather than at FSx creation time.  The **export** prefix is deliberately not checked and is never even listed: it is a destination, and on a first dehydration it is empty by definition — AWS's own default export path does not exist until the filesystem does.
 
 Note that the export fallback overwrites `--fsx_s3_export_path` with the import path.  To keep the two prefixes separate, name the bucket in both parameters rather than relying on the fallback.
 
@@ -730,7 +737,7 @@ Both `compute_instance_type` and `gpu_instance_type` accept comma-separated list
 - No instance store present (e.g. `p3.2xlarge`): `/local_scratch` remains a sticky-bit directory on the root EBS volume
 - `htop` installed by the GPU block itself, since the main package block is head-node-only and does not run on compute nodes; `nvtop` is head-node-only because it lives outside the default repositories (`multiverse` on Ubuntu, EPEL on RHEL 9) and a compute node's package index is whatever the AMI shipped.  A compute node refreshes its index first (`apt-get update` / `dnf makecache`) because `OnNodeStart` — and therefore preinstall's refresh — never runs there.  Both installs are non-fatal (`|| echo "WARNING: ..."`), the only ones in the file: they are diagnostics nothing in the job path imports, and one transient mirror outage would otherwise count toward the 10-failure protected-mode threshold and cost the entire stack
 
-**EFA GPUDirect RDMA (GDR):**  When `--enable_efa=true` and any GPU queue instance type is `p4d.24xlarge`, `p4de.24xlarge`, or `p5.48xlarge`, `GdrSupport: true` is added to the GPU queue EFA config automatically.
+**EFA GPUDirect RDMA (GDR):**  When `--enable_efa=true` and any GPU queue instance type is in the `p4d`, `p4de` or `p5` family, `GdrSupport: true` is added to the GPU queue EFA config automatically.  The test is on the family prefix, not on a specific size, so every member of those families qualifies.
 
 **GPU volume settings:**  The GPU queue uses its own root volume parameters (`--gpu_root_volume_size`, `--gpu_root_volume_type`, `--gpu_root_volume_iops`, `--gpu_root_volume_throughput`) independent of the CPU queue.
 
@@ -1348,17 +1355,33 @@ built elsewhere and skips the build. Runtime choices per platform, and the
 Finch push failure worth knowing about, are in
 [INSTALL.md](INSTALL.md#adding-cluster-creation-the-container-tier).
 
-### Removing it
+### Removing the MCP service
 
 ```bash
 ./deploy_mcp.py --teardown              # add --dry-run to list first
 ```
 
-Gateway first, then the functions, then the IAM they run under, then the
-user pool — each step leaving nothing that depends on something already
-gone. The permissions boundary is left behind on purpose: a deployer who
-can delete their own boundary does not have one. Remove it by hand if the
-account should be empty.
+The API Gateway REST API is removed first, because it is the
+internet-facing surface and deleting it stops requests arriving while the
+rest of the transport is only half torn down. The Lambda functions go next,
+followed by the ECR repository that holds the container tier's image, then
+the IAM roles and policies the functions ran under, and finally the Cognito
+user pool that authenticated callers. The repository has to be deleted
+after the functions that reference its image but before the IAM that grants
+the deletion, and it is removed together with the image inside it, because
+a repository this tool created always holds one.
+
+Deleting the user pool invalidates every session that was issued against
+it, so the claude.ai connector stops working as soon as the pool is gone.
+To recover, remove the connector and add it again. Reloading the page will
+not do it.
+
+The permissions boundary is left in place on purpose. A deployer who is
+able to delete their own boundary does not really have one, so
+`MCPDeployPolicy` denies that action outright and the teardown says so
+rather than attempting it and reporting the refusal as a failure. If you
+want the account completely empty, delete the boundary by hand using
+credentials that are permitted to.
 
 ---
 
@@ -1392,7 +1415,7 @@ ParallelClusterMaker does **not** create or modify VPCs, subnets, gateways, rout
 
 ## Troubleshooting
 
-**IAM permissions:** Check `templates/HeadNode-Compute.json_src`, `HeadNode-Storage.json_src`, `HeadNode-IAM.json_src`, `ComputeNode-Base.json_src`, and (when `enable_monitoring=true`) `HeadNode-Monitoring.json_src`.  The instance policy is split by role into five managed policies to stay under the IAM managed policy size limit.  IAM role and instance-profile resources use both flat-name ARNs (`parallelcluster-<CLUSTER_NAME>-*`) and path-based ARNs (`parallelcluster/<CLUSTER_NAME>/*`) — PCluster v3 uses the latter for compute fleet roles.  Most build failures trace back to missing IAM permissions.
+**IAM permissions:** Check `templates/HeadNode-Compute.json_src`, `HeadNode-Storage.json_src`, `HeadNode-IAM.json_src`, `ComputeNode-Base.json_src`, `ClusterNode-Deny.json_src`, and (when `enable_monitoring=true`) `HeadNode-Monitoring.json_src`.  The instance policy is split by role into five managed policies — six with monitoring — to stay under the IAM managed policy size limit.  `ClusterNode-Deny.json_src` is worth reading first when a permission is refused for no visible reason: it contains only `Deny` statements, it is attached to every node, and an explicit `Deny` overrides any `Allow` in the other policies.  The head node's role is additionally created under the `pclustermaker-cluster-boundary` permissions boundary, which caps what that role can ever be granted.  IAM role and instance-profile resources use both flat-name ARNs (`parallelcluster-<CLUSTER_NAME>-*`) and path-based ARNs (`parallelcluster/<CLUSTER_NAME>/*`) — PCluster v3 uses the latter for compute fleet roles.  Most build failures trace back to missing IAM permissions.
 
 **Spot capacity:** Compute nodes that fail to launch surface as a `ComputeFleet - CREATE_FAILED` CloudFormation error.  Retry the build or switch to `--cluster_type=ondemand`.
 
@@ -1447,7 +1470,7 @@ Anything added there must declare where it belongs:
 ```
 make test       # pytest — template rendering + unit tests
 make lint       # ansible-lint on src/create_pcluster.yml and src/delete_pcluster.yml
-make shellcheck # shellcheck on hpc-benchmark/hpc-benchmark.sh
+make shellcheck # shellcheck on every tracked *.sh file
 ```
 
 `make test` invokes `.venv/bin/python -m pytest` directly, so no manual venv activation is

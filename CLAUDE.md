@@ -314,7 +314,16 @@ standing constraints for local development.
   describe means keep waiting, never "it is gone". An Event invoke has no
   caller, so every terminal outcome must reach the retained log group and
   the cluster's SNS topic — silence would be indistinguishable from
-  success. Detail: `docs/async-teardown-and-build.md`.
+  success. Verified live on `connector4`: two calls, then
+  `retry`×3 → `finalize success=True`, every resource to zero unaided.
+  **When the behavior changed, three instruction surfaces did not** — the
+  preview's `next_step`, the `finalization_token` it minted for a call that
+  had stopped taking one, and `delete_cluster`'s docstring, still saying
+  "you must finish it". A tool's docstring is not documentation *about* the
+  system, it is the input an agent decides on: as load-bearing as the
+  return value, and it rots the same way. `next_step` and the docstring
+  must agree, and the guard reads both. Bounds and reasoning:
+  `mcp_server/completion.py`'s docstring.
 - **A remote `create_cluster` outlives the 29s gateway ceiling** — measured
   43.6s, ~39s of it `pcluster create-cluster`'s CDK synthesis, so no
   decomposition of our work fits it. The caller is cut off while the build

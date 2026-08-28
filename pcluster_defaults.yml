@@ -100,8 +100,10 @@ efs_throughput_mode: bursting         # bursting | provisioned | elastic
 # before the build starts.
 #   - Keep fsx_s3_import_path and fsx_s3_export_path distinct, or dehydrated files
 #     overwrite the hydration source.
-#   - Both prefixes are validated up front and must already contain at least one
-#     object -- an empty or misspelled prefix fails immediately.
+#   - Both buckets are validated up front. The import prefix must already
+#     contain at least one object, so an empty or misspelled hydration source
+#     fails immediately; the export prefix is a destination and is deliberately
+#     not checked, since a first dehydration is empty by definition.
 #   - Leaving fsx_s3_export_bucket UNDEFINED makes export follow the import
 #     bucket *and* path.
 #   - Any fsx_s3_* value requires enable_fsx_hydration=true, which requires

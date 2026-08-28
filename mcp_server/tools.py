@@ -852,17 +852,16 @@ def register_tools(mcp, *, remote, tier=None):
                 f"(the only record of a failed build; expire after 30 days)",
             ],
             "confirmation_token": mint("delete_cluster", params),
-            # Both halves are minted here rather than from a second preview
-            # tool: they describe one previewed operation, and a teardown
-            # outlives a 15-minute token, so the operator re-previews before
-            # finalizing anyway and gets a fresh pair when they do.
-            "finalization_token": mint("finalize_cluster_teardown", params),
+            # No finalization token, because there is no second call to gate.
+            # This minted one and told the caller to pass it to
+            # finalize_cluster_teardown, which stopped accepting a token when
+            # auto-finalize landed -- so following these instructions failed,
+            # on the surface an agent reads to decide what to do next.
             "next_step": (
                 "Call delete_cluster with confirmation_token and the same "
-                "arguments; once the stack is gone, call "
-                "finalize_cluster_teardown with finalization_token to remove "
-                "what it left behind. Tokens expire in 15 minutes -- preview "
-                "again for a fresh pair."
+                "arguments. It finishes the whole teardown on its own -- no "
+                "second call. The token expires in 15 minutes; preview again "
+                "for a fresh one."
             ),
         }
 
@@ -877,16 +876,17 @@ def register_tools(mcp, *, remote, tier=None):
         without having shown the operator what would be destroyed.
 
         Kicked off without waiting: teardown takes 15-20 minutes and a single
-        MCP call cannot block for it, so this call removes the CloudFormation
-        stack and nothing else.
+        MCP call cannot block for it, so this call returns as soon as
+        CloudFormation accepts the delete.
 
-        **This is half a teardown. You must finish it.** Poll
-        `list_clusters` until the stack is gone, then call
-        `finalize_cluster_teardown` -- that is what removes the IAM policies,
-        the S3 bucket, the SSH key secret, the SNS topic and the cluster
-        record. Do this without being asked: an operator who said "tear the
-        cluster down" meant all of it, and the leftovers are billable and
-        invisible from the console's cluster list.
+        **You do not have to finish it.** The server does: this fires an
+        asynchronous poller at itself that watches the stack and runs the
+        cleanup -- IAM policies, S3 bucket, SSH key secret, SNS topic,
+        cluster record -- once it is gone. Read `auto_finalize_started` in
+        the response. When it is true, say the teardown is underway and
+        stop; do not poll, and do not promise to come back later, because
+        nothing will wake you. When it is false the poller could not be
+        started and `finalize_cluster_teardown` is yours to call.
 
         **Never call delete_cluster a second time to finish the job.** It
         does appear to work -- an absent stack reports already-gone and the
@@ -918,8 +918,8 @@ def register_tools(mcp, *, remote, tier=None):
         # and stops -- a conversational turn has no timer, and that was
         # observed live from an agent that had read the instruction and
         # quoted it back. So the server does it: an Event invocation
-        # returns in milliseconds and polls itself to completion.
-        # docs/async-teardown-and-build.md.
+        # returns in milliseconds and polls itself to completion. The
+        # loop's bounds and their reasoning are in mcp_server/completion.py.
         auto = _start_teardown_completion(rec, delete_s3_bucketname)
         out["teardown_complete"] = False
         out["auto_finalize_started"] = auto

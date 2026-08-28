@@ -4508,6 +4508,14 @@ _CLUSTER_ABSENT_MARKERS = (
     "does not exist",
 )
 
+# The exception classes that mean absence on their own, independent of any
+# message. pcluster.lib raises NotFoundException with an empty str().
+_CLUSTER_ABSENT_TYPES = (
+    "NotFoundException",
+    "ClusterNotFoundException",
+    "StackNotFoundException",
+)
+
 
 def _describe_says_cluster_is_absent(exc):
     """True only when a describe failed *because the cluster is gone*.
@@ -4518,7 +4526,22 @@ def _describe_says_cluster_is_absent(exc):
     call is not evidence of absence. Widening this to "any describe error"
     would report every cluster as DELETED the moment a token expires.
     """
-    text = f"{type(exc).__name__}: {exc}"
+    # pcluster_exception_detail, never str(exc). A pcluster.lib exception's
+    # str() is empty -- ParallelClusterApiException.__init__ calls
+    # super().__init__() with no arguments -- so a predicate built on it
+    # sees "NotFoundException: " and matches nothing. That is the trap
+    # CLAUDE.md already names, and it cost a live teardown: the poller read
+    # every describe of a deleted stack as "unreadable" and never
+    # finalized.
+    #
+    # The type name is checked too. NotFoundException *is* the answer to
+    # "is this cluster gone", and depending only on prose leaves the
+    # predicate at the mercy of upstream's wording.
+    name = type(exc).__name__
+    if name in _CLUSTER_ABSENT_TYPES:
+        return True
+    detail = pcluster_exception_detail(exc) or str(exc) or ""
+    text = f"{name}: {detail}"
     return any(m.lower() in text.lower() for m in _CLUSTER_ABSENT_MARKERS)
 
 
