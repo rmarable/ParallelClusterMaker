@@ -299,6 +299,18 @@
             "Resource": "*"
         },
         {
+            "Sid": "LoginNodeLoadBalancerRead",
+            "Action": [
+                "elasticloadbalancing:DescribeLoadBalancers",
+                "elasticloadbalancing:DescribeTags",
+                "elasticloadbalancing:DescribeTargetGroups",
+                "elasticloadbalancing:DescribeTargetHealth",
+                "tag:GetResources"
+            ],
+            "Resource": "*",
+            "Effect": "Allow"
+        },
+        {
             "Sid": "STSCallerIdentity",
             "Action": [
                 "sts:GetCallerIdentity"

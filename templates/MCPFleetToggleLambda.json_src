@@ -57,6 +57,7 @@
             "Sid": "MCPLoginNodeLoadBalancerRead",
             "Action": [
                 "elasticloadbalancing:DescribeLoadBalancers",
+                "tag:GetResources",
                 "elasticloadbalancing:DescribeTags",
                 "elasticloadbalancing:DescribeTargetGroups",
                 "elasticloadbalancing:DescribeTargetHealth"

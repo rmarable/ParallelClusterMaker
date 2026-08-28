@@ -18,6 +18,7 @@
                 "logs:*",
                 "pricing:*",
                 "resource-groups:*",
+                "tag:*",
                 "route53:*",
                 "s3:*",
                 "secretsmanager:*",

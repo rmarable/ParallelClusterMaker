@@ -503,3 +503,122 @@ class TestTheCliCanTearDownWhatItDidNotBuild:
             "core_delete_cluster no longer reads the store, so the CLI's "
             "check was load-bearing after all"
         )
+
+
+class TestTagGetResourcesReachesTheTiersThatNeedIt:
+    """ParallelCluster 3.16.0 makes `tag:GetResources` a required CLI
+    permission -- it resolves login node load balancer ARNs by tag, which
+    is what the `elasticloadbalancing` grant already exists for. Added
+    ahead of the version bump, since it costs nothing on 3.15.1 and is a
+    floor gap the moment anyone upgrades.
+
+    The boundary half is the part that fails silently: a permissions
+    boundary is an intersection, so a service missing from the ceiling
+    removes every grant in it while `CreatePolicy` and `create_role` both
+    succeed. The grant would read perfectly and do nothing.
+    """
+
+    @staticmethod
+    def _doc(name):
+        import json
+
+        src = io.open(os.path.join(REPO_ROOT, "templates", name),
+                      encoding="utf-8").read()
+        for k, v in (("<AWS_ACCOUNT_ID>", "123456789012"),
+                     ("<AWS_REGION>", "us-east-1"),
+                     ("<MCP_USER_POOL_ID>", "us-east-1_XXXXXXXXX")):
+            src = src.replace(k, v)
+        return json.loads(src)
+
+    @staticmethod
+    def _granted(doc, action):
+        import fnmatch
+
+        for st in doc["Statement"]:
+            if st.get("Effect") != "Allow":
+                continue
+            acts = st["Action"]
+            acts = [acts] if isinstance(acts, str) else acts
+            if any(fnmatch.fnmatch(action, a) for a in acts):
+                return True
+        return False
+
+    @pytest.mark.parametrize("policy", [
+        "MCPStackMutation.json_src",     # stack-mutation and -node
+        "MCPReadOnlyLambda.json_src",    # describe-cluster
+        "MCPFleetToggleLambda.json_src",  # update-compute-fleet
+        "OperatorPolicy.json_src",       # the CLI itself
+    ])
+    def test_every_policy_that_reads_a_cluster_can_resolve_its_tags(self, policy):
+        assert self._granted(self._doc(policy), "tag:GetResources"), (
+            f"{policy} cannot call tag:GetResources, which 3.16.0 requires "
+            f"to resolve login node load balancers"
+        )
+
+    @pytest.mark.parametrize("action", [
+        "elasticloadbalancing:DescribeLoadBalancers",
+        "elasticloadbalancing:DescribeTags",
+        "elasticloadbalancing:DescribeTargetGroups",
+        "elasticloadbalancing:DescribeTargetHealth",
+    ])
+    def test_the_operator_can_read_a_login_node_load_balancer(self, action):
+        """`pcluster/aws/elb.py` makes exactly these four calls, and
+        `describe-cluster` makes them against any cluster with a login node
+        pool. The MCP tiers were granted them when that floor gap was
+        found; OperatorPolicy -- which the CLI runs under -- was not, so
+        the CLI had the same gap the whole time.
+
+        Granting only the first moves the failure to the next call, which
+        is why all four are pinned rather than the statement's presence.
+        """
+        assert self._granted(self._doc("OperatorPolicy.json_src"), action), (
+            f"the CLI cannot call {action}, so describe-cluster fails "
+            f"against any --enable_loginnode cluster"
+        )
+
+    def test_the_operator_grant_stays_read_only(self):
+        """Describes take no resource-level permission, so Resource must be
+        `*` and read-only is the only bound left. A mutating
+        elasticloadbalancing action here would let anyone holding operator
+        credentials reconfigure a load balancer."""
+        doc = self._doc("OperatorPolicy.json_src")
+        st = next(x for x in doc["Statement"]
+                  if x.get("Sid") == "LoginNodeLoadBalancerRead")
+        for a in st["Action"]:
+            assert a.split(":")[1].startswith(("Describe", "Get", "List")), (
+                f"{a} is not a read"
+            )
+
+    def test_the_mcp_boundary_ceiling_permits_it(self):
+        """Without this the grant above is nullified, and nothing fails at
+        deploy time to say so."""
+        assert self._granted(self._doc("MCPRoleBoundary.json_src"), "tag:GetResources")
+
+    def test_the_cluster_boundary_permits_it_too(self):
+        assert self._granted(self._doc("ClusterRoleBoundary.json_src"), "tag:GetResources")
+
+    @pytest.mark.parametrize("policy", [
+        "MCPRouterLambda.json_src",
+        "MCPAuthorizerLambda.json_src",
+        "MCPRegisterLambda.json_src",
+    ])
+    def test_it_reaches_no_tier_that_reads_no_cluster(self, policy):
+        """The vacuity guard. The router executes no tool logic and the
+        authorizer validates a token; neither describes a cluster, so
+        neither should have grown this."""
+        assert not self._granted(self._doc(policy), "tag:GetResources")
+
+    @pytest.mark.parametrize("policy", [
+        "MCPStackMutation.json_src",
+        "MCPReadOnlyLambda.json_src",
+        "MCPFleetToggleLambda.json_src",
+        "OperatorPolicy.json_src",
+        "MCPRoleBoundary.json_src",
+    ])
+    def test_each_still_fits_the_managed_policy_limit(self, policy):
+        """MCPStackMutation is the one to watch: it was 6,054 of 6,144
+        bytes before this grant."""
+        import json
+
+        b = len(json.dumps(self._doc(policy), separators=(",", ":")))
+        assert b <= 6144, f"{policy} is {b} bytes, over IAM's 6,144 limit"
