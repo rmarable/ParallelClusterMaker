@@ -378,6 +378,45 @@ def _require_record(cluster_name):
     return ClusterRecord.from_dict(rec)
 
 
+def _start_async_build(params, region):
+    """Fire the background build. Returns whether it started.
+
+    Mirrors `_start_teardown_completion`, including the part that matters
+    most: the return value is a *fact*, never an assumption. `False` means
+    the build did not start and this call must run it synchronously, which
+    is exactly right locally and a genuine failure remotely -- the one
+    thing that must never be guessed is whether work is underway.
+
+    Local (stdio) runs get False by design: there is no Lambda to invoke,
+    and no gateway ceiling to duck under either, so the operator watching a
+    terminal gets the build they asked for.
+    """
+    import os
+
+    if not os.environ.get("AWS_LAMBDA_FUNCTION_NAME"):
+        return False
+    try:
+        import dataclasses
+        import json
+
+        import boto3
+
+        from mcp_server.build import make_build_event
+
+        ev = make_build_event(
+            params=dataclasses.asdict(params), region=region,
+        )
+        boto3.client("lambda", region_name=region).invoke(
+            FunctionName=os.environ["AWS_LAMBDA_FUNCTION_NAME"],
+            InvocationType="Event", Payload=json.dumps(ev).encode(),
+        )
+        return True
+    except Exception as e:  # noqa: BLE001 - see docstring
+        print(f"could not start the background build: "
+              f"{type(e).__name__}: {e}", flush=True)
+        return False
+
+
 def _start_teardown_completion(rec, delete_s3_bucketname):
     """Kick off the self-polling teardown finisher. Returns whether it started.
 
@@ -821,6 +860,28 @@ def register_tools(mcp, *, remote, tier=None):
             overrides=overrides,
         )
         region = resolve_region_from_az(az)
+
+        # Everything above is validation and reaches no AWS mutation, so it
+        # answers well inside the 29s ceiling. The build does not: 43.6s
+        # measured, ~39 of them inside pcluster.lib's own CDK synthesis. So
+        # on a Lambda it runs where nothing is waiting on it, and the caller
+        # gets a real answer instead of a timeout. Locally there is no
+        # Lambda to invoke and no gateway in front, so the build runs here.
+        started = _start_async_build(params, region)
+        if started:
+            return {
+                "cluster_name": cluster_name,
+                "region": region,
+                "build_started": True,
+                "kicked_off": False,
+                "next_step": (
+                    "The build is running in the background and takes 20-45 "
+                    "minutes. Poll list_clusters(live=True) or "
+                    "check_cluster_health for progress. If it does not "
+                    "appear, call get_build_status -- a build that fails "
+                    "records why."
+                ),
+            }
         # core_create_cluster returns a CreateClusterResult, but its shared
         # validation helpers (p_fail/refer_to_docs_and_quit/illegal_az_msg)
         # still sys.exit(1) with the message already printed. SystemExit is

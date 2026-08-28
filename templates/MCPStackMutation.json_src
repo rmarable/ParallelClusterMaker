@@ -176,12 +176,12 @@
             "Effect": "Allow"
         },
         {
-            "Sid": "InvokeItselfToFinishATeardown",
+            "Sid": "InvokeItselfForAsyncWork",
             "Action": [
                 "lambda:InvokeFunction"
             ],
             "Resource": [
-                "arn:aws:lambda:*:<AWS_ACCOUNT_ID>:function:pclustermaker-mcp-stack-mutation"
+                "arn:aws:lambda:*:<AWS_ACCOUNT_ID>:function:pclustermaker-mcp-stack-mutation*"
             ],
             "Effect": "Allow"
         },

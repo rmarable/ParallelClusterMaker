@@ -177,6 +177,16 @@ def make_lambda_handler(tier):
             from mcp_server.completion_runner import run_completion_attempt
 
             return run_completion_attempt(event)
+
+        # A build request arrives the same way and for the same reason: the
+        # work outlives the 29s gateway ceiling, so it runs where nothing is
+        # waiting on it. Told apart by its own explicit marker.
+        from mcp_server.build import is_build_event
+
+        if is_build_event(event):
+            from mcp_server.build_runner import run_build
+
+            return run_build(event)
         return handle(event, tier=tier)
 
     return lambda_handler

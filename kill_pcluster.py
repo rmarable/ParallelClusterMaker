@@ -217,30 +217,15 @@ def main():
     _validate_cluster_name(cluster_name)
     _validate_cluster_owner(cluster_owner)
 
-    _active_clusters_root = os.path.join(_repo_root, "active_clusters")
-    cluster_data_dir = os.path.join(_active_clusters_root, cluster_name)
-    cluster_serial_number_file = os.path.join(
-        cluster_data_dir, cluster_name + ".serial"
-    )
-    vars_file_path = os.path.join(_src_dir, "vars_files", cluster_name + ".yml")
-
-    if os.path.isfile(cluster_serial_number_file):
-        p_val("cluster_serial_number_file", debug_mode)
-    else:
-        print("")
-        print("*** ERROR ***")
-        print("Missing cluster_serial_number_file: " + cluster_serial_number_file)
-        print("Aborting...")
-        sys.exit(1)
-
-    if os.path.isfile(vars_file_path):
-        p_val("vars_file_path", debug_mode)
-    else:
-        print("")
-        print("*** ERROR ***")
-        print("Missing vars_file_path: " + vars_file_path)
-        print("Aborting...")
-        sys.exit(1)
+    # The serial file and the vars file are deliberately *not* checked here.
+    # Both exist only on the machine that built the cluster, and
+    # core_delete_cluster already falls back to the shared record store when
+    # either is absent -- that fallback was written for exactly this case and
+    # carries a comment saying so. Checking them here made it unreachable
+    # from the CLI: a cluster built through the MCP server could not be torn
+    # down from any other machine, on values the published record has
+    # carried all along. Two statements of one rule, and this was the copy
+    # that was wrong.
 
     if debug_mode:
         print("debug_mode = enabled")

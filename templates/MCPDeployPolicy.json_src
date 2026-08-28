@@ -84,6 +84,7 @@
                 "lambda:CreateFunction",
                 "lambda:UpdateFunctionCode",
                 "lambda:UpdateFunctionConfiguration",
+                "lambda:PutFunctionEventInvokeConfig",
                 "lambda:GetFunction",
                 "lambda:GetFunctionConfiguration",
                 "lambda:DeleteFunction",

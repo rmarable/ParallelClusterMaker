@@ -169,6 +169,7 @@ def deploy_tier(lam, tier, *, aws_account_id, code, environment=None):
     try:
         resp = _create_function_once_the_role_exists(lam, kwargs)
         print(f"  Created MCP function: {kwargs['FunctionName']}")
+        _pin_async_retries_to_zero(lam, kwargs["FunctionName"])
         return resp["FunctionArn"]
     except Exception as e:
         if type(e).__name__ != "ResourceConflictException" and not _already_exists(e):
@@ -194,7 +195,44 @@ def deploy_tier(lam, tier, *, aws_account_id, code, environment=None):
         FunctionName=kwargs["FunctionName"], **cfg
     )
     print(f"  Updated MCP function: {kwargs['FunctionName']}")
+    _pin_async_retries_to_zero(lam, kwargs["FunctionName"])
     return resp["FunctionArn"]
+
+
+def _pin_async_retries_to_zero(lam, function_name):
+    """Refuse AWS's default retries on asynchronous invocations.
+
+    Lambda retries a failed `Event` invocation **twice** by default. The
+    teardown poller tolerates that -- finalizing an already-finalized
+    teardown is a no-op -- but a retried *build* would attempt a second
+    launch of the same cluster. The cluster lock refuses the second
+    attempt, so this is the outer of two guards; both are kept because
+    either alone is one edit away from a double launch.
+
+    Best-effort: a deploy must not fail because this could not be set, and
+    the lock is the guard that actually holds. The warning is the record.
+    """
+    try:
+        lam.put_function_event_invoke_config(
+            FunctionName=function_name, MaximumRetryAttempts=0,
+        )
+    except Exception as e:  # noqa: BLE001 - see docstring
+        # Name the cause, not the wrapper. Every boto3 failure is a
+        # `ClientError`, so printing the class name says nothing an
+        # operator can act on -- the first live run of this warned
+        # `(ClientError)` for what was a plain AccessDenied on an action
+        # the deployed policy had not been updated to grant.
+        code = ""
+        try:
+            code = e.response["Error"]["Code"]
+        except (AttributeError, KeyError, TypeError):
+            code = type(e).__name__
+        print(f"  WARNING: could not pin {function_name} to zero async "
+              f"retries: {code} on lambda:PutFunctionEventInvokeConfig. "
+              f"A retried async invocation may run twice; the cluster lock "
+              f"still refuses a duplicate build. Re-render the deploy "
+              f"policy (generate_operator_policy.py --mcp) and push it as "
+              f"a new policy version.")
 
 
 def _wait_until_updated(lam, function_name):
@@ -759,6 +797,12 @@ _DEPLOY_PROBES = (
     ("iam:CreatePolicy", "arn:aws:iam::{acct}:policy/pclustermaker-mcp-policy-probe"),
     ("iam:AttachRolePolicy", "arn:aws:iam::{acct}:role/pclustermaker-mcp-probe"),
     ("lambda:CreateFunction", "arn:aws:lambda:{region}:{acct}:function:pclustermaker-mcp-probe"),
+    # Probed because its absence is otherwise silent: the pin is
+    # best-effort by design, so a missing grant warns after the fact
+    # instead of stopping anything, and the async-retry guard is simply
+    # never applied. That is how it shipped inert on its first deploy.
+    ("lambda:PutFunctionEventInvokeConfig",
+     "arn:aws:lambda:{region}:{acct}:function:pclustermaker-mcp-probe"),
     ("cognito-idp:CreateUserPool", "*"),
 )
 
