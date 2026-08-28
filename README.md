@@ -43,7 +43,6 @@ cd ParallelClusterMaker
 python3.12 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-ansible-galaxy collection install -r requirements_ansible.yml
 ```
 
 **Python 3.12 specifically** — `aws-parallelcluster` does not support 3.13

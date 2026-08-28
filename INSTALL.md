@@ -55,7 +55,6 @@ cd ParallelClusterMaker
 python3.12 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-ansible-galaxy collection install -r requirements_ansible.yml
 ```
 
 Deactivate the environment when you are done:
