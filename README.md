@@ -49,8 +49,20 @@ pip install -r requirements.txt
 or 3.14. You will also need **Node.js** on `PATH`, which ParallelCluster
 shells out to for CloudFormation synthesis.
 
-See [INSTALL.md](INSTALL.md) for the full prerequisites, the operator IAM
-permissions, and the VPC tagging step. Then go to
+Then set up the AWS account, once:
+
+```bash
+./generate_operator_policy.py --bootstrap
+```
+
+This is the only setup step the toolkit cannot do for itself — a tool able
+to grant itself IAM permissions has no ceiling — and everything else it
+creates as it goes. It is idempotent, so run it again after a `git pull`
+that adds a grant. `--dry-run` shows what it would change; `--no-attach`
+creates the policy without attaching it.
+
+See [INSTALL.md](INSTALL.md) for the full prerequisites, what that policy
+grants, and the VPC tagging step. Then go to
 [Building a Cluster](#building-a-cluster).
 
 ### 2. The MCP server in Claude Code

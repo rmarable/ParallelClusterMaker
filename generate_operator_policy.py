@@ -93,6 +93,53 @@ def _create_policy(iam, rendered, policy_name, description):
         sys.exit(f"ERROR: {e}")
 
 
+def _run_bootstrap(rendered, policy_name, description, *, attach, dry_run):
+    """Report a bootstrap in the terms an operator can act on.
+
+    The decision logic is `bootstrap_operator_policy` in `pcluster_core`,
+    where it is testable without AWS credentials; this is presentation only.
+    """
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "src"))
+    from pcluster_core import bootstrap_operator_policy
+
+    r = bootstrap_operator_policy(
+        boto3.client("iam"), boto3.client("sts"),
+        policy_name=policy_name, rendered=rendered, description=description,
+        attach=attach, dry_run=dry_run,
+    )
+
+    lead = "Would " if r.dry_run else ""
+    said = {
+        "created": f"{lead or 'C'}{'reate' if r.dry_run else 'reated'} policy",
+        "updated": f"{lead or 'P'}{'ush' if r.dry_run else 'ushed'} a new default version of",
+        "current": "Policy already matches this checkout:",
+    }[r.policy_action]
+    print(f"\n{said} {r.policy_arn}"
+          + (f" ({r.version_id})" if r.version_id and r.policy_action != "current" else ""))
+
+    print(f"Running as: {r.identity_arn}")
+    if r.attach_action == "attached":
+        verb = "Would attach" if r.dry_run else "Attached"
+        print(f"{verb} it to {r.principal_type} {r.principal_name}")
+    elif r.attach_action == "already":
+        print(f"Already attached to {r.principal_type} {r.principal_name}")
+    elif r.attach_action == "skipped":
+        print(f"Not attached ({r.reason}). Attach it with:\n"
+              f"  aws iam attach-user-policy --user-name <USERNAME> "
+              f"--policy-arn {r.policy_arn}")
+    else:
+        sys.exit(
+            f"\nERROR: the policy is in place but could not be attached.\n"
+            f"  {r.reason}\n\n"
+            f"Attach it by hand once you have an attachable identity:\n"
+            f"  aws iam attach-user-policy --user-name <USERNAME> "
+            f"--policy-arn {r.policy_arn}\n"
+        )
+
+    if not r.dry_run and r.ok:
+        print("\nThis account is ready to build clusters.")
+
+
 def main():
     parser = argparse.ArgumentParser(
         description=(
@@ -128,6 +175,27 @@ def main():
         help="Create the managed policy in IAM",
     )
     parser.add_argument(
+        "--bootstrap",
+        action="store_true",
+        help=(
+            "One-command setup for a fresh clone: create the policy if it is "
+            "absent, push a new default version if the account's copy differs "
+            "from what this repo renders, then attach it to the identity you "
+            "are running as. Idempotent -- safe to re-run after pulling a "
+            "change that adds a grant"
+        ),
+    )
+    parser.add_argument(
+        "--no-attach",
+        action="store_true",
+        help="With --bootstrap, converge the policy but do not attach it",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="With --bootstrap, report what would change without changing it",
+    )
+    parser.add_argument(
         "--policy-name",
         default=None,
         metavar="NAME",
@@ -160,8 +228,20 @@ def main():
 
     # The IAM call comes before the file write: writing first left a rendered
     # policy file on disk after a failed create, which reads as success.
+    if args.bootstrap and args.create:
+        sys.exit(
+            "ERROR: pass --bootstrap or --create, not both. --bootstrap is "
+            "the superset: it creates the policy when absent and converges "
+            "it when present."
+        )
+
     arn = None
-    if args.create:
+    if args.bootstrap:
+        _run_bootstrap(
+            rendered, policy_name, description,
+            attach=not args.no_attach, dry_run=args.dry_run,
+        )
+    elif args.create:
         iam = boto3.client("iam")
         arn = _create_policy(iam, rendered, policy_name, description)
 

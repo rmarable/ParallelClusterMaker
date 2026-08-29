@@ -76,6 +76,45 @@ Run this to see all available options for `make_pcluster.py`:
 ./make_pcluster.py --help
 ```
 
+## Setting up your AWS account
+
+**Do this once per account, before your first build.** Everything else the
+toolkit needs it creates for itself; this is the one step it cannot do,
+because a tool that can grant itself IAM permissions has no ceiling.
+
+```bash
+./generate_operator_policy.py --bootstrap
+```
+
+That creates the `parallelcluster-operator-pclustermaker` managed policy and
+attaches it to whatever identity you are running as — IAM user or assumed
+role, resolved from `sts:GetCallerIdentity`. It is idempotent, so run it
+again after any `git pull`: if a release adds a grant, it pushes the new
+document as the default version rather than failing because the policy
+already exists. Add `--dry-run` to see what it would do first, or
+`--no-attach` to create the policy without attaching it.
+
+You need IAM rights to run it. If you do not have them, hand the command to
+an administrator, or have them attach the policy to you by hand — the
+rendered document is `./generate_operator_policy.py` with no flags, and the
+statements are explained under
+[Operator IAM permissions](#operator-iam-permissions).
+
+Two things worth knowing about what this grants:
+
+* **It is not AWS ParallelCluster's own permission set.** Those are separate
+  and documented upstream; this covers what *this toolkit* does around them.
+* **Spot is the default capacity type**, and spot clusters need an
+  account-level role that no cluster can create for itself. The policy
+  includes the one narrow grant that lets `make_pcluster.py` create it on
+  your first build, so you never have to think about it. Without the policy,
+  a spot build stops immediately with the exact command to run — see
+  [The EC2 Spot service-linked role](#the-ec2-spot-service-linked-role).
+
+If you are also deploying the MCP remote transport, that is a *second*
+permission set — see
+[MCP deployment permissions](#mcp-deployment-permissions).
+
 ## Installing the MCP server
 
 Optional, and independent of everything above except the venv. The MCP
@@ -444,6 +483,11 @@ aws iam create-service-linked-role --aws-service-name spot.amazonaws.com
 ```
 
 Building with `--cluster_type=ondemand` avoids the requirement entirely.
+
+Most people should not create this by hand: `--bootstrap` above renders it,
+creates it, converges it on a later pull, and attaches it in one step. What
+follows is for attaching it to an identity other than the one you are
+running as, or for an administrator setting it up on someone's behalf.
 
 After generating the policy, attach it to your identity:
 

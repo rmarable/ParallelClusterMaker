@@ -2765,7 +2765,7 @@ def _setup_mcp_infra(iam, *, aws_account_id, region, mcp_user_pool_id, templates
         # policies is the point. A boundary the deploy credentials can
         # rewrite is not a boundary, so MCPDeployPolicy denies versioning
         # it; changing it is an administrator's action, out of band.
-        current, version_id = _mcp_policy_is_current(
+        current, version_id = _policy_is_current(
             iam, arn=boundary_arn, rendered=boundary_doc
         )
         if current:
@@ -2795,13 +2795,13 @@ def _setup_mcp_infra(iam, *, aws_account_id, region, mcp_user_pool_id, templates
                 raise
             arn = f"arn:aws:iam::{aws_account_id}:policy/{name}"
             policy_arns[basename] = arn
-            current, version_id = _mcp_policy_is_current(
+            current, version_id = _policy_is_current(
                 iam, arn=arn, rendered=rendered
             )
             if current:
                 print(f"  Reusing existing MCP policy: {name} ({version_id}, current)")
             elif update_policies:
-                new_id = _update_mcp_policy(iam, arn=arn, rendered=rendered)
+                new_id = _update_policy_document(iam, arn=arn, rendered=rendered)
                 stale_policies.append(name)
                 print(f"  Updated MCP policy: {name} ({version_id} -> {new_id})")
             else:
@@ -2884,8 +2884,12 @@ def _decoded_policy_document(doc):
         return json.loads(urllib.parse.unquote(doc))
 
 
-def _mcp_policy_is_current(iam, *, arn, rendered):
+def _policy_is_current(iam, *, arn, rendered):
     """Does the deployed default version match what this repo renders?
+
+    Generic, and named that way deliberately: the MCP tier policies and the
+    operator policy converge by exactly this rule, and a second copy for the
+    operator side would be a second place for the comparison to drift.
 
     Compared against AWS's own copy of the document rather than a stored
     hash, tag or git ref. The deployed document is the truth; a marker
@@ -2902,7 +2906,7 @@ def _mcp_policy_is_current(iam, *, arn, rendered):
     return _decoded_policy_document(doc) == json.loads(rendered), version_id
 
 
-def _update_mcp_policy(iam, *, arn, rendered):
+def _update_policy_document(iam, *, arn, rendered):
     """Push a changed document as the new default version.
 
     Prunes oldest-first to stay under the five-version ceiling, and never
@@ -2922,6 +2926,153 @@ def _update_mcp_policy(iam, *, arn, rendered):
         PolicyArn=arn, PolicyDocument=rendered, SetAsDefault=True
     )
     return resp["PolicyVersion"]["VersionId"]
+
+
+@dataclass
+class OperatorBootstrapResult:
+    """What a bootstrap did, or would do under --dry-run."""
+
+    policy_arn: str = ""
+    policy_action: str = ""          # created | updated | current
+    version_id: str = ""
+    identity_arn: str = ""
+    principal_type: str = ""         # user | role | root | unknown
+    principal_name: str = ""
+    attach_action: str = ""          # attached | already | skipped | refused
+    reason: str = ""
+    dry_run: bool = False
+
+    @property
+    def ok(self):
+        return self.attach_action in ("attached", "already", "skipped")
+
+
+def _principal_from_caller_arn(arn):
+    """Resolve an STS caller ARN to the thing a policy can be attached to.
+
+    Three shapes, and the second is the one that bites: an assumed role
+    answers `arn:aws:sts::<acct>:assumed-role/<RoleName>/<session>`, which
+    is neither an IAM role ARN nor something `attach-role-policy` accepts --
+    it wants the bare RoleName, and passing the session name or the whole
+    ARN fails with NoSuchEntity. The root user cannot have a managed policy
+    attached at all, so it is named rather than guessed at.
+    """
+    if not arn or ":" not in arn:
+        return "unknown", ""
+    tail = arn.split(":", 5)[-1]
+    if tail == "root":
+        return "root", ""
+    if tail.startswith("assumed-role/"):
+        parts = tail.split("/")
+        return ("role", parts[1]) if len(parts) >= 2 else ("unknown", "")
+    if tail.startswith("user/"):
+        return "user", tail.split("/")[-1]
+    if tail.startswith("role/"):
+        return "role", tail.split("/")[-1]
+    return "unknown", ""
+
+
+def _policy_is_attached(iam, *, principal_type, principal_name, policy_arn):
+    lister = (iam.list_attached_user_policies if principal_type == "user"
+              else iam.list_attached_role_policies)
+    kw = ({"UserName": principal_name} if principal_type == "user"
+          else {"RoleName": principal_name})
+    for p in lister(**kw).get("AttachedPolicies", []):
+        if p.get("PolicyArn") == policy_arn:
+            return True
+    return False
+
+
+def bootstrap_operator_policy(
+    iam, sts, *, policy_name, rendered, description="", attach=True,
+    dry_run=False,
+):
+    """Create or converge the operator policy, then attach it to the caller.
+
+    The one setup step a fresh clone cannot do for itself, reduced to one
+    command. It is deliberately **not** an MCP tool on either transport: a
+    tool that grants IAM to its own caller has no ceiling, which is already
+    why `deploy_mcp.py` preflights its permissions rather than granting
+    them. No MCP tier holds `iam:AttachUserPolicy` at all.
+
+    Convergent rather than create-only, because a fresh clone is not the
+    only caller -- an existing account whose policy predates a new grant
+    needs the same command to push the change, and told to run a
+    create-only command such an operator gets EntityAlreadyExists and stops
+    with a policy that is silently a version behind. The comparison is
+    against AWS's own copy of the document, never a stored marker.
+    """
+    result = OperatorBootstrapResult(dry_run=dry_run)
+    arn = f"arn:aws:iam::{sts.get_caller_identity()['Account']}:policy/{policy_name}"
+    result.policy_arn = arn
+
+    try:
+        current, version_id = _policy_is_current(iam, arn=arn, rendered=rendered)
+        if current:
+            result.policy_action, result.version_id = "current", version_id
+        elif dry_run:
+            result.policy_action, result.version_id = "updated", version_id
+        else:
+            result.policy_action = "updated"
+            result.version_id = _update_policy_document(
+                iam, arn=arn, rendered=rendered
+            )
+    except _ClientError as e:
+        if e.response["Error"]["Code"] != "NoSuchEntity":
+            raise
+        result.policy_action = "created"
+        if not dry_run:
+            resp = iam.create_policy(
+                PolicyName=policy_name,
+                PolicyDocument=rendered,
+                Description=description or policy_name,
+            )
+            result.version_id = resp["Policy"]["DefaultVersionId"]
+        else:
+            result.version_id = "v1"
+
+    ident = sts.get_caller_identity()
+    result.identity_arn = ident.get("Arn", "")
+    result.principal_type, result.principal_name = _principal_from_caller_arn(
+        result.identity_arn
+    )
+
+    if not attach:
+        result.attach_action = "skipped"
+        result.reason = "attachment not requested"
+        return result
+
+    if result.principal_type == "root":
+        result.attach_action = "refused"
+        result.reason = (
+            "the account root user cannot have a managed policy attached; "
+            "create an IAM user or role and run this again as that identity"
+        )
+        return result
+    if result.principal_type == "unknown" or not result.principal_name:
+        result.attach_action = "refused"
+        result.reason = (
+            f"could not resolve an attachable principal from {result.identity_arn!r}"
+        )
+        return result
+
+    if result.policy_action != "created" and _policy_is_attached(
+        iam, principal_type=result.principal_type,
+        principal_name=result.principal_name, policy_arn=arn,
+    ):
+        result.attach_action = "already"
+        return result
+
+    if dry_run:
+        result.attach_action = "attached"
+        return result
+
+    if result.principal_type == "user":
+        iam.attach_user_policy(UserName=result.principal_name, PolicyArn=arn)
+    else:
+        iam.attach_role_policy(RoleName=result.principal_name, PolicyArn=arn)
+    result.attach_action = "attached"
+    return result
 
 
 def _delete_policy_with_versions(iam, arn):

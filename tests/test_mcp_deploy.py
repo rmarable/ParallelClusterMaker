@@ -1017,7 +1017,7 @@ class TestAPolicyEditReachesTheAccount:
     def test_an_unchanged_document_is_recognized_as_current(self):
         iam = _FakeIam()
         iam.seed(self.ARN, self.DOC)
-        current, vid = _pc._mcp_policy_is_current(
+        current, vid = _pc._policy_is_current(
             iam, arn=self.ARN, rendered=_json.dumps(self.DOC))
         assert current is True and vid == "v1"
 
@@ -1026,7 +1026,7 @@ class TestAPolicyEditReachesTheAccount:
         iam.seed(self.ARN, self.DOC)
         changed = _json.loads(_json.dumps(self.DOC))
         changed["Statement"][0]["Action"] = "s3:PutObject"
-        current, _ = _pc._mcp_policy_is_current(
+        current, _ = _pc._policy_is_current(
             iam, arn=self.ARN, rendered=_json.dumps(changed))
         assert current is False
 
@@ -1037,7 +1037,7 @@ class TestAPolicyEditReachesTheAccount:
 
         iam = _FakeIam()
         iam.seed(self.ARN, urllib.parse.quote(_json.dumps(self.DOC)))
-        current, _ = _pc._mcp_policy_is_current(
+        current, _ = _pc._policy_is_current(
             iam, arn=self.ARN, rendered=_json.dumps(self.DOC))
         assert current is True
 
@@ -1045,12 +1045,12 @@ class TestAPolicyEditReachesTheAccount:
         iam = _FakeIam()
         iam.seed(self.ARN, self.DOC)
         changed = {"Version": "2012-10-17", "Statement": []}
-        vid = _pc._update_mcp_policy(iam, arn=self.ARN,
+        vid = _pc._update_policy_document(iam, arn=self.ARN,
                                      rendered=_json.dumps(changed))
         versions = iam.policies[self.ARN]["versions"]
         assert vid == "v2"
         assert [v["VersionId"] for v in versions if v["IsDefaultVersion"]] == ["v2"]
-        current, _ = _pc._mcp_policy_is_current(
+        current, _ = _pc._policy_is_current(
             iam, arn=self.ARN, rendered=_json.dumps(changed))
         assert current is True
 
@@ -1061,7 +1061,7 @@ class TestAPolicyEditReachesTheAccount:
         iam = _FakeIam()
         iam.seed(self.ARN, self.DOC, extra_versions=4)
         assert len(iam.policies[self.ARN]["versions"]) == 5
-        vid = _pc._update_mcp_policy(
+        vid = _pc._update_policy_document(
             iam, arn=self.ARN, rendered=_json.dumps({"Version": "2012-10-17",
                                                      "Statement": []}))
         versions = iam.policies[self.ARN]["versions"]
