@@ -266,6 +266,31 @@ class TestDryRunChangesNothing:
         assert r.ok
 
 
+class TestTheOneLinerReadsAsASetupCommand:
+    """`--bootstrap` is documented as the one command a fresh clone runs.
+
+    It printed the rendered policy to stdout as well as the summary, so its
+    own result arrived under ~330 lines of JSON -- noticed while certifying
+    the create/attach path against real IAM, where the summary had to be
+    hunted for. The document is still available: `-o FILE`, or no flags at
+    all."""
+
+    def _main_src(self):
+        with open(os.path.join(REPO_ROOT, "generate_operator_policy.py")) as fh:
+            return fh.read()
+
+    def test_bootstrap_does_not_dump_the_document(self):
+        src = self._main_src()
+        i = src.index("elif not args.bootstrap:")
+        assert "print(rendered)" in src[i:i + 500]
+
+    def test_the_document_is_still_reachable_without_bootstrap(self):
+        """Vacuity guard: the fix is a condition, not deleting the output."""
+        src = self._main_src()
+        assert src.count("print(rendered)") == 1
+        assert "if args.output:" in src
+
+
 class TestItIsNotReachableFromAnyMcpSurface:
     def test_no_tier_can_attach_a_policy_to_a_human_identity(self):
         """The reason this is a CLI command and not a tool. A tool that

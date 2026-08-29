@@ -1049,6 +1049,7 @@ against a cluster that registered itself with populated TRES.
 | `base_os` | package manager | MariaDB package installed |
 |---|---|---|
 | `ubuntu2404` | apt | `mariadb-server` 10.11 |
+| `ubuntu2404arm` | apt | `mariadb-server` 10.11 (arm64, Graviton) |
 | `alinux2023` | dnf | `mariadb105-server` 10.5 (Amazon Linux 2023.11) |
 | `rhel9` | dnf | `mariadb-server` 10.5 (RHEL 9.8) |
 
@@ -1067,11 +1068,21 @@ worked.  The directory is now read out of the server's own `!includedir`
 rather than guessed, and the install checks the setting actually took by
 asking the running server.
 
-One detail worth knowing if you compare the numbers yourself: MariaDB
-rounds `innodb_buffer_pool_size` up to a multiple of its 128 MB chunk
-size, so the effective pool is usually a little larger than the derived
-value (742 MB became 768 MB on RHEL 9).  That is the server behaving
-normally, not the tuning failing.
+One detail worth knowing if you compare the numbers yourself: whether the
+effective buffer pool matches the derived one **depends on the MariaDB
+version**, so a mismatch is not evidence the tuning failed.
+
+| `base_os` | MariaDB | `innodb_buffer_pool_chunk_size` | requested | effective |
+|---|---|---|---|---|
+| `ubuntu2404` / `ubuntu2404arm` | 10.11 | 0 | 767 MB / 775 MB | exact |
+| `alinux2023` | 10.5 | 128 MB | 767 MB | 768 MB |
+| `rhel9` | 10.5 | 128 MB | 742 MB | 768 MB |
+
+MariaDB 10.5 rounds the pool up to a chunk boundary; 10.11 reports a chunk
+size of 0 and applies the value as given.  This is also why the install
+verifies `innodb_lock_wait_timeout` rather than the pool — it is an exact
+integer on every version, where no fixed tolerance on the pool would be
+correct across both.
 
 ### HPC Benchmarks
 

@@ -252,7 +252,12 @@ def main():
             print(f"Policy written to: {args.output}")
         except OSError as e:
             sys.exit(f"ERROR: could not write {args.output}: {e}")
-    else:
+    elif not args.bootstrap:
+        # --bootstrap is a setup command whose result is the summary above.
+        # Dumping the document to stdout as well buries that under ~200
+        # lines of JSON, which is what the documented one-liner would then
+        # look like. Ask for the document explicitly with -o, or with no
+        # flags at all.
         print(rendered)
 
     if arn:
