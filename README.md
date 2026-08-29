@@ -1595,9 +1595,101 @@ Supported departments: `analytics`, `clinical`, `commercial`, `compbio`, `compch
 
 ---
 
+## For Account Owners and Cluster Superusers
+
+Most of what this toolkit creates belongs to one cluster and is destroyed
+with it.  A few things are **account-scoped**: they are shared by every
+cluster in the account, they outlive any individual teardown, and some of
+them keep costing money.  If you own the AWS account — or administer
+clusters on behalf of other people — these are the ones to know about,
+because they are the ones where a reasonable-looking cleanup breaks
+something you did not expect.
+
+### One IAM step is yours, and it cannot be automated
+
+The toolkit creates its own roles, policies and instance profiles per
+cluster.  It cannot create *your* permissions, and deliberately does not
+try: a tool that can grant itself IAM has no ceiling, so
+`generate_operator_policy.py` renders and installs the operator policy but
+nothing in the build path can widen it.  Run this once per account:
+
+```bash
+./generate_operator_policy.py --bootstrap
+```
+
+Two consequences worth knowing before you attach it:
+
+* **Its one `Deny` binds you too.**  `IAMDenyWeakeningTheClusterBoundary`
+  refuses `DeletePolicy`, the policy-version actions, and
+  `DeleteRolePermissionsBoundary` on `pclustermaker-cluster-boundary` and
+  `pclustermaker-role-*`.  That is the guardrail working — an explicit
+  `Deny` beats any `Allow`, including an administrator's — but it means
+  attaching this policy to your own admin identity genuinely restricts it,
+  on those two resources.
+* **It is scoped to this toolkit's own names.**  It does not grant AWS
+  ParallelCluster's own required permissions; those are documented
+  upstream and are a separate set.
+
+### The EC2 Spot service-linked role is account-wide
+
+Spot is the default capacity type.  Every spot request in an AWS account —
+not just this toolkit's — goes through a single role,
+`AWSServiceRoleForEC2Spot`, which the EC2 Spot service assumes.  There is
+one per account, no cluster owns it, and no cluster can create it.
+
+The first spot build creates it for you if your identity has the grant.
+**Deleting it breaks spot for everything in the account**, not just for
+ParallelClusterMaker, and the failure is opaque: instances fail to launch
+with `AuthFailure.ServiceLinkedRoleCreationNotPermitted` while stacks
+report success.  Leave it alone.
+
+### Two permissions boundaries are never deleted, on purpose
+
+`pclustermaker-cluster-boundary` caps what a head node role can ever be
+granted; `pclustermaker-mcp-boundary` does the same for the MCP transport's
+roles.  Teardown deliberately leaves both, and that is not an oversight to
+clean up: they are account-level, so **every other live cluster's role is
+bounded by the same document**, and deleting one on a single teardown
+uncaps all of them at once.
+
+They are also never updated by the toolkit.  Changing a boundary is an
+administrator's action, taken out of band, precisely so a build cannot
+widen its own ceiling.
+
+**Stated rather than hidden:** only the *head node* role carries a
+boundary.  Compute and login node roles are created by ParallelCluster's
+own CDK, which the toolkit cannot pass a boundary to, so they are capped by
+the `ClusterNode-Deny` policy instead — a Deny-only document attached to
+every node.  If your security review needs boundaries everywhere, this is
+the gap to raise.
+
+### Three things keep costing money after a cluster is gone
+
+| What | Why it survives |
+|---|---|
+| CloudWatch log groups `/aws/parallelcluster/<cluster>-<timestamp>` | Retained 30 days.  They are the only surviving record of a failed build, and teardown always follows a failure — deleting them destroys the evidence exactly when it is needed |
+| `parallelclustermaker-results-<account>-<region>` | Benchmark results are meant to outlive the clusters that produced them |
+| `parallelclustermaker-locks-<account>-<region>` | The cluster lock and record store, shared across machines and clusters |
+
+Teardown prints the retained log groups by name every time, so the running
+total is never a surprise.  All three are safe to prune on your own
+schedule; nothing in the toolkit depends on old log groups or old results.
+
+### Job accounting is not an audit trail
+
+Slurm accounting is on by default, so every cluster runs a small MariaDB on
+its head node and `sacct` returns real job history.  **That database lives
+on the head node's root volume and teardown destroys it.**  There is no
+export step and nothing is synced to S3.
+
+If you are relying on job records for chargeback, compliance or capacity
+review, copy them off before deleting a cluster — or use Cost Explorer,
+which the toolkit tags per cluster and which does survive.  See
+[Job Accounting](#job-accounting).
+
 ## Note to DevOps Teams
 
-ParallelClusterMaker does **not** create or modify VPCs, subnets, gateways, routes, or Transit Gateways.  It creates IAM roles, policies, and instance profiles scoped to each individual cluster stack.  Templates are in `templates/` and can be customized.  If you hit permissions errors, the IAM policy template is the right starting point for working with your security team.
+ParallelClusterMaker does **not** create or modify VPCs, subnets, gateways, routes, or Transit Gateways.  It creates IAM roles, policies, and instance profiles scoped to each individual cluster stack — with a small number of deliberate exceptions that are account-scoped and outlive any one cluster, listed under [For Account Owners and Cluster Superusers](#for-account-owners-and-cluster-superusers).  Templates are in `templates/` and can be customized.  If you hit permissions errors, the IAM policy template is the right starting point for working with your security team.
 
 ---
 
