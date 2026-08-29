@@ -55,12 +55,25 @@ def _client_error(code):
 
 
 class _IAM:
-    """Modelled on IAM's own contract, not on what the caller happens to need.
+    """Modelled on IAM's own contract, and since verified against it.
 
     `GetRole` raises `NoSuchEntity` for an absent role;
     `CreateServiceLinkedRole` raises `InvalidInput` when the role already
-    exists (IAM does not return AlreadyExists for this call) and
-    `AccessDenied` when the caller may not create it.
+    exists -- IAM does not return `AlreadyExists` for this call, which is
+    the assumption the concurrent-build path rests on. Confirmed live
+    (2026-08-29): `InvalidInput: Service role name AWSServiceRoleForEC2Spot
+    has been taken in this account, please try a different suffix.`
+
+    The creation branch itself was certified end to end the same day, which
+    took deleting the account's real role to reach the fresh-account state:
+    absent -> `_ensure_spot_service_linked_role` created it -> a second call
+    took the early return and changed nothing. Until then the branch had
+    never executed anywhere, because the role is absent exactly once per
+    account and this one's had been created by hand before the code existed.
+
+    `AccessDenied` is modelled too, but is not load-bearing as a *code*: any
+    error other than `InvalidInput` exits with the message naming whatever
+    code IAM returned, so a different spelling still fails correctly.
     """
 
     def __init__(self, *, exists=False, get_error=None, create_error=None):
