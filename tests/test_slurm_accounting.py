@@ -482,7 +482,21 @@ class TestTheDeferredStepRollsBackWhatItBreaks:
     """A cluster without accounting works. A cluster whose slurmctld cannot
     reach slurmdbd is one where every Slurm command hangs -- so the edit to
     slurm.conf is reverted unless the scheduler comes back *answering*, not
-    merely active."""
+    merely active.
+
+    Certified on live hardware (`acctproof8`, 2026-08-29), and it took two
+    attempts to fire the right guard. Breaking slurmdbd outright left it in
+    `activating` with port 6819 closed, so the **port guard** caught it
+    first -- correctly, leaving slurm.conf untouched. Reaching the rollback
+    needed a failure at the protocol level rather than the port: a decoy
+    listener on 6819 that accepts connections and never speaks Slurm, so
+    the port guard passes, the edit lands, and slurmctld comes back active
+    but hung. It reported `slurmctld is up but not answering -- rolling
+    slurm.conf back`, restored the file, and `sinfo` answered again.
+
+    Both failure paths are therefore covered by evidence rather than by
+    stubs alone, and the property that matters held: a failed accounting
+    enable leaves a working cluster."""
 
     @pytest.fixture
     def deferred(self, cluster_params_slurm_accounting):
