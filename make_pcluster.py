@@ -339,6 +339,14 @@ def main():
         default=None,
     )
     parser.add_argument(
+        "--enable_slurm_accounting",
+        choices=["true", "false"],
+        help="run a local MariaDB on the head node so sacct reports job "
+             "history; accounting dies with the cluster (default = false)",
+        required=False,
+        default=None,
+    )
+    parser.add_argument(
         "--enable_monitoring",
         choices=["true", "false"],
         help="deploy Grafana/Prometheus monitoring dashboard (default = false)",
@@ -753,6 +761,7 @@ def main():
     enable_fsx_hydration = _resolve_bool("enable_fsx_hydration")
     enable_hpc_benchmarks = _resolve_bool("enable_hpc_benchmarks")
     enable_monitoring = _resolve_bool("enable_monitoring")
+    enable_slurm_accounting = _resolve_bool("enable_slurm_accounting")
     monitoring_version = _resolve("monitoring_version")
     if not re.fullmatch(r"v[0-9]+\.[0-9]+(\.[0-9]+)?", monitoring_version):
         sys.exit(
@@ -948,6 +957,7 @@ def main():
         enable_fsx_hydration=enable_fsx_hydration,
         enable_hpc_benchmarks=enable_hpc_benchmarks,
         enable_monitoring=enable_monitoring,
+        enable_slurm_accounting=enable_slurm_accounting,
         monitoring_version=monitoring_version,
         monitoring_version_checksum=monitoring_version_checksum,
         docker_compose_version=docker_compose_version,

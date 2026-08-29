@@ -213,6 +213,7 @@ def cluster_params():
         "pkg_dir": "/fsx/pkg",
         # Monitoring
         "enable_monitoring": "false",
+        "enable_slurm_accounting": "false",
         "monitoring_version": "v2.6",
         "monitoring_version_checksum": "sha256:4afa56a59228c1d8f4e405d07a2291f31853842128e6f7a0e52e1e2c1e262d55",
         "monitoring_s3_dest": "monitoring-post-install-wrapper.test-cluster.sh",
@@ -320,6 +321,22 @@ def cluster_params_unconfirmed_delete(cluster_params):
 
 
 @pytest.fixture
+def cluster_params_slurm_accounting(cluster_params):
+    """Accounting on, Ubuntu. Opt-in, so no other fixture enables it."""
+    p = dict(cluster_params)
+    p["enable_slurm_accounting"] = "true"
+    return p
+
+
+@pytest.fixture
+def cluster_params_slurm_accounting_rhel(cluster_params_rhel):
+    """The dnf family packages MariaDB under a different name."""
+    p = dict(cluster_params_rhel)
+    p["enable_slurm_accounting"] = "true"
+    return p
+
+
+@pytest.fixture
 def cluster_params_rhel(cluster_params):
     """cluster_params variant on rhel9arm.
 
@@ -409,6 +426,7 @@ def cluster_params_al2023_monitoring(cluster_params_al2023):
     """
     overrides = {
         "enable_monitoring": "true",
+        "enable_slurm_accounting": "false",
         "stage_docker_compose": "true",
         "docker_compose_version": "v2.29.7",
         "docker_compose_arch": "aarch64",
@@ -441,6 +459,7 @@ def cluster_params_monitoring_enabled(cluster_params):
     """
     overrides = {
         "enable_monitoring": "true",
+        "enable_slurm_accounting": "false",
     }
     return {**cluster_params, **overrides}
 

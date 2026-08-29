@@ -1996,6 +1996,7 @@ MAKE_CLUSTER_DEFAULTS = {
     "enable_fsx_hydration": "false",
     "enable_hpc_benchmarks": "false",
     "enable_monitoring": "false",
+    "enable_slurm_accounting": "false",
     # These must be real digests, not placeholders. They are the only source
     # on the no-defaults-file path, and a stale <cluster>_defaults.yml that
     # predates a new key falls through to here -- which is how
@@ -7782,6 +7783,7 @@ class MakeClusterParams:
     enable_fsx_hydration: bool
     enable_hpc_benchmarks: bool
     enable_monitoring: bool
+    enable_slurm_accounting: bool
     monitoring_version: str
     monitoring_version_checksum: str
     docker_compose_version: str
@@ -9413,6 +9415,7 @@ def core_create_cluster(*, params, repo_root, region, cluster_build_command, ans
     enable_fsx_hydration = params.enable_fsx_hydration
     enable_hpc_benchmarks = params.enable_hpc_benchmarks
     enable_monitoring = params.enable_monitoring
+    enable_slurm_accounting = params.enable_slurm_accounting
     monitoring_version = params.monitoring_version
     monitoring_version_checksum = params.monitoring_version_checksum
     docker_compose_version = params.docker_compose_version
@@ -10354,6 +10357,7 @@ def core_create_cluster(*, params, repo_root, region, cluster_build_command, ans
         "enable_fsx_hydration": _b(enable_fsx_hydration),
         "enable_hpc_benchmarks": _b(enable_hpc_benchmarks),
         "enable_monitoring": _b(enable_monitoring),
+        "enable_slurm_accounting": _b(enable_slurm_accounting),
         "monitoring_version": monitoring_version,
         "monitoring_version_checksum": monitoring_version_checksum,
         "monitoring_s3_dest": f"monitoring-post-install-wrapper.{cluster_name}.sh",

@@ -601,6 +601,21 @@ standing constraints for local development.
   `SlurmQueues`), not four independent copies — that duplication is what
   let `LoginNodes` silently inherit `HeadNode`'s `OnNodeStart` by
   copy-paste in the first place.
+- **Slurm accounting (`--enable_slurm_accounting`, default false) is a
+  local MariaDB on the head node, and every step is non-fatal** — once
+  `slurm.conf` names an accounting host, `slurmctld` blocks forever when
+  it does not answer, so any failure sets `_acct_ok=0` and leaves
+  `slurm.conf` untouched. Three halves shipped wrong once each:
+  **MariaDB is `restart`ed, never `enable --now`n** — the package's own
+  postinst already started it, so a config written afterward is never
+  read, and the effective value is read back off the server;
+  **`SlurmUser` comes from `slurm.conf`'s `SlurmUser=` line**, never
+  `stat -c %U`, which returns root and built a green cluster with a dead
+  scheduler; and **`slurm.conf` is edited by a deferred unit** after
+  `clustermgtd`'s heartbeat, rolling back unless `slurmctld` returns
+  *answering*, not merely active. Also load-bearing: the `loose-` prefix
+  on `innodb_snapshot_isolation`, never `sacctmgr add cluster`, and a
+  purge policy. Detail: `templates/CLAUDE.local.md`.
 
 ## Environment
 

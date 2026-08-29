@@ -698,4 +698,346 @@ then
 	sudo touch /opt/parallelcluster/shared/custom_action_done
 fi
 
+{% if enable_slurm_accounting == 'true' %}
+# Slurm accounting: a local MariaDB so sacct reports job history.
+#
+# Head node only -- slurmdbd runs there and the database is reached over
+# localhost, never the network.
+#
+# EVERY STEP HERE IS NON-FATAL, and that is the whole design. Once
+# slurm.conf names an accounting host, slurmctld blocks indefinitely when
+# that host does not answer -- observed live: slurmdbd died and `sinfo`
+# hung until slurm.conf was restored. So a failure anywhere below must
+# leave the cluster exactly as it would have been without the feature,
+# rather than half-configured. slurm.conf is touched only after slurmdbd
+# is confirmed listening, and is rolled back if slurmctld does not come
+# back answering.
+if [ "$NODE_TYPE" == "HeadNode" ]
+then
+	_acct_ok=1
+	echo "Slurm accounting: installing MariaDB..."
+{% if 'ubuntu' in base_os %}
+	sudo DEBIAN_FRONTEND=noninteractive apt-get -y install mariadb-server \
+		|| { echo "WARNING: MariaDB install failed; Slurm accounting is OFF" >&2; _acct_ok=0; }
+{% else %}
+	sudo dnf -y install mariadb105-server \
+		|| sudo dnf -y install mariadb-server \
+		|| { echo "WARNING: MariaDB install failed; Slurm accounting is OFF" >&2; _acct_ok=0; }
+{% endif %}
+
+	if [ "$_acct_ok" -eq 1 ]
+	then
+		# Sizing. Slurm's own guidance is 5-50% of memory and at least
+		# 4 GiB for the buffer pool, with the redo log at 25% of it --
+		# but that is sizing for a *dedicated* SQL server. This one is
+		# co-resident with slurmctld on a head node, holds a single
+		# cluster, and is purged at one month, so it is scaled to the
+		# node and bounded at both ends:
+		#
+		#   pool = 10% of RAM, floored at 128M, capped at 4096M
+		#   log  = 25% of pool, capped at 256M
+		#
+		# The pool cap is Slurm's own 4 GiB minimum. The log cap is
+		# ours: 25% of a 4096M pool is a 1024M redo log, preallocated
+		# on disk and replayed on crash recovery, for a database
+		# measured at ~97 MB of data. 256M is still 2.6x MariaDB's own
+		# 96M default.
+		#
+		# The pool floor matters more than the ceiling: Slurm warns
+		# that too small a pool causes trouble when purging records or
+		# upgrading the schema, which are exactly the operations that
+		# touch everything at once.
+		_mem_mb="$(awk '/^MemTotal:/{print int($2/1024)}' /proc/meminfo)"
+		_pool_mb=$(( _mem_mb / 10 ))
+		if [ "$_pool_mb" -lt 128 ]; then _pool_mb=128; fi
+		if [ "$_pool_mb" -gt 4096 ]; then _pool_mb=4096; fi
+		_log_mb=$(( _pool_mb / 4 ))
+		if [ "$_log_mb" -gt 256 ]; then _log_mb=256; fi
+
+		sudo mkdir -p /etc/my.cnf.d /etc/mysql/mariadb.conf.d 2>/dev/null || true
+		_acct_cnf=/etc/mysql/mariadb.conf.d/99-slurm-acct.cnf
+		if [ ! -d /etc/mysql/mariadb.conf.d ]; then _acct_cnf=/etc/my.cnf.d/99-slurm-acct.cnf; fi
+		sudo tee "$_acct_cnf" >/dev/null <<ACCTCNF
+[mysqld]
+# performance_schema instruments a workload nobody here will profile and
+# is worth several hundred MB on its own.
+performance_schema = OFF
+
+innodb_buffer_pool_size = ${_pool_mb}M
+innodb_log_file_size    = ${_log_mb}M
+innodb_flush_method     = O_DIRECT
+
+# Slurm requires both of these by name. The rollup can hold locks well
+# past the 50s default on a busy cluster; and with snapshot isolation ON,
+# a concurrent write makes a locking read fail with ER_CHECKREAD, which
+# slurmdbd cannot recover from -- it stops. The loose- prefix is required
+# because MariaDB refuses to start on an unknown option and this variable
+# does not exist before 10.6.18 / 10.11.8.
+innodb_lock_wait_timeout        = 900
+loose-innodb_snapshot_isolation = OFF
+max_allowed_packet              = 16M
+
+# slurmdbd opens a handful of connections. The default 151 pre-allocates
+# per-thread buffers for connections that will never arrive.
+max_connections   = 24
+thread_cache_size = 8
+table_open_cache  = 128
+
+# Per-connection buffers are allocated per client, so the defaults
+# multiply. Slurm's queries are small.
+sort_buffer_size    = 256K
+read_buffer_size    = 128K
+join_buffer_size    = 256K
+tmp_table_size      = 16M
+max_heap_table_size = 16M
+
+# MyISAM is effectively unused by Slurm; do not reserve for it.
+key_buffer_size = 8M
+
+# No replication and no point-in-time recovery: this database dies with
+# the head node by design, and the binary log is pure write amplification.
+skip-log-bin
+
+# slurmdbd is on this node. Not listening is stronger than a firewall rule.
+bind-address = 127.0.0.1
+ACCTCNF
+
+		# restart, not "enable --now". Installing mariadb-server starts
+		# the service from its own postinst, so by the time the config
+		# above is written the server is already up and `enable --now`
+		# is a no-op against it -- the file is read at startup and
+		# startup already happened. Measured on a live head node: every
+		# value in this file was ignored, and the two that appeared to
+		# have taken effect were coincidences where the setting matched
+		# the stock default.
+		sudo systemctl enable mariadb >/dev/null 2>&1 || true
+		sudo systemctl restart mariadb \
+			|| { echo "WARNING: MariaDB did not start; Slurm accounting is OFF" >&2; _acct_ok=0; }
+	fi
+
+	if [ "$_acct_ok" -eq 1 ]
+	then
+		# Read the settings back. "The file exists" is not evidence it
+		# was applied -- see the restart comment above.
+		_pool_eff="$(sudo mariadb -N -B -e 'select @@innodb_buffer_pool_size;' 2>/dev/null || echo 0)"
+		if [ "$_pool_eff" != "$(( _pool_mb * 1024 * 1024 ))" ]
+		then
+			echo "WARNING: MariaDB did not apply the tuning file (buffer pool is" >&2
+			echo "  ${_pool_eff} bytes, expected $(( _pool_mb * 1024 * 1024 ))). Accounting" >&2
+			echo "  will still work; the footprint will be larger than intended." >&2
+		fi
+	fi
+
+	if [ "$_acct_ok" -eq 1 ]
+	then
+		_acct_pw="$(openssl rand -base64 24 | tr -dc 'A-Za-z0-9' | head -c 24)"
+		sudo mariadb -e "CREATE DATABASE IF NOT EXISTS slurm_acct_db;" \
+			&& sudo mariadb -e "CREATE USER IF NOT EXISTS 'slurm'@'localhost' IDENTIFIED BY '${_acct_pw}';" \
+			&& sudo mariadb -e "GRANT ALL ON slurm_acct_db.* TO 'slurm'@'localhost'; FLUSH PRIVILEGES;" \
+			|| { echo "WARNING: could not create the accounting database; Slurm accounting is OFF" >&2; _acct_ok=0; }
+	fi
+
+	if [ "$_acct_ok" -eq 1 ]
+	then
+		# SlurmUser comes from slurm.conf's own SlurmUser= line, never
+		# from the ownership of the file. It shipped as `stat -c %U`,
+		# which returns root because root owns slurm.conf, while
+		# slurmctld actually runs as `slurm` -- so slurmdbd started
+		# happily and slurmctld was then refused by it with "Your user
+		# doesn't have privilege to perform this action", leaving a
+		# cluster that built green with a dead scheduler.
+		_slurm_user="$(awk -F= '/^SlurmUser=/{print $2}' /opt/slurm/etc/slurm.conf)"
+		if [ -z "$_slurm_user" ]; then _slurm_user=slurm; fi
+
+		sudo tee /opt/slurm/etc/slurmdbd.conf >/dev/null <<SLURMDBD
+AuthType=auth/munge
+DbdHost=localhost
+DbdPort=6819
+SlurmUser=${_slurm_user}
+
+StorageType=accounting_storage/mysql
+StorageHost=localhost
+StoragePort=3306
+StorageUser=slurm
+StoragePass=${_acct_pw}
+StorageLoc=slurm_acct_db
+
+# One month of job detail, a year of the rolled-up usage that reports are
+# built from. Every Purge* setting defaults to never, so a database with
+# no purge policy grows without bound -- on a head node whose root volume
+# is sized for an operating system, not a warehouse. Deliberately no
+# ArchiveDir: archiving defaults to /tmp, and an archive nobody collects
+# before the head node is torn down is not a backup.
+PurgeEventAfter=1month
+PurgeJobAfter=1month
+PurgeResvAfter=1month
+PurgeStepAfter=1month
+PurgeSuspendAfter=1month
+PurgeTXNAfter=12months
+PurgeUsageAfter=12months
+
+LogFile=/var/log/slurmdbd.log
+PidFile=/var/run/slurmdbd.pid
+SLURMDBD
+		sudo chown "${_slurm_user}" /opt/slurm/etc/slurmdbd.conf
+		sudo chmod 600 /opt/slurm/etc/slurmdbd.conf
+		sudo touch /var/log/slurmdbd.log
+		sudo chown "${_slurm_user}" /var/log/slurmdbd.log
+
+		# A managed unit, ordered after MariaDB. Started by hand it dies
+		# with whatever session started it, and slurmctld then blocks on
+		# a database that is not there. No User= directive, matching
+		# PCluster's own slurmctld unit: slurmdbd is started as root and
+		# drops to SlurmUser itself after reading its config.
+		sudo tee /etc/systemd/system/slurmdbd.service >/dev/null <<'SLURMDBDUNIT'
+[Unit]
+Description=Slurm DBD accounting daemon
+After=network-online.target mariadb.service munge.service
+Wants=network-online.target
+Requires=mariadb.service
+
+[Service]
+Type=simple
+ExecStart=/opt/slurm/sbin/slurmdbd -D
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+SLURMDBDUNIT
+		sudo systemctl daemon-reload
+		sudo systemctl enable --now slurmdbd \
+			|| { echo "WARNING: slurmdbd did not start; Slurm accounting is OFF" >&2; _acct_ok=0; }
+	fi
+
+	# slurm.conf is NOT edited here, and slurmctld is NOT restarted here.
+	#
+	# postinstall runs as OnNodeConfigured, which is *inside* PCluster's own
+	# bootstrap -- aws-parallelcluster-slurm::finalize_head_node has not run
+	# yet, and it waits for clustermgtd to write its heartbeat. Restarting
+	# slurmctld from here tore the scheduler out from under that recipe and
+	# failed the whole build: "cat: /opt/slurm/etc/pcluster/.slurm_plugin/
+	# clustermgtd_heartbeat: No such file or directory". The accounting
+	# block had *succeeded*; it was its success at the wrong moment that
+	# broke the cluster.
+	#
+	# Same class as the GPU NVMe block, which must skip devices the cookbook
+	# already claimed. So this defers: a one-shot unit waits for the
+	# heartbeat -- the cookbook's own signal that it is finished -- and only
+	# then edits slurm.conf and restarts slurmctld.
+	if [ "$_acct_ok" -eq 1 ]
+	then
+		sudo tee /usr/local/sbin/pcm-enable-slurm-acct >/dev/null <<'ACCTDEFER'
+#!/bin/bash
+# Enable Slurm accounting once PCluster's own bootstrap has finished.
+set -uo pipefail
+
+CONF=/opt/slurm/etc/slurm.conf
+BACKUP=/opt/slurm/etc/slurm.conf.pcm-preacct
+HEARTBEAT=/opt/slurm/etc/pcluster/.slurm_plugin/clustermgtd_heartbeat
+
+for _ in $(seq 1 120); do
+    [ -f "$HEARTBEAT" ] && break
+    sleep 10
+done
+if [ ! -f "$HEARTBEAT" ]; then
+    echo "clustermgtd never wrote its heartbeat; leaving slurm.conf alone" >&2
+    exit 0
+fi
+if ! ss -lnt 2>/dev/null | grep -q ':6819 '; then
+    echo "slurmdbd is not listening; leaving slurm.conf alone" >&2
+    exit 0
+fi
+
+cp "$CONF" "$BACKUP"
+
+python3 - "$CONF" <<'ACCTCONF'
+import re, sys
+p = sys.argv[1]
+s = open(p).read()
+keys = ("AccountingStorageType", "AccountingStorageHost", "AccountingStoragePort",
+        "JobAcctGatherType", "JobAcctGatherFrequency")
+for k in keys:
+    s = re.sub(rf"(?m)^{k}=.*$\n?", "", s)
+open(p, "w").write(s.rstrip("\n") + "\n" + "\n".join([
+    "AccountingStorageType=accounting_storage/slurmdbd",
+    "AccountingStorageHost=localhost",
+    "AccountingStoragePort=6819",
+    "JobAcctGatherType=jobacct_gather/linux",
+    "JobAcctGatherFrequency=30",
+]) + "\n")
+ACCTCONF
+
+# Roll back on anything short of a scheduler that answers. A cluster
+# without accounting is a working cluster; a cluster whose slurmctld
+# cannot reach slurmdbd is one where every Slurm command hangs.
+_rollback() {
+    echo "$1 -- rolling slurm.conf back" >&2
+    cp "$BACKUP" "$CONF"
+    systemctl restart slurmctld
+    exit 0
+}
+
+systemctl restart slurmctld || _rollback "slurmctld would not restart"
+sleep 8
+systemctl is-active --quiet slurmctld || _rollback "slurmctld is not active"
+timeout 30 /opt/slurm/bin/sinfo -h >/dev/null 2>&1 \
+    || _rollback "slurmctld is up but not answering"
+
+# No `sacctmgr add cluster` here. Slurm 20.02 and later register the
+# cluster themselves when slurmctld starts against slurmdbd, and adding
+# it by hand first is what produced "there's no TRES from it" on a live
+# build -- a row created before slurmctld had reported its resources.
+SU="$(awk -F= '/^SlurmUser=/{print $2}' "$CONF")"
+[ -n "$SU" ] || SU=slurm
+CN="$(awk -F= '/^ClusterName=/{print $2}' "$CONF")"
+
+_sacctmgr() { runuser -u "$SU" -- /opt/slurm/bin/sacctmgr "$@"; }
+
+for _ in $(seq 1 12); do
+    _sacctmgr -n list cluster format=cluster 2>/dev/null | grep -qw "$CN" && break
+    sleep 5
+done
+
+_sacctmgr -i add account "$CN" Description="$CN" Organization="$CN" >/dev/null 2>&1 || true
+
+# The login user always; the cluster owner only when it is a real account
+# on this node. AdminLevel=Admin so either can read every user's jobs --
+# without it sacct shows only the caller's own.
+for u in {{ ec2_user }} {{ cluster_owner }}; do
+    id "$u" >/dev/null 2>&1 || continue
+    _sacctmgr -i add user "$u" Account="$CN" AdminLevel=Admin >/dev/null 2>&1 || true
+done
+
+echo "Slurm accounting enabled for $CN"
+ACCTDEFER
+		sudo chmod 755 /usr/local/sbin/pcm-enable-slurm-acct
+		sudo tee /etc/systemd/system/pcm-slurm-acct.service >/dev/null <<'ACCTUNIT'
+[Unit]
+Description=Enable Slurm accounting after the ParallelCluster bootstrap
+After=network-online.target mariadb.service slurmdbd.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/pcm-enable-slurm-acct
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+ACCTUNIT
+		sudo systemctl daemon-reload
+		sudo systemctl enable pcm-slurm-acct.service >/dev/null 2>&1 || true
+		# --no-block: this must not hold the bootstrap open. It waits for a
+		# heartbeat that only appears after postinstall returns.
+		sudo systemctl start --no-block pcm-slurm-acct.service \
+			|| echo "WARNING: could not schedule the accounting enable step" >&2
+		echo "Slurm accounting: MariaDB (pool ${_pool_mb}M, log ${_log_mb}M) and"
+		echo "  slurmdbd are up; slurm.conf will be updated once the cluster"
+		echo "  bootstrap finishes."
+	fi
+	unset _acct_pw
+fi
+{% endif %}
+
 exit 0
