@@ -2308,6 +2308,77 @@ def _ensure_cluster_boundary(iam, *, aws_account_id, region, templates_dir):
     return boundary_arn
 
 
+_SPOT_SERVICE_NAME = "spot.amazonaws.com"
+_SPOT_SLR_NAME = "AWSServiceRoleForEC2Spot"
+
+
+def _ensure_spot_service_linked_role(iam):
+    """Make sure EC2 Spot's service-linked role exists before a spot build.
+
+    A service-linked role is not attached to anything and cannot be created
+    per cluster: there is exactly one per account, the EC2 Spot service
+    assumes it, and every spot request in the account goes through it. So
+    provisioning can only ensure it *exists*.
+
+    Nothing creates it on our behalf. AWS auto-creates it on the first spot
+    request made by a principal holding iam:CreateServiceLinkedRole, and the
+    principal that makes ours is the **head node** -- slurm_resume calls
+    ec2:CreateFleet with CapacityType SPOT -- whose HeadNode-IAM policy
+    deliberately grants no such action. So in an account that has never
+    launched a spot instance by some other route, every compute node fails
+    to resume with AuthFailure.ServiceLinkedRoleCreationNotPermitted while
+    the stack reports CREATE_COMPLETE: a cluster that builds green and
+    cannot run a job. Observed exactly that way on `acctproof3`.
+
+    Deliberately operator-side rather than granting the head node
+    iam:CreateServiceLinkedRole: any user with a shell there, including via
+    Slurm job submission, would then hold an IAM write action, and the head
+    node needs the role to *exist*, never to create it.
+
+    Three outcomes, and the difference between them matters. Present is a
+    no-op. Absent-and-created is the fix. Absent-and-refused is a hard error
+    *here*, before _setup_iam bills anything, because we then know for
+    certain the cluster cannot run work -- unlike an unreadable role, which
+    only means this operator cannot see it and is a warning.
+    """
+    try:
+        iam.get_role(RoleName=_SPOT_SLR_NAME)
+        return
+    except _ClientError as e:
+        code = e.response["Error"]["Code"]
+        if code not in ("NoSuchEntity",):
+            print(
+                f"*** WARNING ***  Could not check for the EC2 Spot service-linked "
+                f"role ({code}). If this account has never run a spot instance, "
+                f"compute nodes will fail to launch; create it with:\n"
+                f"    aws iam create-service-linked-role --aws-service-name "
+                f"{_SPOT_SERVICE_NAME}",
+                file=sys.stderr,
+            )
+            return
+
+    try:
+        iam.create_service_linked_role(AWSServiceName=_SPOT_SERVICE_NAME)
+        print(f"  Created the EC2 Spot service-linked role: {_SPOT_SLR_NAME}")
+    except _ClientError as e:
+        code = e.response["Error"]["Code"]
+        if code == "InvalidInput":
+            return
+        sys.exit(
+            f"\n*** ERROR ***  This is a spot cluster, the EC2 Spot "
+            f"service-linked role {_SPOT_SLR_NAME} does not exist in account, "
+            f"and it could not be created ({code}).\n\n"
+            f"Every compute node would fail to launch with "
+            f"AuthFailure.ServiceLinkedRoleCreationNotPermitted while the stack "
+            f"still reported CREATE_COMPLETE, so the build is stopped here "
+            f"rather than after it has created resources.\n\n"
+            f"Ask an administrator to run:\n"
+            f"    aws iam create-service-linked-role --aws-service-name "
+            f"{_SPOT_SERVICE_NAME}\n"
+            f"or rebuild with --cluster_type ondemand.\n"
+        )
+
+
 def _setup_iam(
     iam,
     ec2_iam_role,
@@ -10175,6 +10246,9 @@ def core_create_cluster(*, params, repo_root, region, cluster_build_command, ans
     ec2_json_policy_template = os.path.join(
         cluster_data_dir, "ParallelClusterInstancePolicy.json"
     )
+
+    if cluster_type == "spot":
+        _ensure_spot_service_linked_role(iam)
 
     try:
         _setup_iam(

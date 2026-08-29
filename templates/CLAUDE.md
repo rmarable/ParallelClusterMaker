@@ -207,3 +207,25 @@ and deletes the six managed policies.
   those policies attach to is bounded — which is the mitigation
   `templates/CLAUDE.local.md` names for the cluster case and which no
   cluster role has.
+- **`IAMSpotServiceLinkedRole` is in `OperatorPolicy` and `MCPClusterBuild`,
+  and nowhere else.** Spot is the default capacity type, and every spot
+  request in an account goes through one account-level role,
+  `AWSServiceRoleForEC2Spot`, assumed by the EC2 Spot service itself. AWS
+  auto-creates it on the first spot request by a principal holding
+  `iam:CreateServiceLinkedRole` — but that principal is the **head node**
+  (`slurm_resume` calls `ec2:CreateFleet`), and `HeadNode-IAM` grants no
+  such action, deliberately: anyone who can submit a Slurm job can get a
+  shell there. So in an account that has never launched a spot instance,
+  every compute node fails to resume with
+  `AuthFailure.ServiceLinkedRoleCreationNotPermitted` **while the stack
+  reports `CREATE_COMPLETE`** — a cluster that builds green and cannot run
+  a job (observed on `acctproof3`). `_ensure_spot_service_linked_role`
+  fixes it operator-side, before `_setup_iam`, so a refusal costs nothing.
+  Never move the grant onto an instance-reachable policy to "simplify" it;
+  the node needs the role to *exist*, never to create it. It is on
+  `MCPClusterBuild` because `create_cluster` runs remotely too and a tier
+  that cannot ensure the role builds exactly that dead cluster — the floor
+  rule, not the ceiling — and on that file rather than `MCPStackMutation`
+  only because the latter has no bytes left. The `Resource` is the single
+  full role ARN, never an `aws-service-role/*` wildcard, which would let
+  either principal create a service-linked role for any AWS service.

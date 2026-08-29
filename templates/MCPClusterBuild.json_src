@@ -125,6 +125,15 @@
             "Effect": "Allow"
         },
         {
+            "Sid": "IAMSpotServiceLinkedRole",
+            "Effect": "Allow",
+            "Action": [
+                "iam:GetRole",
+                "iam:CreateServiceLinkedRole"
+            ],
+            "Resource": "arn:aws:iam::<AWS_ACCOUNT_ID>:role/aws-service-role/spot.amazonaws.com/AWSServiceRoleForEC2Spot"
+        },
+        {
             "Sid": "IAMManagedPolicyLifecycle",
             "Action": [
                 "iam:CreatePolicy",

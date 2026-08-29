@@ -1470,6 +1470,20 @@ ParallelClusterMaker does **not** create or modify VPCs, subnets, gateways, rout
 
 **Spot capacity:** Compute nodes that fail to launch surface as a `ComputeFleet - CREATE_FAILED` CloudFormation error.  Retry the build or switch to `--cluster_type=ondemand`.
 
+**Spot nodes never launch and the cluster still reports `CREATE_COMPLETE`:** Check `sinfo -R` on the head node.  If the reason reads `(Code:AuthFailure.ServiceLinkedRoleCreationNotPermitted)Failure when resuming nodes`, the account is missing the EC2 Spot service-linked role, `AWSServiceRoleForEC2Spot`.
+
+This is an *account-level* prerequisite, not a per-cluster one.  There is exactly one such role per AWS account, the EC2 Spot service assumes it, and every spot request in the account goes through it — so it is not attached to a cluster and cannot be created by one.  AWS creates it automatically on the first spot request made by a principal holding `iam:CreateServiceLinkedRole`, but the principal that makes ours is the **head node** (`slurm_resume` calls `ec2:CreateFleet` with `CapacityType: SPOT`), and the head node deliberately holds no IAM write permissions — a shell there, including one obtained by submitting a Slurm job, must not be able to create roles.
+
+In an account that has never launched a spot instance by some other route, the result is a cluster that builds green and cannot run a single job: the stack reaches `CREATE_COMPLETE`, `sinfo` shows nodes cycling through `down#`, and jobs sit `PENDING` forever while `clustermgtd` replaces nodes that can never come up.
+
+Since spot is the **default** (`--cluster_type=spot`), this affects most first builds in a fresh account.  `make_pcluster.py` now creates the role for you before it creates anything else, so a normal build handles it.  If the operator identity lacks the grant, the build stops immediately — before any billable resource exists — and names the fix:
+
+```bash
+aws iam create-service-linked-role --aws-service-name spot.amazonaws.com
+```
+
+Ask an administrator to run that once per account, or build with `--cluster_type=ondemand`, which needs no such role.
+
 **Build fails with `HeadNodeWaitCondition` timing out (`CREATE_FAILED`, 0 of 1 signals):** The head node did not finish bootstrapping inside the window CloudFormation allows.  Note that this clock starts when CloudFormation *begins creating the wait condition* — before the head node instance exists — and shared filesystem provisioning sits on the head node's critical path.  A 1200 GB FSx for Lustre filesystem measured 17m 22s, over half of PCluster's stock 2100 s budget, before the instance had even launched.
 
 The toolkit raises `head_node_bootstrap_timeout` automatically for this: +1800 s when `enable_fsx` is true, +600 s when `enable_efs` is true, whichever is larger (the two provision concurrently, so the head node waits on the slower one, not the sum).  A `*** INFO ***` line names the filesystem that drove the increase.

@@ -136,11 +136,35 @@ class _FakeSts:
 
 
 class _FakeIam:
-    def __init__(self):
+    """Modelled on IAM's contract, not on what the caller needs today.
+
+    `get_role` raises `NoSuchEntity` for an absent role and
+    `create_service_linked_role` succeeds -- the shape a spot build sees in
+    an account that has never launched a spot instance, which is the case
+    `_ensure_spot_service_linked_role` exists for. A fake missing these
+    simply raised AttributeError, which is not an outcome IAM has.
+    """
+
+    def __init__(self, spot_slr_exists=False):
         self.deleted_roles = []
+        self.spot_slr_exists = spot_slr_exists
+        self.created_service_linked_roles = []
 
     def delete_role(self, RoleName):
         self.deleted_roles.append(RoleName)
+
+    def get_role(self, RoleName):
+        if RoleName == "AWSServiceRoleForEC2Spot" and not self.spot_slr_exists:
+            raise ClientError(
+                {"Error": {"Code": "NoSuchEntity", "Message": "not found"}},
+                "GetRole",
+            )
+        return {"Role": {"RoleName": RoleName}}
+
+    def create_service_linked_role(self, AWSServiceName):
+        self.created_service_linked_roles.append(AWSServiceName)
+        self.spot_slr_exists = True
+        return {"Role": {"RoleName": "AWSServiceRoleForEC2Spot"}}
 
 
 class _FakeS3Object:

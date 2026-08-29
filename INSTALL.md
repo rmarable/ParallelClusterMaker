@@ -416,6 +416,34 @@ The generated policy (`parallelcluster-operator-pclustermaker`) covers the follo
 | `IAMClusterBoundaryBootstrapReadAndCreate` | Create and read `policy/pclustermaker-cluster-boundary`, the permissions boundary the head node role is created under. Its name falls outside the `pclustermaker-policy-*` wildcard above on purpose: an operator who can rewrite their own boundary does not really have one |
 | `IAMBoundClusterRoleOnly` | Set a role's permissions boundary, conditional on it being that boundary and no other |
 | `IAMDenyWeakeningTheClusterBoundary` | The one `Deny` in the document. Refuses any attempt to delete the boundary or detach it from a role |
+| `IAMSpotServiceLinkedRole` | Read and create `AWSServiceRoleForEC2Spot`, the EC2 Spot service-linked role. Scoped to that one role and nothing else — see below |
+
+#### The EC2 Spot service-linked role
+
+Spot is the default capacity type, and every spot request in an AWS account
+goes through a single account-level role, `AWSServiceRoleForEC2Spot`. It is
+assumed by the EC2 Spot service itself; it is not attached to a cluster, and
+no cluster can create it.
+
+AWS creates it automatically on the first spot request made by a principal
+holding `iam:CreateServiceLinkedRole`. The principal making ours is the head
+node — `slurm_resume` calls `ec2:CreateFleet` — and the head node holds no IAM
+write permissions on purpose, since anyone who can submit a Slurm job can get
+a shell there. So in an account that has never launched a spot instance, the
+role is simply absent, and every compute node fails to resume with
+`AuthFailure.ServiceLinkedRoleCreationNotPermitted` **while the stack still
+reports `CREATE_COMPLETE`**.
+
+`make_pcluster.py` therefore ensures the role exists before it creates
+anything, which is what `IAMSpotServiceLinkedRole` in the operator policy is
+for. If you would rather create it once by hand — or your operator identity
+is not allowed to — run:
+
+```bash
+aws iam create-service-linked-role --aws-service-name spot.amazonaws.com
+```
+
+Building with `--cluster_type=ondemand` avoids the requirement entirely.
 
 After generating the policy, attach it to your identity:
 
