@@ -49,11 +49,47 @@ def _uncommented(text):
     return "\n".join(l for l in text.splitlines() if not l.lstrip().startswith("#"))
 
 
-class TestItIsOffByDefault:
-    def test_the_default_is_false(self):
+class TestItIsOnByDefault:
+    """On by default, and the failure mode is what makes that defensible.
+
+    Every step is latched non-fatal, so on an arm where the install does not
+    work the cluster still builds -- accounting is simply off, with a warning
+    in the bootstrap log. A default-on feature that could fail a node would
+    be a different decision entirely.
+
+    Cost measured on a live build (`acctproof3`, ubuntu2404, c5.xlarge): the
+    whole postinstall phase took 86s including the MariaDB install, against a
+    head node bootstrap of 619.5s and a HeadNodeWaitCondition budget of
+    2100s -- 1,480s of headroom. The budget is deliberately *not* raised for
+    this: `pcluster_defaults.yml` must ship 2100 or the EFS/FSx auto-bump is
+    disabled for every cluster.
+    """
+
+    def test_the_default_is_true(self):
         from pcluster_core import MAKE_CLUSTER_DEFAULTS
 
-        assert MAKE_CLUSTER_DEFAULTS["enable_slurm_accounting"] == "false"
+        assert MAKE_CLUSTER_DEFAULTS["enable_slurm_accounting"] == "true"
+
+    def test_the_two_default_sources_agree(self):
+        """`_resolve`'s precedence is CLI > defaults file > hardcoded, so a
+        disagreement here makes the value depend on whether --use_defaults
+        was passed -- the same hazard the download checksums have."""
+        import yaml
+
+        from pcluster_core import MAKE_CLUSTER_DEFAULTS
+
+        with open(os.path.join(REPO_ROOT, "pcluster_defaults.yml")) as fh:
+            shipped = yaml.safe_load(fh)
+        assert shipped["enable_slurm_accounting"] == "true"
+        assert (str(shipped["enable_slurm_accounting"]).lower()
+                == MAKE_CLUSTER_DEFAULTS["enable_slurm_accounting"])
+
+    def test_the_cli_help_states_the_real_default(self):
+        """The help text is the only place most operators learn the default,
+        and it said `false` for as long as that was true."""
+        src = open(os.path.join(REPO_ROOT, "make_pcluster.py")).read()
+        m = re.search(r'"--enable_slurm_accounting".*?\)', src, re.S)
+        assert m and "default = true" in m.group(0)
 
     def test_it_is_a_real_bool_on_the_params(self):
         """The whole `"false"` is truthy class of bug: a string default on a
@@ -71,6 +107,10 @@ class TestItIsOffByDefault:
         assert "true" in m.group(1) and "false" in m.group(1)
 
     def test_nothing_renders_when_it_is_off(self, cluster_params):
+        """`cluster_params` sets the flag false explicitly. That fixture is
+        documented as choosing values to exercise conditionals rather than to
+        model defaults -- it sets enable_fsx true against a false default for
+        the same reason -- so it is not stale here, it is the off case."""
         body = _postinstall(cluster_params)
         assert "mariadb" not in body.lower()
         assert "slurmdbd" not in body.lower()
@@ -267,12 +307,29 @@ class TestBothPackageFamiliesAreCovered:
         assert "apt-get -y install mariadb-server" in body
         assert "dnf -y install" not in body
 
-    def test_the_dnf_family_gets_its_own_package_name(
+    def test_the_dnf_family_tries_both_package_names(
             self, cluster_params_slurm_accounting_rhel):
-        """AL2023 and RHEL 9 package it as mariadb105-server; the fallback
-        to mariadb-server covers distributions that do not."""
+        """The fallback is load-bearing, not defensive padding.
+
+        Measured on live head nodes, one per distro, and the two disagree:
+
+          Amazon Linux 2023.11  mariadb105-server-10.5.29-1.amzn2023
+          RHEL 9.8              mariadb-server-10.5.29-3.el9_7
+                                (mariadb105-server: not installed)
+
+        Neither name resolves on both, so collapsing this to a single
+        `dnf -y install` fails one of the two distros outright -- and since
+        the install is latched non-fatal, it fails quietly, leaving a
+        cluster that builds green with accounting silently off. An earlier
+        version of this docstring asserted RHEL 9 packages it as
+        mariadb105-server, which the RHEL build disproved."""
         body = _postinstall(cluster_params_slurm_accounting_rhel)
         assert "dnf -y install mariadb105-server" in body
+        assert "dnf -y install mariadb-server" in body
+        assert (body.index("dnf -y install mariadb105-server")
+                < body.index("dnf -y install mariadb-server")), (
+            "the versioned name must be tried first; mariadb-server on "
+            "AL2023 resolves to a different package set")
         assert "apt-get" not in body
 
 
@@ -306,9 +363,26 @@ class TestTheTuningFileIsActuallyApplied:
     def test_the_effective_value_is_read_back(self, body):
         """A test that only checks the file exists is the same test that
         passed while nothing in it applied. The node asks the server."""
-        assert "@@innodb_buffer_pool_size" in body
-        i = body.index("@@innodb_buffer_pool_size")
-        assert "WARNING" in body[i:i + 600]
+        assert "@@innodb_lock_wait_timeout" in body
+        i = body.index("@@innodb_lock_wait_timeout")
+        assert "WARNING" in body[i:i + 700]
+
+    def test_the_read_back_uses_a_value_the_server_does_not_round(self, body):
+        """Measured on `acctproof5`: a request for 767M came back as
+        805306368 (768M), because MariaDB rounds the buffer pool up to its
+        own granularity. Comparing that for exact equality reported failure
+        on a build where every setting had in fact applied -- a guard that
+        fires on every build is worse than none, since this is the guard
+        that caught the config landing in an unread directory."""
+        assert "@@innodb_buffer_pool_size" not in body
+        assert '!= "900"' in body
+
+    def test_the_warning_names_what_slurm_requires(self, body):
+        """The operator needs to know this is not merely a footprint issue:
+        Slurm requires innodb_lock_wait_timeout=900 by name."""
+        i = body.index("@@innodb_lock_wait_timeout")
+        window = body[i:i + 700]
+        assert "900" in window and "Slurm" in window
 
 
 class TestTheSizesAreDerivedFromTheNode:
@@ -546,3 +620,133 @@ class TestTheDaemonsAgreeOnPortsAndAuth:
         i = body.index("Description=Slurm DBD accounting daemon")
         unit = body[i:i + 400]
         assert "munge.service" in unit
+
+
+class TestTheConfigGoesWhereTheServerReadsIt:
+    """The bug this class exists for shipped and reached a live cluster.
+
+    It was `mkdir -p /etc/my.cnf.d /etc/mysql/mariadb.conf.d` followed by
+    `if [ ! -d /etc/mysql/mariadb.conf.d ]` -- a test for a directory the
+    line above had just created, so it could never be true. On AL2023,
+    whose MariaDB reads `/etc/my.cnf.d`, the file landed in a directory
+    nothing reads and the server ran on stock defaults: buffer pool 128M
+    instead of 773M, and `innodb_lock_wait_timeout` **50 instead of the
+    900 Slurm requires**. The cluster built green and `sacct` worked, so
+    nothing surfaced it.
+
+    Measured on `acctproof4` (2026-08-29): `/etc/my.cnf` carries
+    `!includedir /etc/my.cnf.d`.
+    """
+
+    @pytest.fixture
+    def snippet(self, cluster_params_slurm_accounting):
+        body = _postinstall(cluster_params_slurm_accounting)
+        start = body.index('\t\t_acct_cnf=""')
+        end = body.index('if [ -n "$_acct_cnf" ]; then sudo tee')
+        return body[start:end]
+
+    def _resolve(self, snippet, tmp_path, tree):
+        """Run the real detection against a fake /etc laid out like a distro."""
+        import subprocess
+
+        etc = tmp_path / "etc"
+        for path, content in tree.items():
+            f = etc / path
+            f.parent.mkdir(parents=True, exist_ok=True)
+            if content is None:
+                f.mkdir(parents=True, exist_ok=True)
+            else:
+                f.write_text(content)
+        script = ("set -euo pipefail\n"
+                  + snippet.replace("/etc/", f"{etc}/")
+                  + 'echo "${_acct_cnf}"\n')
+        out = subprocess.run(["bash", "-c", script], capture_output=True, text=True)
+        assert out.returncode == 0, out.stderr
+        # The last line is the resolved path. Earlier lines can be the
+        # no-directory warning, which is on stdout by design -- see
+        # TestTheWarningsReachSomebody.
+        last = out.stdout.splitlines()[-1] if out.stdout.splitlines() else ""
+        return last.strip().replace(f"{etc}/", "/etc/")
+
+    def test_the_dnf_family_resolves_to_my_cnf_d(self, snippet, tmp_path):
+        """AL2023's real shape, read off a live node."""
+        got = self._resolve(snippet, tmp_path, {
+            "my.cnf": "[mysqld]\n!includedir /etc/my.cnf.d\n",
+            "my.cnf.d": None,
+        })
+        assert got == "/etc/my.cnf.d/99-slurm-acct.cnf"
+
+    def test_the_debian_family_resolves_to_mariadb_conf_d(self, snippet, tmp_path):
+        got = self._resolve(snippet, tmp_path, {
+            "mysql/my.cnf": "[mysqld]\n!includedir /etc/mysql/mariadb.conf.d/\n",
+            "mysql/mariadb.conf.d": None,
+        })
+        assert got == "/etc/mysql/mariadb.conf.d/99-slurm-acct.cnf"
+
+    def test_the_wrong_directory_existing_does_not_win(self, snippet, tmp_path):
+        """The shipped bug in one assertion: both directories present, and
+        the answer must still come from what the server says it reads."""
+        got = self._resolve(snippet, tmp_path, {
+            "my.cnf": "[mysqld]\n!includedir /etc/my.cnf.d\n",
+            "my.cnf.d": None,
+            "mysql/mariadb.conf.d": None,      # present but not referenced
+        })
+        assert got == "/etc/my.cnf.d/99-slurm-acct.cnf"
+
+    def test_nothing_is_created_before_it_is_tested(self, snippet):
+        """A probe that creates its own answer is not a probe. `mkdir` must
+        not appear before the directory tests at all."""
+        assert "mkdir" not in snippet, snippet
+
+    def test_an_absent_includedir_falls_back_without_crashing(self, snippet, tmp_path):
+        got = self._resolve(snippet, tmp_path, {
+            "my.cnf": "[mysqld]\n", "my.cnf.d": None,
+        })
+        assert got == "/etc/my.cnf.d/99-slurm-acct.cnf"
+
+    def test_no_config_directory_at_all_is_survivable(self, snippet, tmp_path):
+        """Accounting still works on stock defaults; this must not abort."""
+        got = self._resolve(snippet, tmp_path, {"my.cnf": "[mysqld]\n"})
+        assert got == ""
+
+
+class TestTheWarningsReachSomebody:
+    """cfn-init captures stdout only; node stderr reaches no stream at all.
+
+    The whole block is built to fail soft and tell the operator, and on
+    `acctproof4` it did exactly that -- into a stream nobody can read. The
+    tuning silently failed to apply, the guard fired, and its three lines
+    are absent from CloudWatch while an `echo` from the same script
+    milliseconds later is present.
+    """
+
+    @pytest.fixture
+    def parts(self, cluster_params_slurm_accounting):
+        body = _postinstall(cluster_params_slurm_accounting)
+        a = body.index("{% raw %}") if False else body.index(
+            "# Slurm accounting: a local MariaDB")
+        d0 = body.index("sudo tee /usr/local/sbin/pcm-enable-slurm-acct")
+        d1 = body.index("\nACCTDEFER")
+        return body[a:d0] + body[d1:], body[d0:d1]
+
+    def test_no_postinstall_warning_is_written_to_stderr(self, parts):
+        outside, _ = parts
+        offenders = [l.strip() for l in outside.splitlines()
+                     if ">&2" in l and not l.lstrip().startswith("#")]
+        assert offenders == [], offenders
+
+    def test_the_deferred_unit_keeps_stderr(self, parts):
+        """It runs under systemd, where stderr reaches the journal -- which
+        is where its output was actually read from on two live clusters. The
+        rule is about the capture mechanism, not about stderr being bad."""
+        _, deferred = parts
+        assert deferred.count(">&2") >= 3
+
+    def test_the_failure_warnings_still_exist(self, parts):
+        """Vacuity guard: the fix is redirecting them, not deleting them."""
+        outside, _ = parts
+        for msg in ("MariaDB install failed", "MariaDB did not start",
+                    "could not create the accounting database",
+                    "slurmdbd did not start",
+                    "did not read"):
+            assert msg in outside, msg

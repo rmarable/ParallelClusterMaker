@@ -130,6 +130,7 @@ Full detail, including the container tier and teardown:
 
 - Spack + Lmod for HPC software module management
 - Optional benchmark suite (`--enable_hpc_benchmarks`): STREAM, OSU MPI, IOR, and HPCG — STREAM recompiles per microarchitecture, so a GPU-partition job measures the GPU node
+- Slurm job accounting **on by default** (`--enable_slurm_accounting`) — a local MariaDB on the head node so `sacct` reports job history; see [Job Accounting](#job-accounting)
 - Optional Grafana/Prometheus monitoring stack (`--enable_monitoring`) via `aws-parallelcluster-monitoring` — Grafana dashboards, Prometheus, Slurm exporter, CloudWatch exporter
 
 **Operations tooling**
@@ -180,6 +181,7 @@ Most optional parameters have hardcoded defaults, and all of them can be persist
 | `placement_group` | NONE |
 | `hyperthreading` | true |
 | `enable_monitoring` | false |
+| `enable_slurm_accounting` | **true** |
 | `enable_hpc_benchmarks` | false |
 | `enable_efa` | false |
 | `enable_gpu` | derived from `gpu_instance_type` — not user-settable |
@@ -507,7 +509,7 @@ Sections produced:
 
 1. **CloudWatch: head node bootstrap logs** — last N lines from `cfn-init`, `cloud-init-output`, and `cinc_client` streams.  PCluster appends the stack's creation timestamp to the log group name (`/aws/parallelcluster/<cluster_name>-<YYYYmmddHHMM>`), so the group is discovered by prefix rather than constructed; the selected group name is printed above the streams.  Rebuilds of the same cluster name leave older groups behind — the group survives `delete-cluster` by design, since it is the only surviving record of a failed build — and the newest is used.  The toolkit sets `RetentionInDays: 30` in the cluster config, so a group's events age out after 30 days rather than PCluster's default 180.  Requires `logs:DescribeLogGroups`, `logs:DescribeLogStreams`, `logs:FilterLogEvents`, and `logs:GetLogEvents` on the operator identity (all included in the operator policy).  Pass `--no_cw` to skip this section if permissions are unavailable.
 2. **Slurm node states** — `sinfo -N -l` output; nodes not in `idle`/`mix`/`alloc` are annotated with `<-- not idle`.
-3. **Recent Slurm job failures** — `sacct` filtered to `FAILED`, `CANCELLED`, `TIMEOUT`, `NODE_FAIL` states.  Prints a note if no results (Slurm accounting is not enabled by default in PCluster v3).
+3. **Recent Slurm job failures** — `sacct` filtered to `FAILED`, `CANCELLED`, `TIMEOUT`, `NODE_FAIL` states.  Prints a note if no results.  ParallelCluster itself does not enable Slurm accounting storage, so `sacct` has nothing to return on a cluster built with `--enable_slurm_accounting=false`, or on one built before this toolkit enabled it by default — see [Job Accounting](#job-accounting).
 4. **Local log tails** — last N lines of `/var/log/parallelcluster/slurm_resume.log`, `slurm_suspend.log`, `/var/log/cinc/client.log`, `/var/log/cloud-init-output.log`.
 5. **Postinstall marker** — confirms `/opt/parallelcluster/shared/custom_action_done` is present; prints the cluster serial number for cross-referencing S3 benchmark results.
 
@@ -535,7 +537,9 @@ Diagnosing cluster: my-cluster  (us-east-1)
 === Recent Slurm job failures (last 24h) ===
 
   No failed jobs in the last 24h
-  (If this is unexpected, Slurm accounting may not be enabled.)
+  (If this is unexpected, the cluster was built with
+  `--enable_slurm_accounting=false`, or predates it being the default — see
+  [Job Accounting](#job-accounting).)
 
 === Local log tails (last 30 lines each) ===
 
@@ -947,6 +951,127 @@ sbatch /fsx/scratch/my_project/sbatch_default_submission_script.sh
 - **The rank count is vCPUs, divided by `DefaultThreadsPerCore` when `--hyperthreading=false`** — never halved unconditionally.  Graviton reports one thread per core, so halving there would request half the cores every ARM node has.  Where a queue holds several instance types, the count is the smallest one's, since that is the only value every node in the queue can satisfy.
 
 Note this is a *core* count, which is not the same as the GPU benchmark's `--ntasks-per-node`: `job_hpc-benchmark.sh` matches its rank count to the number of NVIDIA devices per node, while this script asks for cores.  A `p3.2xlarge` has 1 GPU and 8 vCPUs, and a general-purpose job wants the 8.
+
+### Job Accounting
+
+**On by default.**  Disable with `--enable_slurm_accounting=false`.
+Installs MariaDB and `slurmdbd` on the head node and points Slurm's
+accounting storage at them, so `sacct` returns real job history:
+
+```
+$ sacct --starttime=now-1hour
+JobID           JobName  Partition    Account  AllocCPUS      State ExitCode
+------------ ---------- ---------- ---------- ---------- ---------- --------
+1             acctproof    compute acctproof3          1  COMPLETED      0:0
+1.batch           batch            acctproof3          1  COMPLETED      0:0
+```
+
+Without it, ParallelCluster leaves accounting storage disabled and `sacct`
+answers `Slurm accounting storage is disabled`.  That also affects
+`diagnose_pcluster.py`, whose job-failure check has nothing to read, and
+the `run_readonly_slurm_command` MCP tool, which deliberately does not
+offer `sacct` for the same reason.
+
+**The accounting data dies with the cluster.**  The database lives on the
+head node's root volume and teardown destroys it; there is no export step
+and nothing is synced to S3.  If you need job records to outlive a cluster,
+copy them off before deleting it.  (Benchmark results are different — those
+go to a long-lived bucket; see [HPC Benchmarks](#hpc-benchmarks).)
+
+**What it costs, and why it is on anyway.**  It puts a database on a node
+that already runs `slurmctld`, so it is not free.  Measured on a
+`c5.xlarge` head node: `mariadbd` holds 100–120 MB RSS and `slurmdbd`
+13 MB — less than the CloudWatch agent already running there — and the
+install added to a postinstall phase that took 86 s in total, against a
+head node bootstrap of 619 s and ParallelCluster's 2100 s bootstrap
+budget.  Turn it off with `--enable_slurm_accounting=false` if you want
+the head node doing nothing but scheduling.
+
+#### Sizing
+
+MariaDB is tuned for a database co-resident with the scheduler rather than
+a dedicated server, and both values scale with the head node:
+
+| Setting | Value |
+|---|---|
+| `innodb_buffer_pool_size` | 10% of RAM, floored at 128M, capped at 4096M |
+| `innodb_log_file_size` | 25% of the buffer pool, capped at 256M |
+
+Upstream Slurm recommends 5–50% of memory and *at least* 4 GiB for the
+buffer pool, with the redo log at 25% of it.  That is sizing advice for a
+dedicated SQL server.  The 4096M ceiling is Slurm's own 4 GiB minimum; the
+256M log cap is this toolkit's deviation, because the uncapped ratio gives
+a 1024M redo log — preallocated on disk and replayed on crash recovery —
+for a database measured at roughly 97 MB.  Raising either currently means
+editing `templates/postinstall.j2`.
+
+#### Retention
+
+Slurm purges nothing by default, so a database with no policy grows without
+bound on a root volume sized for an operating system.  The defaults here:
+
+| Records | Kept |
+|---|---|
+| Jobs, steps, events, reservations, suspends | 1 month |
+| Transactions and the rolled-up usage reports are built from | 12 months |
+
+Nothing is archived.  Slurm's `ArchiveDir` defaults to `/tmp`, and an
+archive nobody collects before the head node is torn down is not a backup.
+
+#### What happens if it fails
+
+Every step is non-fatal by design, and that is worth understanding rather
+than trusting.  Once `slurm.conf` names an accounting host, `slurmctld`
+blocks indefinitely when that host does not answer — so a half-configured
+cluster is worse than one with no accounting at all.  Any failure in the
+install leaves `slurm.conf` untouched and the cluster builds normally,
+with a warning in the bootstrap log.
+
+`slurm.conf` is edited by a deferred one-shot unit that waits for
+ParallelCluster's own bootstrap to finish, not by the post-install script
+itself, so **accounting comes up shortly after the stack reaches
+`CREATE_COMPLETE` rather than at the same moment**.  If `slurmctld` does
+not come back answering after the edit, the unit restores the previous
+`slurm.conf` and restarts it, leaving you a working cluster without
+accounting.  Check `journalctl -u pcm-slurm-acct` on the head node.
+
+The cluster registers itself with the accounting database when `slurmctld`
+starts; the login user and, if it exists as an account on the node, the
+`--cluster_owner` are added with `AdminLevel=Admin` so they can see every
+user's jobs rather than only their own.
+
+#### Verified on
+
+Proven end to end on **every supported OS family**: a submitted job ran on
+a compute node and came back through `sacct` with its `.batch` step,
+against a cluster that registered itself with populated TRES.
+
+| `base_os` | package manager | MariaDB package installed |
+|---|---|---|
+| `ubuntu2404` | apt | `mariadb-server` 10.11 |
+| `alinux2023` | dnf | `mariadb105-server` 10.5 (Amazon Linux 2023.11) |
+| `rhel9` | dnf | `mariadb-server` 10.5 (RHEL 9.8) |
+
+The two dnf distributions disagree about the package name — RHEL 9 does
+not ship `mariadb105-server` at all — so the install tries the versioned
+name first and falls back.  That fallback is load-bearing: collapsing it
+to one name silently disables accounting on one of the two.
+
+Building on AL2023 is what found the defect this section would otherwise
+still be hiding.  The tuned config was written to
+`/etc/mysql/mariadb.conf.d/`, Debian's location, while both dnf
+distributions read `/etc/my.cnf.d/`.  Every value was ignored and the
+server ran on stock defaults — including `innodb_lock_wait_timeout=50`,
+where Slurm requires 900 — while the cluster built green and `sacct`
+worked.  The directory is now read out of the server's own `!includedir`
+rather than guessed, and the install checks the setting actually took by
+asking the running server.
+
+One detail worth knowing if you compare the numbers yourself: MariaDB
+rounds `innodb_buffer_pool_size` up to a multiple of its 128 MB chunk
+size, so the effective pool is usually a little larger than the derived
+value (742 MB became 768 MB on RHEL 9).  That is the server behaving
+normally, not the tuning failing.
 
 ### HPC Benchmarks
 

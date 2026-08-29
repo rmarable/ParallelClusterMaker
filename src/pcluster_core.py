@@ -1996,7 +1996,7 @@ MAKE_CLUSTER_DEFAULTS = {
     "enable_fsx_hydration": "false",
     "enable_hpc_benchmarks": "false",
     "enable_monitoring": "false",
-    "enable_slurm_accounting": "false",
+    "enable_slurm_accounting": "true",
     # These must be real digests, not placeholders. They are the only source
     # on the no-defaults-file path, and a stale <cluster>_defaults.yml that
     # predates a new key falls through to here -- which is how

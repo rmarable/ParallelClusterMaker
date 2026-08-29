@@ -342,7 +342,7 @@ def main():
         "--enable_slurm_accounting",
         choices=["true", "false"],
         help="run a local MariaDB on the head node so sacct reports job "
-             "history; accounting dies with the cluster (default = false)",
+             "history; accounting dies with the cluster (default = true)",
         required=False,
         default=None,
     )

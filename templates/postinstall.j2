@@ -704,6 +704,14 @@ fi
 # Head node only -- slurmdbd runs there and the database is reached over
 # localhost, never the network.
 #
+# Warnings here go to STDOUT, not stderr. cfn-init captures stdout only --
+# node stderr reaches no stream at all -- so a warning written to stderr
+# is invisible to the one person it is for. Confirmed on `acctproof4`,
+# where the tuning file silently failed to apply and the guard that
+# detected it wrote three lines nobody could read, while an echo from the
+# same script milliseconds later is in CloudWatch. The deferred unit below
+# keeps `>&2`: it runs under systemd, where stderr reaches the journal.
+#
 # EVERY STEP HERE IS NON-FATAL, and that is the whole design. Once
 # slurm.conf names an accounting host, slurmctld blocks indefinitely when
 # that host does not answer -- observed live: slurmdbd died and `sinfo`
@@ -718,11 +726,11 @@ then
 	echo "Slurm accounting: installing MariaDB..."
 {% if 'ubuntu' in base_os %}
 	sudo DEBIAN_FRONTEND=noninteractive apt-get -y install mariadb-server \
-		|| { echo "WARNING: MariaDB install failed; Slurm accounting is OFF" >&2; _acct_ok=0; }
+		|| { echo "WARNING: MariaDB install failed; Slurm accounting is OFF"; _acct_ok=0; }
 {% else %}
 	sudo dnf -y install mariadb105-server \
 		|| sudo dnf -y install mariadb-server \
-		|| { echo "WARNING: MariaDB install failed; Slurm accounting is OFF" >&2; _acct_ok=0; }
+		|| { echo "WARNING: MariaDB install failed; Slurm accounting is OFF"; _acct_ok=0; }
 {% endif %}
 
 	if [ "$_acct_ok" -eq 1 ]
@@ -754,10 +762,40 @@ then
 		_log_mb=$(( _pool_mb / 4 ))
 		if [ "$_log_mb" -gt 256 ]; then _log_mb=256; fi
 
-		sudo mkdir -p /etc/my.cnf.d /etc/mysql/mariadb.conf.d 2>/dev/null || true
-		_acct_cnf=/etc/mysql/mariadb.conf.d/99-slurm-acct.cnf
-		if [ ! -d /etc/mysql/mariadb.conf.d ]; then _acct_cnf=/etc/my.cnf.d/99-slurm-acct.cnf; fi
-		sudo tee "$_acct_cnf" >/dev/null <<ACCTCNF
+		# Where the server reads config from is read out of the server's
+		# own config, never guessed. This shipped as `mkdir -p` of both
+		# candidate directories followed by `if [ ! -d <debian one> ]`,
+		# which can never be true because the mkdir just created it -- so
+		# on AL2023, whose MariaDB reads /etc/my.cnf.d, every value in the
+		# file below was silently ignored and the server ran on stock
+		# defaults including innodb_lock_wait_timeout=50, which Slurm
+		# explicitly requires to be 900. Confirmed on a live AL2023 head
+		# node: `!includedir /etc/my.cnf.d`.
+		_acct_cnf=""
+		for _acct_mycnf in /etc/my.cnf /etc/mysql/my.cnf /etc/mysql/mariadb.cnf
+		do
+			[ -f "$_acct_mycnf" ] || continue
+			_acct_dir="$(awk '/^!includedir/{print $2}' "$_acct_mycnf" | tail -1)"
+			if [ -n "$_acct_dir" ] && [ -d "${_acct_dir%/}" ]
+			then
+				_acct_cnf="${_acct_dir%/}/99-slurm-acct.cnf"
+				break
+			fi
+		done
+		if [ -z "$_acct_cnf" ]
+		then
+			# No !includedir anywhere: fall back to whichever directory the
+			# package actually created, testing before creating anything.
+			if [ -d /etc/my.cnf.d ]; then _acct_cnf=/etc/my.cnf.d/99-slurm-acct.cnf
+			elif [ -d /etc/mysql/mariadb.conf.d ]; then _acct_cnf=/etc/mysql/mariadb.conf.d/99-slurm-acct.cnf
+			else _acct_cnf=""; fi
+		fi
+		if [ -z "$_acct_cnf" ]
+		then
+			echo "WARNING: found no MariaDB config directory; the server will"
+			echo "  run on stock defaults. Slurm accounting will still work."
+		fi
+		if [ -n "$_acct_cnf" ]; then sudo tee "$_acct_cnf" >/dev/null <<ACCTCNF
 [mysqld]
 # performance_schema instruments a workload nobody here will profile and
 # is worth several hundred MB on its own.
@@ -801,6 +839,7 @@ skip-log-bin
 # slurmdbd is on this node. Not listening is stronger than a firewall rule.
 bind-address = 127.0.0.1
 ACCTCNF
+		fi
 
 		# restart, not "enable --now". Installing mariadb-server starts
 		# the service from its own postinst, so by the time the config
@@ -812,19 +851,30 @@ ACCTCNF
 		# the stock default.
 		sudo systemctl enable mariadb >/dev/null 2>&1 || true
 		sudo systemctl restart mariadb \
-			|| { echo "WARNING: MariaDB did not start; Slurm accounting is OFF" >&2; _acct_ok=0; }
+			|| { echo "WARNING: MariaDB did not start; Slurm accounting is OFF"; _acct_ok=0; }
 	fi
 
 	if [ "$_acct_ok" -eq 1 ]
 	then
-		# Read the settings back. "The file exists" is not evidence it
-		# was applied -- see the restart comment above.
-		_pool_eff="$(sudo mariadb -N -B -e 'select @@innodb_buffer_pool_size;' 2>/dev/null || echo 0)"
-		if [ "$_pool_eff" != "$(( _pool_mb * 1024 * 1024 ))" ]
+		# Read the settings back. "The file exists" is not evidence it was
+		# applied -- see the restart comment above, and the AL2023 build
+		# where the file landed in a directory nothing reads.
+		#
+		# Checked on innodb_lock_wait_timeout, NOT the buffer pool. MariaDB
+		# rounds the pool up to its own granularity: 767M was applied as
+		# 768M on a live AL2023 node, so an exact comparison there reports
+		# failure on a build that worked. A guard that cries wolf on every
+		# build is worse than no guard at all, because this is the one that
+		# catches a real defect. The lock timeout is an exact integer the
+		# server never rounds, its stock default (50) always differs from
+		# ours, and it is the one value Slurm itself requires to be 900.
+		_acct_eff="$(sudo mariadb -N -B -e 'select @@innodb_lock_wait_timeout;' 2>/dev/null || echo 0)"
+		if [ "$_acct_eff" != "900" ]
 		then
-			echo "WARNING: MariaDB did not apply the tuning file (buffer pool is" >&2
-			echo "  ${_pool_eff} bytes, expected $(( _pool_mb * 1024 * 1024 ))). Accounting" >&2
-			echo "  will still work; the footprint will be larger than intended." >&2
+			echo "WARNING: MariaDB did not read ${_acct_cnf:-the tuning file}"
+			echo "  (innodb_lock_wait_timeout is ${_acct_eff}, expected 900)."
+			echo "  Accounting will still work, but on stock defaults -- including"
+			echo "  a lock timeout Slurm requires to be 900."
 		fi
 	fi
 
@@ -834,7 +884,7 @@ ACCTCNF
 		sudo mariadb -e "CREATE DATABASE IF NOT EXISTS slurm_acct_db;" \
 			&& sudo mariadb -e "CREATE USER IF NOT EXISTS 'slurm'@'localhost' IDENTIFIED BY '${_acct_pw}';" \
 			&& sudo mariadb -e "GRANT ALL ON slurm_acct_db.* TO 'slurm'@'localhost'; FLUSH PRIVILEGES;" \
-			|| { echo "WARNING: could not create the accounting database; Slurm accounting is OFF" >&2; _acct_ok=0; }
+			|| { echo "WARNING: could not create the accounting database; Slurm accounting is OFF"; _acct_ok=0; }
 	fi
 
 	if [ "$_acct_ok" -eq 1 ]
@@ -907,7 +957,7 @@ WantedBy=multi-user.target
 SLURMDBDUNIT
 		sudo systemctl daemon-reload
 		sudo systemctl enable --now slurmdbd \
-			|| { echo "WARNING: slurmdbd did not start; Slurm accounting is OFF" >&2; _acct_ok=0; }
+			|| { echo "WARNING: slurmdbd did not start; Slurm accounting is OFF"; _acct_ok=0; }
 	fi
 
 	# slurm.conf is NOT edited here, and slurmctld is NOT restarted here.
@@ -1031,7 +1081,7 @@ ACCTUNIT
 		# --no-block: this must not hold the bootstrap open. It waits for a
 		# heartbeat that only appears after postinstall returns.
 		sudo systemctl start --no-block pcm-slurm-acct.service \
-			|| echo "WARNING: could not schedule the accounting enable step" >&2
+			|| echo "WARNING: could not schedule the accounting enable step"
 		echo "Slurm accounting: MariaDB (pool ${_pool_mb}M, log ${_log_mb}M) and"
 		echo "  slurmdbd are up; slurm.conf will be updated once the cluster"
 		echo "  bootstrap finishes."
