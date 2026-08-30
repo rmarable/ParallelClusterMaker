@@ -1760,7 +1760,7 @@ Anything added there must declare where it belongs:
 
 **A bootstrap failure whose log ends on a cheerful-looking line:** `cfn-init` captures **stdout only** — a failing command's `stderr` is written nowhere.  So the last line of `cfn-init-cmd.log` is routinely the successful-looking start of the step that failed: `Attempting uninstall: requests` for a pip failure, a list of successful `set on hold` lines for an `apt-mark` exit 100, the `luarocks` download banner for a compiler error.  Read the last line as *where* execution stopped, never as *why*.  To get the reason, re-run the same command by hand on the node (`aws ssm start-session --target <instance-id>`, then execute the rendered `/opt/parallelcluster/scripts/...` step or the individual command) and read its stderr directly.  A related consequence: any block in the toolkit's own scripts that runs without `set -x` — the monitoring wrapper, for instance — leaves no trace in the log at all, so absence of a command from `cfn-init-cmd.log` is not evidence it did not run.
 
-**Postinstall appears to do nothing:** Check that `postinstall.<cluster>.sh` in the cluster's S3 bucket is rendered shell and not raw Jinja2.  The toolkit's templates are rendered by a `template:` task in `src/create_pcluster.yml`; only your own `--post_install_script` hook is copied verbatim.  If the two are conflated, nodes run the hook and skip everything the toolkit's script does — Spack, Lmod, the package installs, `/local_scratch`, and the GPU block.  See [Node Bootstrap Scripts](#node-bootstrap-scripts).
+**Postinstall appears to do nothing:** Check that `postinstall.<cluster>.sh` in the cluster's S3 bucket is rendered shell and not raw Jinja2.  The toolkit's templates are rendered by `render_template` in `src/pcluster_core.py`; only your own `--post_install_script` hook is copied verbatim.  If the two are conflated, nodes run the hook and skip everything the toolkit's script does — Spack, Lmod, the package installs, `/local_scratch`, and the GPU block.  See [Node Bootstrap Scripts](#node-bootstrap-scripts).
 
 **EBS root volume tagging:** May fail on macOS due to IAM tag permission restrictions.  Build from an EC2 instance to avoid this.
 
@@ -1774,7 +1774,7 @@ Anything added there must declare where it belongs:
 
 ```
 make test       # pytest — template rendering + unit tests
-make lint       # ansible-lint on src/create_pcluster.yml and src/delete_pcluster.yml
+make lint       # pyflakes undefined-name sweep over every tracked Python file
 make shellcheck # shellcheck on every tracked *.sh file
 ```
 
@@ -1835,18 +1835,21 @@ are never committed.  A run costs roughly $0.21-$0.34 in EC2 charges.
 See [`tests/integration/README.md`](tests/integration/README.md) for the flag
 reference, prerequisites, cost derivation, log paths, and exit codes.
 
-### Known ansible-lint Warnings
+### What `make lint` Checks
 
-`make lint` exits 0 but emits a small number of warnings that are intentional and safe to ignore:
+`make lint` used to run `ansible-lint` over `src/create_pcluster.yml` and
+`src/delete_pcluster.yml`.  Both playbooks have been deleted — nothing in the
+toolkit executes an Ansible playbook, and every task they held is a function in
+`src/pcluster_core.py` — so that target had no files left to check.
 
-| Warning | Reason |
-|---|---|
-| `yaml[line-length]` — ssh/chown/cp commands | One-liners that are 162 chars (2 over limit); splitting would harm readability |
-| `no-changed-when` | `pcluster` CLI commands are inherently stateful; `changed_when` on every poll would be misleading |
-| `ignore-errors` | Intentional on cleanup tasks (S3 bucket, SNS topic, IAM role) that may not exist at delete time |
-| `no-handler` | Deliberate pattern; notify/handler would require restructuring without benefit |
-
-These are all tracked in `.ansible-lint` under `warn_list` with the same rationale.
+It now runs `pyflakes` over every tracked Python file and fails on **undefined
+names only**.  That one class is a guaranteed `NameError` on any path reaching
+it, and one shipped to a live build once: it sat inside a broad
+`except Exception` that printed it as a warning, and the build reported success.
+The rest of pyflakes' output (unused locals, f-strings without placeholders) is
+deliberately not gated; clearing that backlog is a separate decision, and a gate
+nobody can keep green stops being read.  `tests/test_undefined_names.py` runs the
+same sweep, so `make test` catches it too.
 
 ---
 

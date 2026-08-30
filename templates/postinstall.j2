@@ -504,7 +504,7 @@ HeadNode)
 
 	# Deploy performance toolkit from S3 and install Python plotting dependencies.
 
-	# Allowlist mirrors the upload in create_pcluster.yml.  Only the driver is on
+	# Allowlist mirrors stage_and_upload_hpc_benchmark_driver.  Only the driver is on
 	# S3; the personalized job script and README arrive by scp into
 	# ~/hpc-benchmark/<cluster>/<owner>/slurm and are not restorable from here.
 	aws s3 sync "s3://{{ s3_bucketname }}/hpc-benchmark/" "{{ ec2_user_home }}/hpc-benchmark/" \

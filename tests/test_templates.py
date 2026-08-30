@@ -20,7 +20,7 @@ from jinja2 import Environment, FileSystemLoader, StrictUndefined
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-# hpc-benchmark/*.j2 are rendered by create_pcluster.yml from the same vars file
+# hpc-benchmark/*.j2 are rendered by core_create_cluster from the same vars file
 # as templates/*.j2, so an undefined variable there fails at cluster build time.
 TEMPLATE_DIRS = [
     os.path.join(REPO_ROOT, "templates"),
@@ -33,11 +33,11 @@ SKIP_TEMPLATES = {
     "LustreS3HydrationPolicy.json_src",
 }
 
-# Files that create_pcluster.yml renders with `template:` despite not carrying a
-# .j2 suffix. The suffix filter in _collect_templates() is what kept
+# Files core_create_cluster renders despite not carrying a .j2 suffix. The
+# suffix filter in _collect_templates() is what kept
 # scripts/sbatch_default_submission_script.sh out of every render test for the
 # life of the repo, so an unlisted extra here is a file no test renders.
-# _collect_templates_matches_what_the_playbooks_render is the guard.
+# test_collect_templates_covers_every_template_the_toolkit_renders is the guard.
 EXTRA_TEMPLATES = [
     (os.path.join(REPO_ROOT, "scripts"), "sbatch_default_submission_script.sh"),
 ]
@@ -65,16 +65,6 @@ def _make_env(template_dir):
     # Stub lookup() global — returns a placeholder string.
     env.globals["lookup"] = lambda *args, **kwargs: "<lookup-stub>"
     return env
-
-
-def _walk_tasks(tasks):
-    """Yield every task in a play, descending into block/rescue/always."""
-    for task in tasks or []:
-        if not isinstance(task, dict):
-            continue
-        yield task
-        for key in ("block", "rescue", "always"):
-            yield from _walk_tasks(task.get(key))
 
 
 class TestTheTestEnvironmentMatchesAnsible:
@@ -126,40 +116,14 @@ class TestTheTestEnvironmentMatchesAnsible:
         env = pcluster_core._template_env(os.path.join(REPO_ROOT, "templates"))
         assert getattr(env, option) is self._ansible_defaults()[option]
 
-    def test_no_playbook_template_task_overrides_them(self):
-        """A per-task override would make the env right for every template but one.
-        If this ever fires, the override is the thing to reconsider — not this
-        test. Most of these tasks sit inside a block, so walking only a play's
-        top-level tasks would check the cluster config and miss the monitoring
-        wrapper and the external NFS mount list entirely."""
-        checked = 0
-        for name in ("create_pcluster.yml", "delete_pcluster.yml"):
-            with open(os.path.join(REPO_ROOT, "src", name)) as fh:
-                plays = yaml.safe_load(fh)
-            for play in plays:
-                for task in _walk_tasks(play.get("tasks")):
-                    args = task.get("template") or task.get("ansible.builtin.template")
-                    if not isinstance(args, dict):
-                        continue
-                    checked += 1
-                    for option in ("trim_blocks", "lstrip_blocks"):
-                        assert option not in args, (
-                            f"{name}: {task.get('name')!r} overrides {option}; "
-                            f"_make_env no longer renders it the way Ansible does"
-                        )
-        # This floor is a vacuity guard on the walker, not a target -- it shrinks
-        # as Workstream 2 moves more templates off Ansible's `template:` module
-        # and onto Python's render_template. 3 remain after Tiers 1-3's
-        # cutover: config.pcluster.j2 (deliberately still Ansible-rendered --
-        # it references {{ external_nfs_sg.group_id }}, a runtime AWS value
-        # from a task later in this same playbook, when enable_external_nfs
-        # is true, so it cannot render in Python until Workstream 3 moves
-        # that security group's creation there too) and the two SNS report
-        # templates (Tier 4, out of scope until Workstream 3 supplies the
-        # facts they need). Lower it in the same commit as any further
-        # reduction, the same ratchet discipline as the preamble byte budget
-        # in CLAUDE-STATE.md.
-        assert checked >= 3, f"only found {checked} template tasks — walker is blind"
+    # A test banning a per-task trim_blocks/lstrip_blocks override lived here.
+    # It swept
+    # src/create_pcluster.yml and src/delete_pcluster.yml for a per-task
+    # trim_blocks/lstrip_blocks override on Ansible's `template:` module. Both
+    # playbooks are gone -- nothing in this toolkit executes one -- and there is
+    # no `template:` task left anywhere to override anything. The two tests
+    # above are what the rule reduces to: the test env and the production env
+    # both read their values out of the installed Ansible.
 
 
 class TestRenderTemplate:
@@ -1495,13 +1459,6 @@ class TestPostinstallTemplateIsActuallyRendered:
     "templates/postinstall.j2", so postinstall_s3_dest rendered as the template's
     own basename and every hook assertion passed."""
 
-    def _playbook_items(self):
-        with open(os.path.join(REPO_ROOT, "src", "create_pcluster.yml")) as fh:
-            return yaml.safe_load(fh)
-
-    def _tasks(self):
-        return list(_walk_tasks(self._playbook_items()[0]["tasks"]))
-
     @pytest.mark.parametrize("template", ["preinstall.j2", "postinstall.j2"])
     def test_the_template_is_rendered_by_a_template_task(self, template):
         """Since Workstream 2 Tier 3, neither template is rendered by an
@@ -1567,20 +1524,45 @@ class TestPostinstallTemplateIsActuallyRendered:
     @pytest.mark.parametrize("stage", ["preinstall", "postinstall"])
     def test_the_rendered_output_is_what_gets_uploaded(self, stage):
         """The S3 object the cluster config points at must be the rendered file, not
-        the operator's hook. This is the exact substitution the v3 migration made."""
-        uploaded = []
-        for task in self._tasks():
-            if "amazon.aws.s3_object" not in task:
+        the operator's hook. This is the exact substitution the v3 migration made.
+
+        render_and_upload_cluster_config_and_scripts pairs each local source with
+        the S3 destination name it is uploaded under, so the pairing is what has
+        to be read -- a check that `<stage>_s3_dest` is uploaded at all passes
+        just as happily when its source is the operator's hook.
+        """
+        import ast
+        import inspect
+
+        src = os.path.join(REPO_ROOT, "src")
+        if src not in sys.path:
+            sys.path.insert(0, src)
+        import pcluster_core
+
+        tree = ast.parse(
+            inspect.getsource(
+                pcluster_core.render_and_upload_cluster_config_and_scripts
+            ).lstrip()
+        )
+        pairs = []
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Tuple) or len(node.elts) != 2:
                 continue
-            for item in task.get("with_items") or []:
-                if not isinstance(item, dict):
-                    continue
-                if f"{stage}_s3_dest" in str(item.get("dest", "")) and not str(
-                    item.get("dest", "")
-                ).startswith("{{ s3_script_path }}/{{ user_"):
-                    uploaded.append(str(item.get("src", "")))
-        assert uploaded, f"nothing uploads {stage}_s3_dest to S3"
-        assert any(f"{stage}_rendered" in src for src in uploaded), (
+            keys = [
+                n.slice.value
+                for n in node.elts
+                if isinstance(n, ast.Subscript)
+                and isinstance(n.slice, ast.Constant)
+            ]
+            if len(keys) == 2:
+                pairs.append(tuple(keys))
+        uploaded = [
+            source for source, dest in pairs if dest == f"{stage}_s3_dest"
+        ]
+        assert uploaded, (
+            f"nothing uploads {stage}_s3_dest to S3: {pairs}"
+        )
+        assert uploaded == [f"{stage}_rendered"], (
             f"{stage}_s3_dest is uploaded from {uploaded}, not from the rendered "
             f"template -- the nodes would run the operator's hook instead"
         )
@@ -2991,11 +2973,11 @@ def test_no_operator_side_scheduled_teardown_is_reintroduced():
     name in the meantime. Teardown is now manual and at the operator's
     discretion. Compute cost is bounded by ScaledownIdletime scaling idle nodes
     to zero, which needs no scheduler at all."""
-    for relpath in ("src/create_pcluster.yml", "src/delete_pcluster.yml"):
+    for relpath in ("src/pcluster_core.py", "make_pcluster.py", "kill_pcluster.py"):
         with open(os.path.join(REPO_ROOT, relpath)) as fh:
-            playbook = fh.read()
+            body = fh.read()
         for token in ("at_job_id", "atrm", "atq", "cluster_lifetime"):
-            assert token not in playbook, (
+            assert token not in body, (
                 f"{relpath} references {token!r} — an operator-side scheduled "
                 f"teardown appears to have been reintroduced"
             )
@@ -3035,10 +3017,9 @@ def _policy_suffixes_in_core():
 
 def test_every_policy_template_is_created_and_deleted():
     """The four base policies plus HeadNode-Monitoring exist as templates, are
-    created by _setup_iam, are deleted by _delete_managed_policies, and are
-    deleted by the teardown playbook. A policy created but not deleted is an
-    orphan the operator pays no money for but which blocks a same-name rebuild
-    and silently accumulates in the account."""
+    created by _setup_iam, and are deleted by _delete_managed_policies. A policy
+    created but not deleted is an orphan the operator pays no money for but
+    which blocks a same-name rebuild and silently accumulates in the account."""
     expected = {"-" + f[: -len(".json_src")] for f in _POLICY_FILES}
     assert expected == {
         "-HeadNode-Compute", "-HeadNode-Storage", "-HeadNode-IAM",
@@ -3067,143 +3048,19 @@ def test_every_policy_template_is_created_and_deleted():
             f"{sorted(base - lst)}: {sorted(lst)}"
         )
 
-    with open(os.path.join(REPO_ROOT, "src", "delete_pcluster.yml")) as f:
-        playbook = f.read()
-    for sfx in expected:
-        assert f'ec2_iam_policy }}}}{sfx}' in playbook, (
-            f"delete_pcluster.yml never deletes {sfx} — it orphans in the account"
-        )
-
-
-def _playbook_task_body(playbook, task_name):
-    """Return one task's own lines, stopping at the next task at any depth.
-
-    A fixed-size text window is not good enough here: teardown tasks are short
-    and adjacent, so a window that overruns into the following task picks up
-    that task's `when:` and the assertion passes for the wrong reason.
-    """
-    lines = playbook.splitlines()
-    start = next(
-        i for i, line in enumerate(lines) if line.strip() == f"- name: {task_name}"
-    )
-    indent = len(lines[start]) - len(lines[start].lstrip())
-    body = [lines[start]]
-    for line in lines[start + 1 :]:
-        stripped = line.strip()
-        if stripped.startswith("- name:") and (len(line) - len(line.lstrip())) <= indent:
-            break
-        body.append(line)
-    return "\n".join(body)
-
-
-def _playbook_task_list(relpath):
-    """Every task in a playbook, block/rescue/always-nested ones included."""
-    with open(os.path.join(REPO_ROOT, relpath)) as fh:
-        plays = yaml.safe_load(fh)
-    tasks = []
-    for play in plays:
-        tasks.extend(_walk_tasks(play.get("tasks")))
-    return tasks
-
-
-def _delete_playbook_tasks():
-    return _playbook_task_list(os.path.join("src", "delete_pcluster.yml"))
-
-
-def _create_playbook_tasks():
-    return _playbook_task_list(os.path.join("src", "create_pcluster.yml"))
-
 
 class TestTeardownFailuresReachTheOperator:
-    """Ten cleanup tasks carry ignore_errors so one AWS failure cannot abandon the
-    rest of the teardown. That is correct, and it is also how orphans went unseen:
-    a failed IAM detach still printed "Cluster <name> has been deleted" and exited
-    0, and the leftovers were found by hand days later, after the serial file was
-    gone and kill_pcluster.py would no longer retry them. Every ignored failure
-    must be collected, named in the summary, carried in the SNS report, and turned
-    into a non-zero exit."""
+    """Every ignored cleanup failure must be collected, named in the summary,
+    carried in the SNS report, and turned into a non-zero exit -- a failed IAM
+    detach once printed "Cluster <name> has been deleted" and exited 0, and the
+    leftovers were found by hand days later.
 
-    # The task that deletes the local .pem file cannot orphan anything in AWS,
-    # and the SNS *send* failing is not a leftover resource -- the topic that
-    # carries it is, and that has its own append task after the report is sent.
-    _NOT_AN_ORPHAN = {
-        "Delete the SSH private key associated with this cluster",
-        "Distribute the cluster destruction summary report via SNS",
-    }
-
-    def test_every_ignore_errors_cleanup_task_is_registered(self):
-        """An unregistered ignore_errors task is invisible to the collection: the
-        failure prints "...ignoring" and nothing downstream can see it."""
-        missing = [
-            t.get("name")
-            for t in _delete_playbook_tasks()
-            if t.get("ignore_errors")
-            and t.get("name") not in self._NOT_AN_ORPHAN
-            and "register" not in t
-        ]
-        assert not missing, (
-            f"ignore_errors tasks with no register: cannot be reported as orphans: "
-            f"{missing}"
-        )
-
-    def test_every_registered_cleanup_result_is_examined(self):
-        """A register: that nothing reads is the same silence with more ceremony."""
-        with open(os.path.join(REPO_ROOT, "src", "delete_pcluster.yml")) as fh:
-            playbook = fh.read()
-        collect = _playbook_task_body(
-            playbook, "Collect cleanup failures that ignore_errors swallowed"
-        )
-        appended = _playbook_task_body(
-            playbook, "Append the SNS topic to the orphan list if its deletion failed"
-        )
-        for task in _delete_playbook_tasks():
-            name = task.get("name")
-            if not task.get("ignore_errors") or name in self._NOT_AN_ORPHAN:
-                continue
-            var = task["register"]
-            assert var in collect or var in appended, (
-                f'"{name}" registers {var}, but no task reads {var}.failed — its '
-                f"failure is still swallowed"
-            )
-
-    def test_collected_orphans_are_named_not_counted(self):
-        """"3 cleanup steps failed" sends the operator hunting. Each entry has to
-        interpolate the resource's real name so it can be deleted by hand."""
-        with open(os.path.join(REPO_ROOT, "src", "delete_pcluster.yml")) as fh:
-            playbook = fh.read()
-        body = _playbook_task_body(
-            playbook, "Collect cleanup failures that ignore_errors swallowed"
-        )
-        for var in ("s3_bucketname", "ec2_iam_policy", "ec2_iam_role",
-                    "ssh_secret_name", "cluster_name"):
-            assert var in body, (
-                f"orphan list never names {var} — the operator cannot act on the report"
-            )
-
-    def test_teardown_exits_nonzero_when_cleanup_left_resources(self):
-        """Without this, automation reads an orphaning teardown as success."""
-        tasks = _delete_playbook_tasks()
-        fails = [
-            t for t in tasks
-            if "fail" in t and t.get("when") == "_orphaned_resources | length > 0"
-        ]
-        assert fails, (
-            "teardown never fails on surviving resources — exit 0 means 'clean' to "
-            "every caller, and it would be lying"
-        )
-        names = [t.get("name") for t in tasks]
-        assert names.index(fails[0]["name"]) > names.index(
-            "Print cluster deletion summary with the resources that survived cleanup"
-        ), "the fail: must come after the summary prints, or the operator never sees the list"
-
-    def test_the_clean_summary_cannot_print_when_resources_survived(self):
-        """"Cluster <name> has been deleted." next to a list of survivors is the
-        original defect with extra text."""
-        tasks = {t.get("name"): t for t in _delete_playbook_tasks()}
-        clean = tasks["Print cluster deletion summary"]
-        assert clean.get("when") == "not _orphaned_resources", (
-            "the clean-teardown summary is not gated on an empty orphan list"
-        )
+    The step functions that replaced the teardown playbook's ignore_errors +
+    register: pattern are pinned in tests/test_teardown_steps.py, which drives
+    the real code rather than reading a task list. What is left here is the half
+    that is still a template: the SNS report, which is what whoever is on the
+    topic sees instead of the terminal.
+    """
 
     def test_the_sns_report_carries_the_orphan_list(self, cluster_params,
                                                    cluster_params_orphaned_teardown):
@@ -3225,406 +3082,52 @@ class TestTeardownFailuresReachTheOperator:
             )
 
 
-def test_monitoring_teardown_is_gated_on_enable_monitoring():
-    """HeadNode-Monitoring and the Grafana SSM parameter only exist when
-    monitoring was enabled. Deleting them unconditionally makes every non-
-    monitoring teardown emit a spurious failure, which trains operators to
-    ignore teardown errors."""
-    with open(os.path.join(REPO_ROOT, "src", "delete_pcluster.yml")) as f:
-        playbook = f.read()
-    for task in ("Detach and delete monitoring IAM policy",
-                 "Delete Grafana SSM password parameter"):
-        body = _playbook_task_body(playbook, task)
-        assert 'enable_monitoring == "true"' in body, (
-            f'"{task}" is not gated on enable_monitoring'
-        )
+def _pcluster_core():
+    src = os.path.join(REPO_ROOT, "src")
+    if src not in sys.path:
+        sys.path.insert(0, src)
+    import pcluster_core
+
+    return pcluster_core
 
 
-_PRESERVED_ON_UNCONFIRMED_DELETE = (
-    "Delete the EC2 keypair associated with this cluster",
-    "Delete the SSH private key associated with this cluster",
-    "Delete SSH private key from Secrets Manager",
-    "Delete the cluster data directory",
-)
+def _core_function_source(name):
+    """One function's own source out of src/pcluster_core.py."""
+    import inspect
 
-
-def test_delete_failed_preserves_ssh_access_but_still_cleans_iam():
-    """On DELETE_FAILED the head node is still running and the operator needs to
-    reach it: the keypair, local .pem, and Secrets Manager secret must survive.
-    IAM/SSM/S3 cleanup must still run, or a retry cannot recreate them."""
-    with open(os.path.join(REPO_ROOT, "src", "delete_pcluster.yml")) as f:
-        playbook = f.read()
-    for task in _PRESERVED_ON_UNCONFIRMED_DELETE:
-        body = _playbook_task_body(playbook, task)
-        assert "_cf_delete_confirmed | bool" in body, (
-            f'"{task}" must be skipped unless the stack is confirmed gone, so the '
-            f"head node stays reachable"
-        )
-        assert "_cf_delete_failed" not in body, (
-            f'"{task}" is gated on "not DELETE_FAILED", which reads a wait timeout '
-            f"as a clean delete -- see TestCredentialsSurviveAnUnconfirmedDelete"
-        )
-    # The IAM policy teardown must NOT carry that guard — a retry needs to be
-    # able to recreate the policies by name.
-    body = _playbook_task_body(
-        playbook, "Detach and delete managed IAM policies associated with the cluster stack"
-    )
-    assert "_cf_delete_failed" not in body, (
-        "IAM policy cleanup must still run on DELETE_FAILED; otherwise a rebuild "
-        "of the same serial collides with the surviving policies"
-    )
-    # And the playbook must still surface a non-zero exit so CI/automation
-    # does not read a DELETE_FAILED teardown as success. Position matters as
-    # much as presence: a fail: before the cleanup tasks aborts them. Anchoring
-    # this on the file's last line broke the moment a second terminal fail: was
-    # added, so it is pinned by task order instead.
-    tasks = _delete_playbook_tasks()
-    names = [t.get("name") for t in tasks]
-    fail_task = next(
-        t for t in tasks
-        if "fail" in t and t.get("when") == "_cf_delete_failed | bool"
-    )
-    assert names.index(fail_task["name"]) > names.index(
-        "Detach and delete managed IAM policies associated with the cluster stack"
-    ), "the DELETE_FAILED fail: must come after cleanup, or it aborts the cleanup"
-
-
-def _task_when(task):
-    """A task's when: as one expression string, list form ANDed together."""
-    when = task.get("when")
-    if when is None:
-        return "true"
-    if isinstance(when, list):
-        return " and ".join(f"({str(item).strip()})" for item in when)
-    return str(when).strip()
-
-
-def _eval_when(expr, variables):
-    """Evaluate an Ansible when: the way Ansible does — as a Jinja expression."""
-    env = _make_env(os.path.join(REPO_ROOT, "templates"))
-    return bool(env.compile_expression(expr, undefined_to_none=False)(**variables))
-
-
-def _effective_when(relpath, predicate):
-    """The when: a task really runs under, block ancestors' conditions included.
-
-    Ansible applies an enclosing block's when: to every task inside it, and most
-    template: and s3_bucket: tasks in these playbooks are block-nested -- so a
-    task's own when: is not the gate it runs under.  Returns the conditions from
-    the outermost ancestor down to the matched task, ANDed, or None if no task
-    satisfies the predicate.
-    """
-
-    def walk(task):
-        own = task.get("when")
-        if isinstance(own, str):
-            own = [own]
-        own = list(own or [])
-        if predicate(task):
-            return own
-        for key in ("block", "rescue", "always"):
-            for child in task.get(key) or []:
-                if isinstance(child, dict):
-                    found = walk(child)
-                    if found is not None:
-                        return own + found
-        return None
-
-    with open(os.path.join(REPO_ROOT, relpath)) as fh:
-        plays = yaml.safe_load(fh)
-    for play in plays:
-        for task in play.get("tasks") or []:
-            if isinstance(task, dict):
-                found = walk(task)
-                if found is not None:
-                    return " and ".join(f"({str(c).strip()})" for c in found) or "true"
-    return None
-
-
-class TestCredentialsSurviveAnUnconfirmedDelete:
-    """The EC2 keypair, the local .pem, the Secrets Manager secret, and the cluster
-    data directory that holds the last two are the only ways back into a running
-    head node. All four were gated on `not (_cf_delete_failed | bool)`, a blocklist
-    of exactly one state -- so a wait *timeout* (DELETE_IN_PROGRESS, retries
-    exhausted, the "may still be deleting" warning already printed twelve lines
-    above) read as a clean delete and destroyed all four while the stack, and the
-    head node, were still up and still billing. That is precisely the case the
-    DELETE_FAILED branch says they are preserved for. The gate is now a positive
-    confirmation: DELETE_COMPLETE, or the cluster no longer existing."""
-
-    _CONFIRM_TASK = "Record whether the stack is confirmed gone"
-
-    # Each scenario is a real `pcluster describe-cluster` outcome. The delete
-    # wait's own until:/failed_when: let all four reach the cleanup tasks.
-    _SCENARIOS = {
-        "delete_complete": ({"rc": 0, "stdout": '{"clusterStatus": "DELETE_COMPLETE"}',
-                             "stderr": ""}, True),
-        "cluster_gone": ({"rc": 1, "stdout": "",
-                          "stderr": "ClusterNotFound: cluster osiris does not exist"}, True),
-        "delete_failed": ({"rc": 0, "stdout": '{"clusterStatus": "DELETE_FAILED"}',
-                           "stderr": ""}, False),
-        # The regression: retries exhausted with the stack still deleting.
-        "wait_timed_out": ({"rc": 0, "stdout": '{"clusterStatus": "DELETE_IN_PROGRESS"}',
-                            "stderr": ""}, False),
-    }
-
-    def _confirm_expression(self):
-        with open(os.path.join(REPO_ROOT, "src", "delete_pcluster.yml")) as fh:
-            playbook = fh.read()
-        body = _playbook_task_body(playbook, self._CONFIRM_TASK)
-        task = yaml.safe_load(body)[0]
-        # A set_fact value is a template; when: is a bare expression. Unwrap so
-        # both go through the same evaluator.
-        value = task["set_fact"]["_cf_delete_confirmed"].strip()
-        assert value.startswith("{{") and value.endswith("}}"), value
-        return value[2:-2]
-
-    @pytest.mark.parametrize("scenario", sorted(_SCENARIOS))
-    def test_the_confirmation_fact_only_trusts_a_positive_signal(self, scenario):
-        status, expected = self._SCENARIOS[scenario]
-        got = _eval_when(self._confirm_expression(), {"cluster_delete_status": status})
-        assert got is expected, (
-            f"_cf_delete_confirmed is {got} for {scenario} ({status['stdout'] or status['stderr']!r}); "
-            f"expected {expected}"
-        )
-
-    def test_a_missing_status_is_not_a_confirmed_delete(self):
-        """The wait task can be skipped entirely (check mode, an earlier abort),
-        which leaves cluster_delete_status undefined. That is not confirmation."""
-        assert _eval_when(self._confirm_expression(), {}) is False
-
-    @pytest.mark.parametrize("scenario", sorted(_SCENARIOS))
-    @pytest.mark.parametrize("task_name", _PRESERVED_ON_UNCONFIRMED_DELETE)
-    def test_no_credential_is_destroyed_without_confirmation(self, task_name, scenario):
-        """Text assertions cannot tell one gate from another. This evaluates each
-        task's real when: against each real describe-cluster outcome."""
-        status, confirmed = self._SCENARIOS[scenario]
-        tasks = {t.get("name"): t for t in _delete_playbook_tasks()}
-        variables = {
-            "_cf_delete_confirmed": confirmed,
-            "_cf_delete_failed": "DELETE_FAILED" in status["stdout"],
-            # The data-directory task also gates on its own stat result; a
-            # present directory is the case where deletion would happen.
-            "isdir_cdd": {"stat": {"isdir": True}},
-        }
-        fires = _eval_when(_task_when(tasks[task_name]), variables)
-        assert fires is confirmed, (
-            f'"{task_name}" {"runs" if fires else "is skipped"} on {scenario}; the '
-            f"stack is {'confirmed gone' if confirmed else 'NOT confirmed gone'}"
-        )
-
-    def test_the_scenarios_can_see_the_gate_that_shipped(self):
-        """Vacuity guard: the timeout case must be one the old blocklist gate got
-        wrong, or the tests above prove nothing."""
-        status, confirmed = self._SCENARIOS["wait_timed_out"]
-        assert confirmed is False
-        shipped = "not (_cf_delete_failed | bool)"
-        assert _eval_when(shipped, {"_cf_delete_failed": "DELETE_FAILED" in status["stdout"]}), (
-            "the shipped gate does not fire on a wait timeout, so this scenario "
-            "does not exercise the regression"
-        )
-
-    def test_the_operator_is_told_the_credentials_were_kept(self):
-        """Silently skipping four tasks looks identical to a clean teardown. The
-        one state that is neither confirmed nor DELETE_FAILED needs its own
-        message, since the DELETE_FAILED warning does not cover it."""
-        tasks = [t for t in _delete_playbook_tasks() if "debug" in t]
-        warned = [
-            t for t in tasks
-            if "_cf_delete_confirmed" in _task_when(t)
-            and "_cf_delete_failed" in _task_when(t)
-        ]
-        assert warned, (
-            "no debug task warns the operator when deletion was never confirmed"
-        )
-        status, _ = self._SCENARIOS["wait_timed_out"]
-        assert _eval_when(
-            _task_when(warned[0]),
-            {"_cf_delete_confirmed": False, "_cf_delete_failed": False},
-        ), "the preservation warning does not fire on a wait timeout"
-        assert not _eval_when(
-            _task_when(warned[0]),
-            {"_cf_delete_confirmed": True, "_cf_delete_failed": False},
-        ), "the preservation warning fires on a clean teardown"
-
-    def test_the_keypair_deletion_can_no_longer_abandon_the_teardown(self):
-        """It was the only AWS-mutating cleanup task with no ignore_errors: a
-        single denied DeleteKeyPair aborted the play before every later cleanup
-        step and before the orphan collection, leaking silently."""
-        tasks = {t.get("name"): t for t in _delete_playbook_tasks()}
-        keypair = tasks["Delete the EC2 keypair associated with this cluster"]
-        assert keypair.get("ignore_errors"), (
-            "a denied DeleteKeyPair aborts every cleanup task below it"
-        )
-        assert not keypair.get("no_log"), (
-            "no_log on this task censors the one line naming the failure cause; it "
-            "passes only a key name and returns no key material"
-        )
-
-    def test_key_creation_still_censors_the_key_material(self):
-        """Removing no_log from the teardown side must not be read as license to
-        remove it where real private key bytes are handled."""
-        with open(os.path.join(REPO_ROOT, "src", "create_pcluster.yml")) as fh:
-            playbook = fh.read()
-        for task in ("Generate a new EC2 keypair for this cluster",
-                     "Save the private key",
-                     "Store SSH private key in Secrets Manager"):
-            body = _playbook_task_body(playbook, task)
-            assert "no_log: true" in body, (
-                f'"{task}" handles private key material and must keep no_log'
-            )
+    return inspect.getsource(getattr(_pcluster_core(), name))
 
 
 class TestAnUnconfirmedDeleteIsNotReportedAsSuccess:
-    """Both summary tasks and the SNS report claimed "Cluster <name> has been
-    deleted" whenever no cleanup step *failed* -- and on a wait timeout nothing
-    failed and nothing was deleted either. So teardown printed "may still be
-    deleting", then "credentials are PRESERVED", then contradicted both twelve
-    lines later and exited 0, which every caller reads as a clean teardown.
+    """Every reporting surface claimed "Cluster <name> has been deleted"
+    whenever no cleanup step *failed* -- and on a wait timeout nothing failed
+    and nothing was deleted either. There are three delete outcomes, so the
+    claim is derived once (_classify_cluster_delete_outcome, pinned outcome by
+    outcome in tests/test_teardown_steps.py) and every surface interpolates it.
 
-    There are three delete outcomes and the orphan list is orthogonal to all
-    three, so the claim is derived once into _delete_headline and every surface
-    interpolates it. The gates cannot be checked by matching text -- "confirmed"
-    and "not failed" are indistinguishable that way -- so the headline expression
-    and the new fail:'s when: are evaluated against real describe-cluster
-    outcomes, reusing the scenarios above.
+    What is checked here is that no surface restates the literal instead: the
+    SNS report, and the terminal summary _format_destruction_summary prints.
     """
 
-    _HEADLINE_TASK = "Record what the summary is allowed to claim about the stack"
-    _SCENARIOS = TestCredentialsSurviveAnUnconfirmedDelete._SCENARIOS
-
-    @staticmethod
-    def _facts(scenario):
-        status, confirmed = TestAnUnconfirmedDeleteIsNotReportedAsSuccess._SCENARIOS[
-            scenario
-        ]
-        return {
-            "cluster_name": "osiris",
-            "_cf_delete_confirmed": confirmed,
-            "_cf_delete_failed": "DELETE_FAILED" in status["stdout"],
-        }
-
-    def _headline_expression(self):
-        with open(os.path.join(REPO_ROOT, "src", "delete_pcluster.yml")) as fh:
-            playbook = fh.read()
-        body = _playbook_task_body(playbook, self._HEADLINE_TASK)
-        value = yaml.safe_load(body)[0]["set_fact"]["_delete_headline"].strip()
-        assert value.startswith("{{") and value.endswith("}}"), value
-        return value[2:-2]
-
-    def _headline(self, scenario):
-        env = _make_env(os.path.join(REPO_ROOT, "templates"))
-        expr = env.compile_expression(
-            self._headline_expression(), undefined_to_none=False
-        )
-        return str(expr(**self._facts(scenario)))
-
-    @pytest.mark.parametrize("scenario", ["delete_complete", "cluster_gone"])
-    def test_a_confirmed_delete_still_says_so(self, scenario):
-        """Vacuity guard for the two tests below: if the headline never claimed a
-        deletion, asserting that it does not claim one proves nothing."""
-        assert "has been deleted" in self._headline(scenario)
-
-    @pytest.mark.parametrize("scenario", ["delete_failed", "wait_timed_out"])
-    def test_an_unconfirmed_delete_never_claims_the_cluster_is_gone(self, scenario):
-        headline = self._headline(scenario)
-        assert "has been deleted" not in headline, (
-            f"the summary claims the cluster is gone on {scenario}: {headline!r}"
-        )
-        assert "NOT" in headline, (
-            f"{scenario} produces no negative statement at all: {headline!r}"
-        )
-
-    def test_the_three_outcomes_are_distinguishable(self):
-        """One hedged sentence covering every case would satisfy each assertion
-        above while telling the operator nothing about which state they are in."""
-        headlines = {
-            self._headline(s)
-            for s in ("delete_complete", "delete_failed", "wait_timed_out")
-        }
-        assert len(headlines) == 3, f"outcomes collapse into {headlines}"
-        assert "DELETE_FAILED" in self._headline("delete_failed"), (
-            "the DELETE_FAILED headline does not name the CloudFormation state, "
-            "which is what the operator greps the console for"
-        )
-
-    @pytest.mark.parametrize("scenario", sorted(_SCENARIOS))
-    def test_teardown_exits_nonzero_unless_the_delete_was_confirmed(self, scenario):
-        """A timeout left the stack up, still billing, and exited 0."""
-        tasks = _delete_playbook_tasks()
-        confirmed = self._SCENARIOS[scenario][1]
-        facts = self._facts(scenario)
-        fired = [
-            t.get("name")
-            for t in tasks
-            if "fail" in t and _eval_when(_task_when(t), {**facts, "_orphaned_resources": []})
-        ]
-        if confirmed:
-            assert not fired, (
-                f"teardown aborts on {scenario}, which is a clean delete: {fired}"
-            )
-        else:
-            assert fired, (
-                f"teardown exits 0 on {scenario} with the stack not confirmed gone"
-            )
-
-    def test_exactly_one_terminal_fail_fires_per_outcome(self):
-        """The unconfirmed fail: and the DELETE_FAILED fail: must be mutually
-        exclusive, or a DELETE_FAILED teardown aborts twice with two different
-        explanations of the same state."""
-        tasks = [t for t in _delete_playbook_tasks() if "fail" in t]
-        for scenario in ("delete_failed", "wait_timed_out"):
-            facts = {**self._facts(scenario), "_orphaned_resources": []}
-            fired = [t.get("name") for t in tasks if _eval_when(_task_when(t), facts)]
-            assert len(fired) == 1, f"{scenario} fires {len(fired)} fail: tasks: {fired}"
-
-    def test_the_unconfirmed_fail_comes_after_both_summaries(self):
-        """An abort before the summary prints suppresses the very report it exists
-        to draw attention to -- the ordering rule the other two fail: tasks follow."""
-        tasks = _delete_playbook_tasks()
-        names = [t.get("name") for t in tasks]
-        fail_task = next(
-            t
-            for t in tasks
-            if "fail" in t
-            and "_cf_delete_confirmed" in _task_when(t)
-            and "_cf_delete_failed" in _task_when(t)
-        )
-        for summary in (
-            "Print cluster deletion summary",
-            "Print cluster deletion summary with the resources that survived cleanup",
-        ):
-            assert names.index(fail_task["name"]) > names.index(summary), (
-                f"the unconfirmed-delete fail: precedes {summary!r} and suppresses it"
-            )
-
-    def test_the_headline_is_derived_before_the_sns_report_is_templated(self):
-        """The report interpolates it; a set_fact after the template: task raises
-        under StrictUndefined, and the SNS audience is the one that cannot see the
-        terminal at all."""
-        names = [t.get("name") for t in _delete_playbook_tasks()]
-        assert names.index(self._HEADLINE_TASK) < names.index(
-            "Template the cluster destruction summary report"
-        )
-
     def test_no_reporting_surface_hardcodes_the_success_claim(self):
-        """Three surfaces have to agree. Any one of them restating the claim as a
+        """Two surfaces have to agree. Either one restating the claim as a
         literal goes back to asserting it unconditionally, which is the defect.
 
-        The derivation task is where the literal legitimately lives, so its own
-        body is excluded -- as is the orphan summary's ".serial has been deleted",
-        which is about the local serial file and not the cluster.
+        _classify_cluster_delete_outcome is where the literal legitimately
+        lives, so it is not one of the surfaces swept -- and the summary's
+        ".serial has been deleted" is about the local serial file, not the
+        cluster.
         """
-        for relpath in (
-            os.path.join("src", "delete_pcluster.yml"),
-            os.path.join("templates", "sns_destruction_summary_report.j2"),
-        ):
-            with open(os.path.join(REPO_ROOT, relpath)) as fh:
-                text = fh.read()
-            if relpath.endswith("delete_pcluster.yml"):
-                text = text.replace(
-                    _playbook_task_body(text, self._HEADLINE_TASK), ""
-                )
+        surfaces = {
+            os.path.join("templates", "sns_destruction_summary_report.j2"): None,
+            "src/pcluster_core.py:_format_destruction_summary": _core_function_source(
+                "_format_destruction_summary"
+            ),
+        }
+        for label, text in surfaces.items():
+            if text is None:
+                with open(os.path.join(REPO_ROOT, label)) as fh:
+                    text = fh.read()
             offenders = [
                 line
                 for line in text.splitlines()
@@ -3633,9 +3136,17 @@ class TestAnUnconfirmedDeleteIsNotReportedAsSuccess:
                 and ".serial" not in line
             ]
             assert not offenders, (
-                f"{relpath} states the deletion claim as a literal rather than "
-                f"reading _delete_headline: {offenders}"
+                f"{label} states the deletion claim as a literal rather than "
+                f"interpolating the derived headline: {offenders}"
             )
+
+    def test_the_terminal_summary_interpolates_the_derived_headline(self):
+        """Vacuity guard for the sweep above: a summary that printed no
+        headline at all would satisfy it while telling the operator nothing."""
+        source = _core_function_source("_format_destruction_summary")
+        assert "delete_headline" in source, (
+            "_format_destruction_summary no longer carries the derived headline"
+        )
 
     @pytest.mark.parametrize(
         "fixture_name,expected",
@@ -3656,46 +3167,37 @@ class TestAnUnconfirmedDeleteIsNotReportedAsSuccess:
 
 
 class TestARetainedResourceIsReportedWithoutBeingCalledAnOrphan:
-    """`--delete_s3_bucketname=false` skips the bucket delete, and a skipped task
-    registers as `\'\'` rather than `.failed` -- so `_rm_s3_bucket.failed |
-    default(false)` was False, nothing reached `_orphaned_resources`, and teardown
-    printed "has been deleted" over a bucket that was still there billing. The
-    benchmark results bucket and the 30-day log groups are the same shape: kept
-    on purpose, invisible in the output, not free.
+    """`--delete_s3_bucketname=false` skips the bucket delete, so nothing
+    reached the orphan list and teardown printed "has been deleted" over a
+    bucket that was still there billing. The benchmark results bucket and the
+    30-day log groups are the same shape: kept on purpose, invisible in the
+    output, not free.
 
-    The distinction is the whole fix. `_orphaned_resources` drives the non-zero
-    exit, and a deliberate retention is not a failure -- putting these in that
-    list would fail every `--delete_s3_bucketname=false` teardown. So they go in
-    `_retained_resources`, which is reported on all three surfaces and drives
+    The distinction is the whole fix. The orphan list drives the non-zero exit,
+    and a deliberate retention is not a failure -- putting these there would
+    fail every `--delete_s3_bucketname=false` teardown. So they go through
+    _collect_retained_resources, which is reported on both surfaces and drives
     nothing.
+
+    These drove the teardown playbook's set_fact expression until that playbook
+    was deleted; they drive _collect_retained_resources itself now, which is the
+    code an operator's teardown actually runs.
     """
 
-    _COLLECT_TASK = "Collect the resources this teardown deliberately retained"
-    _ORPHAN_TASK = "Collect cleanup failures that ignore_errors swallowed"
-
-    def _playbook(self):
-        with open(os.path.join(REPO_ROOT, "src", "delete_pcluster.yml")) as fh:
-            return fh.read()
+    _BASE = {
+        "s3_bucketname": "parallelclustermaker-osiris-00001220260720",
+        "results_bucketname": "parallelclustermaker-results-123456789012-us-east-2",
+        "cluster_name": "osiris",
+        "delete_s3_bucketname": True,
+        "enable_hpc_benchmarks": False,
+    }
 
     def _retained(self, **facts):
-        """Evaluate the real set_fact expression rather than matching its text."""
-        body = _playbook_task_body(self._playbook(), self._COLLECT_TASK)
-        value = yaml.safe_load(body)[0]["set_fact"]["_retained_resources"].strip()
-        assert value.startswith("{{") and value.endswith("}}"), value
-        env = _make_env(os.path.join(REPO_ROOT, "templates"))
-        expr = env.compile_expression(value[2:-2], undefined_to_none=False)
-        base = {
-            "s3_bucketname": "parallelclustermaker-osiris-00001220260720",
-            "results_bucketname": "parallelclustermaker-results-123456789012-us-east-2",
-            "cluster_name": "osiris",
-            "delete_s3_bucketname": "true",
-            "enable_hpc_benchmarks": "false",
-        }
-        return expr(**{**base, **facts})
+        return _pcluster_core()._collect_retained_resources(**{**self._BASE, **facts})
 
     def test_a_skipped_bucket_delete_is_reported(self):
         """The reported bug: the bucket survives and nothing says so."""
-        retained = self._retained(delete_s3_bucketname="false")
+        retained = self._retained(delete_s3_bucketname=False)
         assert any("parallelclustermaker-osiris-00001220260720" in r for r in retained), (
             "a retained per-build bucket is not named anywhere in the teardown "
             f"output: {retained}"
@@ -3704,7 +3206,7 @@ class TestARetainedResourceIsReportedWithoutBeingCalledAnOrphan:
     def test_a_deleted_bucket_is_not_reported_as_retained(self):
         """Vacuity guard on the test above: on the default path the bucket really
         is gone, and reporting it as retained sends the operator hunting."""
-        retained = self._retained(delete_s3_bucketname="true")
+        retained = self._retained(delete_s3_bucketname=True)
         assert not any(
             "parallelclustermaker-osiris-00001220260720" in r for r in retained
         ), f"the per-build bucket is reported as retained after being deleted: {retained}"
@@ -3712,9 +3214,9 @@ class TestARetainedResourceIsReportedWithoutBeingCalledAnOrphan:
     def test_the_results_bucket_is_reported_only_when_it_exists(self):
         """It is created under enable_hpc_benchmarks and deleted by nothing, so
         naming it on a cluster that never had one is a false alarm."""
-        with_bench = self._retained(enable_hpc_benchmarks="true")
+        with_bench = self._retained(enable_hpc_benchmarks=True)
         assert any("results-123456789012-us-east-2" in r for r in with_bench), with_bench
-        without = self._retained(enable_hpc_benchmarks="false")
+        without = self._retained(enable_hpc_benchmarks=False)
         assert not any("results-123456789012-us-east-2" in r for r in without), without
 
     def test_the_log_groups_are_always_reported(self):
@@ -3736,53 +3238,73 @@ class TestARetainedResourceIsReportedWithoutBeingCalledAnOrphan:
 
     def test_nothing_retained_is_also_counted_as_an_orphan(self):
         """The property that keeps a --delete_s3_bucketname=false teardown from
-        exiting non-zero: the orphan collection must not read the same conditions."""
-        body = _playbook_task_body(self._playbook(), self._ORPHAN_TASK)
-        assert "delete_s3_bucketname" not in body, (
-            "the orphan list reads delete_s3_bucketname, so a deliberately "
-            "retained bucket would fail the teardown"
+        exiting non-zero. _collect_orphaned_resources reads step *results* and
+        nothing else, so a deliberate retention cannot reach it -- pinned on the
+        signature, since a widened one is exactly how it would."""
+        import inspect
+
+        core = _pcluster_core()
+        params = list(inspect.signature(core._collect_orphaned_resources).parameters)
+        assert params == ["step_results"], (
+            "_collect_orphaned_resources took on another input; a retention "
+            f"condition could now reach the orphan list: {params}"
         )
-        assert "results_bucketname" not in body, (
-            "the orphan list names the results bucket, which is deleted by "
-            "nothing and would fail every benchmark teardown"
-        )
+        source = inspect.getsource(core._collect_orphaned_resources)
+        for token in ("delete_s3_bucketname", "results_bucketname"):
+            assert token not in source, (
+                f"the orphan list reads {token}, so a deliberately retained "
+                f"resource would fail the teardown"
+            )
 
     def test_the_retained_list_never_reaches_the_exit_status(self):
-        """Both fail: tasks must stay keyed on _orphaned_resources alone."""
-        tasks = _delete_playbook_tasks()
-        fails = [t for t in tasks if "fail" in t]
-        assert fails, "no fail: tasks found; this test has stopped covering anything"
-        for task in fails:
-            gate = task.get("when")
-            gate = " ".join(gate) if isinstance(gate, list) else str(gate)
-            assert "_retained_resources" not in gate, (
-                f"{task.get('name')!r} fails on a deliberate retention: {gate}"
+        """core_delete_cluster's non-zero exits must stay keyed on the orphan
+        list and the delete outcome, never on a deliberate retention."""
+        import ast
+
+        core_src = _core_function_source("core_delete_cluster")
+        tree = ast.parse(core_src.lstrip())
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.If):
+                continue
+            names = {
+                n.id for n in ast.walk(node.test) if isinstance(n, ast.Name)
+            }
+            if "_retained_resources" not in names:
+                continue
+            returns = [
+                n for n in ast.walk(node)
+                if isinstance(n, ast.Return)
+            ]
+            assert not returns, (
+                "a deliberate retention decides core_delete_cluster's return "
+                "value; retention is not a failure"
             )
 
     def test_both_summary_surfaces_report_it(self):
         """A retention on a clean teardown and a retention alongside orphans are
-        two different print tasks, and the bug is invisible on whichever one is
-        left out."""
-        playbook = self._playbook()
-        for task_name in (
-            "Print cluster deletion summary",
-            "Print cluster deletion summary with the resources that survived cleanup",
-        ):
-            body = _playbook_task_body(playbook, task_name)
-            assert "_retained_resources" in body, (
-                f"{task_name!r} does not report retained resources"
+        two different renderings of the summary, and the bug is invisible on
+        whichever one is left out."""
+        core = _pcluster_core()
+        retained = ["S3 bucket parallelclustermaker-osiris-00001220260720 (kept)"]
+        for orphans in ([], ["Delete the SNS topic -- AccessDenied"]):
+            text = "\n".join(core._format_destruction_summary(
+                cluster_name="osiris", start_ts="t0", stop_ts="t1",
+                delete_headline="Cluster osiris has been deleted.",
+                orphaned_resources=orphans, retained_resources=retained,
+            ))
+            assert retained[0] in text, (
+                f"the summary with orphans={orphans!r} does not report retained "
+                f"resources"
             )
 
     def test_it_is_collected_before_the_sns_report_is_templated(self):
         """Same ordering rule the orphan collection follows: the report cannot
         carry a fact derived after it is rendered."""
-        playbook = self._playbook()
-        collect = playbook.index(f"- name: {self._COLLECT_TASK}")
-        template = playbook.index(
-            "- name: Template the cluster destruction summary report"
-        )
-        assert collect < template, (
-            "retained resources are collected after the SNS report is templated, "
+        source = _core_function_source("core_delete_cluster")
+        collect = source.index("_collect_retained_resources(")
+        report = source.index("sns_destruction_summary_report.j2")
+        assert collect < report, (
+            "retained resources are collected after the SNS report is rendered, "
             "so the report cannot name them"
         )
 
@@ -3810,217 +3332,95 @@ class TestARetainedResourceIsReportedWithoutBeingCalledAnOrphan:
     def test_a_retention_is_never_worded_as_a_failure(self):
         """The two lists are reported next to each other, so the wording is the
         only thing telling the operator which one needs action."""
-        playbook = self._playbook()
-        for task_name in (
-            "Print cluster deletion summary",
-            "Print cluster deletion summary with the resources that survived cleanup",
-        ):
-            body = _playbook_task_body(playbook, task_name)
-            retained_lines = [l for l in body.splitlines() if "Retained" in l]
-            assert retained_lines, f"{task_name!r} has no retention heading"
-            for line in retained_lines:
-                assert "FAILED" not in line, (
-                    f"a deliberate retention is worded as a failure: {line.strip()}"
-                )
+        core = _pcluster_core()
+        lines = core._format_destruction_summary(
+            cluster_name="osiris", start_ts="t0", stop_ts="t1",
+            delete_headline="Cluster osiris has been deleted.",
+            orphaned_resources=["Delete the SNS topic -- AccessDenied"],
+            retained_resources=["S3 bucket parallelclustermaker-osiris (kept)"],
+        )
+        retained_lines = [l for l in lines if "Retained" in l]
+        assert retained_lines, "the summary has no retention heading"
+        for line in retained_lines:
+            assert "FAILED" not in line, (
+                f"a deliberate retention is worded as a failure: {line.strip()}"
+            )
 
 
 class TestTheResultsSyncSurvivesAnOlderVarsFile:
-    """results_bucketname is newer than enable_hpc_benchmarks, so a vars file from
-    an older toolkit satisfies the gate but leaves the sync's bucket undefined.
-    That raised an UndefinedError which the block's rescue caught -- verified under
-    real ansible-playbook: failed=0, rescued=1, teardown continues -- printing
-    "Unexpected error during performance results sync" and naming nothing. The
-    results were lost silently and teardown went on to destroy the head node
-    holding the only copy.
-
-    The name is derivable from account and region alone, both of which every vars
-    file has carried since the v3 migration. The gain is a named cause, not
-    recovered results: on a cluster that old the bucket was never created, so the
-    sync gets NoSuchBucket and the rc != 0 warning fires, which prints the head
-    node path while the node is still up.
+    """results_bucketname is newer than enable_hpc_benchmarks, so a vars file
+    from an older toolkit satisfies the gate but leaves the sync's bucket
+    undefined -- and teardown then destroys the head node holding the only copy
+    of the results. The gain is a named cause, not recovered results: that
+    bucket was never created, so the sync gets NoSuchBucket and the existing
+    warning names it.
     """
 
-    _DERIVE_TASK = "Derive the results bucket name when the vars file predates it"
-
-    def _derive_task(self):
-        return {t.get("name"): t for t in _delete_playbook_tasks()}[self._DERIVE_TASK]
-
-    def test_the_derived_name_matches_the_python_derivation(self):
-        """Two sources for one bucket name would make the sync target depend on
-        which toolkit built the cluster. Pinned against the function rather than
-        against a restated literal, which would drift with it."""
-        # src/ is not on sys.path when this module runs alone.
-        src = os.path.join(REPO_ROOT, "src")
-        if src not in sys.path:
-            sys.path.insert(0, src)
-        from pcluster_core import _derive_results_bucket
-
-        expr = self._derive_task()["set_fact"]["results_bucketname"]
-        env = _make_env(os.path.join(REPO_ROOT, "templates"))
-        rendered = env.from_string(expr).render(
-            aws_account_id="123456789012", region="us-east-2"
-        )
-        assert rendered == _derive_results_bucket(
-            aws_account_id="123456789012", region="us-east-2"
-        ), f"playbook derives {rendered!r}, _derive_results_bucket disagrees"
+    def _teardown_source(self):
+        return _core_function_source("core_delete_cluster")
 
     def test_it_only_fires_when_the_vars_file_lacks_the_name(self):
-        """A vars file that defines it is authoritative: overwriting it would make
-        every current cluster's results follow this expression instead."""
-        when = _task_when(self._derive_task())
-        assert _eval_when(when, {})
-        assert not _eval_when(when, {"results_bucketname": "parallelclustermaker-results-x"})
+        """A vars file that does define it must keep its own value; the
+        fallback is an `or`, never an unconditional overwrite."""
+        import re
 
-    def test_it_is_derived_before_the_sync_interpolates_it(self):
-        names = [t.get("name") for t in _delete_playbook_tasks()]
-        assert names.index(self._DERIVE_TASK) < names.index(
-            "Push performance results from head node to S3"
+        source = self._teardown_source()
+        m = re.search(
+            r"""results_bucketname\s*=\s*_v\(["']results_bucketname["']\)"""
+            r"\s*or\s*_derive_results_bucket\(",
+            source,
+        )
+        assert m, (
+            "core_delete_cluster no longer falls back to _derive_results_bucket "
+            "only when the vars file omits results_bucketname"
         )
 
-    def test_it_stays_inside_the_benchmark_gate(self):
-        """A cluster built without benchmarks has no results and may have no
-        bucket; deriving the name outside the gate invites a sync that should
-        never run."""
-        gate = _effective_when(
-            os.path.join("src", "delete_pcluster.yml"),
-            lambda t: t.get("name") == self._DERIVE_TASK,
+    def test_the_derived_name_matches_the_python_derivation(self):
+        """Pinned against _derive_results_bucket, never a restated literal --
+        two sources that disagree make the target depend on which toolkit built
+        the cluster."""
+        source = self._teardown_source()
+        assert "parallelclustermaker-results-" not in source, (
+            "the teardown restates the results bucket name as a literal instead "
+            "of calling _derive_results_bucket"
         )
-        assert gate is not None
-        # results_bucketname is omitted, not set to None: passing any value makes
-        # it *defined*, which is the case this fallback must not fire on.
-        assert _eval_when(gate, {"enable_hpc_benchmarks": "true"})
-        assert not _eval_when(gate, {"enable_hpc_benchmarks": "false"})
 
     def test_the_inputs_are_ones_every_vars_file_has(self):
-        """The whole fix rests on this: aws_account_id and region predate
-        results_bucketname in vars_file.j2, so the fallback cannot itself raise
-        the UndefinedError it exists to prevent."""
-        with open(os.path.join(REPO_ROOT, "templates", "vars_file.j2")) as fh:
-            vars_template = fh.read()
-        for name in ("aws_account_id", "region"):
-            assert re.search(rf"^{name}:", vars_template, re.MULTILINE), (
-                f"{name} is not written to the vars file, so the fallback raises too"
-            )
-        expr = self._derive_task()["set_fact"]["results_bucketname"]
-        referenced = set(re.findall(r"\{\{\s*(\w+)", expr)) | set(
-            re.findall(r"~\s*(\w+)", expr)
+        """Referencing the cluster name or the serial would risk the very
+        missing-key failure this exists to prevent, and would restore a
+        per-build bucket."""
+        import inspect
+
+        params = set(
+            inspect.signature(_pcluster_core()._derive_results_bucket).parameters
         )
-        assert referenced <= {"aws_account_id", "region"}, (
-            f"the fallback reads {referenced - {'aws_account_id', 'region'}}, which a "
-            f"vars file old enough to lack results_bucketname may also lack"
-        )
+        assert params == {"aws_account_id", "region"}, params
+
+    def test_it_is_derived_before_the_sync_interpolates_it(self):
+        source = self._teardown_source()
+        assert source.index("_derive_results_bucket(") < source.index(
+            "_sync_performance_results_to_s3("
+        ), "the fallback is derived after the sync that needs it"
+
+    def test_it_stays_inside_the_benchmark_gate(self):
+        """The sync itself must not run on a cluster that never benchmarked."""
+        source = self._teardown_source()
+        assert source.index("if enable_hpc_benchmarks") < source.index(
+            "_sync_performance_results_to_s3("
+        ), "the results sync is not gated on enable_hpc_benchmarks"
 
 
-class TestAFailedDescribeIsNotAFailedCluster:
-    """`pcluster describe-cluster` was waited on with failed_when: false and no
-    follow-up, so three outcomes collapsed into one: the stack succeeded, the
-    stack failed, and the AWS call never answered. In the third case every
-    downstream task ran against head_node_public_ip == '' and the build reported
-    a cluster problem for an expired token. Each outcome now gets its own abort."""
 
-    _WAIT_TASK = "Wait for the cluster head node to reach running state"
-    _RC_FAIL = "Abort if describe-cluster itself failed"
-    _STATE_FAIL = "Abort if the stack never reached a terminal state"
-    _STACK_FAIL = "Abort if stack creation failed"
-    _CONSUMER = "Get the head node IP address"
+# A class asserting that a failed describe is not a failed cluster lived
+# here. It evaluated
+# create_pcluster.yml's three abort tasks (a failed describe, a stack that never
+# reached a terminal state, a genuine failure) against four real describe-cluster
+# outcomes. The playbook is gone; the same three-way discrimination is now
+# _classify_cluster_create_outcome / _wait_for_cluster_create in
+# src/pcluster_core.py, driven outcome by outcome in
+# tests/test_create_pcluster_migration.py (TestWaitForClusterCreate,
+# TestClassifyClusterCreateOutcome, TestRunClusterCreateAndClassify).
 
-    _SCENARIOS = {
-        "aws_call_failed": {
-            "rc": 255, "stdout": "",
-            "stderr": "An error occurred (ExpiredTokenException) when calling ...",
-        },
-        "still_building": {
-            "rc": 0, "stdout": '{"clusterStatus": "CREATE_IN_PROGRESS"}', "stderr": "",
-        },
-        "create_failed": {
-            "rc": 0, "stdout": '{"clusterStatus": "CREATE_FAILED"}', "stderr": "",
-        },
-        "create_complete": {
-            "rc": 0, "stdout": '{"clusterStatus": "CREATE_COMPLETE"}', "stderr": "",
-        },
-    }
-
-    # Which abort must be the first one to fire, per outcome.
-    _FIRST_ABORT = {
-        "aws_call_failed": _RC_FAIL,
-        "still_building": _STATE_FAIL,
-        "create_failed": _STACK_FAIL,
-        "create_complete": None,
-    }
-
-    def _tasks(self):
-        return {t.get("name"): t for t in _create_playbook_tasks()}
-
-    def _order(self):
-        return [t.get("name") for t in _create_playbook_tasks()]
-
-    @pytest.mark.parametrize("scenario", sorted(_SCENARIOS))
-    def test_each_outcome_hits_exactly_one_abort_first(self, scenario):
-        tasks, order = self._tasks(), self._order()
-        variables = {"cluster_status": self._SCENARIOS[scenario],
-                     "pcluster_create_timeout": 60}
-        fired = [
-            name for name in (self._RC_FAIL, self._STATE_FAIL, self._STACK_FAIL)
-            if _eval_when(_task_when(tasks[name]), variables)
-        ]
-        fired.sort(key=order.index)
-        expected = self._FIRST_ABORT[scenario]
-        if expected is None:
-            assert not fired, f"a healthy build aborts at {fired}"
-        else:
-            assert fired and fired[0] == expected, (
-                f"{scenario} should abort first at {expected!r}, got {fired}"
-            )
-
-    def test_the_aborts_run_before_anything_consumes_the_head_node_ip(self):
-        """An abort after the IP fact is set is an abort after every gated task
-        has already silently no-opped."""
-        order = self._order()
-        for abort in (self._RC_FAIL, self._STATE_FAIL):
-            assert order.index(self._WAIT_TASK) < order.index(abort) < order.index(
-                self._CONSUMER
-            ), f"{abort!r} is not between the wait and {self._CONSUMER!r}"
-
-    def test_the_wait_still_does_not_fail_on_its_own(self):
-        """Ansible's own retry failure would collapse the three diagnoses back
-        into one opaque message, which is the defect."""
-        wait = self._tasks()[self._WAIT_TASK]
-        assert wait.get("failed_when") is False, (
-            "the wait task must stay failed_when: false; the aborts below it are "
-            "what distinguish the outcomes"
-        )
-
-    def test_the_three_diagnoses_are_distinguishable(self):
-        """One generic message naming every possible cause would satisfy any
-        individually-worded assertion while telling the operator nothing."""
-        tasks = self._tasks()
-        rc_msg = " ".join(tasks[self._RC_FAIL]["fail"]["msg"])
-        state_msg = " ".join(tasks[self._STATE_FAIL]["fail"]["msg"])
-
-        assert "NOT a cluster problem" in rc_msg, (
-            "a failed AWS call must say so; the operator otherwise checks a "
-            "perfectly healthy cluster"
-        )
-        assert "cluster_status.stderr" in rc_msg, (
-            "aws's own stderr is the only line naming the actual cause"
-        )
-        assert "AWS_PROFILE" in rc_msg, (
-            "an unset or wrong AWS_PROFILE is the most common cause here"
-        )
-        assert "NOT a cluster problem" not in state_msg, (
-            "a still-building stack IS a cluster problem; the two messages have "
-            "collapsed into one"
-        )
-        assert "STILL BUILDING" in state_msg
-        assert "billing" in state_msg, (
-            "a wedged stack keeps costing money; say so"
-        )
-        # The bare variable name also appears in the "did not reach ... within N
-        # minutes" line, so matching it there says nothing about whether the
-        # operator was told what to change. Match the CLI flag.
-        assert "--pcluster_create_timeout" in state_msg, (
-            "the operator needs the knob that would have avoided this"
-        )
 
 
 def test_head_node_cannot_manage_hosted_zone_lifecycle():
@@ -4414,71 +3814,47 @@ def _render_sbatch_default(params):
     ).render(**params)
 
 
-def test_collect_templates_matches_what_the_playbooks_render(cluster_params):
-    """Every `template:` src in either playbook must be a file _collect_templates
-    discovers.
+def test_collect_templates_covers_every_template_the_toolkit_renders(cluster_params):
+    """Every template src/pcluster_core.py names must be a file
+    _collect_templates discovers.
 
     The suffix filter is what hid scripts/sbatch_default_submission_script.sh:
-    create_pcluster.yml renders it with `template:` from a hardcoded path, it
-    carries Jinja2 in its #SBATCH block, and because the name ends in .sh no
-    render test ever touched it. Its two --ntasks ladders were consequently the
-    only Jinja2 in the repo with no coverage at all. Resolve each src against the
-    fixture so a {{ }} path is checked too.
+    it is rendered from a hardcoded path, it carries Jinja2 in its #SBATCH
+    block, and because the name ends in .sh no render test ever touched it. Its
+    two --ntasks ladders were consequently the only Jinja2 in the repo with no
+    coverage at all.
+
+    This walked the two playbooks' `template:` tasks until those were deleted.
+    core_create_cluster renders every one of them in Python now, so the names
+    are string literals in that module -- swept by name rather than by call
+    site, since several are supplied through a loop variable and an
+    argument-position check would not see them.
     """
-    discovered = {os.path.join(tdir, fname) for tdir, fname in _collect_templates()}
-    env = _make_env(os.path.join(REPO_ROOT, "templates"))
-    # Resolve every src against the real vars file, rendered with the repo itself
-    # as its root, so a src built from cluster_template_dir or performance_rootdir
-    # lands on an actual path rather than a hand-written guess. cluster_rootdir and
-    # cluster_template_dir are overridden as well as local_workingdir: vars_file.j2
-    # derives them from it, but the fixture also supplies them and Jinja prefers
-    # the context value over the line above it in the same file.
-    repo_paths = {
-        "local_workingdir": REPO_ROOT,
-        "cluster_rootdir": REPO_ROOT,
-        "cluster_template_dir": os.path.join(REPO_ROOT, "templates"),
-        "performance_rootdir": os.path.join(REPO_ROOT, "hpc-benchmark"),
+    import ast
+
+    discovered = {fname for _tdir, fname in _collect_templates()}
+    extra = {fname for _tdir, fname in EXTRA_TEMPLATES}
+    with open(os.path.join(REPO_ROOT, "src", "pcluster_core.py")) as fh:
+        tree = ast.parse(fh.read())
+    named = {
+        node.value
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Constant) and isinstance(node.value, str)
+        and (node.value.endswith(".j2") or node.value in extra)
     }
-    # enable_monitoring on: monitoring_wrapper_src and grafana_tunnel_src exist in
-    # the vars file only inside that gate, and both are `template:` srcs.
-    context = {
-        **yaml.safe_load(
-            env.get_template("vars_file.j2").render(
-                {**cluster_params, **repo_paths, "enable_monitoring": "true"}
-            )
-        ),
-        **repo_paths,
-    }
-    checked = 0
-    for playbook in ("create_pcluster.yml", "delete_pcluster.yml"):
-        with open(os.path.join(REPO_ROOT, "src", playbook)) as fh:
-            plays = yaml.safe_load(fh)
-        for play in plays:
-            for task in _walk_tasks(play.get("tasks")):
-                for module in ("template", "ansible.builtin.template"):
-                    args = task.get(module)
-                    if not isinstance(args, dict):
-                        continue
-                    src = str(args.get("src", ""))
-                    # `item.src` is a loop variable; the loop's own entries name
-                    # files under templates/ and hpc-benchmark/, both already in
-                    # TEMPLATE_DIRS.
-                    if "item" in src:
-                        continue
-                    resolved = env.from_string(src).render(**context)
-                    if not resolved.startswith("/"):
-                        continue
-                    checked += 1
-                    assert resolved in discovered, (
-                        f"{playbook} renders {resolved} with `template:` but no test "
-                        f"renders it -- add it to EXTRA_TEMPLATES"
-                    )
-    # Vacuity guard, not a target -- shrinks with Workstream 2 (see the
-    # matching floor in TestTheTestEnvironmentMatchesAnsible). Since Tier 3's
-    # cutover the preinstall.j2/postinstall.j2 with_items task is gone
-    # entirely (not just skipped), leaving config.pcluster.j2 and the two
-    # SNS report tasks' absolute `src` values to resolve and check here.
-    assert checked >= 3, f"only resolved {checked} template srcs -- walker is blind"
+    assert named, "no template names found in pcluster_core.py -- sweep is blind"
+    missing = sorted(named - discovered)
+    assert not missing, (
+        f"src/pcluster_core.py renders {missing} but no test renders them -- add "
+        f"them to EXTRA_TEMPLATES (or to a directory in TEMPLATE_DIRS)"
+    )
+    # Vacuity guard on the sweep, not a target: the .sh entry is the reason
+    # EXTRA_TEMPLATES exists, so losing it silently is the failure mode.
+    assert extra <= named, (
+        f"EXTRA_TEMPLATES lists {sorted(extra - named)}, which pcluster_core.py "
+        f"never renders -- the entry is stale"
+    )
+    assert cluster_params  # the fixture is the render tests' own precondition
 
 
 class TestTheDefaultSbatchScriptIsShapedByTheCluster:
@@ -4683,12 +4059,16 @@ class TestTheDefaultSbatchScriptIsShapedByTheCluster:
 
 
 # ---------------------------------------------------------------------------
-# The playbook's build summary
+# The build summary
+#
+# Two surfaces carry the storage topology: pcluster_core's printed summary
+# (_storage_summary_lines, driven in tests/test_make_pcluster.py) and
+# templates/sns_build_summary_report.j2, which is what the SNS audience sees
+# and what these render. A third copy lived in create_pcluster.yml's
+# _build_summary set_fact until that playbook was deleted.
 # ---------------------------------------------------------------------------
 
-_SUMMARY_TASK = "Build cluster build summary message"
-
-# Facts the playbook registers at runtime; the vars file knows nothing about them.
+# Runtime facts the report interpolates; the vars file knows nothing about them.
 _RUNTIME_FACTS = {
     "head_node_public_ip": "1.2.3.4",
     "start_overall_timer": {"stdout": "2026-07-25 @ 20:09:46"},
@@ -4708,21 +4088,6 @@ _STORAGE_COMBOS = [
         [],
     ),
 ]
-
-
-def _summary_expression():
-    """The _build_summary Jinja expression out of create_pcluster.yml, unwrapped
-    from its {{ }} so it can be compiled as an expression rather than a template
-    — the value is a list, and rendering would stringify it."""
-    with open(os.path.join(REPO_ROOT, "src", "create_pcluster.yml")) as fh:
-        plays = yaml.safe_load(fh)
-    for play in plays:
-        for task in play.get("tasks") or []:
-            if task.get("name") == _SUMMARY_TASK:
-                value = task["set_fact"]["_build_summary"].strip()
-                assert value.startswith("{{") and value.endswith("}}"), value
-                return value[2:-2]
-    raise AssertionError(f"task not found: {_SUMMARY_TASK!r}")
 
 
 def _vars_for(overrides, cluster_params):
@@ -4746,16 +4111,6 @@ def _vars_for(overrides, cluster_params):
     return yaml.safe_load(rendered)
 
 
-def _rendered_summary(overrides, cluster_params):
-    """Evaluate the playbook's _build_summary expression and join it to text."""
-    variables = {**_vars_for(overrides, cluster_params), **_RUNTIME_FACTS}
-    env = _make_env(os.path.join(REPO_ROOT, "templates"))
-    lines = env.compile_expression(_summary_expression(), undefined_to_none=False)(
-        **variables
-    )
-    return "\n".join(lines)
-
-
 def _rendered_sns(overrides, cluster_params):
     variables = {**cluster_params, **_vars_for(overrides, cluster_params),
                  **_RUNTIME_FACTS}
@@ -4769,38 +4124,10 @@ def _rendered_sns(overrides, cluster_params):
     ).render(**variables)
 
 
-_LAUNCH_SUMMARY_TASK = "Print cluster launch summary"
-
-
-def _launch_summary_expression():
-    """The pre-build "Print cluster launch summary" debug message, unwrapped
-    from its {{ }} the same way _summary_expression unwraps the post-build
-    one. A genuinely separate, independently-written list literal in the same
-    file -- not the same summary referenced twice."""
-    with open(os.path.join(REPO_ROOT, "src", "create_pcluster.yml")) as fh:
-        plays = yaml.safe_load(fh)
-    for play in plays:
-        for task in play.get("tasks") or []:
-            if task.get("name") == _LAUNCH_SUMMARY_TASK:
-                value = task["debug"]["msg"].strip()
-                assert value.startswith("{{") and value.endswith("}}"), value
-                return value[2:-2]
-    raise AssertionError(f"task not found: {_LAUNCH_SUMMARY_TASK!r}")
-
-
-def _rendered_launch_summary(overrides, cluster_params):
-    variables = {**_vars_for(overrides, cluster_params), **_RUNTIME_FACTS}
-    env = _make_env(os.path.join(REPO_ROOT, "templates"))
-    lines = env.compile_expression(
-        _launch_summary_expression(), undefined_to_none=False
-    )(**variables)
-    return "\n".join(lines)
-
-
 # The mount point alone is not enough to prove the filesystem was reported: on an
 # FSx cluster pkg_dir is /fsx/pkg, so a bare "/fsx" check still passes after the
-# mount line is deleted. Match the label the line carries. Both surfaces indent
-# differently, so anchor from the mount point rightwards.
+# mount line is deleted. Match the label the line carries, anchored from the
+# mount point rightwards so the surface's own indentation does not matter.
 _MOUNT_LINES = {
     "/shared": "/shared  EBS (",
     "/efs": "/efs     EFS (",
@@ -4820,38 +4147,16 @@ def _assert_storage(text, overrides, present, absent):
         )
 
 
-class TestPlaybookBuildSummaryStorage:
-    """The playbook summary said "FSx/Lustre: enabled" and nothing more, so an
-    operator with a Lustre filesystem was never told it was on /fsx or how large
-    it was. These render the real expression, which is also the only check that it
-    does not reach for a variable vars_file.j2 leaves undefined."""
+# A class covering the playbook's own build-summary storage block lived here.
+# It evaluated create_pcluster.yml's
+# _build_summary expression over the same _STORAGE_COMBOS the SNS class below
+# uses, and was also the only check that the expression never reached for a
+# variable vars_file.j2 leaves undefined under its gate. The playbook is gone;
+# the printed summary an operator actually reads is _storage_summary_lines in
+# src/pcluster_core.py, driven over the same combinations in
+# tests/test_make_pcluster.py (TestStorageSummaryLines,
+# TestStorageSummaryLinesTakesKeywordsOnly).
 
-    @pytest.mark.parametrize("overrides,present,absent", _STORAGE_COMBOS)
-    def test_the_summary_names_every_filesystem_and_only_those(
-        self, overrides, present, absent, cluster_params
-    ):
-        _assert_storage(
-            _rendered_summary(overrides, cluster_params), overrides, present, absent
-        )
-
-    @pytest.mark.parametrize("overrides,present,absent", _STORAGE_COMBOS)
-    def test_the_summary_reports_the_vars_file_pkg_dir(
-        self, overrides, present, absent, cluster_params
-    ):
-        """Spack and the shared package tree move with the storage precedence.
-        Reporting anything but the pkg_dir the playbook itself uses sends the
-        operator to a directory that does not exist."""
-        pkg_dir = _vars_for(overrides, cluster_params)["pkg_dir"]
-        assert f"install under {pkg_dir}" in _rendered_summary(
-            overrides, cluster_params
-        )
-
-    def test_lustre_reports_its_size(self, cluster_params):
-        overrides = {"enable_fsx": "true"}
-        fsx_size = _vars_for(overrides, cluster_params)["fsx_size"]
-        assert f"FSx for Lustre ({fsx_size} GB)" in _rendered_summary(
-            overrides, cluster_params
-        )
 
 
 class TestSnsBuildSummaryStorage:
@@ -4907,39 +4212,37 @@ def _config_mount_dirs(overrides, cluster_params):
 
 
 class TestSummaryMountPointsMatchTheClusterConfig:
-    """/efs and /fsx are hardcoded in four places — config.pcluster.j2's
-    SharedStorage block, _storage_summary_lines, the playbook expression, and the
-    SNS template — and vars_file.j2's efs_root/fsx_root variables are referenced
-    by none of them. Nothing but this stops a mount point changed in the config
-    from leaving all three summaries pointing at a directory that does not exist.
-    External NFS is absent from SharedStorage by design: PCluster does not manage
-    it, postinstall.j2 mounts it at external_nfs_server_root, so that one is
-    checked against the vars file instead."""
+    """/efs and /fsx are hardcoded in three places — config.pcluster.j2's
+    SharedStorage block, _storage_summary_lines, and the SNS template — and
+    vars_file.j2's efs_root/fsx_root variables are referenced by none of them.
+    Nothing but this stops a mount point changed in the config from leaving both
+    summaries pointing at a directory that does not exist. (There were four
+    places until create_pcluster.yml's own copy of the summary was deleted with
+    the playbook.) External NFS is absent from SharedStorage by design: PCluster
+    does not manage it, postinstall.j2 mounts it at external_nfs_server_root, so
+    that one is checked against the vars file instead."""
 
     @pytest.mark.parametrize("overrides,present,absent", _STORAGE_COMBOS)
-    def test_every_pcluster_managed_mount_is_named_in_both_summaries(
+    def test_every_pcluster_managed_mount_is_named_in_the_report(
         self, overrides, present, absent, cluster_params
     ):
         mounts = _config_mount_dirs(overrides, cluster_params)
         assert mounts, "SharedStorage parsed empty — the config template changed shape"
-        playbook = _rendered_summary(overrides, cluster_params)
         sns = _rendered_sns(overrides, cluster_params)
         for mount in mounts:
             assert mount in _MOUNT_LINES, (
                 f"config mounts {mount}, which no summary knows how to report"
             )
-            assert _MOUNT_LINES[mount] in playbook, f"{mount} missing from playbook"
             assert _MOUNT_LINES[mount] in sns, f"{mount} missing from SNS report"
 
     @pytest.mark.parametrize("overrides,present,absent", _STORAGE_COMBOS)
-    def test_the_summaries_claim_no_mount_the_config_does_not_create(
+    def test_the_report_claims_no_mount_the_config_does_not_create(
         self, overrides, present, absent, cluster_params
     ):
         managed = set(_config_mount_dirs(overrides, cluster_params))
         for mount, line in _MOUNT_LINES.items():
             if mount in managed or mount == "/nfs":
                 continue
-            assert line not in _rendered_summary(overrides, cluster_params)
             assert line not in _rendered_sns(overrides, cluster_params)
 
     def test_the_external_nfs_mount_tracks_the_vars_file(self, cluster_params):
@@ -4950,54 +4253,18 @@ class TestSummaryMountPointsMatchTheClusterConfig:
 
 
 class TestReportingSurfacesNameTheLoginNode:
-    """Login node appears on three independently-maintained literals -- the
-    pre-build "Print cluster launch summary" debug message, the post-build
-    _build_summary set_fact (used for the SNS notification), and the SNS
-    report template itself -- plus list_pcluster.py's table and the cost
-    estimate, covered elsewhere. A line added to one and missed on another is
-    worse than not adding it anywhere, so all three are checked independently,
-    the same discipline the storage-summary tests above use."""
+    """Login node appears on several independently-maintained literals -- the
+    pre-build launch summary and the post-build summary
+    (print_cluster_launch_summary and _print_build_summary in
+    src/pcluster_core.py, driven in tests/test_create_pcluster_migration.py and
+    by TestTheNodeLinesReadAsOneGroup below), the SNS report template itself,
+    plus list_pcluster.py's table and the cost estimate, covered elsewhere. A
+    line added to one and missed on another is worse than not adding it
+    anywhere, so each is checked independently. The two that read
+    create_pcluster.yml's own literals went with that playbook.
 
-    def test_the_launch_summary_names_the_login_node_only_when_enabled(
-        self, cluster_params, cluster_params_loginnode_enabled
-    ):
-        assert "Login Node:" not in _rendered_launch_summary({}, cluster_params)
-        text = _rendered_launch_summary({}, cluster_params_loginnode_enabled)
-        assert (
-            f"Login Node:        "
-            f"{cluster_params_loginnode_enabled['loginnode_instance_type']} "
-            f"(x{cluster_params_loginnode_enabled['loginnode_count']})"
-        ) in text
-
-    def test_the_launch_summary_reports_the_pool_size(self, cluster_params_loginnode_pool):
-        text = _rendered_launch_summary({}, cluster_params_loginnode_pool)
-        assert "(x3)" in text
-
-    def test_the_build_summary_names_the_login_node_only_when_enabled(
-        self, cluster_params, cluster_params_loginnode_enabled
-    ):
-        assert "Login Node:" not in _rendered_summary({}, cluster_params)
-        text = _rendered_summary({}, cluster_params_loginnode_enabled)
-        assert (
-            f"Login Node:        "
-            f"{cluster_params_loginnode_enabled['loginnode_instance_type']} "
-            f"(x{cluster_params_loginnode_enabled['loginnode_count']})"
-        ) in text
-
-    def test_the_build_summary_reports_the_pool_size(self, cluster_params_loginnode_pool):
-        text = _rendered_summary({}, cluster_params_loginnode_pool)
-        assert "(x3)" in text
-
-    def test_the_build_summary_access_instructions_reflect_the_login_node_default(
-        self, cluster_params, cluster_params_loginnode_enabled
-    ):
-        disabled_text = _rendered_summary({}, cluster_params)
-        assert "Access the head node:" in disabled_text
-
-        enabled_text = _rendered_summary({}, cluster_params_loginnode_enabled)
-        assert "Access the head node:" not in enabled_text
-        assert "Access the cluster (login node by default; -H for the head node):" in enabled_text
-        assert "(head node)" in enabled_text
+    What is left here is the SNS report, which is the copy that outlives the
+    terminal scrollback."""
 
     def test_the_sns_report_names_the_login_node_only_when_enabled(
         self, cluster_params, cluster_params_loginnode_enabled
@@ -5981,14 +5248,13 @@ class TestPackageManagersMatchTheRenderedOs:
     )
 
     # Two templates was too narrow a scope: a package-manager branch added to
-    # monitoring-post-install-wrapper.j2 or a task appended to create_pcluster.yml
-    # reaches the node just as directly, and both passed.
+    # monitoring-post-install-wrapper.j2 reaches the node just as directly, and
+    # it passed. The two playbooks were on this list until they were deleted;
+    # nothing in the toolkit runs an Ansible task on a node any more.
     _NODE_SURFACES = (
         os.path.join("templates", "preinstall.j2"),
         os.path.join("templates", "postinstall.j2"),
         os.path.join("templates", "monitoring-post-install-wrapper.j2"),
-        os.path.join("src", "create_pcluster.yml"),
-        os.path.join("src", "delete_pcluster.yml"),
     )
 
     # Word-boundary regexes, not `"dnf "`. The space-suffixed literal missed
@@ -6320,57 +5586,17 @@ class TestPackageManagersMatchTheRenderedOs:
             f"no defaults file documents the valid base_os values (found {checked})"
         )
 
-    def test_the_playbook_rejects_an_unsupported_os_before_spending_anything(self):
-        """The last gate. argparse choices in make_pcluster.py are bypassed
-        entirely by `ansible-playbook --extra-vars base_os=<unsupported>`
-        run straight at create_pcluster.yml, and config.pcluster.j2 then renders
-        that value into `Os:`, which upstream PCluster's own SUPPORTED_OSES accepts -- so
-        nothing downstream refuses it and the node dies at the first apt-get,
-        twenty minutes in.
+    # A test requiring the playbook to reject an unsupported OS before spending
+    # anything lived here. It pinned create_pcluster.yml's `assert` task at index 0 and checked
+    # that its own vars listed exactly this set for both base_os and pcluster_os.
+    # The playbook is gone; _assert_supported_os in src/pcluster_core.py is the
+    # last gate now, and tests/test_create_pcluster_migration.py pins both halves
+    # it used to cover -- the valid set (TestAssertSupportedOs, including that
+    # the set is ARM_OSES/X86_OSES rather than a restated literal, and that
+    # pcluster_os is checked as well as base_os) and the position
+    # (TestAssertRunsBeforeAnythingElse, which asserts on the AST that the call
+    # is core_create_cluster's first statement, before anything is spent).
 
-        Position is the whole point, so this asserts on the index rather than on
-        the task's presence: an assert placed after the SNS topic or the S3 bucket
-        has already left resources behind and billed the operator, and an assert
-        placed anywhere at all satisfies a presence-only check."""
-        path = os.path.join(REPO_ROOT, "src", "create_pcluster.yml")
-        with open(path) as fh:
-            tasks = yaml.safe_load(fh)[0]["tasks"]
-
-        guard = None
-        for i, task in enumerate(tasks):
-            if "assert" in task:
-                guard = (i, task)
-                break
-        assert guard, "create_pcluster.yml has no assert task gating base_os"
-        idx, task = guard
-        assert idx == 0, (
-            f"the base_os assert is task {idx}, not the first task; every task "
-            f"before it runs on an unsupported OS: "
-            f"{[t.get('name') for t in tasks[:idx]]}"
-        )
-
-        # The two variables that reach config.pcluster.j2's Os: field. Asserting
-        # base_os alone leaves pcluster_os free, and it is what PCluster actually
-        # reads.
-        conditions = " ".join(task["assert"]["that"])
-        for var in ("base_os", "pcluster_os"):
-            assert var in conditions, f"the assert does not constrain {var}"
-
-        # The allowed values live in the task's own vars, so they are checked
-        # against the same set every other surface is pinned to rather than
-        # drifting on their own.
-        listed = set(task["vars"]["_supported_base_oses"])
-        assert listed == self._SUPPORTED_OSES, (
-            f"the playbook allows {sorted(listed)}, expected "
-            f"{sorted(self._SUPPORTED_OSES)}"
-        )
-        pc_listed = set(task["vars"]["_supported_pcluster_oses"])
-        assert pc_listed == {
-            os_name.removesuffix("arm") for os_name in self._SUPPORTED_OSES
-        }, (
-            f"the playbook allows pcluster_os {sorted(pc_listed)}; PCluster's Os: "
-            f"field rejects the arm suffix, so this is base_os with it stripped"
-        )
 
 
 class TestOnlyTheDriverIsStagedToS3:
@@ -6400,15 +5626,37 @@ class TestOnlyTheDriverIsStagedToS3:
     )
 
     @staticmethod
-    def _upload_task():
-        with open(os.path.join(REPO_ROOT, "src", "create_pcluster.yml")) as fh:
-            plays = yaml.safe_load(fh)
-        for play in plays:
-            for task in _walk_tasks(play.get("tasks")):
-                cmd = task.get("command")
-                if isinstance(cmd, str) and "aws s3 sync" in cmd and "hpc-benchmark/" in cmd:
-                    return task, " ".join(cmd.split())
-        raise AssertionError("no aws s3 sync of the hpc-benchmark tree in create_pcluster.yml")
+    def _upload_argv():
+        """The `aws s3 sync` argv stage_and_upload_hpc_benchmark_driver runs.
+
+        Read off the AST rather than as text: the arguments are a real Python
+        list, so `--exclude "*"` is two separate elements and a substring match
+        on the source would happily accept a blocklist written across them.
+        """
+        import ast
+        import inspect
+
+        core = _pcluster_core()
+        tree = ast.parse(
+            inspect.getsource(core.stage_and_upload_hpc_benchmark_driver).lstrip()
+        )
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.List):
+                continue
+            literals = [
+                e.value for e in node.elts
+                if isinstance(e, ast.Constant) and isinstance(e.value, str)
+            ]
+            if literals[:3] == ["aws", "s3", "sync"]:
+                return literals
+        raise AssertionError(
+            "stage_and_upload_hpc_benchmark_driver no longer runs an aws s3 sync"
+        )
+
+    @classmethod
+    def _upload_includes(cls):
+        argv = cls._upload_argv()
+        return [argv[i + 1] for i, a in enumerate(argv) if a == "--include"]
 
     @staticmethod
     def _pull_command(rendered):
@@ -6426,56 +5674,53 @@ class TestOnlyTheDriverIsStagedToS3:
         return " ".join(" ".join(body).split())
 
     def test_the_upload_is_an_allowlist(self):
-        _, cmd = self._upload_task()
-        assert '--exclude "*"' in cmd, (
-            "the upload is not an allowlist -- without --exclude \"*\" every file "
+        argv = self._upload_argv()
+        excludes = [argv[i + 1] for i, a in enumerate(argv) if a == "--exclude"]
+        assert "*" in excludes, (
+            'the upload is not an allowlist -- without --exclude "*" every file '
             "added to hpc-benchmark/ ships to the operator's home directory"
         )
-        assert '--include "hpc-benchmark.sh"' in cmd, \
+        assert "hpc-benchmark.sh" in self._upload_includes(), \
             "the upload excludes everything and includes nothing; self-repair is dead"
 
     def test_the_upload_allowlists_nothing_but_the_driver(self):
-        _, cmd = self._upload_task()
-        assert re.findall(r'--include\s+"([^"]+)"', cmd) == ["hpc-benchmark.sh"], \
+        assert self._upload_includes() == ["hpc-benchmark.sh"], \
             "only the driver is needed for self-repair"
 
     def test_the_upload_is_still_gated_on_benchmarks(self):
         """An ungated upload creates the S3 prefix on every cluster, and the pull
-        side is gated, so nothing would ever read it.  The gate lives on the
-        enclosing block rather than the task, so find the ancestor that carries it.
+        side is gated, so nothing would ever read it.
+
+        Asserted on core_create_cluster's AST: the call has to sit inside an
+        `if` whose test names the flag, which a text search for the two tokens
+        near each other cannot tell from a call beside the gate.
         """
-        with open(os.path.join(REPO_ROOT, "src", "create_pcluster.yml")) as fh:
-            plays = yaml.safe_load(fh)
+        import ast
 
-        def gates(task):
-            """Every when: condition from this task down to the sync, or None."""
-            conditions = task.get("when")
-            if isinstance(conditions, str):
-                conditions = [conditions]
-            cmd = task.get("command")
-            if isinstance(cmd, str) and "aws s3 sync" in cmd and "hpc-benchmark/" in cmd:
-                return list(conditions or [])
-            for key in ("block", "rescue", "always"):
-                for child in task.get(key) or []:
-                    if not isinstance(child, dict):
-                        continue
-                    found = gates(child)
-                    if found is not None:
-                        return list(conditions or []) + found
-            return None
+        source = _core_function_source("core_create_cluster")
+        tree = ast.parse(source.lstrip())
 
-        for play in plays:
-            for task in play.get("tasks") or []:
-                if not isinstance(task, dict):
-                    continue
-                found = gates(task)
-                if found is not None:
-                    assert any("enable_hpc_benchmarks" in c for c in found), (
-                        "the upload is not gated on enable_hpc_benchmarks; its "
-                        f"conditions are {found}"
-                    )
-                    return
-        raise AssertionError("no aws s3 sync of the hpc-benchmark tree found")
+        def calls_the_stager(node):
+            return any(
+                isinstance(n, ast.Call)
+                and getattr(n.func, "id", None) == "stage_and_upload_hpc_benchmark_driver"
+                for n in ast.walk(node)
+            )
+
+        assert calls_the_stager(tree), (
+            "core_create_cluster never stages the benchmark driver"
+        )
+        gated = [
+            node for node in ast.walk(tree)
+            if isinstance(node, ast.If)
+            and "enable_hpc_benchmarks" in {
+                n.id for n in ast.walk(node.test) if isinstance(n, ast.Name)
+            }
+            and calls_the_stager(node)
+        ]
+        assert gated, (
+            "the benchmark driver upload is not inside an `if enable_hpc_benchmarks`"
+        )
 
     @pytest.mark.parametrize("fixture", ["cluster_params", "cluster_params_rhel"])
     def test_the_pull_is_the_same_allowlist(self, fixture, request):
@@ -6491,13 +5736,14 @@ class TestOnlyTheDriverIsStagedToS3:
     @pytest.mark.parametrize("name", _NOT_FOR_THE_OPERATOR)
     def test_no_internal_file_is_named_on_either_end(self, name, cluster_params):
         """A --include naming any of these would defeat the allowlist by hand."""
-        _, upload = self._upload_task()
         rendered = _make_env(os.path.join(REPO_ROOT, "templates")).get_template(
             "postinstall.j2"
         ).render(**cluster_params)
         pull = self._pull_command(rendered)
-        for where, cmd in (("upload", upload), ("pull", pull)):
-            included = re.findall(r'--include\s+"([^"]+)"', cmd)
+        for where, included in (
+            ("upload", self._upload_includes()),
+            ("pull", re.findall(r'--include\s+"([^"]+)"', pull)),
+        ):
             assert name not in included, f"{name} is allowlisted on the {where}"
 
     def test_the_internal_files_are_really_in_the_source_tree(self):
@@ -6534,123 +5780,35 @@ class TestOnlyTheDriverIsStagedToS3:
         )
 
 
-class TestTheSshSecretIsWrittenOnEveryRun:
-    """The Secrets Manager write must not be gated on ec2_private_key.changed.
+# A class asserting the Secrets Manager write happens on every run lived here.
+# It pinned four properties of
+# create_pcluster.yml's keypair/secret tasks: that the Secrets Manager write is
+# not gated on whether AWS minted a new keypair, that an existing secret is
+# tolerated, that the local .pem is guaranteed to exist first, and that the
+# tasks handling real key material keep no_log. The playbook is gone, and so is
+# no_log -- there is no Ansible task to censor. The other three are properties
+# of src/pcluster_core.py's _store_ssh_secret / _save_private_key_locally /
+# _abort_if_keypair_orphaned, driven directly in
+# tests/test_create_pcluster_migration.py (TestStoreSshSecret,
+# TestSavePrivateKeyLocally, TestAbortIfKeypairOrphaned,
+# TestProvisionS3KeypairAndSecret).
 
-    That gate conflated two independent facts -- whether AWS minted a new keypair
-    on this run, and whether the secret exists. A build that failed after the
-    keypair was created but before the secret was written (the S3 bucket, the five
-    managed policies, and the IAM role are all created in that window, and any of
-    them can fail) leaves the keypair in AWS, so the next run's ec2_key task
-    reports changed=false, the task is skipped, and no secret is ever created.
-    retrieve_ssh_key.<cluster>.sh -- which make_pcluster.py, rotate_cluster_key.py,
-    access_cluster.j2 and grafana_tunnel.j2 all point the operator at when the
-    local .pem is missing -- then fails with ResourceNotFoundException, and there
-    is no other way back into a running head node.
-
-    Running it unconditionally is safe for two reasons that are both pinned below:
-    --secret-string reads the local .pem, whose presence on a re-run is already
-    guaranteed by the abort task above it, and failed_when tolerates
-    ResourceExistsException.
-    """
-
-    @staticmethod
-    def _task(name):
-        with open(os.path.join(REPO_ROOT, "src", "create_pcluster.yml")) as fh:
-            playbook = yaml.safe_load(fh)
-        for play in playbook:
-            for task in _walk_tasks(play.get("tasks")):
-                if task.get("name") == name:
-                    return task
-        raise AssertionError(f"task {name!r} not found in create_pcluster.yml")
-
-    def test_the_secret_write_is_not_gated_on_a_new_keypair(self):
-        task = self._task("Store SSH private key in Secrets Manager")
-        gate = task.get("when")
-        gates = gate if isinstance(gate, list) else ([gate] if gate else [])
-        for cond in gates:
-            assert "ec2_private_key" not in str(cond), (
-                "the Secrets Manager write is gated on whether a new keypair was "
-                f"minted: when: {gate!r}"
-            )
-
-    def test_an_existing_secret_is_still_not_an_error(self):
-        """What makes the ungated run safe. Without this, every rebuild fails."""
-        task = self._task("Store SSH private key in Secrets Manager")
-        assert "ResourceExistsException" in str(task.get("failed_when", "")), (
-            "an unconditional create-secret must tolerate ResourceExistsException"
-        )
-
-    def test_the_local_key_is_still_guaranteed_to_exist_first(self):
-        """--secret-string file://{{ ssh_keypair }} needs the .pem on disk.
-
-        The abort task is what guarantees it on a re-run: AWS never returns key
-        material for an existing keypair, so a missing .pem there is fatal and
-        the play stops before reaching this task.
-        """
-        with open(os.path.join(REPO_ROOT, "src", "create_pcluster.yml")) as fh:
-            playbook = yaml.safe_load(fh)
-        names = [
-            t["name"]
-            for play in playbook
-            for t in _walk_tasks(play.get("tasks"))
-            if "name" in t
-        ]
-        abort = "Abort if keypair exists in AWS but local key file is missing"
-        assert abort in names
-        assert names.index(abort) < names.index(
-            "Store SSH private key in Secrets Manager"
-        ), f"{abort!r} must precede the Secrets Manager write"
-
-    def test_key_creation_still_censors_the_key_material(self):
-        """Vacuity guard: removing the gate must not remove no_log.
-
-        Both this task and 'Save the private key' handle the private key itself.
-        """
-        for name in (
-            "Generate a new EC2 keypair for this cluster",
-            "Save the private key",
-            "Store SSH private key in Secrets Manager",
-        ):
-            assert self._task(name).get("no_log") is True, f"{name}: lost no_log"
-
-    def test_the_local_pem_write_is_still_gated(self):
-        """Vacuity guard: only the secret write loses its gate.
-
-        'Save the private key' copies ec2_private_key.key.private_key, which AWS
-        populates only when it actually minted a key -- ungating that one would
-        overwrite a good .pem with an empty string on every rebuild.
-        """
-        gate = str(self._task("Save the private key").get("when", ""))
-        assert "ec2_private_key.changed" in gate, (
-            "Save the private key must stay gated on ec2_private_key.changed"
-        )
 
 
 class TestTheKnownHostsPathIsExpanded:
     """`ssh_known_hosts` must be absolute, because every use of it is quoted.
 
     It shipped as the literal `~/.ssh/known_hosts` in vars_file.j2, and both
-    consumers in create_pcluster.yml wrap it in double quotes -- which the shell
-    does not tilde-expand. Two consequences, verified under real bash rather than
-    assumed: `ssh-keygen -R "~/.ssh/known_hosts"` cannot find the file (its
-    `|| true` swallowed that), and the keyscan append redirected into a
-    nonexistent `./~/.ssh/` directory. The append's failure was invisible: the
-    `_added=1` that followed it inside the `{ ... }` group always succeeded, so
-    the group returned 0 and Ansible reported the task `changed` on a write that
-    never happened. Every later ssh and scp task in the play then depends on a
-    fingerprint that was never recorded.
+    consumers wrap it in double quotes -- which the shell does not tilde-expand.
+    Two consequences, verified under real bash rather than assumed:
+    `ssh-keygen -R "~/.ssh/known_hosts"` cannot find the file (its `|| true`
+    swallowed that), and the keyscan append redirected into a nonexistent
+    `./~/.ssh/` directory. The append's failure was invisible: the `_added=1`
+    that followed it inside the `{ ... }` group always succeeded, so the group
+    returned 0 and the write was reported as having happened. Every later ssh
+    and scp against the head node then depends on a fingerprint that was never
+    recorded.
     """
-
-    @staticmethod
-    def _keyscan_task():
-        with open(os.path.join(REPO_ROOT, "src", "create_pcluster.yml")) as fh:
-            playbook = yaml.safe_load(fh)
-        for play in playbook:
-            for task in _walk_tasks(play.get("tasks")):
-                if task.get("name") == "Accept the SSH fingerprint of the head node":
-                    return task
-        raise AssertionError("keyscan task not found in create_pcluster.yml")
 
     def test_the_vars_file_does_not_ship_a_literal_tilde(self):
         with open(os.path.join(REPO_ROOT, "templates", "vars_file.j2")) as fh:
@@ -6719,144 +5877,23 @@ class TestTheKnownHostsPathIsExpanded:
                 "class no longer holds"
             )
 
-    def test_a_failed_append_fails_the_task(self):
-        """The append must not be followed by an unconditionally-succeeding line.
-
-        Executes the task's real body with the known_hosts path pointed at an
-        unwritable location. A text assertion cannot see this: the shipped code
-        was `grep ... || { echo ... >> file; _added=1; }`, which is valid bash
-        whose group status comes from the assignment, not from the redirect.
-        """
-        import subprocess
-        import tempfile
-
-        body = self._keyscan_task()["shell"]
-        assert "{{ ssh_known_hosts }}" in body and "{{ head_node_public_ip }}" in body
-
-        with tempfile.TemporaryDirectory() as td:
-            stub = os.path.join(td, "bin")
-            os.makedirs(stub)
-            with open(os.path.join(stub, "ssh-keyscan"), "w") as fh:
-                fh.write("#!/bin/sh\necho '|1|abc= ssh-rsa AAAAKEY'\n")
-            os.chmod(os.path.join(stub, "ssh-keyscan"), 0o755)
-
-            # A directory in place of the file: every append fails, nothing else does.
-            unwritable = os.path.join(td, "known_hosts_as_a_dir")
-            os.makedirs(unwritable)
-            script = body.replace("{{ ssh_known_hosts }}", unwritable).replace(
-                "{{ head_node_public_ip }}", "10.0.0.1"
-            )
-            env = dict(os.environ, PATH=stub + os.pathsep + os.environ["PATH"])
-            result = subprocess.run(
-                ["bash", "-c", script], capture_output=True, env=env, cwd=td
-            )
-        # changed_when is rc == 1 and failed_when is rc > 1, so anything <= 1
-        # reports success on a fingerprint that was never written.
-        assert result.returncode > 1, (
-            f"a failed known_hosts append exited {result.returncode}, which "
-            f"Ansible reads as success or as 'changed'"
-        )
-
-    def test_a_successful_append_reports_changed(self):
-        """Vacuity guard: the task must still distinguish its three outcomes.
-
-        rc 0 = already present, rc 1 = appended, rc > 1 = failed. Making every
-        path fail would satisfy the test above.
-        """
-        import subprocess
-        import tempfile
-
-        body = self._keyscan_task()["shell"]
-        with tempfile.TemporaryDirectory() as td:
-            stub = os.path.join(td, "bin")
-            os.makedirs(stub)
-            with open(os.path.join(stub, "ssh-keyscan"), "w") as fh:
-                fh.write("#!/bin/sh\necho '|1|abc= ssh-rsa AAAAKEY'\n")
-            os.chmod(os.path.join(stub, "ssh-keyscan"), 0o755)
-
-            known = os.path.join(td, "known_hosts")
-            script = body.replace("{{ ssh_known_hosts }}", known).replace(
-                "{{ head_node_public_ip }}", "10.0.0.1"
-            )
-            env = dict(os.environ, PATH=stub + os.pathsep + os.environ["PATH"])
-            first = subprocess.run(
-                ["bash", "-c", script], capture_output=True, env=env, cwd=td
-            )
-            assert first.returncode == 1, (
-                f"appending a new fingerprint exited {first.returncode}, "
-                f"expected 1 (changed): {first.stderr.decode()}"
-            )
-            assert "ssh-rsa AAAAKEY" in open(known).read()
-
-            second = subprocess.run(
-                ["bash", "-c", script], capture_output=True, env=env, cwd=td
-            )
-            assert second.returncode == 0, (
-                f"re-running on an unchanged file exited {second.returncode}, "
-                f"expected 0 (ok)"
-            )
-            assert open(known).read().count("AAAAKEY") == 1, "entry was duplicated"
-
-    def test_an_empty_keyscan_is_not_reported_as_success(self):
-        """ssh-keyscan returning nothing means no fingerprint was obtained.
-
-        It writes its errors to stderr, which the task discards, so an empty
-        result was previously indistinguishable from 'already present' -- the
-        loop simply never iterated and the task exited 0.
-        """
-        import subprocess
-        import tempfile
-
-        body = self._keyscan_task()["shell"]
-        with tempfile.TemporaryDirectory() as td:
-            stub = os.path.join(td, "bin")
-            os.makedirs(stub)
-            with open(os.path.join(stub, "ssh-keyscan"), "w") as fh:
-                fh.write("#!/bin/sh\nexit 1\n")
-            os.chmod(os.path.join(stub, "ssh-keyscan"), 0o755)
-            known = os.path.join(td, "known_hosts")
-            script = body.replace("{{ ssh_known_hosts }}", known).replace(
-                "{{ head_node_public_ip }}", "10.0.0.1"
-            )
-            env = dict(os.environ, PATH=stub + os.pathsep + os.environ["PATH"])
-            result = subprocess.run(
-                ["bash", "-c", script], capture_output=True, env=env, cwd=td
-            )
-        assert result.returncode > 1, (
-            f"an empty ssh-keyscan exited {result.returncode}, which Ansible "
-            f"reads as a successful no-op"
-        )
-
-    def test_the_ssh_directory_is_created_before_either_task(self):
-        """A first-ever run on a fresh workstation has no ~/.ssh at all.
-
-        Both shell tasks assume the directory exists; the append would fail and
-        (before the fix above) do so silently.
-        """
-        with open(os.path.join(REPO_ROOT, "src", "create_pcluster.yml")) as fh:
-            playbook = yaml.safe_load(fh)
-        names = []
-        for play in playbook:
-            for task in _walk_tasks(play.get("tasks")):
-                if "name" in task:
-                    names.append(task["name"])
-        mkdir = "Ensure the local SSH directory exists"
-        assert mkdir in names, f"{mkdir!r} task is missing"
-        for consumer in (
-            "Remove any stale known_hosts entry for the head node",
-            "Accept the SSH fingerprint of the head node",
-        ):
-            assert names.index(mkdir) < names.index(consumer), (
-                f"{mkdir!r} must precede {consumer!r}"
-            )
-
+    # Four tests that executed create_pcluster.yml's own keyscan shell body
+    # under real bash lived here -- that a failed known_hosts append fails the
+    # task, that a successful one reports changed, that an empty ssh-keyscan is
+    # not a success, and that the .ssh directory is created before either
+    # consumer. The playbook is gone; those are properties of
+    # _accept_ssh_fingerprint / _remove_stale_known_hosts_entry /
+    # _ensure_local_ssh_dir in src/pcluster_core.py, driven in
+    # tests/test_create_pcluster_migration.py. What stays here is the property
+    # the class is named for: ssh_known_hosts must be an absolute path, because
+    # every consumer of it quotes it.
 
 class TestBenchmarkResultsOutliveTheCluster:
     """Teardown synced the head node's benchmark results to s3_bucketname and then,
-    a few tasks later, deleted that same bucket with force=true -- which purges
+    a few steps later, deleted that same bucket with force=true -- which purges
     objects before removing it. delete_s3_bucketname defaults to "true", so the
     default teardown path uploaded possibly gigabytes and immediately destroyed
-    them. Both tasks succeed, so nothing reached _orphaned_resources and teardown
+    them. Both steps succeed, so nothing was reported as orphaned and teardown
     still printed "has been deleted": the loss was silent by construction.
 
     Results now go to results_bucketname, which is keyed on account+region rather
@@ -6864,46 +5901,50 @@ class TestBenchmarkResultsOutliveTheCluster:
     carry this, and each fails on its own:
 
       - the sync must name results_bucketname, not s3_bucketname
-      - nothing in the toolkit may delete results_bucketname -- not teardown, and
-        not create_pcluster.yml's early-setup rescue, which deletes s3_bucketname
-        with force=true on any failure in that block
+      - nothing in the toolkit may delete results_bucketname
 
-    Text matching is enough here, unusually: the bug is which *variable* a task
-    interpolates, which is visible in the source. What text cannot see is the
-    when: gate on the bucket creation, so that one is evaluated.
+    These drove the two playbooks' tasks until those were deleted; they drive
+    src/pcluster_core.py's own teardown and build functions now.
     """
 
     _RESULTS_VAR = "results_bucketname"
     _PER_BUILD_VAR = "s3_bucketname"
 
     @staticmethod
-    def _sync_task():
-        for task in _delete_playbook_tasks():
-            cmd = task.get("command")
-            if isinstance(cmd, str) and "hpc-benchmark-results/" in cmd:
-                return task, " ".join(cmd.split())
+    def _sync_argv():
+        """The argv _sync_performance_results_to_s3 runs on the head node."""
+        import ast
+        import inspect
+
+        core = _pcluster_core()
+        tree = ast.parse(
+            inspect.getsource(core._sync_performance_results_to_s3).lstrip()
+        )
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.List):
+                continue
+            if any(
+                isinstance(e, ast.Constant) and e.value == "ssh" for e in node.elts
+            ):
+                return node
         raise AssertionError(
-            "no benchmark results sync in delete_pcluster.yml; if it was removed, "
-            "the accumulation claim in README.md must go with it"
+            "no results sync command in _sync_performance_results_to_s3; if it "
+            "was removed, the accumulation claim in README.md must go with it"
         )
 
-    @staticmethod
-    def _bucket_state_absent_tasks(tasks):
-        """Every task that deletes an S3 bucket, whichever module spelling."""
-        found = []
-        for task in tasks:
-            module = task.get("amazon.aws.s3_bucket") or task.get("s3_bucket")
-            if isinstance(module, dict) and str(module.get("state")) == "absent":
-                found.append((task.get("name", "<unnamed>"), str(module.get("name", ""))))
-        return found
+    @classmethod
+    def _sync_text(cls):
+        import ast
+
+        return ast.unparse(cls._sync_argv())
 
     def test_the_results_sync_does_not_target_the_bucket_teardown_deletes(self):
-        _task, cmd = self._sync_task()
+        cmd = self._sync_text()
         assert self._RESULTS_VAR in cmd, (
             f"results sync does not name {self._RESULTS_VAR}: {cmd}"
         )
-        # The per-build bucket is deleted a few tasks below, by default.
-        assert f"s3://{{{{ {self._PER_BUILD_VAR} }}}}" not in cmd, (
+        # The per-build bucket is deleted later in the same teardown, by default.
+        assert f"s3://{{{self._PER_BUILD_VAR}}}" not in cmd, (
             f"results are synced to {self._PER_BUILD_VAR}, which teardown deletes "
             f"with force=true when delete_s3_bucketname is true (the default): {cmd}"
         )
@@ -6911,85 +5952,104 @@ class TestBenchmarkResultsOutliveTheCluster:
     def test_the_results_prefix_still_separates_clusters_and_builds(self):
         """One bucket for every build means the prefix is the only thing keeping two
         clusters' results apart, so it carries both the name and the serial."""
-        _task, cmd = self._sync_task()
-        assert "hpc-benchmark-results/{{ cluster_name }}/{{ cluster_serial_number }}/" in cmd, cmd
+        cmd = self._sync_text()
+        assert (
+            "hpc-benchmark-results/{cluster_name}/{cluster_serial_number}/" in cmd
+        ), cmd
 
-    @pytest.mark.parametrize(
-        "relpath",
-        [os.path.join("src", "delete_pcluster.yml"), os.path.join("src", "create_pcluster.yml")],
-    )
-    def test_no_playbook_ever_deletes_the_results_bucket(self, relpath):
-        """The whole point of the bucket. create_pcluster.yml is included because its
-        early-setup rescue deletes s3_bucketname with force=true, and the obvious
-        wrong move is to add the results bucket beside it for symmetry."""
-        offenders = [
-            (name, target)
-            for name, target in self._bucket_state_absent_tasks(_playbook_task_list(relpath))
-            if self._RESULTS_VAR in target
-        ]
+    def test_no_surface_ever_deletes_the_results_bucket(self):
+        """The whole point of the bucket. The build side is included because its
+        provisioning rollback deletes s3_bucketname on any failure, and the
+        obvious wrong move is to add the results bucket beside it for symmetry."""
+        import ast
+
+        core = _pcluster_core()
+        with open(os.path.join(REPO_ROOT, "src", "pcluster_core.py")) as fh:
+            tree = ast.parse(fh.read())
+        offenders = []
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            attr = getattr(node.func, "attr", "")
+            if attr not in ("delete_bucket", "delete_objects", "delete_object"):
+                continue
+            names = {
+                n.id for n in ast.walk(node) if isinstance(n, ast.Name)
+            } | {
+                n.value for n in ast.walk(node)
+                if isinstance(n, ast.Constant) and isinstance(n.value, str)
+            }
+            if any(self._RESULTS_VAR in str(n) for n in names):
+                offenders.append(attr)
         assert not offenders, (
-            f"{relpath} deletes the results bucket: {offenders}. It holds every past "
-            f"build's results and nothing in this toolkit may remove it."
+            f"src/pcluster_core.py deletes the results bucket: {offenders}. It "
+            f"holds every past build's results and nothing in this toolkit may "
+            f"remove it."
         )
+        assert core is not None
 
     def test_the_per_build_bucket_is_still_deleted_on_teardown(self):
         """Vacuity guard: if the S3 deletion were simply gone, the test above would
         pass while teardown leaked a bucket per build."""
-        targets = [
-            target
-            for _name, target in self._bucket_state_absent_tasks(_delete_playbook_tasks())
-        ]
-        assert any(self._PER_BUILD_VAR in t for t in targets), (
-            f"teardown no longer deletes {self._PER_BUILD_VAR}: {targets}"
+        import inspect
+
+        source = inspect.getsource(_pcluster_core()._delete_s3_bucket_step)
+        assert "delete_bucket" in source, (
+            "teardown no longer deletes the per-build bucket"
         )
 
     def test_the_results_bucket_is_created_before_it_is_synced_to(self):
         """Teardown's sync is the first write on a first-ever build, and `aws s3 sync`
         to a nonexistent bucket fails -- so the build side must create it."""
-        creators = [
-            task
-            for task in _create_playbook_tasks()
-            if isinstance(task.get("amazon.aws.s3_bucket"), dict)
-            and self._RESULTS_VAR in str(task["amazon.aws.s3_bucket"].get("name", ""))
-            and str(task["amazon.aws.s3_bucket"].get("state", "present")) == "present"
+        import ast
+        import inspect
+
+        core = _pcluster_core()
+        creator = inspect.getsource(core._create_hpc_results_bucket)
+        assert "create_bucket" in creator and self._RESULTS_VAR in creator, creator
+
+        # It is only reached under the benchmark gate: its one caller is the
+        # driver staging, which core_create_cluster calls inside
+        # `if enable_hpc_benchmarks`.
+        stager = inspect.getsource(core.stage_and_upload_hpc_benchmark_driver)
+        assert "_create_hpc_results_bucket(" in stager, (
+            "the results bucket is no longer created alongside the driver upload"
+        )
+        tree = ast.parse(_core_function_source("core_create_cluster").lstrip())
+        gated = [
+            node for node in ast.walk(tree)
+            if isinstance(node, ast.If)
+            and "enable_hpc_benchmarks" in {
+                n.id for n in ast.walk(node.test) if isinstance(n, ast.Name)
+            }
+            and any(
+                isinstance(n, ast.Call)
+                and getattr(n.func, "id", None)
+                == "stage_and_upload_hpc_benchmark_driver"
+                for n in ast.walk(node)
+            )
         ]
-        assert len(creators) == 1, (
-            f"expected exactly one task creating the results bucket, found {len(creators)}"
+        assert gated, (
+            "the results bucket is created on clusters that run no benchmarks"
         )
-        # The gate is on the enclosing block, not the task, so evaluate the whole
-        # ancestor chain -- a task-only read sees "true" and passes vacuously.
-        gate = _effective_when(
-            os.path.join("src", "create_pcluster.yml"),
-            lambda t: isinstance(t.get("amazon.aws.s3_bucket"), dict)
-            and self._RESULTS_VAR in str(t["amazon.aws.s3_bucket"].get("name", "")),
-        )
-        assert gate is not None, "no results bucket creation task found"
-        assert _eval_when(
-            gate, {"enable_hpc_benchmarks": "true"}
-        ), "the results bucket is not created even when benchmarks are enabled"
-        assert not _eval_when(
-            gate, {"enable_hpc_benchmarks": "false"}
-        ), f"the results bucket is created on clusters that run no benchmarks: {gate}"
 
     def test_the_results_bucket_blocks_public_access(self):
         """It is the one bucket that outlives every cluster, so it is also the one
         whose misconfiguration persists."""
-        for task in _create_playbook_tasks():
-            module = task.get("amazon.aws.s3_bucket")
-            if isinstance(module, dict) and self._RESULTS_VAR in str(module.get("name", "")):
-                access = module.get("public_access")
-                assert isinstance(access, dict), (
-                    "the results bucket does not block public access"
-                )
-                for key in (
-                    "block_public_acls",
-                    "block_public_policy",
-                    "ignore_public_acls",
-                    "restrict_public_buckets",
-                ):
-                    assert access.get(key) is True, f"public_access.{key} is not true"
-                return
-        raise AssertionError("no results bucket creation task in create_pcluster.yml")
+        import inspect
+
+        source = inspect.getsource(_pcluster_core()._create_hpc_results_bucket)
+        assert "put_public_access_block" in source, (
+            "the results bucket does not block public access"
+        )
+        for key in (
+            "BlockPublicAcls",
+            "BlockPublicPolicy",
+            "IgnorePublicAcls",
+            "RestrictPublicBuckets",
+        ):
+            assert f'"{key}": True' in source, f"{key} is not true"
+
 
     def test_the_rendered_vars_file_actually_defines_the_bucket(self, cluster_params):
         """The teardown sync interpolates results_bucketname out of
@@ -7713,49 +6773,55 @@ class TestTheNodeLinesReadAsOneGroup:
                 return i
         raise AssertionError(f"{label!r} not in:\n{text}")
 
-    def test_the_launch_summary_puts_head_node_directly_above_login_node(
-        self, cluster_params_loginnode_enabled
-    ):
-        text = _rendered_launch_summary({}, cluster_params_loginnode_enabled)
-        head = self._index(text, "Head Node:")
-        login = self._index(text, "Login Node:")
+    def test_the_build_summary_does_too(self):
+        """The other surface, and the one that was already right; pinned so it
+        stays that way and so the two cannot drift apart again.
+
+        The build summary reads dozens of inputs and calls out to the pricing
+        API, so its order is asserted on its own source rather than by driving
+        it -- the lines are prints in a fixed sequence, which is exactly what an
+        ordering assertion needs to see. Read out of whichever function carries
+        them, so extracting the block into a helper does not silently stop this
+        from covering anything."""
+        core = _pcluster_core()
+        for candidate in ("_print_build_summary", "core_create_cluster"):
+            if hasattr(core, candidate):
+                source = _core_function_source(candidate)
+                if "Cluster Build Summary" in source:
+                    break
+        else:
+            raise AssertionError("no function prints the cluster build summary")
+        printed = [
+            line.strip() for line in source.splitlines()
+            if line.strip().startswith(("print(", 'print(f"'))
+        ]
+
+        def _index(label):
+            for i, line in enumerate(printed):
+                if label in line:
+                    return i
+            raise AssertionError(f"{label!r} not printed by _print_build_summary")
+
+        head = _index("Head Node:")
+        login = _index("Login Node:")
         assert login == head + 1, (
-            "the node lines must be adjacent, head first -- they were split "
-            "by VPC Name and Availability Zone"
+            "the node lines must be adjacent, head first, in the build summary "
+            f"too:\n" + "\n".join(printed[head - 1:login + 2])
         )
+        assert _index("Availability Zone:") < head
+        assert _index("CPU Queue:") > login
 
-    def test_the_build_summary_does_too(self, cluster_params_loginnode_enabled):
-        """The surface that was already right; pinned so it stays that way
-        and so the two cannot drift apart again."""
-        text = _rendered_summary({}, cluster_params_loginnode_enabled)
-        head = self._index(text, "Head Node:")
-        login = self._index(text, "Login Node:")
-        assert login == head + 1
+    def test_the_launch_summary_is_the_one_the_operator_sees(self, capsys):
+        """What actually prints during a build is
+        `print_cluster_launch_summary` in `pcluster_core.py`. The four tests
+        that used to sit above this one evaluated create_pcluster.yml's own
+        launch-summary literal instead, and reverting *this* function's order
+        left every one of them green -- which is why they were not what the
+        rule needed even before the playbook was deleted.
 
-    def test_the_network_lines_still_come_before_the_nodes(
-        self, cluster_params_loginnode_enabled
-    ):
-        """Vacuity guard on the fix's direction: moving Login Node *up*
-        instead would also make them adjacent, but would leave the network
-        context stranded below the hardware."""
-        text = _rendered_launch_summary({}, cluster_params_loginnode_enabled)
-        assert self._index(text, "Availability Zone:") < self._index(text, "Head Node:")
-        assert self._index(text, "VPC Name:") < self._index(text, "Head Node:")
-
-    def test_the_queues_follow_the_nodes(self, cluster_params_loginnode_enabled):
-        text = _rendered_launch_summary({}, cluster_params_loginnode_enabled)
-        if "CPU Queue:" in text:
-            assert self._index(text, "CPU Queue:") > self._index(text, "Login Node:")
-
-    def test_the_python_launch_summary_is_the_one_the_operator_sees(self, capsys):
-        """The surface the other tests in this class do not reach.
-
-        `_rendered_launch_summary` evaluates `create_pcluster.yml`'s
-        expression -- the unexecuted reference spec. What actually prints
-        during a build is `print_cluster_launch_summary` in
-        `pcluster_core.py`, and reverting *its* order left every assertion
-        above green. Driving the real function is the only thing that sees
-        it.
+        The network lines coming before the nodes is the vacuity guard on the
+        fix's direction: moving Login Node *up* would also make the pair
+        adjacent, but would strand the network context below the hardware.
         """
         src = os.path.join(REPO_ROOT, "src")
         if src not in sys.path:
@@ -7784,6 +6850,7 @@ class TestTheNodeLinesReadAsOneGroup:
             f"operator actually reads:\n{text}"
         )
         assert self._index(text, "Availability Zone:") < head
+        assert self._index(text, "VPC Name:") < head
         assert self._index(text, "CPU Queue:") > login
 
 

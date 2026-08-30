@@ -64,9 +64,9 @@ standing constraints for local development.
 - The build summary names every filesystem's mount point on two live
   surfaces: `make_pcluster.py`'s printed summary (`_storage_summary_lines`
   in `pcluster_core.py`) and `templates/sns_build_summary_report.j2`. A
-  line added to one must be added to the other.
-  `src/create_pcluster.yml`'s `_build_summary` carries a third copy but no
-  longer executes — update it only to keep the reference spec honest. `_storage_summary_lines` is keyword-only (14 same-typed
+  line added to one must be added to the other. (There was a third copy in
+  `src/create_pcluster.yml`; that playbook is deleted.)
+  `_storage_summary_lines` is keyword-only (14 same-typed
   params) — never call it positionally. The mount-point column width is
   derived from the longest active label (`max(len(label)) + 2`), never a
   hardcoded constant — a fixed width of 6 didn't fit the 7-character
@@ -94,7 +94,7 @@ standing constraints for local development.
   PCluster's `deletion_policy` default of `"Retain"`, deliberately not
   overridden: the group is the only surviving record of a failed build,
   which is always immediately followed by a teardown. Never add a
-  log-group deletion task to `src/delete_pcluster.yml`, never set
+  log-group deletion step to teardown, never set
   `DeletionPolicy: Delete`, never put a retained log group in
   `_orphaned_resources`. Its *lifetime* is a decision, not an
   inheritance: `config.pcluster.j2` sets `RetentionInDays: 30` over
@@ -115,12 +115,14 @@ standing constraints for local development.
   name the same bucket) — enforced by `_normalize_fsx_buckets` in
   `pcluster_core.py`.
 - **An undefined name must never reach a commit.** Nothing else checks
-  Python for one: `make lint` runs ansible-lint on the two playbooks only,
-  every AWS call is stubbed in tests, and a `NameError` inside a broad
-  `except Exception` prints as a warning while the build reports success —
-  all three failed together once, on a live build. `tests/test_undefined_names.py`
-  gates it with pyflakes. Scoped to that one class on purpose; do not widen
-  it to general linting without deciding to clear the backlog.
+  Python for one: every AWS call is stubbed in tests, and a `NameError`
+  inside a broad `except Exception` prints as a warning while the build
+  reports success — both failed together once, on a live build, while
+  `make lint` was running ansible-lint on two playbooks and no Python at
+  all. `tests/test_undefined_names.py` gates it with pyflakes, and
+  `make lint` now runs that same sweep. Scoped to that one class on
+  purpose; do not widen it to general linting without deciding to clear
+  the backlog.
 - **A duration, path or label stated on more than one surface needs a
   guard that they agree.** The teardown estimate lived in six places and
   drifted; `stage_dir` had two definitions that disagreed. The pattern is
@@ -552,9 +554,9 @@ standing constraints for local development.
   `aws-parallelcluster` *declares* 17 `aws-cdk.*` packages — the lazy
   import does not keep them out of the artifact.
 - **`requirements.txt` is the development set and must never be installed
-  into a Lambda artifact** — `ansible` alone is ~408 MB of collections for
-  playbooks nothing executes. `mcp_server/packaging.py` holds the per-tier
-  sets and generates `requirements-lambda.txt`.
+  into a Lambda artifact** — `ansible` alone is ~408 MB of collections,
+  and nothing on any tier imports it. `mcp_server/packaging.py` holds the
+  per-tier sets and generates `requirements-lambda.txt`.
 - **Slurm is not on a non-interactive PATH, and a remote command is
   re-parsed by the remote shell.** `ssh host sinfo` gets the bare system
   PATH — `/opt/slurm/bin` is appended only by a login shell — so
@@ -633,12 +635,19 @@ standing constraints for local development.
 - `.venv/` is excluded from git; all dependencies are in `requirements.txt`.
 - **Python 3.12 only.** `aws-parallelcluster` does not support 3.13/3.14.
   Always create `.venv` with `python3.12 -m venv .venv`.
+- **Nothing executes an Ansible playbook, and `ansible` is still required.**
+  `src/create_pcluster.yml`/`delete_pcluster.yml` are deleted; every task
+  they held is a function in `pcluster_core.py`. The dependency stays for
+  two live reasons: `_template_env` renders every template with
+  `ansible.builtin.template`'s own `trim_blocks`/`lstrip_blocks` defaults,
+  read out of the installed package by
+  `TestTheTestEnvironmentMatchesAnsible`, and `make_pcluster.py` aborts a
+  build when `ansible --version` does not run. Removing either is what has
+  to come first.
 - Venv guard uses `sys.prefix` (not `sys.executable`) — Homebrew Python
   symlinks resolve outside `.venv/`.
 - Shebangs use `#!/usr/bin/env python`, not `python3` — `env python3` on
   macOS bypasses the active venv.
-- Ansible deprecation warnings are suppressed globally via `ansible.cfg`
-  (`deprecation_warnings = False`). Do not re-enable or work around per-task.
 - `<cluster_name>_defaults.yml` is applied automatically when it exists,
   by the CLI and the MCP server both — `load_cluster_defaults`
   (`pcluster_core.py`) is the one loader. Precedence: explicit input >
@@ -706,9 +715,8 @@ three gates; see the `Makefile`.
 - Prefer editing existing files over creating new ones.
 - No emojis.
 - **American English everywhere** — docs, comments, docstrings, CLI help,
-  error strings, Ansible `name:` fields ("personalize", "normalize",
-  "analog", "behavior", "honor", "signaling", "neighboring", "defense",
-  "unlabeled"). Exception: never "correct" a spelling that is part of an
+  error strings ("personalize", "normalize", "analog", "behavior",
+  "honor", "signaling", "neighboring", "defense", "unlabeled"). Exception: never "correct" a spelling that is part of an
   external contract — Slurm's `CANCELLED` job state is passed verbatim to
   `sacct --state=` in `diagnose_pcluster.py` and
   `tests/integration/run_integration_test.sh`, and Americanizing it breaks

@@ -8,8 +8,9 @@ upload 1,000 lines below still called `s3.Object(...)`, and the sweep that
 
 Nothing caught it:
 
-  * `make lint` runs ansible-lint on the two playbooks only -- no Python
-    linting runs anywhere in the gates;
+  * no Python linting ran anywhere in the gates -- `make lint` was
+    ansible-lint over two playbooks nothing executed, and it runs this
+    same sweep now;
   * every test stubs at the AWS boundary, so no test executes that line;
   * and the call sits inside `except Exception: print("WARNING: could not
     upload serial number to S3: {e}")`, which turned a NameError into a

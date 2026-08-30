@@ -148,7 +148,7 @@ Two caveats on relying on the trap:
   `make_pcluster.py` returns. If `make_pcluster.py` itself fails, `pipefail`
   aborts the script before that assignment and no teardown runs. Partial
   CloudFormation stacks from a failed create must be cleaned up by hand.
-- Teardown runs synchronously and `delete_pcluster.yml` waits up to 40 minutes
+- Teardown runs synchronously and waits up to 40 minutes
   (80 retries at 30 s) for `DELETE_COMPLETE`, but the trap wraps it in
   `set +e`, so a failed teardown does not change the script's exit code.
 

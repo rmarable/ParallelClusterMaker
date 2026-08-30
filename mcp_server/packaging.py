@@ -52,8 +52,7 @@ IMAGE_LIMIT_BYTES = 10 * 1024 * 1024 * 1024
 # inferred: each is here for a reason worth keeping, and an inferred
 # exclusion list silently stops excluding when the inference changes.
 EXCLUDED_FROM_LAMBDA = {
-    "ansible": "playbooks are no longer executed; ~408 MB of collections",
-    "ansible-lint": "development lint gate only",
+    "ansible": "template-semantics reference only; ~408 MB of collections",
     "pytest": "test-only",
     "pyflakes": "lint-only",
     "pytest-asyncio": "test-only",

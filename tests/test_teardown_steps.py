@@ -878,13 +878,15 @@ class TestTeardownProgressIsReportedDuringTheWait:
 
 
 class TestEverySurfaceQuotesTheSameTeardownDuration:
-    """Six places tell an operator how long a teardown takes, and they had
+    """Five places tell an operator how long a teardown takes, and they had
     all quoted the old, too-short figure while real teardowns ran
     longer. They are not
-    generated from one another -- the CLI print, the playbook reference
-    spec, the README, the MCP server's instructions string, the
-    delete_cluster tool docstring, and this file's own note -- so nothing
-    stopped one from being corrected and the rest going stale.
+    generated from one another -- the CLI print, the README, the MCP
+    server's instructions string, the delete_cluster tool docstring, the
+    automatic finisher's poll bounds, and this file's own note -- so nothing
+    stopped one from being corrected and the rest going stale. (There were
+    six until src/delete_pcluster.yml, the unexecuted reference spec, was
+    deleted.)
 
     A stale figure here is not cosmetic: it is the number an operator uses
     to decide whether a teardown has hung, so understating it manufactures
@@ -895,7 +897,6 @@ class TestEverySurfaceQuotesTheSameTeardownDuration:
     _DURATION = "15-20"
     _SURFACES = {
         "src/pcluster_core.py": "approximately 15-20 minutes to complete",
-        "src/delete_pcluster.yml": "approximately 15-20 minutes to complete",
         "mcp_server/server.py": "20-45 minutes and 15-20 ",
         "mcp_server/tools.py": "teardown takes 15-20 minutes",
         # The automatic finisher states the same duration, and states

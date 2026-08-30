@@ -539,7 +539,7 @@ cannot run, the deploy says so and continues.
 
 ## Development environment (macOS)
 
-Running `make test` on macOS requires a modern `bash` and GNU `coreutils`, and `make shellcheck` requires `shellcheck`. None of these ship with the OS. (`make lint` runs `ansible-lint` only and needs none of them.)
+Running `make test` on macOS requires a modern `bash` and GNU `coreutils`, and `make shellcheck` requires `shellcheck`. None of these ship with the OS. (`make lint` runs `pyflakes` from the venv and needs none of them.)
 
 * macOS's `/bin/bash` is frozen at version 3.2, from 2007, for licensing reasons, and the shell-surface tests require bash 4+/5 features such as `mapfile`.
 * `nproc` is a GNU coreutils command, not part of the BSD userland macOS ships, and `hpc-benchmark.sh` calls it directly.

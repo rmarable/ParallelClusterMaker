@@ -16,6 +16,7 @@ import re
 import shlex
 import shutil
 import subprocess
+import sys
 import time
 
 import pytest
@@ -2120,19 +2121,32 @@ class TestPerformanceDocsMatchTheBenchmarkDriver:
             )
 
     def test_the_docs_describe_the_s3_upload_as_the_allowlist_it_is(self):
-        """The docs said `create_pcluster.yml` "uploads the full performance
-        source tree" to the cluster bucket, which was true when it was a
+        """The docs said the build "uploads the full performance source tree"
+        to the cluster bucket, which was true when it was a
         blocklist sync of the whole tracked directory -- the shape that shipped
         hpc-benchmark/CLAUDE.md and two raw .j2 files into the operator's home.
         The sync is now `--exclude "*" --include "hpc-benchmark.sh"`, and a doc
         still promising the whole tree tells an operator that losing the head
         node's EBS root is recoverable when only the driver comes back.
 
-        Pinned against the playbook's own arguments rather than as prose, so the
+        Pinned against the sync's own arguments rather than as prose, so the
         doc and the sync cannot drift apart in either direction."""
-        with open(os.path.join(REPO_ROOT, "src", "create_pcluster.yml")) as fh:
-            playbook = fh.read()
-        assert '--exclude "*"' in playbook and '--include "hpc-benchmark.sh"' in playbook, (
+        import ast
+        import inspect
+
+        src = os.path.join(REPO_ROOT, "src")
+        if src not in sys.path:
+            sys.path.insert(0, src)
+        import pcluster_core
+
+        argv = ast.unparse(
+            ast.parse(
+                inspect.getsource(
+                    pcluster_core.stage_and_upload_hpc_benchmark_driver
+                ).lstrip()
+            )
+        )
+        assert "'--exclude', '*'" in argv and "'--include', 'hpc-benchmark.sh'" in argv, (
             "the driver upload is no longer an allowlist; if it went back to "
             "syncing the tree, these docs have to say so again"
         )

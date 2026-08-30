@@ -1,18 +1,21 @@
 aws-parallelcluster==3.15.1
 boto3
 botocore
+# Not for running playbooks -- there are none. `pcluster_core._template_env`
+# renders every template with ansible.builtin.template's own trim_blocks/
+# lstrip_blocks defaults, read out of this package by
+# TestTheTestEnvironmentMatchesAnsible, and make_pcluster.py aborts a build
+# when `ansible --version` does not run.
 ansible
 Jinja2
 PyYAML
 ruamel.yaml
 pytest
-ansible-lint
 # Undefined-name gate (tests/test_undefined_names.py). Nothing else in the
 # toolchain checks Python for undefined names, and a NameError inside a
 # broad `except Exception` reads as a benign runtime warning.
 pyflakes
-# json_query in src/create_pcluster.yml needs this; it only arrived
-# transitively via botocore.
+# Named directly rather than relied on as a transitive of botocore.
 jmespath
 # MCP server (Workstream 5). The standalone `fastmcp` package, deliberately
 # not the official `mcp` SDK's raw low-level API -- the SDK vendors an older

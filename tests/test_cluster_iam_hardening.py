@@ -532,10 +532,13 @@ class TestTheHeadNodeRoleIsCreatedUnderTheBoundary:
         assert _cluster_boundary_name() not in iam.deleted_policies
 
     def test_no_teardown_surface_names_the_boundary(self):
-        """The playbook and kill_pcluster.py delete policies by name, so a
-        literal added to either would delete the shared boundary out from under
-        every other cluster without going through _delete_managed_policies."""
-        for relpath in ("src/delete_pcluster.yml", "kill_pcluster.py"):
+        """kill_pcluster.py deletes policies by name, so a literal added there
+        would delete the shared boundary out from under every other cluster
+        without going through _delete_managed_policies. src/delete_pcluster.yml
+        was the other surface swept here until that playbook was deleted;
+        src/pcluster_core.py is deliberately not swept in its place, since the
+        boundary is created there and naming it is correct."""
+        for relpath in ("kill_pcluster.py",):
             with open(os.path.join(REPO_ROOT, relpath)) as fh:
                 assert _cluster_boundary_name() not in fh.read(), (
                     f"{relpath} names the shared cluster boundary"

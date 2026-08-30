@@ -1,19 +1,19 @@
 # ParallelClusterMaker Performance Toolkit
 
 Standards-based HPC benchmarks deployed to the cluster head node by
-`create_pcluster.yml` when `enable_hpc_benchmarks=true`.
+the cluster build when `enable_hpc_benchmarks=true`.
 
 ---
 
 ## Deployment
 
-When `enable_hpc_benchmarks=true`, `create_pcluster.yml`:
+When `enable_hpc_benchmarks=true`, the build:
 
 1. Stages cluster-specific scripts (rendered Jinja2 templates) to a local `stage_dir/` tree, then SCP-deploys to `~/hpc-benchmark/<cluster_name>/<cluster_owner>/slurm/` on the head node
 2. Uploads `hpc-benchmark.sh` -- and only that file, via an `--exclude "*" --include` allowlist -- to `s3://<cluster-bucket>/hpc-benchmark/`, so postinstall can restore the driver to `~/hpc-benchmark/` if the head node's EBS root is replaced.  The personalized `<cluster_name>/<cluster_owner>/slurm/` tree from step 1 is *not* on S3 and cannot be restored this way
 3. Postinstall installs `matplotlib numpy pandas scipy seaborn` via `pip3` on every head node bootstrap
 
-On teardown, `delete_pcluster.yml` syncs results from `~/hpc-benchmark/<cluster_name>/` to `s3://parallelclustermaker-results-<account-id>-<region>/hpc-benchmark-results/<cluster_name>/<cluster_serial_number>/` before destroying the cluster.  That bucket is deliberately not the per-cluster bucket, which teardown deletes by default; it is keyed on account and region, nothing in the toolkit ever deletes it, and each serial number gets its own subdirectory — so rebuilds of the same cluster name accumulate rather than overwrite.
+On teardown, the toolkit syncs results from `~/hpc-benchmark/<cluster_name>/` to `s3://parallelclustermaker-results-<account-id>-<region>/hpc-benchmark-results/<cluster_name>/<cluster_serial_number>/` before destroying the cluster.  That bucket is deliberately not the per-cluster bucket, which teardown deletes by default; it is keyed on account and region, nothing in the toolkit ever deletes it, and each serial number gets its own subdirectory — so rebuilds of the same cluster name accumulate rather than overwrite.
 
 ---
 
