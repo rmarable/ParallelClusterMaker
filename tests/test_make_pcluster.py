@@ -4067,22 +4067,53 @@ class TestPclusterCallsWorkOffTheMainThread:
     def test_every_pcluster_lib_import_installs_a_loop(self):
         """Any of these can be reached from a tool call, so the guard has to
         sit at each one. Asserted over the source: a site that drops it
-        fails only off the main thread, which no ordinary test runs on."""
+        fails only off the main thread, which no ordinary test runs on.
+
+        Matched on the AST, not on line adjacency. This compared
+        `src[i + 1].strip()` for most of its life, which `CLAUDE.md` already
+        described as an AST check -- and which a blank line or a comment
+        between the import and the call defeats silently, leaving the guard
+        green while the site it names is unprotected. The statement *after*
+        the import in the same suite is the property; whitespace is not.
+        """
+        import ast
         import inspect
 
         import pcluster_core
 
-        src = inspect.getsource(pcluster_core).splitlines()
-        imports = [i for i, line in enumerate(src)
-                   if line.strip() == "import pcluster.lib as pc"]
-        assert imports, "no pcluster.lib import found -- this guard is vacuous"
-        missing = [
-            i + 1 for i in imports
-            if src[i + 1].strip() != "ensure_event_loop()"
-        ]
+        tree = ast.parse(inspect.getsource(pcluster_core))
+
+        def _imports_pcluster_lib(node):
+            return isinstance(node, ast.Import) and any(
+                alias.name == "pcluster.lib" for alias in node.names
+            )
+
+        def _calls_ensure_event_loop(node):
+            return (
+                isinstance(node, ast.Expr)
+                and isinstance(node.value, ast.Call)
+                and isinstance(node.value.func, ast.Name)
+                and node.value.func.id == "ensure_event_loop"
+            )
+
+        found, missing = 0, []
+        for node in ast.walk(tree):
+            for attr in ("body", "orelse", "finalbody"):
+                suite = getattr(node, attr, None)
+                if not isinstance(suite, list):
+                    continue
+                for i, stmt in enumerate(suite):
+                    if not _imports_pcluster_lib(stmt):
+                        continue
+                    found += 1
+                    following = suite[i + 1] if i + 1 < len(suite) else None
+                    if following is None or not _calls_ensure_event_loop(following):
+                        missing.append(stmt.lineno)
+
+        assert found, "no pcluster.lib import found -- this guard is vacuous"
         assert not missing, (
             f"pcluster.lib is imported without ensure_event_loop() at line(s) "
-            f"{missing}; that call fails only on a worker thread"
+            f"{sorted(missing)}; that call fails only on a worker thread"
         )
 
 
@@ -4601,3 +4632,55 @@ class TestGetBuildStatusAnswersHonestly:
         from mcp_server.tiers import TOOL_TIERS
 
         assert TOOL_TIERS["get_build_status"] == "read-only"
+
+
+class TestTheSummaryNamesTheBucketResultsActuallyGoTo:
+    """The build summary and the teardown sync must name the same bucket.
+
+    They did not. The summary told the operator results land in
+    `s3://<s3_bucketname>/hpc-benchmark-results/...` while
+    `_sync_performance_results_to_s3` has always written to
+    `<results_bucketname>` -- and `s3_bucketname` is the per-build bucket
+    teardown deletes, so the operator was directed to a bucket that stops
+    existing at exactly the moment they go looking for their results.
+
+    This is the multi-surface drift CLAUDE.md warns about ("a duration,
+    path or label stated on more than one surface needs a guard that they
+    agree"). It survived because the only test covering the summary's copy
+    read it out of a *playbook* that no longer executes; deleting that
+    playbook is what exposed it.
+    """
+
+    def _core_source(self):
+        import inspect
+
+        import pcluster_core
+
+        return inspect.getsource(pcluster_core)
+
+    def test_the_summary_line_uses_the_long_lived_bucket(self):
+        src = self._core_source()
+        line = next(
+            (ln for ln in src.splitlines() if "Results sync to s3://" in ln), None
+        )
+        assert line is not None, "the summary no longer names a results bucket"
+        assert "results_bucketname" in line, line.strip()
+        assert "{s3_bucketname}" not in line, (
+            "the summary names the per-build bucket, which teardown deletes: "
+            + line.strip()
+        )
+
+    def test_the_sync_itself_still_uses_it(self):
+        """Vacuity guard: the fix is aligning the summary to the sync, not
+        renaming both to whatever the summary happened to say."""
+        src = self._core_source()
+        assert "s3://{results_bucketname}/hpc-benchmark-results/" in src
+
+    def test_the_two_surfaces_name_one_bucket(self):
+        """The property, stated once. Both lines mention the prefix; neither
+        may reach for the per-build bucket to do it."""
+        offenders = [
+            ln.strip() for ln in self._core_source().splitlines()
+            if "hpc-benchmark-results" in ln and "{s3_bucketname}" in ln
+        ]
+        assert offenders == [], offenders

@@ -9259,10 +9259,11 @@ def print_cluster_launch_summary(ctx, *, launch_timestamp):
 
 
 # Never let a private key reach S3. This is the one exclusion the toolkit
-# cannot get wrong: TestCreatePlaybookExcludesPrivateKeyFromS3Sync pins it
-# on the Ansible side, and every uploader here shares this one tuple rather
-# than restating the pattern -- a second copy is a second thing to keep
-# true, and the cost of it drifting is a cluster's private key in a bucket.
+# cannot get wrong: TestThePrivateKeyIsNeverUploadedToS3 pins the constant,
+# the uploader's default, every call site and the behavior, and every
+# uploader here shares this one tuple rather than restating the pattern --
+# a second copy is a second thing to keep true, and the cost of it drifting
+# is a cluster's private key in a bucket.
 _S3_UPLOAD_NEVER = ("*.pem",)
 
 STAGING_PREFIX = "staging"
@@ -9525,6 +9526,165 @@ def _describe_cluster_status_quietly(cluster_name, region):
         ).get("clusterStatus", "")
     except Exception:
         return ""
+
+
+def _render_build_templates(
+    *, templates_dir, cluster_parameters, vars_file_path, cluster_name,
+    cluster_data_dir, stage_dir, repo_root,
+    enable_monitoring, enable_external_nfs, enable_hpc_benchmarks,
+):
+    """Render the vars file and every staged template; return the merged context.
+
+    Raises on any failure, deliberately: recovering from a render failure
+    means rolling back IAM, publishing to the record store and releasing the
+    cluster lock, which belong to the build's control flow rather than to
+    rendering. The caller keeps that handler.
+
+    This is the one clean seam in core_create_cluster. It needs ten inputs
+    and returns one value, where every neighbouring block either threads
+    ~40 locals or leaks partial state its caller must see -- see the
+    module note above core_create_cluster for why the rest stayed put.
+    """
+    _templates_dir = templates_dir
+    _rendered_vars_file = render_template(
+        _templates_dir, "vars_file.j2", **cluster_parameters
+    )
+    print(f"  Writing vars file: {vars_file_path}")
+    with open(
+        os.open(vars_file_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w"
+    ) as _vf:
+        _vf.write(_rendered_vars_file)
+
+    # The templates rendered below reference names (preinstall_s3_dest,
+    # ssh_keypair, ...) that vars_file.j2 itself derives with its own
+    # Jinja2 expressions -- they are not in cluster_parameters directly,
+    # only in what vars_file.j2 renders from it, which is what Ansible's
+    # own vars_files: load gave these templates before Workstream 2. But
+    # the reverse gap is real too: two cluster_parameters keys
+    # (debug_mode, Deployed_On) are never re-emitted by vars_file.j2 at
+    # all, confirmed by checking every key against the template's own
+    # text rather than assumed -- Deployed_On is what several of these
+    # templates' "Deployed On:" comments need once their Ansible-only
+    # `lookup('pipe', 'date ...')` calls are replaced with it (see the
+    # template-level fix in this same round). Merge both so every
+    # template gets the union, with vars_file.j2's own rendering winning
+    # on the (identical-value) keys both carry.
+    _vars_file_context = {**cluster_parameters, **yaml.safe_load(_rendered_vars_file)}
+
+    # Tier 3: the toolkit's own pre/postinstall pair. 28KB, the heaviest
+    # branching of any template in the repo, and confirmed to carry no
+    # runtime-AWS-call dependency (unlike config.pcluster.j2) by the same
+    # variable-by-variable check Tier 1/2 already applied, plus a
+    # byte-for-byte parity check against every tests/conftest.py fixture
+    # combination before this task was deleted from create_pcluster.yml
+    # (TestPreinstallPostinstallByteForByteParity, tests/test_templates.py).
+    for _tmpl_name, _dest_name in (
+        ("preinstall.j2", f"preinstall.{cluster_name}.sh"),
+        ("postinstall.j2", f"postinstall.{cluster_name}.sh"),
+    ):
+        _rendered_install = render_template(_templates_dir, _tmpl_name, **_vars_file_context)
+        _install_dest = os.path.join(cluster_data_dir, _dest_name)
+        with open(
+            os.open(_install_dest, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o755), "w"
+        ) as _if:
+            _if.write(_rendered_install)
+
+    os.makedirs(stage_dir, exist_ok=True)
+    for _tmpl_name, _dest_name in (
+        ("kill_pcluster.j2", f"kill_pcluster.{cluster_name}.sh"),
+        ("access_cluster.j2", f"access_cluster.{cluster_name}.sh"),
+        ("retrieve_ssh_key.j2", f"retrieve_ssh_key.{cluster_name}.sh"),
+    ):
+        _rendered_script = render_template(_templates_dir, _tmpl_name, **_vars_file_context)
+        _dest_path = os.path.join(stage_dir, _dest_name)
+        with open(
+            os.open(_dest_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o755), "w"
+        ) as _tf:
+            _tf.write(_rendered_script)
+
+    # Tier 2: gated templates whose upload/publish step stays an Ansible
+    # task pointed at the pre-rendered file (Workstream 2's own
+    # instruction, to decouple this rendering change from Workstream 3's
+    # eventual boto3 swap of those uploads).
+    if enable_monitoring:
+        _rendered_wrapper = render_template(
+            _templates_dir, "monitoring-post-install-wrapper.j2", **_vars_file_context
+        )
+        with open(
+            os.open(
+                _vars_file_context["monitoring_wrapper_dest"],
+                os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o755,
+            ),
+            "w",
+        ) as _mf:
+            _mf.write(_rendered_wrapper)
+
+        _rendered_grafana = render_template(
+            _templates_dir, "grafana_tunnel.j2", **_vars_file_context
+        )
+        with open(
+            os.open(
+                _vars_file_context["grafana_tunnel_dest"],
+                os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o755,
+            ),
+            "w",
+        ) as _gf:
+            _gf.write(_rendered_grafana)
+
+    if enable_external_nfs:
+        # Same template, two destinations, two modes -- matches the two
+        # Ansible tasks this replaces exactly rather than writing once
+        # and copying, since the original never assumed the two stayed
+        # byte-identical either.
+        _rendered_nfs = render_template(
+            _templates_dir, "external_nfs_mount_list.j2", **_vars_file_context
+        )
+        with open(
+            os.open(
+                _vars_file_context["external_nfs_mount_list_template_src"],
+                os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o644,
+            ),
+            "w",
+        ) as _nf1:
+            _nf1.write(_rendered_nfs)
+        _nfs_stage_dest = os.path.join(
+            stage_dir, _vars_file_context["external_nfs_mount_list_template_dest"]
+        )
+        with open(
+            os.open(_nfs_stage_dest, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o755), "w"
+        ) as _nf2:
+            _nf2.write(_rendered_nfs)
+
+    if enable_hpc_benchmarks:
+        _performance_stage_dir = _vars_file_context["performance_stage_dir"]
+        os.makedirs(_performance_stage_dir, exist_ok=True)
+        _hpc_benchmark_dir = os.path.join(repo_root, "hpc-benchmark")
+        for _tmpl_name, _dest_name in (
+            ("job_hpc-benchmark.sh.j2", "job_hpc-benchmark.sh"),
+            ("README-PERFORMANCE.md.j2", "README-PERFORMANCE.md"),
+        ):
+            _rendered_perf = render_template(
+                _hpc_benchmark_dir, _tmpl_name, **_vars_file_context
+            )
+            _perf_dest = os.path.join(_performance_stage_dir, _dest_name)
+            with open(
+                os.open(_perf_dest, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o755), "w"
+            ) as _pf:
+                _pf.write(_rendered_perf)
+
+    # Unconditional -- every build gets the default Slurm submission
+    # script, regardless of enable_hpc_benchmarks.
+    _rendered_sbatch = render_template(
+        os.path.join(repo_root, "scripts"),
+        "sbatch_default_submission_script.sh",
+        **_vars_file_context,
+    )
+    _sbatch_dest = os.path.join(stage_dir, "sbatch_default_submission_script.sh")
+    with open(
+        os.open(_sbatch_dest, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o755), "w"
+    ) as _sf:
+        _sf.write(_rendered_sbatch)
+    return _vars_file_context
 
 
 def core_create_cluster(*, params, repo_root, region, cluster_build_command, ansible_version, wait=True):
@@ -10762,144 +10922,14 @@ def core_create_cluster(*, params, repo_root, region, cluster_build_command, ans
     stage_dir = cluster_parameters["stage_dir"]
 
     try:
-        _rendered_vars_file = render_template(
-            _templates_dir, "vars_file.j2", **cluster_parameters
+        _vars_file_context = _render_build_templates(
+            templates_dir=_templates_dir, cluster_parameters=cluster_parameters,
+            vars_file_path=vars_file_path, cluster_name=cluster_name,
+            cluster_data_dir=cluster_data_dir, stage_dir=stage_dir,
+            repo_root=repo_root, enable_monitoring=enable_monitoring,
+            enable_external_nfs=enable_external_nfs,
+            enable_hpc_benchmarks=enable_hpc_benchmarks,
         )
-        print(f"  Writing vars file: {vars_file_path}")
-        with open(
-            os.open(vars_file_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w"
-        ) as _vf:
-            _vf.write(_rendered_vars_file)
-
-        # The templates rendered below reference names (preinstall_s3_dest,
-        # ssh_keypair, ...) that vars_file.j2 itself derives with its own
-        # Jinja2 expressions -- they are not in cluster_parameters directly,
-        # only in what vars_file.j2 renders from it, which is what Ansible's
-        # own vars_files: load gave these templates before Workstream 2. But
-        # the reverse gap is real too: two cluster_parameters keys
-        # (debug_mode, Deployed_On) are never re-emitted by vars_file.j2 at
-        # all, confirmed by checking every key against the template's own
-        # text rather than assumed -- Deployed_On is what several of these
-        # templates' "Deployed On:" comments need once their Ansible-only
-        # `lookup('pipe', 'date ...')` calls are replaced with it (see the
-        # template-level fix in this same round). Merge both so every
-        # template gets the union, with vars_file.j2's own rendering winning
-        # on the (identical-value) keys both carry.
-        _vars_file_context = {**cluster_parameters, **yaml.safe_load(_rendered_vars_file)}
-
-        # Tier 3: the toolkit's own pre/postinstall pair. 28KB, the heaviest
-        # branching of any template in the repo, and confirmed to carry no
-        # runtime-AWS-call dependency (unlike config.pcluster.j2) by the same
-        # variable-by-variable check Tier 1/2 already applied, plus a
-        # byte-for-byte parity check against every tests/conftest.py fixture
-        # combination before this task was deleted from create_pcluster.yml
-        # (TestPreinstallPostinstallByteForByteParity, tests/test_templates.py).
-        for _tmpl_name, _dest_name in (
-            ("preinstall.j2", f"preinstall.{cluster_name}.sh"),
-            ("postinstall.j2", f"postinstall.{cluster_name}.sh"),
-        ):
-            _rendered_install = render_template(_templates_dir, _tmpl_name, **_vars_file_context)
-            _install_dest = os.path.join(cluster_data_dir, _dest_name)
-            with open(
-                os.open(_install_dest, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o755), "w"
-            ) as _if:
-                _if.write(_rendered_install)
-
-        os.makedirs(stage_dir, exist_ok=True)
-        for _tmpl_name, _dest_name in (
-            ("kill_pcluster.j2", f"kill_pcluster.{cluster_name}.sh"),
-            ("access_cluster.j2", f"access_cluster.{cluster_name}.sh"),
-            ("retrieve_ssh_key.j2", f"retrieve_ssh_key.{cluster_name}.sh"),
-        ):
-            _rendered_script = render_template(_templates_dir, _tmpl_name, **_vars_file_context)
-            _dest_path = os.path.join(stage_dir, _dest_name)
-            with open(
-                os.open(_dest_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o755), "w"
-            ) as _tf:
-                _tf.write(_rendered_script)
-
-        # Tier 2: gated templates whose upload/publish step stays an Ansible
-        # task pointed at the pre-rendered file (Workstream 2's own
-        # instruction, to decouple this rendering change from Workstream 3's
-        # eventual boto3 swap of those uploads).
-        if enable_monitoring:
-            _rendered_wrapper = render_template(
-                _templates_dir, "monitoring-post-install-wrapper.j2", **_vars_file_context
-            )
-            with open(
-                os.open(
-                    _vars_file_context["monitoring_wrapper_dest"],
-                    os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o755,
-                ),
-                "w",
-            ) as _mf:
-                _mf.write(_rendered_wrapper)
-
-            _rendered_grafana = render_template(
-                _templates_dir, "grafana_tunnel.j2", **_vars_file_context
-            )
-            with open(
-                os.open(
-                    _vars_file_context["grafana_tunnel_dest"],
-                    os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o755,
-                ),
-                "w",
-            ) as _gf:
-                _gf.write(_rendered_grafana)
-
-        if enable_external_nfs:
-            # Same template, two destinations, two modes -- matches the two
-            # Ansible tasks this replaces exactly rather than writing once
-            # and copying, since the original never assumed the two stayed
-            # byte-identical either.
-            _rendered_nfs = render_template(
-                _templates_dir, "external_nfs_mount_list.j2", **_vars_file_context
-            )
-            with open(
-                os.open(
-                    _vars_file_context["external_nfs_mount_list_template_src"],
-                    os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o644,
-                ),
-                "w",
-            ) as _nf1:
-                _nf1.write(_rendered_nfs)
-            _nfs_stage_dest = os.path.join(
-                stage_dir, _vars_file_context["external_nfs_mount_list_template_dest"]
-            )
-            with open(
-                os.open(_nfs_stage_dest, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o755), "w"
-            ) as _nf2:
-                _nf2.write(_rendered_nfs)
-
-        if enable_hpc_benchmarks:
-            _performance_stage_dir = _vars_file_context["performance_stage_dir"]
-            os.makedirs(_performance_stage_dir, exist_ok=True)
-            _hpc_benchmark_dir = os.path.join(repo_root, "hpc-benchmark")
-            for _tmpl_name, _dest_name in (
-                ("job_hpc-benchmark.sh.j2", "job_hpc-benchmark.sh"),
-                ("README-PERFORMANCE.md.j2", "README-PERFORMANCE.md"),
-            ):
-                _rendered_perf = render_template(
-                    _hpc_benchmark_dir, _tmpl_name, **_vars_file_context
-                )
-                _perf_dest = os.path.join(_performance_stage_dir, _dest_name)
-                with open(
-                    os.open(_perf_dest, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o755), "w"
-                ) as _pf:
-                    _pf.write(_rendered_perf)
-
-        # Unconditional -- every build gets the default Slurm submission
-        # script, regardless of enable_hpc_benchmarks.
-        _rendered_sbatch = render_template(
-            os.path.join(repo_root, "scripts"),
-            "sbatch_default_submission_script.sh",
-            **_vars_file_context,
-        )
-        _sbatch_dest = os.path.join(stage_dir, "sbatch_default_submission_script.sh")
-        with open(
-            os.open(_sbatch_dest, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o755), "w"
-        ) as _sf:
-            _sf.write(_rendered_sbatch)
     except Exception as _render_e:
         print(f"\n*** ERROR ***\n" f"  Template render failed: {_render_e}")
         print("Cleaning up IAM role to prevent orphan:")
@@ -11367,7 +11397,15 @@ def core_create_cluster(*, params, repo_root, region, cluster_build_command, ans
         print(f"    ./hpc-benchmark.sh install")
         print(f"    ./hpc-benchmark.sh run --tests stream,osu,ior,hpcg")
         print(f"    Note: multi-node tests require a Slurm allocation (srun/sbatch)")
-        print(f"    Results sync to s3://{s3_bucketname}/hpc-benchmark-results/{cluster_name}/ on teardown")
+        # results_bucketname, never s3_bucketname: the per-build bucket is
+        # deleted by teardown, so naming it here sends the operator to a
+        # bucket that no longer exists at the moment they go looking. The
+        # sync itself (_sync_performance_results_to_s3) has always used the
+        # long-lived bucket; this line was the surface that drifted.
+        print(
+            f"    Results sync to s3://{results_bucketname}"
+            f"/hpc-benchmark-results/{cluster_name}/ on teardown"
+        )
     print("")
     print("  Delete this cluster:")
     print(f"    ./kill_pcluster.py -N {cluster_name} -O {cluster_owner} -A {az}")
