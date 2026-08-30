@@ -617,16 +617,16 @@ standing constraints for local development.
   on `innodb_snapshot_isolation`, never `sacctmgr add cluster`, and a
   purge policy. **Default-on is safe only because of that latch**; the
   two defaults surfaces must agree. Detail: `templates/CLAUDE.local.md`.
-- **A warning a node script writes to stderr reaches nobody.** cfn-init
-  captures stdout only, so `|| echo "WARNING: ..." >&2` in
-  `preinstall.j2`/`postinstall.j2` is invisible to the operator it is for.
-  On `acctproof4` a guard fired and its lines are absent from CloudWatch
-  while an `echo` from the same script is present — which is what let the
-  defect it detected go unnoticed. Warnings there go to **stdout**; only a
-  systemd unit keeps `>&2`, since the journal captures it — the rule is
-  about the capture mechanism, not about stderr being wrong. All three
-  node templates are converted; `TestNoNodeScriptWarningGoesToStderr`
-  keeps them that way.
+- **A warning a node script writes to stderr reaches nobody.** A script's
+  own stderr reaches no CloudWatch stream, so `|| echo "WARNING: ..." >&2`
+  is invisible. Before/after on one guard: `acctproof4` wrote it to stderr
+  and it is **absent** while an `echo` from the same script is present;
+  `acctproof5`, on stdout, has it. Scope it that way — dpkg relays
+  `depmod`'s warnings, so "stderr is never captured" is too strong. Only a
+  systemd unit keeps `>&2`, the journal capturing it. Pinned by
+  `TestNoNodeScriptWarningGoesToStderr`. **A clean build cannot verify
+  this**: no guard fires, so evidence needs a failed build or a retained
+  log group.
 
 ## Environment
 
