@@ -27,6 +27,8 @@ import time
 import urllib.request
 import yaml
 from concurrent.futures import ThreadPoolExecutor
+import dataclasses
+from typing import Any
 from dataclasses import (asdict as _dc_asdict, dataclass,
                          field as _dc_field,
                          fields as _dc_fields,
@@ -9528,6 +9530,379 @@ def _describe_cluster_status_quietly(cluster_name, region):
         return ""
 
 
+@dataclass(frozen=True)
+class BuildContext:
+    """The build's resolved state, with the types it was validated as.
+
+    `cluster_parameters` used to be both the state container and the
+    template payload, and it could not be either honestly: it stores
+    booleans as the strings "true"/"false" for the vars file, so reading
+    one back gives "false", which is truthy. Any code that treated that
+    dict as the build's state silently inverted every flag -- reproduced
+    while trying to extract the summary block, where three tests failed
+    in one run.
+
+    So the two roles are separated. This holds the real types; the dict
+    is *derived* by to_template_vars() at the render boundary, which is
+    the only place the string form is correct. The 19 fields marked bool
+    below are the ones that were lossy.
+    """
+
+    local_workingdir: Any
+    cluster_rootdir: Any
+    ssh_known_hosts: Any
+    cluster_data_dir: Any
+    cluster_template_dir: Any
+    stage_dir: Any
+    ec2_keypair: Any
+    ssh_secret_name: Any
+    ebs_root: Any
+    efs_root: Any
+    fsx_root: Any
+    s3_script_path: Any
+    efs_pkg_dir: Any
+    fsx_pkg_dir: Any
+    aws_account_id: Any
+    az: Any
+    compute_az_list: Any
+    compute_subnet_ids: Any
+    use_private_compute_subnet: Any
+    gpu_subnet_ids: Any
+    use_private_gpu_subnet: Any
+    base_os: Any
+    pcluster_os: Any
+    cluster_name: Any
+    cluster_owner: Any
+    cluster_owner_email: Any
+    cluster_owner_department: Any
+    cluster_serial_datestamp: Any
+    cluster_serial_number: Any
+    cluster_serial_number_file: Any
+    cluster_type: Any
+    compute_instance_type: Any
+    cpu_instance_types: Any
+    gpu_instance_type: Any
+    gpu_instance_types: Any
+    compute_root_volume_size: Any
+    compute_root_volume_type: Any
+    compute_root_volume_iops: Any
+    compute_root_volume_throughput: Any
+    gpu_root_volume_size: Any
+    gpu_root_volume_type: Any
+    gpu_root_volume_iops: Any
+    gpu_root_volume_throughput: Any
+    custom_ami: Any
+    debug_mode: bool
+    ebs_encryption: bool
+    ebs_shared_dir: Any
+    ebs_shared_volume_size: Any
+    ebs_shared_volume_type: Any
+    ebs_shared_volume_iops: Any
+    ebs_shared_volume_throughput: Any
+    ec2_iam_policy: Any
+    ec2_iam_role: Any
+    ec2_user: Any
+    ec2_user_home: Any
+    efs_encryption: Any
+    efs_performance_mode: Any
+    efs_throughput_mode: Any
+    enable_efa: bool
+    enable_efs: bool
+    enable_gpu: bool
+    enable_cpu_queue: bool
+    enable_gpu_queue: bool
+    gpu_ranks_per_node: Any
+    cpu_ranks_per_node: Any
+    gpu_vcpus_per_node: Any
+    enable_efa_gdr: bool
+    enable_external_nfs: bool
+    enable_loginnode: bool
+    loginnode_instance_type: Any
+    loginnode_count: Any
+    loginnode_subnet_id: Any
+    enable_fsx: bool
+    enable_fsx_hydration: bool
+    enable_hpc_benchmarks: bool
+    enable_monitoring: bool
+    enable_slurm_accounting: bool
+    monitoring_version: Any
+    monitoring_version_checksum: Any
+    monitoring_s3_dest: Any
+    docker_compose_version: Any
+    docker_compose_arch: Any
+    docker_compose_checksum: Any
+    stage_docker_compose: bool
+    external_nfs_server: Any
+    head_node_bootstrap_timeout: Any
+    fsx_chunk_size: Any
+    fsx_hydration_iam_policy: Any
+    fsx_s3_export_bucket: Any
+    fsx_s3_export_path: Any
+    fsx_s3_import_bucket: Any
+    fsx_s3_import_path: Any
+    fsx_size: Any
+    hyperthreading: bool
+    initial_cpu_queue_size: Any
+    initial_gpu_queue_size: Any
+    maintain_cpu_initial_size: bool
+    maintain_gpu_initial_size: bool
+    max_cpu_queue_size: Any
+    max_gpu_queue_size: Any
+    headnode_instance_type: Any
+    headnode_root_volume_size: Any
+    headnode_root_volume_type: Any
+    headnode_root_volume_iops: Any
+    headnode_root_volume_throughput: Any
+    placement_group: Any
+    pre_install_script: Any
+    post_install_script: Any
+    prod_level: Any
+    project_id: Any
+    region: Any
+    s3_bucketname: Any
+    results_bucketname: Any
+    pcluster_create_timeout: Any
+    scaledown_idletime: Any
+    scheduler: Any
+    pcluster_version: Any
+    subnet_id: Any
+    vpc_cidr: Any
+    vpc_id: Any
+    turbot_account: Any
+    vpc_name: Any
+    Deployed_On: Any
+    ANSIBLE_VERSION: Any
+    DEPLOYMENT_DATE: Any
+
+    _COERCED_TO_STRINGS = (
+        "debug_mode",
+        "ebs_encryption",
+        "enable_efa",
+        "enable_efs",
+        "enable_gpu",
+        "enable_cpu_queue",
+        "enable_gpu_queue",
+        "enable_efa_gdr",
+        "enable_external_nfs",
+        "enable_loginnode",
+        "enable_fsx",
+        "enable_fsx_hydration",
+        "enable_hpc_benchmarks",
+        "enable_monitoring",
+        "enable_slurm_accounting",
+        "stage_docker_compose",
+        "hyperthreading",
+        "maintain_cpu_initial_size",
+        "maintain_gpu_initial_size",
+    )
+
+    def to_template_vars(self):
+        """The vars-file payload: identical to the dict this replaced.
+
+        Jinja2 templates compare against the strings "true"/"false", so
+        the coercion happens here and nowhere else. Anything upstream
+        that needs a flag reads the bool off the context instead.
+        """
+        out = {f.name: getattr(self, f.name) for f in dataclasses.fields(self)}
+        for name in self._COERCED_TO_STRINGS:
+            out[name] = _b(out[name])
+        return out
+
+
+def _print_build_summary(
+    *, ctx, outcome, ec2client, pricing_client, installed_pcluster_version,
+):
+    """Print the operator-facing build summary. Pure output, nothing escapes.
+
+    Reads its inputs off BuildContext, not off the template payload. That
+    distinction is the whole reason BuildContext exists: this extraction was
+    attempted once against `cluster_parameters` and inverted every flag,
+    because the payload carries booleans as "true"/"false" and "false" is
+    truthy. Three tests caught it in one run. On the context they are bools.
+    """
+    az = ctx.az
+    base_os = ctx.base_os
+    cluster_name = ctx.cluster_name
+    cluster_owner = ctx.cluster_owner
+    cluster_serial_datestamp = ctx.cluster_serial_datestamp
+    cluster_serial_number = ctx.cluster_serial_number
+    cluster_type = ctx.cluster_type
+    cpu_instance_types = ctx.cpu_instance_types
+    ebs_shared_dir = ctx.ebs_shared_dir
+    ebs_shared_volume_size = ctx.ebs_shared_volume_size
+    ebs_shared_volume_type = ctx.ebs_shared_volume_type
+    ec2_user = ctx.ec2_user
+    efs_throughput_mode = ctx.efs_throughput_mode
+    enable_cpu_queue = ctx.enable_cpu_queue
+    enable_efa = ctx.enable_efa
+    enable_efs = ctx.enable_efs
+    enable_external_nfs = ctx.enable_external_nfs
+    enable_fsx = ctx.enable_fsx
+    enable_fsx_hydration = ctx.enable_fsx_hydration
+    enable_gpu = ctx.enable_gpu
+    enable_gpu_queue = ctx.enable_gpu_queue
+    enable_hpc_benchmarks = ctx.enable_hpc_benchmarks
+    enable_loginnode = ctx.enable_loginnode
+    enable_monitoring = ctx.enable_monitoring
+    external_nfs_server = ctx.external_nfs_server
+    fsx_s3_export_bucket = ctx.fsx_s3_export_bucket
+    fsx_s3_export_path = ctx.fsx_s3_export_path
+    fsx_s3_import_bucket = ctx.fsx_s3_import_bucket
+    fsx_s3_import_path = ctx.fsx_s3_import_path
+    fsx_size = ctx.fsx_size
+    gpu_instance_types = ctx.gpu_instance_types
+    headnode_instance_type = ctx.headnode_instance_type
+    loginnode_count = ctx.loginnode_count
+    loginnode_instance_type = ctx.loginnode_instance_type
+    maintain_cpu_initial_size = ctx.maintain_cpu_initial_size
+    maintain_gpu_initial_size = ctx.maintain_gpu_initial_size
+    max_cpu_queue_size = ctx.max_cpu_queue_size
+    max_gpu_queue_size = ctx.max_gpu_queue_size
+    region = ctx.region
+    s3_bucketname = ctx.s3_bucketname
+    scaledown_idletime = ctx.scaledown_idletime
+    scheduler = ctx.scheduler
+    vpc_name = ctx.vpc_name
+    results_bucketname = ctx.results_bucketname
+
+    _head_ip = outcome.head_node_public_ip
+
+    # Print a human-friendly cluster build summary.
+    _min_count_pinned = (enable_cpu_queue and maintain_cpu_initial_size) or (
+        enable_gpu_queue and maintain_gpu_initial_size
+    )
+    _enabled = [
+        lbl
+        for lbl, flag in [
+            ("EFA", enable_efa),
+            ("EFS", enable_efs),
+            ("FSx/Lustre", enable_fsx),
+            ("External NFS", enable_external_nfs),
+            ("GPU queue", enable_gpu),
+            ("HPC Benchmarks", enable_hpc_benchmarks),
+            ("Monitoring", enable_monitoring),
+        ]
+        if str(flag).lower() == "true"
+    ]
+    print("")
+    print("=" * 66)
+    print("                   Cluster Build Summary")
+    print("=" * 66)
+    print(f"  Cluster Name:      {cluster_name}")
+    print(f"  Cluster Type:      {cluster_type}")
+    print(f"  Serial Datestamp:  {cluster_serial_datestamp}")
+    print(f"  Availability Zone: {az}")
+    print(f"  VPC:               {vpc_name}")
+    print(f"  Head Node:         {headnode_instance_type}")
+    if enable_loginnode:
+        print(f"  Login Node:        {loginnode_instance_type} (x{loginnode_count})")
+    if enable_cpu_queue:
+        print(f"  CPU Queue:         {', '.join(cpu_instance_types)}")
+    if enable_gpu_queue:
+        print(f"  GPU Queue:         {', '.join(gpu_instance_types)}")
+    print(f"  OS:                {base_os}")
+    print(f"  Scheduler:         {scheduler}")
+    print(f"  PCluster Version:  {installed_pcluster_version()}")
+    if _enabled:
+        print(f"  Options:           {', '.join(_enabled)}")
+    for _cost_line in _cost_summary_lines(
+        pricing_client=pricing_client,
+        ec2client=ec2client,
+        headnode_instance_type=headnode_instance_type,
+        cpu_instance_types=cpu_instance_types,
+        max_cpu_queue_size=max_cpu_queue_size,
+        enable_cpu_queue=enable_cpu_queue,
+        gpu_instance_types=gpu_instance_types,
+        max_gpu_queue_size=max_gpu_queue_size,
+        enable_gpu_queue=enable_gpu_queue,
+        region=region,
+        cluster_type=cluster_type,
+        loginnode_instance_type=loginnode_instance_type,
+        loginnode_count=loginnode_count,
+        enable_loginnode=enable_loginnode,
+    ):
+        print(_cost_line)
+    print("")
+    for _storage_line in _storage_summary_lines(
+        ebs_shared_dir=ebs_shared_dir,
+        ebs_shared_volume_size=ebs_shared_volume_size,
+        ebs_shared_volume_type=ebs_shared_volume_type,
+        enable_efs=enable_efs,
+        efs_throughput_mode=efs_throughput_mode,
+        enable_fsx=enable_fsx,
+        fsx_size=fsx_size,
+        enable_fsx_hydration=enable_fsx_hydration,
+        fsx_s3_import_bucket=fsx_s3_import_bucket,
+        fsx_s3_import_path=fsx_s3_import_path,
+        fsx_s3_export_bucket=fsx_s3_export_bucket,
+        fsx_s3_export_path=fsx_s3_export_path,
+        enable_external_nfs=enable_external_nfs,
+        external_nfs_server=external_nfs_server,
+    ):
+        print(_storage_line)
+    print("")
+    print("  Idle compute:")
+    print(
+        f"    Compute nodes idle for more than {scaledown_idletime} minutes are "
+        f"terminated automatically."
+    )
+    if _min_count_pinned:
+        print(
+            f"    NOTE: maintain_*_initial_size is set, so the queue floor stays "
+            f"above zero and those nodes bill continuously."
+        )
+    else:
+        print("    An idle cluster scales its compute fleet to zero on its own.")
+    print("    The head node keeps running and billing until you tear the cluster down:")
+    print(f"      ./kill_pcluster.py -N {cluster_name} -O {cluster_owner} -A {az}")
+    if _head_ip:
+        print("")
+        if enable_loginnode:
+            print("  Access the cluster (login node by default; -H for the head node):")
+        else:
+            print("  Access the head node:")
+        print(f"    ./access_cluster.py -N {cluster_name}")
+        print("  Access the head node directly:")
+        print(
+            f"    ssh -i active_clusters/{cluster_name}/{cluster_serial_number}_{region}.pem {ec2_user}@{_head_ip}"
+        )
+        print("")
+        print("  SSH key (Secrets Manager):")
+        _secret = _ssh_secret_name(cluster_name, cluster_serial_number)
+        print(f"    Secret: {_secret}")
+        print(f"    Retrieve: active_clusters/{cluster_name}/retrieve_ssh_key.{cluster_name}.sh")
+        print(f"    Rotate:   ./rotate_cluster_key.py -N {cluster_name} -A {az}")
+    if enable_monitoring and _head_ip:
+        print("")
+        print("  Grafana monitoring dashboard:")
+        print(f"    Tunnel: active_clusters/{cluster_name}/grafana_tunnel.{cluster_name}.sh")
+        print(f"    URL:    https://localhost:8443/grafana/  (after tunnel is open)")
+        print(f"    Password: aws ssm get-parameter --region {region} \\")
+        print(f"      --name /parallelcluster/{cluster_name}/grafana/admin-password \\")
+        print("      --with-decryption --query Parameter.Value --output text")
+    if enable_hpc_benchmarks and _head_ip:
+        print("")
+        print("  HPC benchmarks (run these commands on the head node):")
+        print(f"    cd ~/hpc-benchmark/{cluster_name}/{cluster_owner}/{scheduler}")
+        print(f"    ./hpc-benchmark.sh install")
+        print(f"    ./hpc-benchmark.sh run --tests stream,osu,ior,hpcg")
+        print(f"    Note: multi-node tests require a Slurm allocation (srun/sbatch)")
+        # results_bucketname, never s3_bucketname: the per-build bucket is
+        # deleted by teardown, so naming it here sends the operator to a
+        # bucket that no longer exists at the moment they go looking. The
+        # sync itself (_sync_performance_results_to_s3) has always used the
+        # long-lived bucket; this line was the surface that drifted.
+        print(
+            f"    Results sync to s3://{results_bucketname}"
+            f"/hpc-benchmark-results/{cluster_name}/ on teardown"
+        )
+    print("")
+    print("  Delete this cluster:")
+    print(f"    ./kill_pcluster.py -N {cluster_name} -O {cluster_owner} -A {az}")
+    print("=" * 66)
+    print("")
+
+
 def _render_build_templates(
     *, templates_dir, cluster_parameters, vars_file_path, cluster_name,
     cluster_data_dir, stage_dir, repo_root,
@@ -10645,153 +11020,134 @@ def core_create_cluster(*, params, repo_root, region, cluster_build_command, ans
     # Define the cluster_parameters dictionary.
     # This data is needed to build the vars_file.
     #
-    cluster_parameters = {
-        "local_workingdir": repo_root,
-        "cluster_rootdir": repo_root,
-        # Absolute, because the shell tasks that use it quote it: an unexpanded
-        # "~/.ssh/known_hosts" makes ssh-keygen -R a no-op and sends the keyscan
-        # append into a nonexistent ./~/.ssh directory.
-        "ssh_known_hosts": os.path.join(
-            os.path.expanduser("~"), ".ssh", "known_hosts"
-        ),
-        # Pre-computed path variables referenced by vars_file.j2 as Jinja2 expressions.
-        # Plain Python Jinja2 does not evaluate YAML output lines as variables, so every
-        # {{ cluster_data_dir }}, {{ stage_dir }}, etc. reference in the template must be
-        # supplied explicitly in the render context.
-        "cluster_data_dir": os.path.join(repo_root, "active_clusters", cluster_name),
-        "cluster_template_dir": os.path.join(repo_root, "templates"),
-        # "/tmp", not tempfile.gettempdir(): this path is created and
-        # written on BOTH machines. The operator's box stages files into it,
-        # then _transfer_staging_dir ssh's `mkdir -p` for its parent on the
-        # head node and scp's it across -- so it has to be a path that
-        # exists on a Linux node, not one that merely exists locally.
-        # gettempdir() on macOS is /var/folders/<...>/T, which the head node
-        # cannot create (Permission denied on /var/folders) and which means
-        # nothing there anyway. vars_file.j2 echoes this value rather than
-        # restating the literal, so the two cannot drift apart again.
-        "stage_dir": os.path.join(
-            "/tmp", "_ParallelClusterMaker_stage", cluster_serial_number
-        ),
-        "ec2_keypair": cluster_serial_number + "_" + region,
-        "ssh_secret_name": _ssh_secret_name(cluster_name, cluster_serial_number),
-        "ebs_root": ebs_shared_dir,
-        "efs_root": "/efs",
-        "fsx_root": "/fsx",
-        "s3_script_path": "cluster_scripts/" + prod_level,
-        "efs_pkg_dir": "/efs/pkg",
-        "fsx_pkg_dir": "/fsx/pkg",
-        "aws_account_id": aws_account_id,
-        "az": az,
-        "compute_az_list": compute_az_list,
-        "compute_subnet_ids": compute_subnet_ids,
-        "use_private_compute_subnet": use_private_compute_subnet,
-        "gpu_subnet_ids": gpu_subnet_ids,
-        "use_private_gpu_subnet": use_private_gpu_subnet,
-        "base_os": base_os,
-        "pcluster_os": base_os.removesuffix("arm"),
-        "cluster_name": cluster_name,
-        "cluster_owner": cluster_owner,
-        "cluster_owner_email": cluster_owner_email,
-        "cluster_owner_department": cluster_owner_department,
-        "cluster_serial_datestamp": cluster_serial_datestamp,
-        "cluster_serial_number": cluster_serial_number,
-        "cluster_serial_number_file": cluster_serial_number_file,
-        "cluster_type": cluster_type,
-        "compute_instance_type": compute_instance_type,
-        "cpu_instance_types": cpu_instance_types,
-        "gpu_instance_type": gpu_instance_type,
-        "gpu_instance_types": gpu_instance_types,
-        "compute_root_volume_size": compute_root_volume_size,
-        "compute_root_volume_type": compute_root_volume_type,
-        "compute_root_volume_iops": compute_root_volume_iops,
-        "compute_root_volume_throughput": compute_root_volume_throughput,
-        "gpu_root_volume_size": gpu_root_volume_size,
-        "gpu_root_volume_type": gpu_root_volume_type,
-        "gpu_root_volume_iops": gpu_root_volume_iops,
-        "gpu_root_volume_throughput": gpu_root_volume_throughput,
-        "custom_ami": custom_ami,
-        "debug_mode": _b(debug_mode),
-        "ebs_encryption": _b(ebs_encryption),
-        "ebs_shared_dir": ebs_shared_dir,
-        "ebs_shared_volume_size": ebs_shared_volume_size,
-        "ebs_shared_volume_type": ebs_shared_volume_type,
-        "ebs_shared_volume_iops": ebs_shared_volume_iops,
-        "ebs_shared_volume_throughput": ebs_shared_volume_throughput,
-        "ec2_iam_policy": ec2_iam_policy,
-        "ec2_iam_role": ec2_iam_role,
-        "ec2_user": ec2_user,
-        "ec2_user_home": ec2_user_home,
-        "efs_encryption": efs_encryption,
-        "efs_performance_mode": efs_performance_mode,
-        "efs_throughput_mode": efs_throughput_mode,
-        "enable_efa": _b(enable_efa),
-        "enable_efs": _b(enable_efs),
-        "enable_gpu": _b(enable_gpu),
-        "enable_cpu_queue": _b(enable_cpu_queue),
-        "enable_gpu_queue": _b(enable_gpu_queue),
-        "gpu_ranks_per_node": gpu_ranks_per_node,
-        "cpu_ranks_per_node": cpu_ranks_per_node,
-        "gpu_vcpus_per_node": gpu_vcpus_per_node,
-        "enable_efa_gdr": _b(enable_efa and any(needs_efa_gdr(t) for t in cpu_instance_types + gpu_instance_types)),
-        "enable_external_nfs": _b(enable_external_nfs),
-        "enable_loginnode": _b(enable_loginnode),
-        "loginnode_instance_type": loginnode_instance_type,
-        "loginnode_count": loginnode_count,
-        "loginnode_subnet_id": loginnode_subnet_id,
-        "enable_fsx": _b(enable_fsx),
-        "enable_fsx_hydration": _b(enable_fsx_hydration),
-        "enable_hpc_benchmarks": _b(enable_hpc_benchmarks),
-        "enable_monitoring": _b(enable_monitoring),
-        "enable_slurm_accounting": _b(enable_slurm_accounting),
-        "monitoring_version": monitoring_version,
-        "monitoring_version_checksum": monitoring_version_checksum,
-        "monitoring_s3_dest": f"monitoring-post-install-wrapper.{cluster_name}.sh",
-        "docker_compose_version": docker_compose_version,
-        "docker_compose_arch": docker_compose_arch,
-        "docker_compose_checksum": docker_compose_checksum,
-        "stage_docker_compose": _b(stage_docker_compose),
-        "external_nfs_server": external_nfs_server,
-        "head_node_bootstrap_timeout": head_node_bootstrap_timeout,
-        "fsx_chunk_size": fsx_chunk_size,
-        "fsx_hydration_iam_policy": fsx_hydration_iam_policy,
-        "fsx_s3_export_bucket": fsx_s3_export_bucket,
-        "fsx_s3_export_path": fsx_s3_export_path,
-        "fsx_s3_import_bucket": fsx_s3_import_bucket,
-        "fsx_s3_import_path": fsx_s3_import_path,
-        "fsx_size": fsx_size,
-        "hyperthreading": _b(hyperthreading),
-        "initial_cpu_queue_size": initial_cpu_queue_size,
-        "initial_gpu_queue_size": initial_gpu_queue_size,
-        "maintain_cpu_initial_size": _b(maintain_cpu_initial_size),
-        "maintain_gpu_initial_size": _b(maintain_gpu_initial_size),
-        "max_cpu_queue_size": max_cpu_queue_size,
-        "max_gpu_queue_size": max_gpu_queue_size,
-        "headnode_instance_type": headnode_instance_type,
-        "headnode_root_volume_size": headnode_root_volume_size,
-        "headnode_root_volume_type": headnode_root_volume_type,
-        "headnode_root_volume_iops": headnode_root_volume_iops,
-        "headnode_root_volume_throughput": headnode_root_volume_throughput,
-        "placement_group": placement_group,
-        "pre_install_script": pre_install_script,
-        "post_install_script": post_install_script,
-        "prod_level": prod_level,
-        "project_id": project_id,
-        "region": region,
-        "s3_bucketname": s3_bucketname,
-        "results_bucketname": results_bucketname,
-        "pcluster_create_timeout": pcluster_create_timeout,
-        "scaledown_idletime": scaledown_idletime,
-        "scheduler": scheduler,
-        "pcluster_version": installed_pcluster_version(),
-        "subnet_id": subnet_id,
-        "vpc_cidr": vpc_cidr,
-        "vpc_id": vpc_id,
-        "turbot_account": turbot_account,
-        "vpc_name": vpc_name,
-        "Deployed_On": Deployed_On,
-        "ANSIBLE_VERSION": ansible_version,
-        "DEPLOYMENT_DATE": DEPLOYMENT_DATE_TAG,
-    }
+    _build_ctx = BuildContext(
+        local_workingdir=repo_root,
+        cluster_rootdir=repo_root,
+        ssh_known_hosts=os.path.join(os.path.expanduser('~'), '.ssh', 'known_hosts'),
+        cluster_data_dir=os.path.join(repo_root, 'active_clusters', cluster_name),
+        cluster_template_dir=os.path.join(repo_root, 'templates'),
+        stage_dir=os.path.join('/tmp', '_ParallelClusterMaker_stage', cluster_serial_number),
+        ec2_keypair=cluster_serial_number + '_' + region,
+        ssh_secret_name=_ssh_secret_name(cluster_name, cluster_serial_number),
+        ebs_root=ebs_shared_dir,
+        efs_root='/efs',
+        fsx_root='/fsx',
+        s3_script_path='cluster_scripts/' + prod_level,
+        efs_pkg_dir='/efs/pkg',
+        fsx_pkg_dir='/fsx/pkg',
+        aws_account_id=aws_account_id,
+        az=az,
+        compute_az_list=compute_az_list,
+        compute_subnet_ids=compute_subnet_ids,
+        use_private_compute_subnet=use_private_compute_subnet,
+        gpu_subnet_ids=gpu_subnet_ids,
+        use_private_gpu_subnet=use_private_gpu_subnet,
+        base_os=base_os,
+        pcluster_os=base_os.removesuffix('arm'),
+        cluster_name=cluster_name,
+        cluster_owner=cluster_owner,
+        cluster_owner_email=cluster_owner_email,
+        cluster_owner_department=cluster_owner_department,
+        cluster_serial_datestamp=cluster_serial_datestamp,
+        cluster_serial_number=cluster_serial_number,
+        cluster_serial_number_file=cluster_serial_number_file,
+        cluster_type=cluster_type,
+        compute_instance_type=compute_instance_type,
+        cpu_instance_types=cpu_instance_types,
+        gpu_instance_type=gpu_instance_type,
+        gpu_instance_types=gpu_instance_types,
+        compute_root_volume_size=compute_root_volume_size,
+        compute_root_volume_type=compute_root_volume_type,
+        compute_root_volume_iops=compute_root_volume_iops,
+        compute_root_volume_throughput=compute_root_volume_throughput,
+        gpu_root_volume_size=gpu_root_volume_size,
+        gpu_root_volume_type=gpu_root_volume_type,
+        gpu_root_volume_iops=gpu_root_volume_iops,
+        gpu_root_volume_throughput=gpu_root_volume_throughput,
+        custom_ami=custom_ami,
+        debug_mode=debug_mode,
+        ebs_encryption=ebs_encryption,
+        ebs_shared_dir=ebs_shared_dir,
+        ebs_shared_volume_size=ebs_shared_volume_size,
+        ebs_shared_volume_type=ebs_shared_volume_type,
+        ebs_shared_volume_iops=ebs_shared_volume_iops,
+        ebs_shared_volume_throughput=ebs_shared_volume_throughput,
+        ec2_iam_policy=ec2_iam_policy,
+        ec2_iam_role=ec2_iam_role,
+        ec2_user=ec2_user,
+        ec2_user_home=ec2_user_home,
+        efs_encryption=efs_encryption,
+        efs_performance_mode=efs_performance_mode,
+        efs_throughput_mode=efs_throughput_mode,
+        enable_efa=enable_efa,
+        enable_efs=enable_efs,
+        enable_gpu=enable_gpu,
+        enable_cpu_queue=enable_cpu_queue,
+        enable_gpu_queue=enable_gpu_queue,
+        gpu_ranks_per_node=gpu_ranks_per_node,
+        cpu_ranks_per_node=cpu_ranks_per_node,
+        gpu_vcpus_per_node=gpu_vcpus_per_node,
+        enable_efa_gdr=enable_efa and any((needs_efa_gdr(t) for t in cpu_instance_types + gpu_instance_types)),
+        enable_external_nfs=enable_external_nfs,
+        enable_loginnode=enable_loginnode,
+        loginnode_instance_type=loginnode_instance_type,
+        loginnode_count=loginnode_count,
+        loginnode_subnet_id=loginnode_subnet_id,
+        enable_fsx=enable_fsx,
+        enable_fsx_hydration=enable_fsx_hydration,
+        enable_hpc_benchmarks=enable_hpc_benchmarks,
+        enable_monitoring=enable_monitoring,
+        enable_slurm_accounting=enable_slurm_accounting,
+        monitoring_version=monitoring_version,
+        monitoring_version_checksum=monitoring_version_checksum,
+        monitoring_s3_dest=f'monitoring-post-install-wrapper.{cluster_name}.sh',
+        docker_compose_version=docker_compose_version,
+        docker_compose_arch=docker_compose_arch,
+        docker_compose_checksum=docker_compose_checksum,
+        stage_docker_compose=stage_docker_compose,
+        external_nfs_server=external_nfs_server,
+        head_node_bootstrap_timeout=head_node_bootstrap_timeout,
+        fsx_chunk_size=fsx_chunk_size,
+        fsx_hydration_iam_policy=fsx_hydration_iam_policy,
+        fsx_s3_export_bucket=fsx_s3_export_bucket,
+        fsx_s3_export_path=fsx_s3_export_path,
+        fsx_s3_import_bucket=fsx_s3_import_bucket,
+        fsx_s3_import_path=fsx_s3_import_path,
+        fsx_size=fsx_size,
+        hyperthreading=hyperthreading,
+        initial_cpu_queue_size=initial_cpu_queue_size,
+        initial_gpu_queue_size=initial_gpu_queue_size,
+        maintain_cpu_initial_size=maintain_cpu_initial_size,
+        maintain_gpu_initial_size=maintain_gpu_initial_size,
+        max_cpu_queue_size=max_cpu_queue_size,
+        max_gpu_queue_size=max_gpu_queue_size,
+        headnode_instance_type=headnode_instance_type,
+        headnode_root_volume_size=headnode_root_volume_size,
+        headnode_root_volume_type=headnode_root_volume_type,
+        headnode_root_volume_iops=headnode_root_volume_iops,
+        headnode_root_volume_throughput=headnode_root_volume_throughput,
+        placement_group=placement_group,
+        pre_install_script=pre_install_script,
+        post_install_script=post_install_script,
+        prod_level=prod_level,
+        project_id=project_id,
+        region=region,
+        s3_bucketname=s3_bucketname,
+        results_bucketname=results_bucketname,
+        pcluster_create_timeout=pcluster_create_timeout,
+        scaledown_idletime=scaledown_idletime,
+        scheduler=scheduler,
+        pcluster_version=installed_pcluster_version(),
+        subnet_id=subnet_id,
+        vpc_cidr=vpc_cidr,
+        vpc_id=vpc_id,
+        turbot_account=turbot_account,
+        vpc_name=vpc_name,
+        Deployed_On=Deployed_On,
+        ANSIBLE_VERSION=ansible_version,
+        DEPLOYMENT_DATE=DEPLOYMENT_DATE_TAG,
+    )
+    cluster_parameters = _build_ctx.to_template_vars()
 
     # Print the current values of all validated cluster_parameters to the console
     # when debug mode is enabled.
@@ -11275,142 +11631,11 @@ def core_create_cluster(*, params, repo_root, region, cluster_build_command, ans
     except Exception as _s3e:
         print(f"WARNING: could not upload serial number to S3: {_s3e}")
 
-    _head_ip = outcome.head_node_public_ip
-
-    # Print a human-friendly cluster build summary.
-    _min_count_pinned = (enable_cpu_queue and maintain_cpu_initial_size) or (
-        enable_gpu_queue and maintain_gpu_initial_size
-    )
-    _enabled = [
-        lbl
-        for lbl, flag in [
-            ("EFA", enable_efa),
-            ("EFS", enable_efs),
-            ("FSx/Lustre", enable_fsx),
-            ("External NFS", enable_external_nfs),
-            ("GPU queue", enable_gpu),
-            ("HPC Benchmarks", enable_hpc_benchmarks),
-            ("Monitoring", enable_monitoring),
-        ]
-        if str(flag).lower() == "true"
-    ]
-    print("")
-    print("=" * 66)
-    print("                   Cluster Build Summary")
-    print("=" * 66)
-    print(f"  Cluster Name:      {cluster_name}")
-    print(f"  Cluster Type:      {cluster_type}")
-    print(f"  Serial Datestamp:  {cluster_serial_datestamp}")
-    print(f"  Availability Zone: {az}")
-    print(f"  VPC:               {vpc_name}")
-    print(f"  Head Node:         {headnode_instance_type}")
-    if enable_loginnode:
-        print(f"  Login Node:        {loginnode_instance_type} (x{loginnode_count})")
-    if enable_cpu_queue:
-        print(f"  CPU Queue:         {', '.join(cpu_instance_types)}")
-    if enable_gpu_queue:
-        print(f"  GPU Queue:         {', '.join(gpu_instance_types)}")
-    print(f"  OS:                {base_os}")
-    print(f"  Scheduler:         {scheduler}")
-    print(f"  PCluster Version:  {installed_pcluster_version()}")
-    if _enabled:
-        print(f"  Options:           {', '.join(_enabled)}")
-    for _cost_line in _cost_summary_lines(
+    _print_build_summary(
+        ctx=_build_ctx, outcome=outcome, ec2client=ec2client,
         pricing_client=pricing_client,
-        ec2client=ec2client,
-        headnode_instance_type=headnode_instance_type,
-        cpu_instance_types=cpu_instance_types,
-        max_cpu_queue_size=max_cpu_queue_size,
-        enable_cpu_queue=enable_cpu_queue,
-        gpu_instance_types=gpu_instance_types,
-        max_gpu_queue_size=max_gpu_queue_size,
-        enable_gpu_queue=enable_gpu_queue,
-        region=region,
-        cluster_type=cluster_type,
-        loginnode_instance_type=loginnode_instance_type,
-        loginnode_count=loginnode_count,
-        enable_loginnode=enable_loginnode,
-    ):
-        print(_cost_line)
-    print("")
-    for _storage_line in _storage_summary_lines(
-        ebs_shared_dir=ebs_shared_dir,
-        ebs_shared_volume_size=ebs_shared_volume_size,
-        ebs_shared_volume_type=ebs_shared_volume_type,
-        enable_efs=enable_efs,
-        efs_throughput_mode=efs_throughput_mode,
-        enable_fsx=enable_fsx,
-        fsx_size=fsx_size,
-        enable_fsx_hydration=enable_fsx_hydration,
-        fsx_s3_import_bucket=fsx_s3_import_bucket,
-        fsx_s3_import_path=fsx_s3_import_path,
-        fsx_s3_export_bucket=fsx_s3_export_bucket,
-        fsx_s3_export_path=fsx_s3_export_path,
-        enable_external_nfs=enable_external_nfs,
-        external_nfs_server=external_nfs_server,
-    ):
-        print(_storage_line)
-    print("")
-    print("  Idle compute:")
-    print(
-        f"    Compute nodes idle for more than {scaledown_idletime} minutes are "
-        f"terminated automatically."
+        installed_pcluster_version=installed_pcluster_version,
     )
-    if _min_count_pinned:
-        print(
-            f"    NOTE: maintain_*_initial_size is set, so the queue floor stays "
-            f"above zero and those nodes bill continuously."
-        )
-    else:
-        print("    An idle cluster scales its compute fleet to zero on its own.")
-    print("    The head node keeps running and billing until you tear the cluster down:")
-    print(f"      ./kill_pcluster.py -N {cluster_name} -O {cluster_owner} -A {az}")
-    if _head_ip:
-        print("")
-        if enable_loginnode:
-            print("  Access the cluster (login node by default; -H for the head node):")
-        else:
-            print("  Access the head node:")
-        print(f"    ./access_cluster.py -N {cluster_name}")
-        print("  Access the head node directly:")
-        print(
-            f"    ssh -i active_clusters/{cluster_name}/{cluster_serial_number}_{region}.pem {ec2_user}@{_head_ip}"
-        )
-        print("")
-        print("  SSH key (Secrets Manager):")
-        _secret = _ssh_secret_name(cluster_name, cluster_serial_number)
-        print(f"    Secret: {_secret}")
-        print(f"    Retrieve: active_clusters/{cluster_name}/retrieve_ssh_key.{cluster_name}.sh")
-        print(f"    Rotate:   ./rotate_cluster_key.py -N {cluster_name} -A {az}")
-    if enable_monitoring and _head_ip:
-        print("")
-        print("  Grafana monitoring dashboard:")
-        print(f"    Tunnel: active_clusters/{cluster_name}/grafana_tunnel.{cluster_name}.sh")
-        print(f"    URL:    https://localhost:8443/grafana/  (after tunnel is open)")
-        print(f"    Password: aws ssm get-parameter --region {region} \\")
-        print(f"      --name /parallelcluster/{cluster_name}/grafana/admin-password \\")
-        print("      --with-decryption --query Parameter.Value --output text")
-    if enable_hpc_benchmarks and _head_ip:
-        print("")
-        print("  HPC benchmarks (run these commands on the head node):")
-        print(f"    cd ~/hpc-benchmark/{cluster_name}/{cluster_owner}/{scheduler}")
-        print(f"    ./hpc-benchmark.sh install")
-        print(f"    ./hpc-benchmark.sh run --tests stream,osu,ior,hpcg")
-        print(f"    Note: multi-node tests require a Slurm allocation (srun/sbatch)")
-        # results_bucketname, never s3_bucketname: the per-build bucket is
-        # deleted by teardown, so naming it here sends the operator to a
-        # bucket that no longer exists at the moment they go looking. The
-        # sync itself (_sync_performance_results_to_s3) has always used the
-        # long-lived bucket; this line was the surface that drifted.
-        print(
-            f"    Results sync to s3://{results_bucketname}"
-            f"/hpc-benchmark-results/{cluster_name}/ on teardown"
-        )
-    print("")
-    print("  Delete this cluster:")
-    print(f"    ./kill_pcluster.py -N {cluster_name} -O {cluster_owner} -A {az}")
-    print("=" * 66)
-    print("")
     print("Finished creating ParallelCluster stack " + cluster_name + "!")
     print("Exiting...")
     _publish_cluster_state(

@@ -4690,3 +4690,92 @@ class TestTheSummaryNamesTheBucketResultsActuallyGoTo:
             if "hpc-benchmark-results" in ln and "{s3_bucketname}" in ln
         ]
         assert offenders == [], offenders
+
+
+class TestBuildContextKeepsTheTypesItWasValidatedAs:
+    """The dict was doing two incompatible jobs; this is the separation.
+
+    `cluster_parameters` carried booleans as the strings "true"/"false",
+    because that is what `vars_file.j2` compares against -- and it was also
+    the only object holding the build's resolved state. Reading a flag back
+    out of it therefore gave `"false"`, which is **truthy**. That is not
+    hypothetical: extracting the 129-line build summary to read its inputs
+    from that dict inverted every flag and failed three tests in one run.
+
+    `BuildContext` holds the real types. `to_template_vars()` applies the
+    string form at the render boundary, which is the only place it is
+    correct. Anything upstream that needs a flag reads the bool.
+    """
+
+    @property
+    def _ctx_cls(self):
+        import pcluster_core
+
+        return pcluster_core.BuildContext
+
+    def test_every_flag_is_a_real_bool_on_the_context(self):
+        import typing
+
+        hints = typing.get_type_hints(self._ctx_cls)
+        flags = {k for k, v in hints.items() if v is bool}
+        assert flags == set(self._ctx_cls._COERCED_TO_STRINGS), (
+            "the fields typed bool and the fields coerced to strings have "
+            "diverged; one of them is now lying"
+        )
+        assert len(flags) >= 19, f"only {len(flags)} flags -- expected 19+"
+
+    def test_the_string_form_exists_only_in_the_template_payload(self):
+        """The round trip, on a real instance: bool in, "true"/"false" out."""
+        import dataclasses
+
+        cls = self._ctx_cls
+        flags = set(cls._COERCED_TO_STRINGS)
+        kwargs = {
+            f.name: (True if f.name in flags else f"<{f.name}>")
+            for f in dataclasses.fields(cls)
+        }
+        ctx = cls(**kwargs)
+        for name in flags:
+            assert getattr(ctx, name) is True, f"{name} is not a bool on the context"
+        payload = ctx.to_template_vars()
+        for name in flags:
+            assert payload[name] == "true", f"{name} was not coerced for the vars file"
+
+    def test_a_false_flag_survives_as_false(self):
+        """The actual bug: `"false"` is truthy, so a flag read off the payload
+        reads as enabled. On the context it stays False."""
+        import dataclasses
+
+        cls = self._ctx_cls
+        flags = set(cls._COERCED_TO_STRINGS)
+        kwargs = {
+            f.name: (False if f.name in flags else f"<{f.name}>")
+            for f in dataclasses.fields(cls)
+        }
+        ctx = cls(**kwargs)
+        for name in flags:
+            assert getattr(ctx, name) is False
+            assert not getattr(ctx, name), f"{name} is truthy when disabled"
+        payload = ctx.to_template_vars()
+        for name in flags:
+            assert payload[name] == "false"
+            assert payload[name], (
+                "vacuity check: the payload's string form IS truthy -- which "
+                "is exactly why nothing upstream may read flags from it"
+            )
+
+    def test_the_context_is_frozen(self):
+        """State that can be mutated mid-build is state two readers can
+        disagree about."""
+        import dataclasses
+
+        import pytest
+
+        cls = self._ctx_cls
+        kwargs = {
+            f.name: (False if f.name in set(cls._COERCED_TO_STRINGS) else "x")
+            for f in dataclasses.fields(cls)
+        }
+        ctx = cls(**kwargs)
+        with pytest.raises(dataclasses.FrozenInstanceError):
+            ctx.cluster_name = "other"

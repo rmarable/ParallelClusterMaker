@@ -3576,19 +3576,26 @@ def _vars_file_variables():
 
 
 def _cluster_parameters_keys():
-    """Static keys of core_create_cluster's cluster_parameters dict (moved
-    from make_pcluster.py to src/pcluster_core.py in the core/shim split)."""
-    import ast
+    """The names the vars file is rendered from.
 
-    with open(os.path.join(REPO_ROOT, "src", "pcluster_core.py")) as fh:
-        tree = ast.parse(fh.read())
-    for node in ast.walk(tree):
-        if (
-            isinstance(node, ast.Assign)
-            and getattr(node.targets[0], "id", "") == "cluster_parameters"
-        ):
-            return {k.value for k in node.value.keys if isinstance(k, ast.Constant)}
-    raise AssertionError("cluster_parameters dict not found in src/pcluster_core.py")
+    Read off `BuildContext`'s fields rather than a dict literal's keys.
+    `cluster_parameters` is no longer written out in the source: it is
+    derived by `BuildContext.to_template_vars()`, which exists because the
+    dict was doing two incompatible jobs -- the build's state, and the
+    template payload that carries booleans as "true"/"false" strings.
+
+    Taking the fields is stronger than parsing the old literal was: the
+    dataclass is the single declaration of what a vars file gets, so a name
+    added to one and not the other cannot exist."""
+    import dataclasses
+    import sys
+
+    sys.path.insert(0, os.path.join(REPO_ROOT, "src"))
+    from pcluster_core import BuildContext
+
+    fields = {f.name for f in dataclasses.fields(BuildContext)}
+    assert fields, "BuildContext has no fields -- this helper reads nothing"
+    return fields
 
 
 def test_vars_file_variables_are_all_supplied_by_make_pcluster():
@@ -5835,31 +5842,38 @@ class TestTheKnownHostsPathIsExpanded:
         assert os.path.isabs(value), f"ssh_known_hosts is not absolute: {value!r}"
 
     def test_the_derivation_uses_expanduser_not_a_literal(self):
-        """An AST walk over src/pcluster_core.py's core_create_cluster (where
-        cluster_parameters has lived since the core/shim split), so the
-        fixture cannot carry it alone.
+        """An AST walk over the real construction in src/pcluster_core.py, so
+        the fixture cannot carry it alone -- conftest supplies an absolute
+        value regardless of what production does, so a test reading only the
+        fixture passes with the literal tilde restored.
 
-        conftest supplies an absolute value regardless of what production does, so
-        the test above passes with the literal tilde restored in production.
-        """
+        Walks `BuildContext(...)`'s keyword arguments. It used to walk a
+        `cluster_parameters = {...}` literal, which no longer exists: the
+        dict is derived by `to_template_vars()` now. The `found` flag is not
+        decoration -- the previous version `return`ed on a match and simply
+        fell off the end otherwise, so it passed unchanged once the node it
+        searched for was gone."""
         import ast
 
         with open(os.path.join(REPO_ROOT, "src", "pcluster_core.py")) as fh:
             tree = ast.parse(fh.read())
+
+        found = False
         for node in ast.walk(tree):
-            if (
-                isinstance(node, ast.Assign)
-                and getattr(node.targets[0], "id", "") == "cluster_parameters"
-            ):
-                for key, value in zip(node.value.keys, node.value.values):
-                    if getattr(key, "value", None) == "ssh_known_hosts":
-                        src = ast.dump(value)
-                        assert "expanduser" in src, (
-                            "ssh_known_hosts must be expanded in Python; a literal "
-                            "'~' is not expanded by the quoted shell tasks"
-                        )
-                        return
-        raise AssertionError("cluster_parameters['ssh_known_hosts'] not found")
+            if not (isinstance(node, ast.Call)
+                    and getattr(node.func, "id", "") == "BuildContext"):
+                continue
+            for kw in node.keywords:
+                if kw.arg == "ssh_known_hosts":
+                    found = True
+                    assert "expanduser" in ast.dump(kw.value), (
+                        "ssh_known_hosts must be expanded in Python; a literal "
+                        "'~' is not expanded by the quoted shell tasks"
+                    )
+        assert found, (
+            "no BuildContext(ssh_known_hosts=...) found -- this test would "
+            "have passed without checking anything"
+        )
 
     def test_the_quoted_tilde_really_is_not_expanded(self):
         """Vacuity guard for the two tests above, under the real shell.
