@@ -5707,8 +5707,14 @@ class TestOnlyTheDriverIsStagedToS3:
         """
         import ast
 
-        source = _core_function_source("core_create_cluster")
-        tree = ast.parse(source.lstrip())
+        # The stage that makes this call moved out of core_create_cluster
+        # when the 1,856-line function was split; the gate moved with it.
+        # Parse both so the rule is checked where it now lives.
+        source = "\n".join(
+            _core_function_source(n).lstrip()
+            for n in ("core_create_cluster", "_provision_pre_launch_resources")
+        )
+        tree = ast.parse(source)
 
         def calls_the_stager(node):
             return any(
@@ -6032,7 +6038,13 @@ class TestBenchmarkResultsOutliveTheCluster:
         assert "_create_hpc_results_bucket(" in stager, (
             "the results bucket is no longer created alongside the driver upload"
         )
-        tree = ast.parse(_core_function_source("core_create_cluster").lstrip())
+        # Parsed across the build path: the staging call sits in
+        # _provision_pre_launch_resources since core_create_cluster was split,
+        # and the `if enable_hpc_benchmarks` gate went with it.
+        tree = ast.parse("\n".join(
+            _core_function_source(n).lstrip()
+            for n in ("core_create_cluster", "_provision_pre_launch_resources")
+        ))
         gated = [
             node for node in ast.walk(tree)
             if isinstance(node, ast.If)

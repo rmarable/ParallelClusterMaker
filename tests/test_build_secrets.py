@@ -156,6 +156,15 @@ class TestParametersTheBuildDependsOn:
         )
 
 
+# The functions a create actually runs through. Adding a stage here is
+# what keeps the flag sweeps honest after an extraction.
+_BUILD_PATH = (
+    "core_create_cluster",
+    "_provision_pre_launch_resources",
+    "_render_build_templates",
+)
+
+
 class TestEveryOptionalFeatureStaysBehindItsFlag:
     """enable_hpc_benchmarks=false must mean no benchmark work at all: no
     staging, no S3 upload, no remote mkdir. enable_monitoring=false is the
@@ -200,15 +209,26 @@ class TestEveryOptionalFeatureStaysBehindItsFlag:
         return f"if not {flag}" in source
 
     def _check(self, func_name, flag, tokens):
-        tree = ast.parse(_source(func_name).lstrip())
-        func = tree.body[0]
-        gated = set()
-        for node in ast.walk(func):
-            if isinstance(node, ast.If) and flag in self._flags(node.test):
-                gated |= self._calls(node)
+        """`func_name` may name several functions -- the build path is no
+        longer one.
+
+        core_create_cluster was 1,856 lines; the stages that actually make
+        the gated calls now live in _provision_pre_launch_resources and
+        _render_build_templates. Sweeping only the entry point found nothing
+        and tripped this test's own vacuity guard, which is the guard doing
+        its job: a rule that spans functions has to be checked across them.
+        """
+        names = (func_name,) if isinstance(func_name, str) else tuple(func_name)
+        funcs = [ast.parse(_source(n).lstrip()).body[0] for n in names]
+        gated, all_calls = set(), set()
+        for func in funcs:
+            all_calls |= self._calls(func)
+            for node in ast.walk(func):
+                if isinstance(node, ast.If) and flag in self._flags(node.test):
+                    gated |= self._calls(node)
         ungated = {
             name
-            for name in self._calls(func)
+            for name in all_calls
             if name
             and any(tok in name.lower() for tok in tokens)
             and name not in gated
@@ -222,7 +242,7 @@ class TestEveryOptionalFeatureStaysBehindItsFlag:
         # this proves nothing. A self-gated call counts -- it is the same gate
         # one level down, which is why it is accepted above.
         matched = {
-            n for n in self._calls(func)
+            n for n in all_calls
             if n and any(tok in n.lower() for tok in tokens)
         }
         assert matched & (gated | {n for n in matched if self._self_gated(n, flag)}), (
@@ -230,11 +250,11 @@ class TestEveryOptionalFeatureStaysBehindItsFlag:
         )
 
     def test_the_build_gates_every_benchmark_call(self):
-        self._check("core_create_cluster", "enable_hpc_benchmarks",
+        self._check(_BUILD_PATH, "enable_hpc_benchmarks",
                     self._GATED["enable_hpc_benchmarks"])
 
     def test_the_build_gates_every_monitoring_call(self):
-        self._check("core_create_cluster", "enable_monitoring",
+        self._check(_BUILD_PATH, "enable_monitoring",
                     self._GATED["enable_monitoring"])
 
     def test_the_teardown_gates_every_benchmark_call(self):

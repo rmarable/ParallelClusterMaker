@@ -4779,3 +4779,102 @@ class TestBuildContextKeepsTheTypesItWasValidatedAs:
         ctx = cls(**kwargs)
         with pytest.raises(dataclasses.FrozenInstanceError):
             ctx.cluster_name = "other"
+
+
+class TestPartialProgressSurvivesForTheRollback:
+    """A build that fails half-way must still clean up what it created.
+
+    The pre-launch stage creates an SNS topic, then a bucket, keypair,
+    secret and uploads. If it fails after the topic and before the rest,
+    the rollback has to delete that topic -- and to do that it has to know
+    the topic exists.
+
+    That is why extracting this stage was declined twice: the value lived
+    in a local, and moving the body into a function left the caller's copy
+    at None, so a mid-way failure would orphan a topic on every failed
+    build. `_PreLaunchProgress` is mutable for exactly this reason and
+    holds only what the rollback reads.
+    """
+
+    def _progress_cls(self):
+        import pcluster_core
+
+        return pcluster_core._PreLaunchProgress
+
+    def test_the_stage_records_the_topic_as_soon_as_it_exists(self):
+        """On the AST: the assignment must be to the progress object, not to
+        a local the caller cannot see."""
+        import ast
+        import inspect
+
+        import pcluster_core
+
+        src = inspect.getsource(pcluster_core._provision_pre_launch_resources)
+        tree = ast.parse(src.lstrip())
+        recorded = [
+            n for n in ast.walk(tree)
+            if isinstance(n, ast.Assign)
+            and any(
+                isinstance(t, ast.Attribute) and t.attr == "sns_topic_arn"
+                for t in n.targets
+            )
+        ]
+        assert recorded, (
+            "the SNS topic is not recorded on the progress object; a failure "
+            "after it is created would orphan it"
+        )
+
+    def test_the_rollback_reads_progress_not_a_local(self):
+        import inspect
+
+        import pcluster_core
+
+        src = inspect.getsource(pcluster_core.core_create_cluster)
+        start = src.index("def _rollback_pre_launch_resources")
+        body = src[start:src.index("def _fail_after_launch")]
+        assert "_progress.sns_topic_arn" in body, (
+            "the rollback reads a local, which is unbound after the stage "
+            "moved into its own function"
+        )
+        # Every mention, not just one. The closure names it twice -- the
+        # guard and the delete -- so a substring check passes with one of
+        # them reverted, which is how a mutation slipped through once.
+        import re
+
+        bare = [
+            m for m in re.finditer(r"(?<!_progress\.)\bsns_topic_arn\b", body)
+        ]
+        assert not bare, (
+            f"{len(bare)} bare `sns_topic_arn` reference(s) left in the "
+            f"rollback; on a mid-way failure that name is unbound"
+        )
+
+    def test_a_half_finished_stage_leaves_the_topic_visible(self):
+        """The behaviour itself, not its shape: set the topic, then raise,
+        and the caller can still see what to delete."""
+        cls = self._progress_cls()
+        progress = cls()
+        assert progress.sns_topic_arn is None
+
+        def _stage(progress):
+            progress.sns_topic_arn = "arn:aws:sns:us-east-1:1:topic"
+            raise RuntimeError("upload failed after the topic was created")
+
+        try:
+            _stage(progress)
+        except RuntimeError:
+            pass
+        assert progress.sns_topic_arn == "arn:aws:sns:us-east-1:1:topic", (
+            "the caller cannot see the topic the failed stage created"
+        )
+
+    def test_it_carries_only_what_the_rollback_needs(self):
+        """Vacuity guard against it becoming a second state bag. BuildContext
+        is the state; this is the short list of things created mid-flight."""
+        import dataclasses
+
+        names = {f.name for f in dataclasses.fields(self._progress_cls())}
+        assert names == {"sns_topic_arn"}, (
+            f"_PreLaunchProgress has grown to {sorted(names)}; anything that "
+            f"is not read by the rollback belongs on BuildContext or a return"
+        )

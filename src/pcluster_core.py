@@ -9903,6 +9903,136 @@ def _print_build_summary(
     print("")
 
 
+@dataclass
+class _PreLaunchProgress:
+    """What the pre-launch stage has created, readable while it is still running.
+
+    Deliberately mutable, and the only mutable state in this file's build
+    path. The rollback has to know what exists *so far*: if provisioning
+    fails after the SNS topic is created but before the uploads finish,
+    that topic must still be deleted. A plain local could not carry that
+    across a function boundary -- extracting this stage without it would
+    leave the caller's `sns_topic_arn` at None and orphan a topic on every
+    mid-way failure, which is why this extraction was declined twice.
+
+    Only what the rollback reads belongs here. Everything else the stage
+    produces is returned normally.
+    """
+
+    sns_topic_arn: str = None
+
+
+def _provision_pre_launch_resources(
+    *, ctx, vars_file_context, templates_dir, s3_client, ec2client, sns,
+    start_timestamp, progress,
+):
+    """Create everything CloudFormation does not own, before the stack exists.
+
+    Records each creation on `progress` as it happens rather than
+    returning them at the end, because a failure part-way through is
+    exactly when the caller needs to know what to clean up. Raises; the
+    caller owns the rollback.
+    """
+    _templates_dir = templates_dir
+    _vars_file_context = vars_file_context
+    start_overall_timestamp = start_timestamp
+    base_os = ctx.base_os
+    cluster_data_dir = ctx.cluster_data_dir
+    cluster_name = ctx.cluster_name
+    cluster_owner = ctx.cluster_owner
+    cluster_owner_department = ctx.cluster_owner_department
+    cluster_owner_email = ctx.cluster_owner_email
+    cluster_serial_number = ctx.cluster_serial_number
+    docker_compose_arch = ctx.docker_compose_arch
+    docker_compose_checksum = ctx.docker_compose_checksum
+    docker_compose_version = ctx.docker_compose_version
+    enable_external_nfs = ctx.enable_external_nfs
+    enable_hpc_benchmarks = ctx.enable_hpc_benchmarks
+    enable_monitoring = ctx.enable_monitoring
+    monitoring_version = ctx.monitoring_version
+    monitoring_version_checksum = ctx.monitoring_version_checksum
+    prod_level = ctx.prod_level
+    project_id = ctx.project_id
+    region = ctx.region
+    s3_bucketname = ctx.s3_bucketname
+    scheduler = ctx.scheduler
+    stage_dir = ctx.stage_dir
+    stage_docker_compose = ctx.stage_docker_compose
+    vpc_cidr = ctx.vpc_cidr
+    vpc_id = ctx.vpc_id
+
+    progress.sns_topic_arn = _create_sns_topic_and_notify(
+        sns, cluster_name=cluster_name, cluster_owner_email=cluster_owner_email,
+        start_timestamp=start_overall_timestamp,
+    )
+
+    _bucket_tags = {
+        "ClusterID": cluster_name,
+        "ClusterStackType": "ParallelCluster",
+        "ClusterOSType": base_os,
+        "ClusterScheduler": scheduler,
+        "ClusterSerialNumber": cluster_serial_number,
+        "ClusterOwner": cluster_owner,
+        "ClusterOwnerEmail": cluster_owner_email,
+        "ClusterOwnerDepartment": cluster_owner_department,
+        "ProdLevel": prod_level,
+        "DEPLOYMENT_DATE": ctx.DEPLOYMENT_DATE,
+    }
+    if project_id != "UNDEFINED":
+        _bucket_tags["ProjectID"] = project_id
+
+    secretsmanager = boto3.client("secretsmanager", region_name=region)
+    external_nfs_sg_id = provision_s3_keypair_and_secret(
+        s3=s3_client, ec2=ec2client, secretsmanager=secretsmanager,
+        s3_bucketname=s3_bucketname, region=region, tags=_bucket_tags,
+        enable_external_nfs=enable_external_nfs, cluster_name=cluster_name,
+        vpc_id=vpc_id, vpc_cidr=vpc_cidr,
+        ec2_keypair=_vars_file_context["ec2_keypair"],
+        ssh_keypair=_vars_file_context["ssh_keypair"],
+        ssh_secret_name=_vars_file_context["ssh_secret_name"],
+    )
+
+    render_and_upload_cluster_config_and_scripts(
+        s3_client, ctx=_vars_file_context, external_nfs_sg_id=external_nfs_sg_id,
+        templates_dir=_templates_dir,
+    )
+
+    stage_and_upload_monitoring_wrapper(
+        s3_client, enable_monitoring=enable_monitoring,
+        cluster_data_dir=cluster_data_dir, s3_bucketname=s3_bucketname,
+        s3_script_path=_vars_file_context["s3_script_path"],
+        monitoring_version=monitoring_version,
+        monitoring_version_checksum=monitoring_version_checksum,
+        stage_docker_compose=stage_docker_compose,
+        docker_compose_version=docker_compose_version,
+        docker_compose_arch=docker_compose_arch,
+        docker_compose_checksum=docker_compose_checksum,
+        docker_compose_local_dest=_vars_file_context.get("docker_compose_local_dest"),
+        docker_compose_s3_dest=_vars_file_context.get("docker_compose_s3_dest"),
+        monitoring_wrapper_dest=_vars_file_context.get("monitoring_wrapper_dest"),
+        monitoring_s3_dest=_vars_file_context["monitoring_s3_dest"],
+    )
+
+    if enable_external_nfs:
+        _upload_external_nfs_mount_list(s3_client, ctx=_vars_file_context)
+
+    if enable_hpc_benchmarks:
+        stage_and_upload_hpc_benchmark_driver(s3_client, ctx=_vars_file_context, region=region)
+
+    # Before the stack, not after it: the head node fetches this during
+    # OnNodeConfigured, so it has to be in the bucket before any node
+    # boots. The tree is complete by now -- every file in it renders
+    # from the vars file, which is why it can be published this early
+    # at all.
+    publish_staging_tree(
+        s3_client, stage_dir=stage_dir, s3_bucketname=s3_bucketname,
+        enable_hpc_benchmarks=enable_hpc_benchmarks,
+        performance_stage_dir=_vars_file_context.get("performance_stage_dir"),
+    )
+    print(f"  Published the staging tree to s3://{s3_bucketname}/{STAGING_PREFIX}/")
+    return progress.sns_topic_arn, external_nfs_sg_id
+
+
 def _render_build_templates(
     *, templates_dir, cluster_parameters, vars_file_path, cluster_name,
     cluster_data_dir, stage_dir, repo_root,
@@ -11348,9 +11478,9 @@ def core_create_cluster(*, params, repo_root, region, cluster_build_command, ans
             _delete_secrets_manager_secret_step(secretsmanager, _vars_file_context["ssh_secret_name"])
             if enable_external_nfs:
                 _delete_external_nfs_sg_step(ec2client, cluster_name)
-        if sns_topic_arn:
+        if _progress.sns_topic_arn:
             with contextlib.suppress(Exception):
-                sns.delete_topic(TopicArn=sns_topic_arn)
+                sns.delete_topic(TopicArn=_progress.sns_topic_arn)
         _fsx = fsx_hydration_iam_policy if fsx_hydration_iam_policy != "UNDEFINED" else None
         _delete_managed_policies(
             iam, ec2_iam_role, ec2_iam_policy, aws_account_id,
@@ -11395,78 +11525,15 @@ def core_create_cluster(*, params, repo_root, region, cluster_build_command, ans
         )
 
     sns = boto3.client("sns", region_name=region)
-    sns_topic_arn = None
+    _progress = _PreLaunchProgress()
     start_overall_timestamp = teardown_timestamp()
     try:
-        sns_topic_arn = _create_sns_topic_and_notify(
-            sns, cluster_name=cluster_name, cluster_owner_email=cluster_owner_email,
-            start_timestamp=start_overall_timestamp,
+        sns_topic_arn, external_nfs_sg_id = _provision_pre_launch_resources(
+            ctx=_build_ctx, vars_file_context=_vars_file_context,
+            templates_dir=_templates_dir, s3_client=s3_client,
+            ec2client=ec2client, sns=sns,
+            start_timestamp=start_overall_timestamp, progress=_progress,
         )
-
-        _bucket_tags = {
-            "ClusterID": cluster_name,
-            "ClusterStackType": "ParallelCluster",
-            "ClusterOSType": base_os,
-            "ClusterScheduler": scheduler,
-            "ClusterSerialNumber": cluster_serial_number,
-            "ClusterOwner": cluster_owner,
-            "ClusterOwnerEmail": cluster_owner_email,
-            "ClusterOwnerDepartment": cluster_owner_department,
-            "ProdLevel": prod_level,
-            "DEPLOYMENT_DATE": DEPLOYMENT_DATE_TAG,
-        }
-        if project_id != "UNDEFINED":
-            _bucket_tags["ProjectID"] = project_id
-
-        secretsmanager = boto3.client("secretsmanager", region_name=region)
-        external_nfs_sg_id = provision_s3_keypair_and_secret(
-            s3=s3_client, ec2=ec2client, secretsmanager=secretsmanager,
-            s3_bucketname=s3_bucketname, region=region, tags=_bucket_tags,
-            enable_external_nfs=enable_external_nfs, cluster_name=cluster_name,
-            vpc_id=vpc_id, vpc_cidr=vpc_cidr,
-            ec2_keypair=_vars_file_context["ec2_keypair"],
-            ssh_keypair=_vars_file_context["ssh_keypair"],
-            ssh_secret_name=_vars_file_context["ssh_secret_name"],
-        )
-
-        render_and_upload_cluster_config_and_scripts(
-            s3_client, ctx=_vars_file_context, external_nfs_sg_id=external_nfs_sg_id,
-            templates_dir=_templates_dir,
-        )
-
-        stage_and_upload_monitoring_wrapper(
-            s3_client, enable_monitoring=enable_monitoring,
-            cluster_data_dir=cluster_data_dir, s3_bucketname=s3_bucketname,
-            s3_script_path=_vars_file_context["s3_script_path"],
-            monitoring_version=monitoring_version,
-            monitoring_version_checksum=monitoring_version_checksum,
-            stage_docker_compose=stage_docker_compose,
-            docker_compose_version=docker_compose_version,
-            docker_compose_arch=docker_compose_arch,
-            docker_compose_checksum=docker_compose_checksum,
-            docker_compose_local_dest=_vars_file_context.get("docker_compose_local_dest"),
-            docker_compose_s3_dest=_vars_file_context.get("docker_compose_s3_dest"),
-            monitoring_wrapper_dest=_vars_file_context.get("monitoring_wrapper_dest"),
-            monitoring_s3_dest=_vars_file_context["monitoring_s3_dest"],
-        )
-
-        if enable_external_nfs:
-            _upload_external_nfs_mount_list(s3_client, ctx=_vars_file_context)
-
-        if enable_hpc_benchmarks:
-            stage_and_upload_hpc_benchmark_driver(s3_client, ctx=_vars_file_context, region=region)
-
-        # Before the stack, not after it: the head node fetches this during
-        # OnNodeConfigured, so it has to be in the bucket before any node
-        # boots. The tree is complete by now -- every file in it renders
-        # from the vars file, which is why it can be published this early
-        # at all.
-        publish_staging_tree(
-            s3_client, stage_dir=stage_dir, s3_bucketname=s3_bucketname,
-            enable_hpc_benchmarks=enable_hpc_benchmarks,
-            performance_stage_dir=_vars_file_context.get("performance_stage_dir"),
-        )
-        print(f"  Published the staging tree to s3://{s3_bucketname}/{STAGING_PREFIX}/")
     except Exception as _early_e:
         print(f"\n*** ERROR ***\n  Exception before cluster launch: {_early_e}")
         print("Cleaning up everything this build has created so far:")
