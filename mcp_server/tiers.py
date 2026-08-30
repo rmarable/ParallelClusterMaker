@@ -98,4 +98,4 @@ def function_name_for(tier):
     except KeyError:
         raise KeyError(
             f"unknown MCP tier {tier!r} -- known tiers: {', '.join(sorted(FUNCTION_NAMES))}"
-        )
+        ) from None

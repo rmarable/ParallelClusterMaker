@@ -6,6 +6,8 @@ import sys
 import types
 from datetime import date, timezone
 
+import dataclasses
+
 import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -251,7 +253,7 @@ class TestClusterRecord:
 
     def test_from_dict_is_frozen(self):
         rec = pcluster_core.ClusterRecord.from_dict(_FULL_REC_DICT)
-        with pytest.raises(Exception):
+        with pytest.raises(dataclasses.FrozenInstanceError):
             rec.cluster_owner = "someone-else"
 
     def test_unknown_sets_owner_and_region_unknown(self):

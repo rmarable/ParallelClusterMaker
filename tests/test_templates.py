@@ -12,7 +12,7 @@ stubbed out so plain Python Jinja2 can render them without crashing.
 import fnmatch
 import json
 import os
-from conftest import assert_source_is_real
+from conftest import assert_absent_ignoring_formatting, assert_source_is_real
 import pytest
 import re
 import sys
@@ -2831,7 +2831,7 @@ class TestLuarocksGetsTheLuaHeadersItCompilesAgainst:
 
         for rock in self._ROCKS:
             for line in body.splitlines():
-                if f"luarocks" in line and rock in line:
+                if "luarocks" in line and rock in line:
                     pinned = re.search(r"--lua-version[= ](\d\.\d)", line)
                     assert pinned is None or pinned.group(1) == "5.1", (
                         f"{rock} is pinned to Lua {pinned.group(1)} while the dev "
@@ -6835,7 +6835,7 @@ class TestTheNodeLinesReadAsOneGroup:
         login = _index("Login Node:")
         assert login == head + 1, (
             "the node lines must be adjacent, head first, in the build summary "
-            f"too:\n" + "\n".join(printed[head - 1:login + 2])
+            "too:\n" + "\n".join(printed[head - 1:login + 2])
         )
         assert _index("Availability Zone:") < head
         assert _index("CPU Queue:") > login
@@ -7128,10 +7128,13 @@ class TestTheWaitProgressLineSpacing:
     def test_no_printer_reintroduces_a_literal_interval(self):
         with open(os.path.join(REPO_ROOT, "src", "pcluster_core.py")) as fh:
             body = fh.read()
-        assert_source_is_real(body, 'test_no_printer_reintroduces_a_literal_interval')
-        assert "(attempt + 1) * 30" not in body
-        assert_source_is_real(body, 'test_no_printer_reintroduces_a_literal_interval')
-        assert "(attempt + 1) * 60" not in body
+        # Compared with layout removed: these needles contain parentheses and
+        # spaces a formatter can move, and a negative assertion that stops
+        # matching passes.
+        for interval in ("(attempt + 1) * 30", "(attempt + 1) * 60"):
+            assert_absent_ignoring_formatting(
+                interval, body, "test_no_printer_reintroduces_a_literal_interval"
+            )
 
 
 class TestTheStagingDirectoryIsValidOnBothMachines:
@@ -7155,7 +7158,10 @@ class TestTheStagingDirectoryIsValidOnBothMachines:
         asserted against the source rather than against a rendered value."""
         with open(os.path.join(REPO_ROOT, "src", "pcluster_core.py")) as fh:
             body = fh.read()
-        assert "tempfile.gettempdir(), \"_ParallelClusterMaker_stage\"" not in body
+        assert_absent_ignoring_formatting(
+            'tempfile.gettempdir(), "_ParallelClusterMaker_stage"', body,
+            "stage_dir must be the literal /tmp, not the platform temp dir",
+        )
         assert 'os.path.join(\n            "/tmp", "_ParallelClusterMaker_stage"' in body
 
     def test_the_rendered_value_is_an_absolute_posix_path(self, cluster_params):

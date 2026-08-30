@@ -198,7 +198,12 @@ class TestToolCallsReturnStructuredResults:
                 tools_mod, "_require_record",
                 lambda name: type("R", (), {"region": "us-east-2"})(),
             )
-            monkeypatch.setattr(tools_mod, core, lambda **kw: seen.update(kw) or {"ok": True})
+            # noqa B023: `seen` is rebound each iteration and this lambda is
+            # consumed inside the same iteration, so late binding cannot bite.
+            monkeypatch.setattr(  # noqa: B023
+                tools_mod, core,
+                lambda **kw: seen.update(kw) or {"ok": True},  # noqa: B023
+            )
             async with Client(build_local()) as client:
                 await client.call_tool(tool, {"cluster_name": "osiris"})
             assert seen["wait"] is False, tool
@@ -1809,8 +1814,6 @@ class TestDeleteClusterSendsTheCallerToFinalize:
     def _doc(self):
         import mcp_server.tools as t
 
-        fn = t.register_tools.__wrapped__ if hasattr(
-            t.register_tools, "__wrapped__") else None
         import inspect
         src = inspect.getsource(t)
         start = src.index("def delete_cluster(")

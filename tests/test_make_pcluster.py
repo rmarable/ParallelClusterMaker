@@ -4630,7 +4630,11 @@ class TestGetBuildStatusAnswersHonestly:
         the shim, for the same reason build_make_cluster_params does."""
         from pcluster_core import core_get_build_status
 
-        with pytest.raises(BaseException):
+        # SystemExit specifically, verified rather than assumed: the shared
+        # validators exit rather than raise, and `BaseException` here would
+        # also have been satisfied by a KeyboardInterrupt or a typo in the
+        # call above.
+        with pytest.raises(SystemExit):
             core_get_build_status(
                 "../../etc/passwd", s3=self._S3(), locks_bucketname="b")
 

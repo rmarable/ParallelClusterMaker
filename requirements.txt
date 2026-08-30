@@ -38,3 +38,6 @@ scipy
 pandas
 matplotlib
 seaborn
+
+# Linting. `make lint` runs `ruff check` (never --fix -- see the Makefile).
+ruff

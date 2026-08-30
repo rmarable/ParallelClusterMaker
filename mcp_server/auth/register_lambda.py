@@ -127,14 +127,14 @@ def register(payload, *, user_pool_id, cognito=None):
         name = type(e).__name__
         if name in ("InvalidParameterException", "InvalidOAuthFlowException",
                     "ScopeDoesNotExistException"):
-            raise RegistrationError("invalid_client_metadata", str(e))
+            raise RegistrationError("invalid_client_metadata", str(e)) from e
         if name == "LimitExceededException":
             # The pool's app-client quota. Worth naming, because the fix is
             # to delete stale clients, not to retry.
             raise RegistrationError(
                 "invalid_client_metadata",
                 f"the user pool is at its app-client limit: {e}",
-            )
+            ) from e
         raise
 
     client = resp["UserPoolClient"]

@@ -16,7 +16,11 @@ test:
 # gitignored and mcp_server/ was untracked for a while, so a git-only sweep
 # skips exactly the newest code.
 lint:
-	@files="$$( { git ls-files '*.py'; find mcp_server tests src -name '*.py' -not -path '*/__pycache__/*'; } | sort -u )"; \
+	@# Two gates, narrowest first. The undefined-name sweep predates ruff and
+	@# stays because it is the one this repo committed to after a NameError
+	@# reached a live build; ruff's F821 covers the same ground, and keeping
+	@# both means the promise survives a config edit.
+	@files="$$(git ls-files '*.py')"; \
 	if [ -z "$$files" ]; then echo "make lint: no Python files found" >&2; exit 1; fi; \
 	out="$$(.venv/bin/python -m pyflakes $$files 2>&1 | grep 'undefined name' || true)"; \
 	if [ -n "$$out" ]; then \
@@ -24,7 +28,12 @@ lint:
 		echo "make lint: an undefined name is a guaranteed NameError -- fix before committing" >&2; \
 		exit 1; \
 	fi; \
-	echo "make lint: no undefined names in $$(echo "$$files" | wc -l | tr -d ' ') Python files"
+	echo "make lint: no undefined names in $$(echo $$files | wc -w | tr -d ' ') files"
+	@# Never --fix here: several entry points import names they do not use so
+	@# tests can reach them through the module, and autofix deletes exactly
+	@# that. They are declared in __all__; tests/test_reexports_survive_autofix.py
+	@# fails if a new unprotected one appears.
+	@.venv/bin/python -m ruff check .
 
 # Every tracked .sh except the Jinja2 templates, discovered rather than listed so
 # a newly added shell script joins the gate without anyone remembering to add it.

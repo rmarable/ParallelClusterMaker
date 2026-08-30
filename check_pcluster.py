@@ -98,7 +98,7 @@ def main():
     rec = _read_cluster_record(cluster_name, _repo_root)
     if rec is None:
         print(f"  {_FAIL} vars file — vars file missing or unreadable")
-        print(f"\n1 check(s) failed.")
+        print("\n1 check(s) failed.")
         sys.exit(1)
     print(f"  {_PASS} vars file")
     cluster_record = ClusterRecord.from_dict(rec)

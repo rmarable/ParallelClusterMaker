@@ -128,7 +128,7 @@ def verify(token, action, params, *, now=None, ttl_seconds=_DEFAULT_TTL_SECONDS)
     try:
         issued_at = int(issued_at_raw)
     except ValueError:
-        raise MalformedToken("confirmation token timestamp is not an integer")
+        raise MalformedToken("confirmation token timestamp is not an integer") from None
 
     now = int(time.time()) if now is None else int(now)
     age = now - issued_at

@@ -290,7 +290,7 @@ class TestTheHeldLockErrorSurvivesTheTransport:
         monkeypatch.setattr(tools_mod, "_acquire_distributed_cluster_lock", s.acquire)
         monkeypatch.setattr(tools_mod, "s3_release_cluster_lock", s.release)
         monkeypatch.setattr(tools_mod, "_aws_account_id", lambda: "123456789012")
-        with pytest.raises(Exception):
+        with pytest.raises(pcluster_core.PClusterMakerError):
             with tools_mod._cluster_lock("osiris", "us-east-2", "mcp test"):
                 pass
         assert s.released == [], "a failed acquire must not release the holder's lock"

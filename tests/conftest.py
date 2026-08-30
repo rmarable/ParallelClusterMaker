@@ -741,3 +741,28 @@ def assert_source_is_real(source, label=""):
         f"{label or 'source'} does not look like Python source -- a negative "
         f"assertion against it would pass without reading anything"
     )
+
+
+def assert_absent_ignoring_formatting(needle, source, label=""):
+    """Assert `needle` is absent, comparing with all whitespace removed.
+
+    A literal needle like `"(attempt + 1) * 30"` stops matching the moment a
+    formatter wraps that expression across lines -- and a *negative*
+    assertion that stops matching passes. The rule it names would then be
+    unguarded with the suite green, which is the failure mode
+    `assert_source_is_real` covers for an empty haystack and this one covers
+    for a reshaped needle.
+
+    Measured before writing: 22 negative assertions over Python source carry
+    a literal needle, and 4 of them contain parentheses, commas or runs of
+    spaces that `black` could move. Those 4 use this; the other 18 cannot be
+    reshaped by any formatter.
+    """
+    import re
+
+    assert_source_is_real(source, label)
+    squeezed_needle = re.sub(r"\s+", "", needle)
+    assert squeezed_needle, f"{label or 'needle'} is empty after squeezing"
+    assert squeezed_needle not in re.sub(r"\s+", "", source), (
+        f"{label or 'source'} contains {needle!r} (matched ignoring layout)"
+    )

@@ -14,6 +14,8 @@ import os
 import re
 import sys
 
+import dataclasses
+
 import pytest
 from botocore.exceptions import ClientError
 
@@ -251,7 +253,7 @@ def test_teardown_step_result_is_a_plain_named_tuple_of_fields():
     assert r.name == "x"
     assert r.succeeded is True
     assert r.detail == ""
-    with pytest.raises(Exception):
+    with pytest.raises(dataclasses.FrozenInstanceError):
         r.succeeded = False  # frozen dataclass
 
 

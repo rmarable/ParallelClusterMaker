@@ -55,6 +55,7 @@ EXCLUDED_FROM_LAMBDA = {
     "ansible": "template-semantics reference only; ~408 MB of collections",
     "pytest": "test-only",
     "pyflakes": "lint-only",
+    "ruff": "lint-only",
     "pytest-asyncio": "test-only",
     "numpy": "hpc-benchmark plotting only",
     "scipy": "hpc-benchmark plotting only",

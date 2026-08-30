@@ -21,6 +21,7 @@ import json
 import os
 import sys
 
+from conftest import assert_absent_ignoring_formatting
 import pytest
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -346,7 +347,10 @@ class TestAFailingHandlerLambdaDoesNotLeakItsStackTrace:
 
         source = inspect.getsource(router.lambda_handler)
         assert "unwrap_invocation(" in source
-        assert "json.loads(response[\"Payload\"].read())" not in source
+        assert_absent_ignoring_formatting(
+            'json.loads(response["Payload"].read())', source,
+            "the router must check FunctionError before parsing",
+        )
 
 
 class TestAnInvokeThatFailsOutrightIsNotLeaked:

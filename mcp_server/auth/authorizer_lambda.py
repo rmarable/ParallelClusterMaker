@@ -111,7 +111,7 @@ def verify_claims(token, *, region, user_pool_id, jwks_client=None, jwt_module=N
     try:
         signing_key = client.get_signing_key_from_jwt(token)
     except Exception as e:
-        raise Unauthorized(f"cannot resolve signing key: {type(e).__name__}: {e}")
+        raise Unauthorized(f"cannot resolve signing key: {type(e).__name__}: {e}") from e
 
     try:
         claims = jwt_module.decode(
@@ -125,7 +125,7 @@ def verify_claims(token, *, region, user_pool_id, jwks_client=None, jwt_module=N
             options={"verify_aud": False, "require": ["exp", "iss"]},
         )
     except Exception as e:
-        raise Unauthorized(f"token rejected: {type(e).__name__}: {e}")
+        raise Unauthorized(f"token rejected: {type(e).__name__}: {e}") from e
 
     if claims.get("token_use") != _TOKEN_USE:
         raise Unauthorized(
@@ -154,7 +154,7 @@ def _client_exists(client_id, *, user_pool_id, cognito=None):
         # distinctly rather than reporting an unknown client.
         raise Unauthorized(
             f"could not verify client id against the user pool: {type(e).__name__}: {e}"
-        )
+        ) from e
     return True
 
 

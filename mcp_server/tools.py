@@ -83,7 +83,6 @@ from pcluster_core import (
 from pcluster_core import (
     _derive_locks_bucket,
     _acquire_distributed_cluster_lock,
-    _derive_locks_bucket,
     s3_release_cluster_lock,
 )
 
@@ -284,7 +283,7 @@ def _cluster_lock(cluster_name, region, command):
         # FastMCP process kills the whole server rather than failing one
         # call. A held lock is an ordinary, expected condition; it must
         # reach the model as a normal tool error.
-        raise PClusterMakerError(str(e) or f"cluster {cluster_name!r} is locked")
+        raise PClusterMakerError(str(e) or f"cluster {cluster_name!r} is locked") from e
     try:
         yield
     finally:
@@ -337,7 +336,7 @@ def _require_record(cluster_name):
     try:
         _validate_cluster_name(cluster_name)
     except SystemExit as e:
-        raise PClusterMakerError(str(e))
+        raise PClusterMakerError(str(e)) from e
     # Local first with no store at all: a cluster this machine built is
     # answered from its own vars file, and its region then addresses the
     # bucket for every later store call. Only a cluster with no local
@@ -967,7 +966,7 @@ def register_tools(mcp, *, remote, tier=None):
             raise PClusterMakerError(
                 f"cluster creation for {cluster_name!r} failed during validation "
                 f"(exit {e.code}); the reason was printed to the server log."
-            )
+            ) from e
 
     @tool
     def preview_cluster_delete(cluster_name: str,

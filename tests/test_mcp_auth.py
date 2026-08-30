@@ -250,7 +250,9 @@ class TestEveryFailureRaisesRatherThanDenying:
         actionable, and it lives in CloudWatch."""
         monkeypatch.delenv("MCP_USER_POOL_ID", raising=False)
         monkeypatch.setenv("AWS_REGION", REGION)
-        with pytest.raises(Exception):
+        # The bare word, not any exception: API Gateway maps exactly this
+        # to a 401, and a sentence to a 500.
+        with pytest.raises(Exception, match=r"^Unauthorized$"):
             authz.lambda_handler({"authorizationToken": "Bearer x"}, None)
         out = capsys.readouterr().out
         assert "Unauthorized:" in out

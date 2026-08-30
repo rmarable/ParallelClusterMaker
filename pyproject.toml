@@ -1,0 +1,49 @@
+# Ruff only. This project is not pip-installable and deliberately has no
+# build backend: entry points are run from the checkout, and the venv guard
+# in each one depends on that.
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+extend-exclude = [".venv", "active_clusters", "src/vars_files", "__pycache__"]
+
+[tool.ruff.lint]
+# Errors only -- nothing aesthetic, nothing about style. Every rule here
+# names something that is either already enforced in this repo or is a
+# guaranteed bug rather than a preference.
+#
+#   F    pyflakes: what `make lint` already gates, plus the rest of the family
+#   E9   syntax and IO errors
+#   PLE  pylint's *errors* only, never its conventions or refactor advice
+select = ["F", "E9", "PLE"]
+extend-select = [
+    "B002",   # unary prefix increment -- always a typo for +=
+    "B006",   # mutable default argument
+    "B008",   # function call in a default argument
+    "B012",   # break/return inside finally swallows the exception
+    "B017",   # assertRaises(Exception) is too broad to prove anything
+    "B023",   # loop variable captured by a closure
+    "B904",   # bare raise inside except loses the cause
+]
+ignore = [
+    # 142 occurrences, and every one is the venv guard plus the
+    # sys.path.insert prologue that has to run before `import pcluster_core`.
+    # That ordering is the architecture, not a lapse.
+    "E402",
+]
+
+# Deliberately NOT enabled, each measured rather than assumed:
+#   BLE   109 broad `except Exception` -- the non-fatal design in the node
+#         templates and the teardown's ignore_errors equivalents depend on it
+#   I     isort: 54 files rely on sys.path.insert ordering before imports
+#   ARG   unused arguments: the tier handlers take a uniform signature
+
+[tool.ruff.lint.per-file-ignores]
+# Tests import for side effects and to assert a symbol exists at all.
+"tests/*" = ["F401", "F811"]
+
+# The four entry-point shims re-export pcluster_core names so tests can reach
+# them through the module object. They are NOT listed here on purpose: each
+# declares its re-exports in `__all__`, which ruff honours and which stays
+# precise -- a file-wide F401 ignore would also hide a genuinely dead import
+# added later. See tests/test_reexports_survive_autofix.py.

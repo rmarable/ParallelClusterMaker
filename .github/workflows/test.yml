@@ -42,7 +42,7 @@ jobs:
       # target needs exactly that, and the test job already pays for the
       # full install. Widen this if `make lint` ever needs more.
       - name: Create the venv the lint target expects
-        run: python -m venv .venv && .venv/bin/pip install pyflakes
+        run: python -m venv .venv && .venv/bin/pip install pyflakes ruff
 
       - name: Run lint
         run: make lint

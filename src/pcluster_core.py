@@ -201,7 +201,7 @@ def resolve_region_from_az(az, *, ec2_client=None):
     try:
         _validate_az_input(az)
     except SystemExit as e:
-        raise PClusterMakerError(str(e))
+        raise PClusterMakerError(str(e)) from e
 
     # Client construction inside the try: it is what raises on a malformed
     # region, and it sat above the except clause that names ValueError.
@@ -215,7 +215,7 @@ def resolve_region_from_az(az, *, ec2_client=None):
     except (ValueError, BotoCoreError, NoCredentialsError, _ClientError) as e:
         raise PClusterMakerError(
             f"ERROR: Could not verify availability zone '{az}': {e}"
-        )
+        ) from e
     if not zones:
         raise AvailabilityZoneNotFound(
             f"ERROR: '{az}' is not an availability zone in this account."
@@ -614,7 +614,7 @@ def discover_defaults_file(cluster_name, *, repo_root=None):
     try:
         _validate_cluster_name(cluster_name)
     except SystemExit as e:
-        raise PClusterMakerError(str(e))
+        raise PClusterMakerError(str(e)) from e
 
     root = repo_root or _default_repo_root()
     path = os.path.join(root, f"{cluster_name}_defaults.yml")
@@ -644,9 +644,9 @@ def load_cluster_defaults(cluster_name, *, repo_root=None):
     except yaml.YAMLError as e:
         raise PClusterMakerError(
             f"ERROR: defaults file is not valid YAML: {path}\n  {e}"
-        )
+        ) from e
     except OSError as e:
-        raise PClusterMakerError(f"ERROR: cannot read defaults file {path}: {e}")
+        raise PClusterMakerError(f"ERROR: cannot read defaults file {path}: {e}") from e
     if not isinstance(data, dict):
         raise PClusterMakerError(
             f"ERROR: defaults file must be a mapping of parameter names to "
@@ -1066,7 +1066,7 @@ def put_cluster_config_object(s3, *, locks_bucketname, cluster_name, text,
                 f"The configuration for '{cluster_name}' changed while this "
                 f"edit was being made. Nothing was written. Re-read it and "
                 f"apply the edit again."
-            )
+            ) from e
         if etag and _is_missing_key_rejection(e):
             # Same class of outcome, different cause, so it gets its own
             # sentence: the object is not stale, it is gone. Without this
@@ -1077,7 +1077,7 @@ def put_cluster_config_object(s3, *, locks_bucketname, cluster_name, text,
                 f"while this edit was being made. Nothing was written. If the "
                 f"cluster still exists, re-publish its config; if it was torn "
                 f"down, this edit has nothing to apply to."
-            )
+            ) from e
         raise
 
 
@@ -1627,7 +1627,7 @@ def s3_acquire_cluster_lock(
                     f"Lock for cluster {cluster_name!r} looked stale (age "
                     f"{int(age_seconds)}s, status {status}) but another "
                     f"operation reclaimed it first -- re-run to retry."
-                )
+                ) from e2
 
     raise ClusterLockError(
         f"Another operation is already running against cluster {cluster_name!r}: "
@@ -2176,7 +2176,7 @@ def build_make_cluster_params(
         _validate_cluster_name(cluster_name)
         _validate_cluster_owner(cluster_owner)
     except SystemExit as e:
-        raise PClusterMakerError(str(e))
+        raise PClusterMakerError(str(e)) from e
 
     fields = {f.name for f in _dc_fields(MakeClusterParams)}
     # Accepted override keys are the dataclass fields PLUS the input keys
@@ -3463,8 +3463,8 @@ def _validate_network(
         print("")
         print("*** ERROR: VPC not found ***")
         print(f'  No VPC named "{vpc_name}" exists in this account and region.')
-        print(f"  Fix: set vpc_name in your defaults file to the Name tag of")
-        print(f"       an existing VPC, then re-run.")
+        print("  Fix: set vpc_name in your defaults file to the Name tag of")
+        print("       an existing VPC, then re-run.")
         _hint = f"{cluster_name}_defaults.yml" if cluster_name else "<cluster_name>_defaults.yml"
         print(f"  Hint: you probably forgot to add --use_defaults={_hint}")
         print("")
@@ -3550,8 +3550,8 @@ def _validate_network(
             _gpu_label = "private GPU" if _gpu_private else "GPU"
             if not gpu_az_list:
                 print(
-                    f"  --use_private_gpu_subnet=true with no --gpu_subnet_ids: "
-                    f"discovering private subnets rather than reusing compute's."
+                    "  --use_private_gpu_subnet=true with no --gpu_subnet_ids: "
+                    "discovering private subnets rather than reusing compute's."
                 )
             print(
                 f"  Auto-discovering {_gpu_label} subnet(s) in: {', '.join(_gpu_azs)}..."
@@ -4478,7 +4478,7 @@ def _update_compute_fleet_lib(cluster_name, region, status):
         raise PClusterMakerError(
             f"update-compute-fleet failed for {cluster_name!r} in {region}: "
             f"{pcluster_exception_detail(e)}"
-        )
+        ) from e
 
 
 def _update_cluster_lib(cluster_name, region, config_path):
@@ -4504,7 +4504,7 @@ def _update_cluster_lib(cluster_name, region, config_path):
         raise PClusterMakerError(
             f"update-cluster failed for {cluster_name!r} in {region}: "
             f"{pcluster_exception_detail(e)}"
-        )
+        ) from e
 
 
 def _describe_cluster_json(cluster_name, region):
@@ -4536,7 +4536,7 @@ def _describe_cluster_json(cluster_name, region):
         raise PClusterMakerError(
             f"describe-cluster failed for {cluster_name!r} in {region}: "
             f"{pcluster_exception_detail(e)}"
-        )
+        ) from e
 
 
 def _get_fleet_status(cluster_name, region, pcluster_bin):
@@ -4610,7 +4610,7 @@ def _poll_fleet(cluster_name, region, target, label, pcluster_bin):
             f"\nInterrupted. Fleet operation still running in AWS.\n"
             f"  pcluster describe-cluster --cluster-name {cluster_name} --region {region}"
         )
-        raise SystemExit(1)
+        raise SystemExit(1) from None
 
 
 # ---------------------------------------------------------------------------
@@ -6171,7 +6171,7 @@ def core_rotate_cluster_key(*, cluster_record, region, secret_name=None, dry_run
         instance = reservations[0]["Instances"][0] if reservations else {}
         head_ip = instance.get("PublicIpAddress") or instance.get("PrivateIpAddress", "")
     except (BotoCoreError, _ClientError, NoCredentialsError) as e:
-        raise PClusterMakerError(f"ERROR: Could not describe EC2 instances: {e}")
+        raise PClusterMakerError(f"ERROR: Could not describe EC2 instances: {e}") from e
 
     if not head_ip:
         raise PClusterMakerError(f"ERROR: No running head node found for cluster '{cluster_name}'.")
@@ -6246,7 +6246,7 @@ def core_rotate_cluster_key(*, cluster_record, region, secret_name=None, dry_run
             raise PClusterMakerError(
                 f"ERROR: new key failed to authenticate: {e}\n"
                 f"  The old key was left in place in authorized_keys. No AWS resources were changed."
-            )
+            ) from e
 
         if old_pub_key:
             print("Removing old public key from head node authorized_keys...")
@@ -6271,7 +6271,7 @@ def core_rotate_cluster_key(*, cluster_record, region, secret_name=None, dry_run
                     f"  key, so nothing was moved into place.\n"
                     f"  No AWS resources were changed. Inspect ~/.ssh/authorized_keys on the\n"
                     f"  head node manually, then re-run this script."
-                )
+                ) from e
 
         # 3. Import new public key as EC2 keypair (rotated name).
         new_keypair_name = ec2_keypair + "-rotated"
@@ -6365,7 +6365,7 @@ def _queue_config_path(cluster_name, repo_root):
     try:
         _validate_cluster_name(cluster_name)
     except SystemExit as e:
-        raise PClusterMakerError(str(e))
+        raise PClusterMakerError(str(e)) from e
     return os.path.join(
         repo_root, "active_clusters", cluster_name, f"config.{cluster_name}"
     )
@@ -6388,7 +6388,7 @@ def _load_cluster_config(cluster_name, repo_root, *, s3=None,
             with open(path) as fh:
                 config = _make_yaml().load(fh)
         except Exception as exc:
-            raise PClusterMakerError(f"ERROR: failed to parse {path}: {exc}")
+            raise PClusterMakerError(f"ERROR: failed to parse {path}: {exc}") from exc
         return config, path, None
 
     if s3 is not None and locks_bucketname:
@@ -6402,7 +6402,7 @@ def _load_cluster_config(cluster_name, repo_root, *, s3=None,
                 raise PClusterMakerError(
                     f"ERROR: failed to parse the stored config for "
                     f"'{cluster_name}': {exc}"
-                )
+                ) from exc
             return config, None, etag
 
     raise PClusterMakerError(f"ERROR: cluster config not found: {path}")
@@ -7153,7 +7153,7 @@ def _poll_cluster_update(cluster_name, region, pcluster_bin):
             f"\nInterrupted. The cluster update is still running in AWS.\n"
             f"Check status with: pcluster describe-cluster --cluster-name {cluster_name} --region {region}"
         )
-        raise SystemExit(1)
+        raise SystemExit(1) from None
 
 
 @dataclass(frozen=True)
@@ -8784,7 +8784,7 @@ def _wait_for_ssh_port(
             if time_fn() >= deadline:
                 raise TimeoutError(
                     f"SSH port {port} on {host} did not become reachable within {timeout}s"
-                )
+                ) from None
             sleep_fn(poll_interval)
 
 
@@ -9759,7 +9759,6 @@ def _print_build_summary(
     max_cpu_queue_size = ctx.max_cpu_queue_size
     max_gpu_queue_size = ctx.max_gpu_queue_size
     region = ctx.region
-    s3_bucketname = ctx.s3_bucketname
     scaledown_idletime = ctx.scaledown_idletime
     scheduler = ctx.scheduler
     vpc_name = ctx.vpc_name
@@ -9848,8 +9847,8 @@ def _print_build_summary(
     )
     if _min_count_pinned:
         print(
-            f"    NOTE: maintain_*_initial_size is set, so the queue floor stays "
-            f"above zero and those nodes bill continuously."
+            "    NOTE: maintain_*_initial_size is set, so the queue floor stays "
+            "above zero and those nodes bill continuously."
         )
     else:
         print("    An idle cluster scales its compute fleet to zero on its own.")
@@ -9876,7 +9875,7 @@ def _print_build_summary(
         print("")
         print("  Grafana monitoring dashboard:")
         print(f"    Tunnel: active_clusters/{cluster_name}/grafana_tunnel.{cluster_name}.sh")
-        print(f"    URL:    https://localhost:8443/grafana/  (after tunnel is open)")
+        print("    URL:    https://localhost:8443/grafana/  (after tunnel is open)")
         print(f"    Password: aws ssm get-parameter --region {region} \\")
         print(f"      --name /parallelcluster/{cluster_name}/grafana/admin-password \\")
         print("      --with-decryption --query Parameter.Value --output text")
@@ -9884,9 +9883,9 @@ def _print_build_summary(
         print("")
         print("  HPC benchmarks (run these commands on the head node):")
         print(f"    cd ~/hpc-benchmark/{cluster_name}/{cluster_owner}/{scheduler}")
-        print(f"    ./hpc-benchmark.sh install")
-        print(f"    ./hpc-benchmark.sh run --tests stream,osu,ior,hpcg")
-        print(f"    Note: multi-node tests require a Slurm allocation (srun/sbatch)")
+        print("    ./hpc-benchmark.sh install")
+        print("    ./hpc-benchmark.sh run --tests stream,osu,ior,hpcg")
+        print("    Note: multi-node tests require a Slurm allocation (srun/sbatch)")
         # results_bucketname, never s3_bucketname: the per-build bucket is
         # deleted by teardown, so naming it here sends the operator to a
         # bucket that no longer exists at the moment they go looking. The
@@ -10263,7 +10262,6 @@ def core_create_cluster(*, params, repo_root, region, cluster_build_command, ans
 
     src_dir = os.path.join(repo_root, "src")
 
-    ansible_verbosity = params.ansible_verbosity
     az = params.az
     base_os = params.base_os
     cluster_name = params.cluster_name
@@ -10386,7 +10384,7 @@ def core_create_cluster(*, params, repo_root, region, cluster_build_command, ans
         _in_flight = _describe_cluster_status_quietly(cluster_name, region)
         if _in_flight in _CLUSTER_BUILD_IN_FLIGHT:
             print("")
-            print(f"*** ALREADY BUILDING ***")
+            print("*** ALREADY BUILDING ***")
             print(f"  {cluster_name} is {_in_flight} in {region}.")
             print("  Nothing was created by this call and nothing needs "
                   "cleaning up.")
