@@ -29,6 +29,7 @@ import inspect
 import os
 import sys
 
+from conftest import assert_source_is_real
 import pytest
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -229,6 +230,7 @@ class TestTheLockIsNotTakenTwice:
         the wrapper must be removed or it will deadlock."""
         for name in ("_core_fleet_action", "core_apply_queue_config"):
             src = inspect.getsource(getattr(pcluster_core, name))
+            assert_source_is_real(src, 'test_the_wrapped_cores_really_do_not')
             assert "_acquire_distributed_cluster_lock" not in src, (
                 f"{name} now locks internally -- remove the wrapper-layer lock "
                 f"from mcp_server/tools.py or the two will deadlock"

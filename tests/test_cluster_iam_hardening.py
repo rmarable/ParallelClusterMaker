@@ -34,6 +34,7 @@ import json
 import os
 import sys
 
+from conftest import assert_source_is_real
 import pytest
 import yaml
 
@@ -540,6 +541,7 @@ class TestTheHeadNodeRoleIsCreatedUnderTheBoundary:
         boundary is created there and naming it is correct."""
         for relpath in ("kill_pcluster.py",):
             with open(os.path.join(REPO_ROOT, relpath)) as fh:
+                assert_source_is_real(fh.read(), 'test_no_teardown_surface_names_the_boundary')
                 assert _cluster_boundary_name() not in fh.read(), (
                     f"{relpath} names the shared cluster boundary"
                 )

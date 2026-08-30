@@ -29,12 +29,6 @@ import subprocess  # noqa: F401 -- also used directly below (ansible --version),
 # patch make_pcluster.subprocess.run also reach core_create_cluster's calls,
 # which resolve subprocess.run in pcluster_core's namespace -- same shared
 # process-wide module object either way (see kill_pcluster.py's own note).
-from botocore.exceptions import (
-    BotoCoreError,
-    ClientError,
-    EndpointConnectionError,
-    NoCredentialsError,
-)
 
 # Import the list of supported EC2 instances and some external functions.
 sys.path.insert(0, _src_dir)

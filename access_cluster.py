@@ -26,7 +26,6 @@ sys.path.insert(0, _src_dir)
 from pcluster_core import (
     PClusterMakerError,
     core_ensure_generated_script,
-    _resolve_access_node_type,
     _validate_cluster_name,
     _read_cluster_record,
     core_exec_access_script,

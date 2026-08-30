@@ -30,10 +30,22 @@ from pcluster_core import (
     _get_cluster_cost,
     _read_cluster_record,
     _safe,
-    _utc_today,
     _validate_cluster_name,
     core_get_cost_report,
 )
+
+# Re-exported on purpose. These names are not called in this file -- the
+# entry point delegates to pcluster_core -- but the test suite reaches them
+# *through this module*, which is what keeps each shim honest about the
+# core it fronts. Declared in __all__ rather than silenced with a noqa:
+# __all__ states the intent, and both pyflakes and ruff read it, so
+# `ruff check --fix` cannot quietly delete a working re-export.
+__all__ = [
+    "_check_tag_activated",
+    "_date_range",
+    "_get_cluster_cost",
+    "_safe",
+]
 
 _ACTIVE_CLUSTERS_DIR = os.path.join(_repo_root, "active_clusters")
 

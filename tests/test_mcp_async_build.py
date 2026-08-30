@@ -17,6 +17,7 @@ import io
 import json
 import os
 
+from conftest import assert_source_is_real
 import pytest
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -379,8 +380,11 @@ class TestWhetherTheBuildStartedIsAFactNotAGuess:
         src = io.open(
             os.path.join(REPO_ROOT, "make_pcluster.py"), encoding="utf-8"
         ).read()
+        assert_source_is_real(src, 'test_the_cli_is_untouched')
         assert "_start_async_build" not in src
+        assert_source_is_real(src, 'test_the_cli_is_untouched')
         assert "make_build_event" not in src
+        assert_source_is_real(src, 'test_the_cli_is_untouched')
         assert "InvocationType" not in src
 
 

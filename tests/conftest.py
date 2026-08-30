@@ -719,3 +719,25 @@ def _no_test_reaches_aws(request, monkeypatch):
         )
 
     monkeypatch.setattr(URLLib3Session, "send", _blocked)
+
+
+def assert_source_is_real(source, label=""):
+    """Prove a haystack is the source you think it is, before asserting absence.
+
+    `assert needle not in source` is satisfied by an empty string, a
+    truncated read, a renamed file, and a path typo. It fails loudly when
+    the *code* regresses and silently when the *test* does, which is the
+    wrong way round: a negative assertion that has stopped reading anything
+    still passes, forever, while the rule it names goes unguarded.
+
+    Seventeen negative assertions over Python source had no such control.
+    They were found by asking which tests read source and assert absence
+    without also asserting presence -- and `TestEveryNegativeSourceAssertion
+    ProvesItsHaystack` in tests/test_negative_assertions.py keeps the answer
+    at zero, so a new one cannot be added quietly.
+    """
+    assert source and source.strip(), f"{label or 'source'} is empty"
+    assert "def " in source or "import " in source, (
+        f"{label or 'source'} does not look like Python source -- a negative "
+        f"assertion against it would pass without reading anything"
+    )

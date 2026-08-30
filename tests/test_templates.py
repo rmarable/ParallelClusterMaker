@@ -12,6 +12,7 @@ stubbed out so plain Python Jinja2 can render them without crashing.
 import fnmatch
 import json
 import os
+from conftest import assert_source_is_real
 import pytest
 import re
 import sys
@@ -2977,6 +2978,7 @@ def test_no_operator_side_scheduled_teardown_is_reintroduced():
         with open(os.path.join(REPO_ROOT, relpath)) as fh:
             body = fh.read()
         for token in ("at_job_id", "atrm", "atq", "cluster_lifetime"):
+            assert_source_is_real(body, 'test_no_operator_side_scheduled_teardown_is_reintroduced')
             assert token not in body, (
                 f"{relpath} references {token!r} — an operator-side scheduled "
                 f"teardown appears to have been reintroduced"
@@ -3251,6 +3253,7 @@ class TestARetainedResourceIsReportedWithoutBeingCalledAnOrphan:
         )
         source = inspect.getsource(core._collect_orphaned_resources)
         for token in ("delete_s3_bucketname", "results_bucketname"):
+            assert_source_is_real(source, 'test_nothing_retained_is_also_counted_as_an_orphan')
             assert token not in source, (
                 f"the orphan list reads {token}, so a deliberately retained "
                 f"resource would fail the teardown"
@@ -6980,7 +6983,9 @@ class TestTheWaitProgressLineSpacing:
         _elapsed_str's zero-filled fields, not in the bracket format."""
         with open(os.path.join(REPO_ROOT, "src", "pcluster_core.py")) as fh:
             body = fh.read()
+        assert_source_is_real(body, 'test_no_printer_pads_the_number_inside_the_brackets')
         assert ":>3d}m]" not in body
+        assert_source_is_real(body, 'test_no_printer_pads_the_number_inside_the_brackets')
         assert ":>3d}m ]" not in body
 
     def test_minutes_are_not_zero_padded(self):
@@ -7022,6 +7027,7 @@ class TestTheWaitProgressLineSpacing:
             body = fh.read()
 
         unconditional = 'f" (CloudFormation: {cfn_status})" if cfn_status else ""'
+        assert_source_is_real(body, 'test_the_cloudformation_status_is_shown_only_when_it_differs')
         assert unconditional not in body, (
             "a printer appends the CloudFormation status without comparing it"
         )
@@ -7096,7 +7102,9 @@ class TestTheWaitProgressLineSpacing:
     def test_no_printer_reintroduces_a_literal_interval(self):
         with open(os.path.join(REPO_ROOT, "src", "pcluster_core.py")) as fh:
             body = fh.read()
+        assert_source_is_real(body, 'test_no_printer_reintroduces_a_literal_interval')
         assert "(attempt + 1) * 30" not in body
+        assert_source_is_real(body, 'test_no_printer_reintroduces_a_literal_interval')
         assert "(attempt + 1) * 60" not in body
 
 

@@ -232,6 +232,7 @@ class TestCostSummaryLinesTakesKeywordsOnly:
         for call in calls:
             assert not call.args, "call site passes a positional argument"
             passed = {kw.arg for kw in call.keywords}
+            assert passed, "test_the_make_pcluster_call_site_names_every_argument: nothing to assert absence against"
             assert None not in passed, "call site splats **kwargs instead of naming"
             assert passed == expected, (
                 f"call site keywords {sorted(passed ^ expected)} do not match the "

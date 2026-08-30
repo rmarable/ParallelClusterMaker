@@ -33,8 +33,6 @@ work and the delay is the gap between invocations, because sleeping in a
 Lambda is billed at the same rate as working in one.
 """
 
-import json
-import os
 import time
 
 # Poll cadence and ceiling. A teardown is 15-20 minutes; the deadline is

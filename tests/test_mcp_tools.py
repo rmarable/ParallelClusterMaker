@@ -19,6 +19,7 @@ import json
 import os
 import sys
 
+from conftest import assert_source_is_real
 import pytest
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -1871,6 +1872,7 @@ class TestFinalizeTeardownNeedsNoTokenItCouldNeverHold:
         src = inspect.getsource(t)
         start = src.index("def finalize_cluster_teardown(")
         sig = src[start:src.index(")", start)]
+        assert_source_is_real(sig, 'test_it_takes_no_confirmation_token')
         assert "confirmation_token" not in sig, (
             "finalize_cluster_teardown still takes a token it cannot be "
             "given: the TTL is shorter than the teardown it follows"

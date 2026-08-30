@@ -382,6 +382,7 @@ def test_required_options_do_not_advertise_a_default():
     for block in _re.findall(r"add_argument\((.*?)\n    \)", src, _re.S):
         if '"--headnode_instance_type"' not in block:
             continue
+        assert block, "test_required_options_do_not_advertise_a_default: nothing to assert absence against"
         assert "default = " not in block, (
             "headnode_instance_type is required (make_pcluster.py aborts when unset); "
             "its help must not advertise a default"

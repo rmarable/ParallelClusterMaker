@@ -17,6 +17,7 @@ import json
 import os
 import sys
 
+from conftest import assert_source_is_real
 import pytest
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -308,4 +309,5 @@ class TestItIsNotReachableFromAnyMcpSurface:
     def test_no_mcp_tool_exposes_the_bootstrap(self):
         import glob
         for path in glob.glob(os.path.join(REPO_ROOT, "mcp_server", "*.py")):
+            assert_source_is_real(open(path).read(), 'test_no_mcp_tool_exposes_the_bootstrap')
             assert "bootstrap_operator_policy" not in open(path).read(), path

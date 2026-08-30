@@ -11,6 +11,7 @@ import subprocess
 import sys
 import types
 
+from conftest import assert_source_is_real
 import pytest
 from botocore.exceptions import ClientError
 
@@ -785,6 +786,7 @@ class TestDeriveHeadNodeBootstrapTimeout:
         for call in calls:
             assert not call.args, "call site passes a positional argument"
             passed = {kw.arg for kw in call.keywords}
+            assert passed, "test_the_make_pcluster_call_site_names_every_argument: nothing to assert absence against"
             assert None not in passed, "call site splats **kwargs instead of naming"
             assert passed == {"configured", "enable_efs", "enable_fsx"}, (
                 f"call site keywords {sorted(passed)} do not match the signature"
@@ -835,6 +837,7 @@ class TestStorageSummaryLinesTakesKeywordsOnly:
         for call in calls:
             assert not call.args, "call site passes a positional argument"
             passed = {kw.arg for kw in call.keywords}
+            assert passed, "test_the_make_pcluster_call_site_names_every_argument: nothing to assert absence against"
             assert None not in passed, "call site splats **kwargs instead of naming"
             assert passed == expected, (
                 f"call site keywords {sorted(passed ^ expected)} do not match the "
@@ -908,6 +911,7 @@ class TestValidateNetworkTakesKeywordsOnly:
             ]
             assert not other_positional, "call site passes a positional argument"
             passed = {kw.arg for kw in call.keywords}
+            assert passed, "test_the_make_pcluster_call_site_names_every_argument: nothing to assert absence against"
             assert None not in passed, "call site splats **kwargs instead of naming"
             assert passed == expected, (
                 f"call site keywords {sorted(passed ^ expected)} do not match "
@@ -4007,6 +4011,7 @@ class TestAccessDoesNotDependOnTheBuildHavingFinished:
         not come back in either the access or the tunnel path."""
         for rel in ("access_cluster.py", "grafana_tunnel.py", "src/pcluster_core.py"):
             body = open(os.path.join(self._ROOT, rel)).read()
+            assert_source_is_real(body, 'test_no_shim_tells_the_operator_to_rebuild')
             assert "Make sure the cluster was built" not in body, rel
 
 
@@ -4247,6 +4252,7 @@ class TestABuildFailureSaysWhatWentWrong:
         src = io.open(
             os.path.join(root, "src", "pcluster_core.py"), encoding="utf-8"
         ).read()
+        assert_source_is_real(src, 'test_no_failure_path_still_returns_the_generic_string')
         assert "build failed; see the messages above" not in src, (
             "a build failure still tells a remote caller to read stdout it "
             "cannot see"

@@ -31,6 +31,16 @@ from pcluster_core import (
     core_list_clusters,
 )
 
+# Re-exported on purpose. These names are not called in this file -- the
+# entry point delegates to pcluster_core -- but the test suite reaches them
+# *through this module*, which is what keeps each shim honest about the
+# core it fronts. Declared in __all__ rather than silenced with a noqa:
+# __all__ states the intent, and both pyflakes and ruff read it, so
+# `ruff check --fix` cannot quietly delete a working re-export.
+__all__ = [
+    "_age_str",
+]
+
 _PCLUSTER_BIN = os.path.join(_repo_root, ".venv", "bin", "pcluster")
 _ACTIVE_CLUSTERS_DIR = os.path.join(_repo_root, "active_clusters")
 _TRUNC = 20
