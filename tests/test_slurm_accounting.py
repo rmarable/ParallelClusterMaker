@@ -764,3 +764,59 @@ class TestTheWarningsReachSomebody:
                     "slurmdbd did not start",
                     "did not read"):
             assert msg in outside, msg
+
+
+class TestNoNodeScriptWarningGoesToStderr:
+    """cfn-init captures stdout only; node stderr reaches no stream at all.
+
+    So `|| echo "WARNING: ..." >&2` in a template a node executes is
+    invisible to the operator it is written for. Proven on `acctproof4`:
+    the guard that detects the MariaDB tuning failing to apply fired
+    correctly and its three lines are absent from CloudWatch, while an
+    `echo` from the same script milliseconds later is present -- one
+    stream, one script, a controlled comparison. The defect it had caught
+    then went unnoticed until the next build.
+
+    This started as an accounting fix and turned out to be repo-wide: 17
+    further warnings had the same problem, including every CloudWatch-agent
+    config failure and the `cfn_node_type` diagnosis, which is a *hard*
+    failure whose reason the operator could not see.
+
+    The one exception is deliberate: the deferred systemd unit keeps
+    `>&2`, because the journal captures it, and that is where its output
+    has actually been read on three live clusters. The rule is about the
+    capture mechanism, not about stderr being wrong.
+    """
+
+    _TEMPLATES = ("preinstall.j2", "postinstall.j2",
+                  "monitoring-post-install-wrapper.j2")
+
+    def _source(self, name):
+        with open(os.path.join(REPO_ROOT, "templates", name)) as fh:
+            return fh.read()
+
+    @pytest.mark.parametrize("name", _TEMPLATES)
+    def test_no_stderr_redirect_outside_a_systemd_unit(self, name):
+        src = self._source(name)
+        if "ACCTDEFER" in src:          # the deferred unit's body is exempt
+            d0 = src.index("sudo tee /usr/local/sbin/pcm-enable-slurm-acct")
+            d1 = src.index("\nACCTDEFER")
+            src = src[:d0] + src[d1:]
+        offenders = [l.strip() for l in src.splitlines()
+                     if ">&2" in l and not l.lstrip().startswith("#")]
+        assert offenders == [], offenders
+
+    def test_the_deferred_unit_still_uses_stderr(self):
+        """Vacuity guard, and the exception itself: systemd routes it to the
+        journal, so stderr is correct exactly there."""
+        src = self._source("postinstall.j2")
+        d0 = src.index("sudo tee /usr/local/sbin/pcm-enable-slurm-acct")
+        d1 = src.index("\nACCTDEFER")
+        assert src[d0:d1].count(">&2") >= 3
+
+    @pytest.mark.parametrize("name", _TEMPLATES)
+    def test_the_warnings_still_exist(self, name):
+        """The fix is redirecting them, not deleting them. Without this a
+        template that simply dropped every warning would pass above."""
+        src = self._source(name)
+        assert "WARNING" in src or "ERROR" in src, name

@@ -98,8 +98,8 @@ then
 	exit 0
 elif [ ! -r "$MONITORING_HOME/installer/install.sh" ]
 then
-	echo "ERROR: $MONITORING_HOME/installer/install.sh is absent or unreadable;" >&2
-	echo "       the head node's monitoring install did not complete" >&2
+	echo "ERROR: $MONITORING_HOME/installer/install.sh is absent or unreadable;"
+	echo "       the head node's monitoring install did not complete"
 	exit 1
 fi
 {% if stage_docker_compose == 'true' %}
@@ -167,9 +167,9 @@ then
 		END { if (_cmd ~ /curl|wget/ && _cmd ~ /docker-compose/) _bad = 1; exit _bad }
 	' "$_al2023_installer"
 	then
-		echo "ERROR: a compose download survived the patch in" >&2
-		echo "       $_al2023_installer -- its shape changed in monitoring" >&2
-		echo "       {{ monitoring_version }} and the awk above no longer matches." >&2
+		echo "ERROR: a compose download survived the patch in"
+		echo "       $_al2023_installer -- its shape changed in monitoring"
+		echo "       {{ monitoring_version }} and the awk above no longer matches."
 		exit 1
 	fi
 fi
@@ -182,11 +182,11 @@ rc=${PIPESTATUS[0]}
 set -e
 
 if [[ ${rc} -ne 0 ]]; then
-    echo "=============================================================" >&2
-    echo "monitoring install FAILED with exit ${rc}" >&2
-    echo "last 80 lines of ${LOG}:" >&2
-    echo "=============================================================" >&2
-    tail -n 80 "$LOG" >&2 || true
+    echo "============================================================="
+    echo "monitoring install FAILED with exit ${rc}"
+    echo "last 80 lines of ${LOG}:"
+    echo "============================================================="
+    tail -n 80 "$LOG" || true
 fi
 
 exit "${rc}"

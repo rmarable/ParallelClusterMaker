@@ -37,7 +37,7 @@ APT_TIMEOUTS="-o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::htt
 # outright.  `|| echo` cannot help a process that never exits, so the wall
 # clock has to be bounded from outside.  timeout(1) is coreutils and is on
 # every image this template supports.
-sudo timeout 300 apt-get -y $APT_TIMEOUTS update || echo "WARNING: apt-get update failed or timed out; continuing with the AMI's package index" >&2
+sudo timeout 300 apt-get -y $APT_TIMEOUTS update || echo "WARNING: apt-get update failed or timed out; continuing with the AMI's package index"
 
 # Hold the kernel back, but let userspace upgrade.  Two reasons, both learned the
 # hard way: a kernel bump triggers an initramfs rebuild whose runtime is
@@ -75,7 +75,7 @@ fi
 # installs in postinstall.j2, guarded the same way for the same reason.
 # The `install` line below stays fatal -- python3 and python3-dev are
 # genuinely required, and a cluster without them is not one.
-sudo timeout 900 env DEBIAN_FRONTEND=noninteractive apt-get -y $APT_TIMEOUTS dist-upgrade || echo "WARNING: apt-get dist-upgrade failed or timed out; the AMI's package set is unchanged" >&2
+sudo timeout 900 env DEBIAN_FRONTEND=noninteractive apt-get -y $APT_TIMEOUTS dist-upgrade || echo "WARNING: apt-get dist-upgrade failed or timed out; the AMI's package set is unchanged"
 # Bounded too, but still fatal: timeout(1) exits 124, which `set -e` treats
 # as the failure it is.  A head node without python3-dev is not a cluster,
 # so this must fail loudly rather than warn -- but it must not hang.

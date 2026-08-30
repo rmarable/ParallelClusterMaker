@@ -53,7 +53,7 @@ set -euo pipefail
 PCM_CW_AGENT_CFG="/opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.d/file_amazon-cloudwatch-agent.json"
 if [ -f "$PCM_CW_AGENT_CFG" ]
 then
-	sudo python3 - "$PCM_CW_AGENT_CFG" <<'PCM_CW_EOF' 2>/dev/null || echo "WARNING: could not add cfn-init-cmd.log to the CloudWatch agent" >&2
+	sudo python3 - "$PCM_CW_AGENT_CFG" <<'PCM_CW_EOF' 2>/dev/null || echo "WARNING: could not add cfn-init-cmd.log to the CloudWatch agent"
 import json, sys
 
 cfg = sys.argv[1]
@@ -78,7 +78,7 @@ entry["log_stream_name"] = "{instance_id}.cfn-init-cmd"
 cl.append(entry)
 json.dump(d, open(cfg, "w"))
 PCM_CW_EOF
-	sudo systemctl restart amazon-cloudwatch-agent >/dev/null 2>&1 		|| echo "WARNING: could not restart the CloudWatch agent" >&2
+	sudo systemctl restart amazon-cloudwatch-agent >/dev/null 2>&1 		|| echo "WARNING: could not restart the CloudWatch agent"
 fi
 
 # Set values for some important variables. 
@@ -118,7 +118,7 @@ then
 	NODE_TYPE="${cfn_node_type-}"
 	if [ -z "$NODE_TYPE" ]
 	then
-		echo "ERROR: /etc/parallelcluster/cfnconfig defines no cfn_node_type" >&2
+		echo "ERROR: /etc/parallelcluster/cfnconfig defines no cfn_node_type"
 		exit 1
 	fi
 fi
@@ -231,10 +231,10 @@ fi
 {% if 'ubuntu' in base_os %}
 if [ "$NODE_TYPE" == "HeadNode" ]
 then
-	sudo apt-get -y install nvtop htop || echo "WARNING: nvtop/htop unavailable on this node" >&2
+	sudo apt-get -y install nvtop htop || echo "WARNING: nvtop/htop unavailable on this node"
 else
-	sudo apt-get -y update || echo "WARNING: apt index refresh failed; htop may be unavailable" >&2
-	sudo apt-get -y install htop || echo "WARNING: htop unavailable on this node" >&2
+	sudo apt-get -y update || echo "WARNING: apt index refresh failed; htop may be unavailable"
+	sudo apt-get -y install htop || echo "WARNING: htop unavailable on this node"
 fi
 {% elif 'alinux' in base_os %}
 # Same node-type split for the same reasons, but htop only on both node types.
@@ -246,10 +246,10 @@ fi
 # to satisfy.  Non-fatal for the same reason as the other two arms.
 if [ "$NODE_TYPE" == "HeadNode" ]
 then
-	sudo dnf -y install htop || echo "WARNING: htop unavailable on this node" >&2
+	sudo dnf -y install htop || echo "WARNING: htop unavailable on this node"
 else
-	sudo dnf -y makecache || echo "WARNING: dnf metadata refresh failed; htop may be unavailable" >&2
-	sudo dnf -y install htop || echo "WARNING: htop unavailable on this node" >&2
+	sudo dnf -y makecache || echo "WARNING: dnf metadata refresh failed; htop may be unavailable"
+	sudo dnf -y install htop || echo "WARNING: htop unavailable on this node"
 fi
 {% else %}
 # Same split for the same reasons.  nvtop is in EPEL, which is not in RHEL's own
@@ -258,11 +258,11 @@ fi
 # command in this block is non-fatal for the reason above.
 if [ "$NODE_TYPE" == "HeadNode" ]
 then
-	sudo dnf -y install "https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm" || echo "WARNING: EPEL unavailable; nvtop will not install" >&2
-	sudo dnf -y install nvtop htop || echo "WARNING: nvtop/htop unavailable on this node" >&2
+	sudo dnf -y install "https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm" || echo "WARNING: EPEL unavailable; nvtop will not install"
+	sudo dnf -y install nvtop htop || echo "WARNING: nvtop/htop unavailable on this node"
 else
-	sudo dnf -y makecache || echo "WARNING: dnf metadata refresh failed; htop may be unavailable" >&2
-	sudo dnf -y install htop || echo "WARNING: htop unavailable on this node" >&2
+	sudo dnf -y makecache || echo "WARNING: dnf metadata refresh failed; htop may be unavailable"
+	sudo dnf -y install htop || echo "WARNING: htop unavailable on this node"
 fi
 {% endif %}
 {% endif %}
@@ -304,7 +304,7 @@ sudo chmod -R 755 "$SPACK_DIR"
 # nothing when the mirror is healthy.
 APT_TIMEOUTS="-o Acquire::Retries=5 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::ftp::Timeout=30"
 
-sudo timeout 300 apt-get -y $APT_TIMEOUTS update || echo "WARNING: apt index refresh failed or timed out; installs will use the AMI's index" >&2
+sudo timeout 300 apt-get -y $APT_TIMEOUTS update || echo "WARNING: apt index refresh failed or timed out; installs will use the AMI's index"
 sudo timeout 900 apt-get -y $APT_TIMEOUTS install gcc git lua5.4 liblua5.4-dev lua-filesystem nfs-common parallel pigz tcl tcsh zsh lua-posix tcllib binutils bc
 {% elif 'alinux' in base_os %}
 # Install critical packages via dnf.  Same kernel exclusions and the same `bc`
@@ -564,7 +564,7 @@ LoginNode)
 	# which ParallelCluster writes as HeadNode, ComputeFleet, or LoginNode. A
 	# fourth value means the contract changed and node-type gating above
 	# silently stopped applying.
-	echo "ERROR: unrecognized cfn_node_type: $NODE_TYPE" >&2
+	echo "ERROR: unrecognized cfn_node_type: $NODE_TYPE"
 	exit 1
 	;;
 esac
@@ -683,12 +683,12 @@ then
 		mkdir -p "{{ headnode_performance_dir_dest }}"
 		aws s3 sync "s3://{{ s3_bucketname }}/performance/" \
 			"{{ headnode_performance_dir_dest }}/" \
-			|| echo "WARNING: could not pull the performance tree from S3" >&2
+			|| echo "WARNING: could not pull the performance tree from S3"
 {% endif %}
 		sudo mkdir -p /opt/parallelcluster/shared
 		sudo touch /opt/parallelcluster/shared/staging_tree_pulled
 	else
-		echo "WARNING: could not pull the staging tree from s3://{{ s3_bucketname }}/staging/" >&2
+		echo "WARNING: could not pull the staging tree from s3://{{ s3_bucketname }}/staging/"
 	fi
 fi
 

@@ -623,8 +623,10 @@ standing constraints for local development.
   On `acctproof4` a guard fired and its lines are absent from CloudWatch
   while an `echo` from the same script is present — which is what let the
   defect it detected go unnoticed. Warnings there go to **stdout**; only a
-  systemd unit keeps `>&2`, since the journal captures it. Instances
-  outside the accounting block are unconverted (`CLAUDE-STATE.md`).
+  systemd unit keeps `>&2`, since the journal captures it — the rule is
+  about the capture mechanism, not about stderr being wrong. All three
+  node templates are converted; `TestNoNodeScriptWarningGoesToStderr`
+  keeps them that way.
 
 ## Environment
 

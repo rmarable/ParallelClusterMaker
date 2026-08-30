@@ -1862,7 +1862,9 @@ class TestPostinstallNodeTypeGating:
         applying, which must not look like success."""
         r, _, _ = _run_postinstall(cluster_params, "SomeOtherNodeType")
         assert r.returncode != 0, "an unrecognized node type must not exit 0"
-        assert b"SomeOtherNodeType" in r.stderr
+        # stdout, not stderr: cfn-init captures stdout only, so a diagnosis
+        # written to stderr is invisible to whoever has to act on it.
+        assert b"SomeOtherNodeType" in r.stdout
 
     def test_a_manual_run_outside_a_custom_action_does_not_abort(self, cluster_params):
         """No cfnconfig means this is not a ParallelCluster node, so HeadNode is
@@ -8286,12 +8288,21 @@ class TestATransientMirrorCannotFailTheCluster:
 
     def test_the_warning_names_what_was_skipped(self, cluster_params):
         """A silent `|| true` is worse than the failure: the operator has no
-        way to know the node is running the AMI's package set."""
+        way to know the node is running the AMI's package set.
+
+        The warning must go to **stdout**, not stderr. This test used to
+        require `>&2` and was therefore enforcing the defect: cfn-init
+        captures stdout only, so a warning on stderr reaches no stream at
+        all and the operator it is written for cannot see it. Proven on
+        `acctproof4`, where a guard fired and its output is absent from
+        CloudWatch while an `echo` from the same script is present."""
         rendered = self._render_preinstall(cluster_params)
         for needle in (" update", "dist-upgrade"):
             ln = self._line_for(rendered, needle)
             assert "WARNING" in ln, f"failure is swallowed silently: {ln}"
-            assert ">&2" in ln, f"the warning does not reach stderr: {ln}"
+            assert ">&2" not in ln, (
+                f"the warning goes to stderr, which cfn-init discards: {ln}"
+            )
 
 
 class TestPostinstallsRequiredInstallsRetry:
