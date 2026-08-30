@@ -617,6 +617,14 @@ standing constraints for local development.
   on `innodb_snapshot_isolation`, never `sacctmgr add cluster`, and a
   purge policy. **Default-on is safe only because of that latch**; the
   two defaults surfaces must agree. Detail: `templates/CLAUDE.local.md`.
+- **A warning a node script writes to stderr reaches nobody.** cfn-init
+  captures stdout only, so `|| echo "WARNING: ..." >&2` in
+  `preinstall.j2`/`postinstall.j2` is invisible to the operator it is for.
+  On `acctproof4` a guard fired and its lines are absent from CloudWatch
+  while an `echo` from the same script is present — which is what let the
+  defect it detected go unnoticed. Warnings there go to **stdout**; only a
+  systemd unit keeps `>&2`, since the journal captures it. Instances
+  outside the accounting block are unconverted (`CLAUDE-STATE.md`).
 
 ## Environment
 
