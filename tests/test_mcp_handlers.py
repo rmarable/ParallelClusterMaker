@@ -77,6 +77,58 @@ class TestEveryTierHasAModule:
         assert served <= set(tools_for(tier))
 
 
+class TestAMarkerCannotBeSmuggledThroughTheRouter:
+    """F1: a handler serves gateway traffic and self-invokes on one entry
+    point, and the router forwards a `tools/call` body verbatim. A caller
+    who adds `_pcm_build`/`_pcm_completion` to an ordinary call must NOT
+    reach run_build/run_completion_attempt -- those run ahead of every
+    wrapper-level gate (the confirmation token, _REMOTE_DENIED_PARAMS). The
+    forwarded body carries a `method`; a real self-invoke does not.
+
+    This is the boundary-crossing test the async-marker suite lacked: every
+    other test drives the markers with clean, internally-minted events, so
+    the bypass was invisible. The tool named is misrouted for the tier, so
+    handle() answers before building any server or touching AWS -- which is
+    itself the proof the event reached handle() and not the marker branch."""
+
+    def test_a_build_marker_on_a_tools_call_reaches_handle_not_run_build(self, monkeypatch):
+        import mcp_server.build_runner as build_runner
+
+        def _boom(*a, **k):
+            raise AssertionError("run_build reached from a forwarded tools/call")
+
+        monkeypatch.setattr(build_runner, "run_build", _boom)
+        event = {
+            "jsonrpc": "2.0",
+            "id": 7,
+            "method": "tools/call",
+            "_pcm_build": True,
+            "params": {"name": "create_cluster", "arguments": {}},
+        }
+        resp = read_only.lambda_handler(event, None)
+        assert resp["id"] == 7
+        assert "not served by tier" in resp["error"]["message"]
+
+    def test_a_completion_marker_on_a_tools_call_reaches_handle_not_the_runner(self, monkeypatch):
+        import mcp_server.completion_runner as completion_runner
+
+        def _boom(*a, **k):
+            raise AssertionError("run_completion_attempt reached from a forwarded tools/call")
+
+        monkeypatch.setattr(completion_runner, "run_completion_attempt", _boom)
+        event = {
+            "jsonrpc": "2.0",
+            "id": 8,
+            "method": "tools/call",
+            "_pcm_completion": True,
+            "cluster_name": "victim",
+            "params": {"name": "delete_cluster", "arguments": {}},
+        }
+        resp = read_only.lambda_handler(event, None)
+        assert resp["id"] == 8
+        assert "not served by tier" in resp["error"]["message"]
+
+
 class TestTierServesExactlyItsRoutedTools:
     @pytest.mark.parametrize("tier", sorted(HANDLER_TIERS))
     def test_no_tool_leaks_onto_the_wrong_tier(self, tier):

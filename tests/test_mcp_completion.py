@@ -130,8 +130,7 @@ class TestTheCompletionEventIsRecognizedByAMarker:
         assert is_completion_event(ev)
 
     def test_a_tools_call_is_not(self):
-        """Keyed on an explicit marker, never on the absence of something:
-        a malformed or unrelated event must not be mistaken for a
+        """A malformed or unrelated event must not be mistaken for a
         completion poll and start deleting things."""
         for ev in (
             {"jsonrpc": "2.0", "method": "tools/call"},
@@ -140,6 +139,28 @@ class TestTheCompletionEventIsRecognizedByAMarker:
             {"body": "{}"},
             {"_pcm_completion": "yes"},
             {"_pcm_completion": False},
+        ):
+            assert not is_completion_event(ev), ev
+
+    def test_a_marker_on_a_forwarded_request_is_not_a_completion(self):
+        """The F1 bypass: a caller adds the marker to a real `tools/call`
+        body, the router forwards it verbatim, and without this the handler
+        runs run_completion_attempt -- an unpreviewed, untokened teardown of
+        any named cluster. The router only forwards a body carrying a
+        `method`, so its presence alongside the marker marks the event as
+        forwarded gateway input, not a self-invoke."""
+        for ev in (
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "_pcm_completion": True,
+                "cluster_name": "victim",
+                "cluster_owner": "x",
+                "region": "us-east-1",
+            },
+            {"_pcm_completion": True, "method": "tools/call"},
+            {"_pcm_completion": True, "jsonrpc": "2.0"},
         ):
             assert not is_completion_event(ev), ev
 

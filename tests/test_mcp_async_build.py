@@ -25,8 +25,10 @@ REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 class TestTheMarkerIsExplicit:
     """A malformed event must never be mistaken for a build request and
-    start creating infrastructure. Keyed on a present marker, never on the
-    absence of a `method` field."""
+    start creating infrastructure. A build is identified by a present
+    marker AND the absence of JSON-RPC request shape: the router forwards a
+    `tools/call` body verbatim, so the marker alone let a forwarded request
+    reach run_build ahead of every wrapper-level gate."""
 
     def test_only_the_marker_identifies_a_build(self):
         from mcp_server.build import is_build_event
@@ -38,6 +40,27 @@ class TestTheMarkerIsExplicit:
         assert not is_build_event({"_pcm_build": False})
         assert not is_build_event(None)
         assert not is_build_event("_pcm_build")
+
+    def test_a_marker_on_a_forwarded_request_is_not_a_build(self):
+        """The F1 bypass: a caller adds the marker to a real `tools/call`
+        body, the router forwards it verbatim, and without this the handler
+        runs run_build with attacker-chosen params -- pre_install_script and
+        friends -- ahead of _reject_denied and the confirmation token. The
+        router only forwards a body carrying a `method`, so its presence
+        alongside the marker is proof of forwarded gateway input."""
+        from mcp_server.build import is_build_event
+
+        assert not is_build_event(
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "_pcm_build": True,
+                "params": {"cluster_name": "x", "pre_install_script": "evil"},
+            }
+        )
+        assert not is_build_event({"_pcm_build": True, "method": "tools/call"})
+        assert not is_build_event({"_pcm_build": True, "jsonrpc": "2.0"})
 
     def test_a_build_event_is_not_a_completion_event(self):
         """Both arrive on the same function. Confusing them would run a

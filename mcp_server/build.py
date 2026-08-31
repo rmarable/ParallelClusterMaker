@@ -34,8 +34,23 @@ Two properties that are not obvious:
 def is_build_event(event):
     """True when this invocation is a build request rather than a
     `tools/call`. Keyed on an explicit marker, never on the absence of
-    something else."""
-    return isinstance(event, dict) and event.get("_pcm_build") is True
+    something else.
+
+    The marker is not sufficient on its own. A handler serves gateway
+    traffic and self-invokes on the same entry point, and the router
+    forwards a `tools/call` body *verbatim* -- so a caller who adds
+    `_pcm_build` to a request would otherwise reach `run_build` ahead of
+    every wrapper-level gate (the confirmation token, `_REMOTE_DENIED_PARAMS`).
+    A legitimate self-invoke is `make_build_event`'s payload and carries no
+    JSON-RPC fields; the router refuses to forward a body without a
+    `method`, so its presence proves the event is forwarded gateway input,
+    not a self-invoke. Reject those here rather than trusting the marker."""
+    return (
+        isinstance(event, dict)
+        and event.get("_pcm_build") is True
+        and event.get("method") is None
+        and event.get("jsonrpc") is None
+    )
 
 
 def make_build_event(*, params, region, repo_root=None):

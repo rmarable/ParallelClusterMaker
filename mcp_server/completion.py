@@ -114,8 +114,22 @@ def next_payload(payload):
 def is_completion_event(event):
     """True when this invocation is a completion poll rather than a
     `tools/call`. Keyed on an explicit marker rather than on the absence of
-    something, so an unrelated malformed event is never mistaken for one."""
-    return isinstance(event, dict) and event.get("_pcm_completion") is True
+    something, so an unrelated malformed event is never mistaken for one.
+
+    The marker alone is not enough. The router forwards a `tools/call` body
+    verbatim to a handler, so a caller who adds `_pcm_completion` would
+    otherwise reach `run_completion_attempt` -- an unpreviewed, untokened
+    teardown of any named cluster -- ahead of every wrapper-level gate. A
+    legitimate self-invoke is `make_completion_event`'s payload and carries
+    no JSON-RPC fields; the router will not forward a body without a
+    `method`, so its presence marks the event as forwarded gateway input.
+    Reject those here rather than trusting the marker."""
+    return (
+        isinstance(event, dict)
+        and event.get("_pcm_completion") is True
+        and event.get("method") is None
+        and event.get("jsonrpc") is None
+    )
 
 
 def make_completion_event(
