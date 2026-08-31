@@ -212,6 +212,8 @@ def cluster_params():
         # Monitoring
         "enable_monitoring": "false",
         "enable_slurm_accounting": "false",
+        "slurm_accounting_buffer_pool_mb": "auto",
+        "slurm_accounting_log_file_mb": "auto",
         "monitoring_version": "v2.6",
         "monitoring_version_checksum": "sha256:4afa56a59228c1d8f4e405d07a2291f31853842128e6f7a0e52e1e2c1e262d55",
         "monitoring_s3_dest": "monitoring-post-install-wrapper.test-cluster.sh",
@@ -423,6 +425,8 @@ def cluster_params_al2023_monitoring(cluster_params_al2023):
     overrides = {
         "enable_monitoring": "true",
         "enable_slurm_accounting": "false",
+        "slurm_accounting_buffer_pool_mb": "auto",
+        "slurm_accounting_log_file_mb": "auto",
         "stage_docker_compose": "true",
         "docker_compose_version": "v2.29.7",
         "docker_compose_arch": "aarch64",
@@ -456,6 +460,8 @@ def cluster_params_monitoring_enabled(cluster_params):
     overrides = {
         "enable_monitoring": "true",
         "enable_slurm_accounting": "false",
+        "slurm_accounting_buffer_pool_mb": "auto",
+        "slurm_accounting_log_file_mb": "auto",
     }
     return {**cluster_params, **overrides}
 

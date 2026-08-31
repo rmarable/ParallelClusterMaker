@@ -341,6 +341,24 @@ def main():
         default=None,
     )
     parser.add_argument(
+        "--slurm_accounting_buffer_pool_mb",
+        metavar="auto|MB",
+        help='MariaDB innodb_buffer_pool_size for the accounting DB: "auto" '
+        "derives it from head-node RAM (10%%, floor 128, cap 4096), or an "
+        "integer in MB to raise it (default = auto)",
+        required=False,
+        default=None,
+    )
+    parser.add_argument(
+        "--slurm_accounting_log_file_mb",
+        metavar="auto|MB",
+        help='MariaDB innodb_log_file_size for the accounting DB: "auto" '
+        "derives it from the pool size (25%%, cap 256), or an integer in MB "
+        "to raise it (default = auto)",
+        required=False,
+        default=None,
+    )
+    parser.add_argument(
         "--enable_monitoring",
         choices=["true", "false"],
         help="deploy Grafana/Prometheus monitoring dashboard (default = false)",
@@ -754,6 +772,8 @@ def main():
     enable_hpc_benchmarks = _resolve_bool("enable_hpc_benchmarks")
     enable_monitoring = _resolve_bool("enable_monitoring")
     enable_slurm_accounting = _resolve_bool("enable_slurm_accounting")
+    slurm_accounting_buffer_pool_mb = _resolve("slurm_accounting_buffer_pool_mb")
+    slurm_accounting_log_file_mb = _resolve("slurm_accounting_log_file_mb")
     monitoring_version = _resolve("monitoring_version")
     if not re.fullmatch(r"v[0-9]+\.[0-9]+(\.[0-9]+)?", monitoring_version):
         sys.exit(
@@ -950,6 +970,8 @@ def main():
         enable_hpc_benchmarks=enable_hpc_benchmarks,
         enable_monitoring=enable_monitoring,
         enable_slurm_accounting=enable_slurm_accounting,
+        slurm_accounting_buffer_pool_mb=slurm_accounting_buffer_pool_mb,
+        slurm_accounting_log_file_mb=slurm_accounting_log_file_mb,
         monitoring_version=monitoring_version,
         monitoring_version_checksum=monitoring_version_checksum,
         docker_compose_version=docker_compose_version,

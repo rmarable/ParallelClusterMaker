@@ -2041,6 +2041,12 @@ MAKE_CLUSTER_DEFAULTS = {
     "enable_hpc_benchmarks": "false",
     "enable_monitoring": "false",
     "enable_slurm_accounting": "true",
+    # "auto" derives the MariaDB accounting DB sizes from the head node's RAM
+    # at boot (pool 10% floored 128M capped 4096M, log 25% of pool capped
+    # 256M); an integer overrides it in MB, for a large or long-retention
+    # cluster whose database outgrows the derived ceiling.
+    "slurm_accounting_buffer_pool_mb": "auto",
+    "slurm_accounting_log_file_mb": "auto",
     # These must be real digests, not placeholders. They are the only source
     # on the no-defaults-file path, and a stale <cluster>_defaults.yml that
     # predates a new key falls through to here -- which is how
@@ -4057,6 +4063,30 @@ def _validate_download_checksum(name, value):
             f"  If this is a placeholder, set a real value in your defaults file\n"
             f"  (copy the current one from pcluster_defaults.yml), or obtain it with:\n"
             f"    curl -sL <url> | sha256sum"
+        )
+
+
+def _validate_accounting_db_size(name, value):
+    """Abort unless value is "auto" or a positive integer number of MB.
+
+    "auto" derives the size from the head node's RAM at boot; an integer
+    overrides it. postinstall.j2 renders the value straight into the MariaDB
+    config as `${value}M` under `set -euo pipefail`, on the head node only.
+    A non-numeric value would write a config the server rejects -- accounting
+    then silently OFF, since that block is latched non-fatal -- and not be
+    seen until 20 minutes into a build. Checked here, before any AWS mutation,
+    so a typo fails preflight instead. Only validated when accounting is on:
+    a size for a feature that will not run must not reject a valid config.
+    """
+    if value == "auto":
+        return
+    s = str(value)
+    if not (s.isdigit() and int(s) >= 1):
+        sys.exit(
+            f"*** ERROR ***\n"
+            f'  Invalid {name} "{value}".\n'
+            f'  Must be "auto" (derive from head-node RAM) or a positive '
+            f"integer number of megabytes."
         )
 
 
@@ -8419,6 +8449,8 @@ class MakeClusterParams:
     enable_hpc_benchmarks: bool
     enable_monitoring: bool
     enable_slurm_accounting: bool
+    slurm_accounting_buffer_pool_mb: str
+    slurm_accounting_log_file_mb: str
     monitoring_version: str
     monitoring_version_checksum: str
     docker_compose_version: str
@@ -10229,6 +10261,8 @@ class BuildContext:
     enable_hpc_benchmarks: bool
     enable_monitoring: bool
     enable_slurm_accounting: bool
+    slurm_accounting_buffer_pool_mb: Any
+    slurm_accounting_log_file_mb: Any
     monitoring_version: Any
     monitoring_version_checksum: Any
     monitoring_s3_dest: Any
@@ -10932,6 +10966,8 @@ def core_create_cluster(
     enable_hpc_benchmarks = params.enable_hpc_benchmarks
     enable_monitoring = params.enable_monitoring
     enable_slurm_accounting = params.enable_slurm_accounting
+    slurm_accounting_buffer_pool_mb = params.slurm_accounting_buffer_pool_mb
+    slurm_accounting_log_file_mb = params.slurm_accounting_log_file_mb
     monitoring_version = params.monitoring_version
     monitoring_version_checksum = params.monitoring_version_checksum
     docker_compose_version = params.docker_compose_version
@@ -11473,6 +11509,12 @@ def core_create_cluster(
     if enable_external_nfs:
         _check_external_nfs_reachable(external_nfs_server)
 
+    if enable_slurm_accounting:
+        _validate_accounting_db_size(
+            "slurm_accounting_buffer_pool_mb", slurm_accounting_buffer_pool_mb
+        )
+        _validate_accounting_db_size("slurm_accounting_log_file_mb", slurm_accounting_log_file_mb)
+
     # Set external_nfs_server to a dummy value if external NFS support has not
     # been enabled.
 
@@ -11861,6 +11903,8 @@ def core_create_cluster(
         enable_hpc_benchmarks=enable_hpc_benchmarks,
         enable_monitoring=enable_monitoring,
         enable_slurm_accounting=enable_slurm_accounting,
+        slurm_accounting_buffer_pool_mb=slurm_accounting_buffer_pool_mb,
+        slurm_accounting_log_file_mb=slurm_accounting_log_file_mb,
         monitoring_version=monitoring_version,
         monitoring_version_checksum=monitoring_version_checksum,
         monitoring_s3_dest=f"monitoring-post-install-wrapper.{cluster_name}.sh",

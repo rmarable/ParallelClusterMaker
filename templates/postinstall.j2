@@ -755,12 +755,24 @@ then
 		# that too small a pool causes trouble when purging records or
 		# upgrading the schema, which are exactly the operations that
 		# touch everything at once.
+		# "auto" derives from RAM (the default); an operator override is an
+		# absolute value in MB, threaded from slurm_accounting_*_mb, for a
+		# large or long-retention database that outgrows the derived ceiling.
+		# The override is validated as a positive integer at build time.
+{% if slurm_accounting_buffer_pool_mb == 'auto' %}
 		_mem_mb="$(awk '/^MemTotal:/{print int($2/1024)}' /proc/meminfo)"
 		_pool_mb=$(( _mem_mb / 10 ))
 		if [ "$_pool_mb" -lt 128 ]; then _pool_mb=128; fi
 		if [ "$_pool_mb" -gt 4096 ]; then _pool_mb=4096; fi
+{% else %}
+		_pool_mb={{ slurm_accounting_buffer_pool_mb }}
+{% endif %}
+{% if slurm_accounting_log_file_mb == 'auto' %}
 		_log_mb=$(( _pool_mb / 4 ))
 		if [ "$_log_mb" -gt 256 ]; then _log_mb=256; fi
+{% else %}
+		_log_mb={{ slurm_accounting_log_file_mb }}
+{% endif %}
 
 		# Where the server reads config from is read out of the server's
 		# own config, never guessed. This shipped as `mkdir -p` of both

@@ -36,6 +36,7 @@ from pcluster_core import (
     _derive_head_node_bootstrap_timeout,
     _derive_docker_compose_staging,
     _derive_results_bucket,
+    _validate_accounting_db_size,
     _validate_download_checksum,
 )
 
@@ -1148,6 +1149,78 @@ class TestDeriveDockerComposeStaging:
         assert stage is True and arch == "x86_64"
 
 
+class TestSlurmAccountingDbSizeIsOverridableAndValidated:
+    """The MariaDB accounting-DB sizes are threaded as vars-file variables so
+    a large or long-retention cluster can raise them without editing the
+    template. "auto" keeps the RAM-based derivation (the default); an integer
+    overrides it in MB. postinstall.j2 renders the value straight into the
+    server config under set -euo pipefail, so a non-numeric value must fail
+    preflight rather than write a config the server rejects (accounting is
+    latched non-fatal, so it would silently go OFF)."""
+
+    def test_auto_is_accepted(self):
+        """Vacuity guard: the default must pass, or every reject below is
+        trivially satisfied by a validator that rejects everything."""
+        _validate_accounting_db_size("slurm_accounting_buffer_pool_mb", "auto")
+
+    def test_a_positive_integer_is_accepted(self):
+        for v in ("1", "512", "8192"):
+            _validate_accounting_db_size("slurm_accounting_log_file_mb", v)
+
+    @pytest.mark.parametrize("bad", ["0", "-5", "512M", "2G", "abc", "", "4096.0", "auto "])
+    def test_a_non_positive_integer_is_rejected(self, bad):
+        with pytest.raises(SystemExit):
+            _validate_accounting_db_size("slurm_accounting_buffer_pool_mb", bad)
+
+    def test_the_defaults_ship_auto(self):
+        from pcluster_core import MAKE_CLUSTER_DEFAULTS
+
+        assert MAKE_CLUSTER_DEFAULTS["slurm_accounting_buffer_pool_mb"] == "auto"
+        assert MAKE_CLUSTER_DEFAULTS["slurm_accounting_log_file_mb"] == "auto"
+
+    def test_the_fields_are_on_makeclusterparams(self):
+        from dataclasses import fields
+
+        from pcluster_core import MakeClusterParams
+
+        names = {f.name for f in fields(MakeClusterParams)}
+        assert {"slurm_accounting_buffer_pool_mb", "slurm_accounting_log_file_mb"} <= names
+
+    def _render_sizing(self, cluster_params, pool, log):
+        import pcluster_core
+
+        ctx = dict(cluster_params)
+        ctx["enable_slurm_accounting"] = "true"
+        ctx["slurm_accounting_buffer_pool_mb"] = pool
+        ctx["slurm_accounting_log_file_mb"] = log
+        repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        env = pcluster_core._template_env(os.path.join(repo_root, "templates"))
+        out = env.get_template("postinstall.j2").render(**ctx)
+        return [
+            line.strip() for line in out.splitlines() if "_pool_mb=" in line or "_log_mb=" in line
+        ]
+
+    def test_auto_renders_the_ram_derivation(self, cluster_params):
+        lines = self._render_sizing(cluster_params, "auto", "auto")
+        assert any("_mem_mb / 10" in line for line in lines), lines
+        assert any("_pool_mb / 4" in line for line in lines), lines
+
+    def test_an_override_renders_the_literal_value_and_no_derivation(self, cluster_params):
+        lines = self._render_sizing(cluster_params, "8192", "512")
+        assert "_pool_mb=8192" in lines
+        assert "_log_mb=512" in lines
+        assert not any("_mem_mb" in line for line in lines), (
+            "an explicit pool must not reference _mem_mb -- it is only set in the "
+            "auto branch, and referencing it unset fails under set -u"
+        )
+
+    def test_an_explicit_pool_with_auto_log_derives_the_log_from_the_pool(self, cluster_params):
+        lines = self._render_sizing(cluster_params, "8192", "auto")
+        assert "_pool_mb=8192" in lines
+        assert any("_pool_mb / 4" in line for line in lines), lines
+        assert not any("_mem_mb" in line for line in lines), lines
+
+
 class TestDownloadChecksumsAreValidatedBeforeAnythingIsCreated:
     """Every checksum the build resolves is handed to Ansible's get_url, which
     splits on ':' and int()s the remainder base 16. A placeholder therefore
@@ -1503,11 +1576,10 @@ class TestDeriveAzList:
 
 class TestBuildMakeClusterParams:
     """The bridge that lets a non-argparse caller construct a
-    MakeClusterParams (round 44). 84 fields, none with a default:
-    MAKE_CLUSTER_DEFAULTS supplies 70, four are required inputs, and the
-    remaining ten are derived here through the same core helpers
-    make_pcluster.py's main() calls -- not reimplemented, so a change to
-    any of them reaches both callers.
+    MakeClusterParams (round 44). Every field is supplied one of three ways:
+    MAKE_CLUSTER_DEFAULTS, the required inputs, or a value derived here
+    through the same core helpers make_pcluster.py's main() calls -- not
+    reimplemented, so a change to any of them reaches both callers.
     """
 
     _REQUIRED = dict(

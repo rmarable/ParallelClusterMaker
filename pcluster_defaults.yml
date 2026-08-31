@@ -148,8 +148,16 @@ use_private_gpu_subnet: "false"  # only auto-discover private subnets for GPU no
 # --- Performance tests ---
 enable_hpc_benchmarks: "false"
 
-# --- Monitoring (aws-parallelcluster-monitoring Grafana/Prometheus stack) ---
+# --- Slurm accounting (local MariaDB on the head node) ---
 enable_slurm_accounting: "true"
+# MariaDB accounting-DB sizing. "auto" derives from the head node's RAM at
+# boot: buffer pool 10% of RAM (floor 128M, cap 4096M), redo log 25% of the
+# pool (cap 256M). Override in megabytes for a large or long-retention
+# cluster whose database outgrows the derived ceiling, e.g. "8192" / "512".
+slurm_accounting_buffer_pool_mb: "auto"
+slurm_accounting_log_file_mb: "auto"
+
+# --- Monitoring (aws-parallelcluster-monitoring Grafana/Prometheus stack) ---
 enable_monitoring: "false"
 monitoring_version: "v2.6"  # pin to a specific release tag from aws-samples/aws-parallelcluster-monitoring
 # SHA-256 of the release tarball for supply-chain integrity.

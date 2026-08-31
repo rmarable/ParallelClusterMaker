@@ -168,6 +168,8 @@ user_postinstall_s3_dest: "{{ post_install_script.split('/')[-1] }}"
 # Monitoring configuration
 
 enable_slurm_accounting: "{{ enable_slurm_accounting }}"
+slurm_accounting_buffer_pool_mb: "{{ slurm_accounting_buffer_pool_mb }}"
+slurm_accounting_log_file_mb: "{{ slurm_accounting_log_file_mb }}"
 enable_monitoring: "{{ enable_monitoring }}"
 {% if enable_monitoring == 'true' %}
 monitoring_version: "{{ monitoring_version }}"
