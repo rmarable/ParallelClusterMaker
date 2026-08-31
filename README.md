@@ -1,6 +1,6 @@
 # ParallelClusterMaker
 
-This Open Source CLI toolkit automates creation and destruction of [AWS ParallelCluster v3](https://github.com/aws/aws-parallelcluster) stacks.  It lets researchers and engineers stand up a working HPC cluster on AWS without deep infrastructure expertise.
+This CLI toolkit automates creation and destruction of [AWS ParallelCluster v3](https://github.com/aws/aws-parallelcluster) stacks.  It lets researchers and engineers stand up a working HPC cluster on AWS without deep infrastructure expertise.
 
 This codebase was co-written with [Claude Code](https://claude.ai/code) (Anthropic). AI-assisted contributions are accepted under a public policy ([AI_POLICY.md](AI_POLICY.md)): the tool or model must be disclosed, and a human remains responsible for every line submitted.
 
@@ -1794,8 +1794,8 @@ explicitly and invokes `.venv/bin/python -m pytest` directly for the same reason
 Template tests render with the same Jinja settings `ansible.builtin.template` uses —
 `trim_blocks=True`, `lstrip_blocks=False` — so what a test asserts on is the file the node
 actually receives.  `tests/test_templates.py::TestTheTestEnvironmentMatchesAnsible` reads both
-defaults back out of the installed Ansible instead of restating them, and fails if a playbook
-task overrides either.
+defaults back out of the installed Ansible instead of restating them, and holds both the test
+environment and the production `pcluster_core._template_env` to them.
 
 Every OS arm is rendered and executed.  `tests/conftest.py` ships Ubuntu, RHEL 9, and Amazon
 Linux 2023 fixtures (plus GPU variants of each), and `TestPackageManagersMatchTheRenderedOs` runs the
@@ -1863,18 +1863,18 @@ Potential future improvements, roughly ordered by impact:
 
 ### Architecture
 
-- **Terraform / CDK parity** — the toolkit is Ansible-native.  A Terraform or AWS CDK implementation of the same lifecycle (`make` / `kill` / `access`) would fit more naturally into infrastructure-as-code pipelines that already use those tools.
+- **Terraform / CDK parity** — the toolkit drives ParallelCluster from Python through `pcluster.lib`.  A Terraform or AWS CDK implementation of the same lifecycle (`make` / `kill` / `access`) would fit more naturally into infrastructure-as-code pipelines that already use those tools.
 
 ---
 
 ## Disclaimer
 
-This software is licensed under the Apache License, Version 2.0 with the Commons Clause restriction.  You may use, modify, and distribute it freely, but you may not sell it or offer it as a commercial product or service without the explicit written consent of Rodney Marable.  See `LICENSE` for full terms.
+This software is licensed under the Apache License, Version 2.0 with the Commons Clause restriction.  You may use, modify, and distribute it freely, including inside a commercial organization, but you may not sell it or offer it to third parties as a paid product or hosted service without the explicit written consent of Rodney Marable.  Charging a customer for professional services — installation, configuration, training, or support — is permitted, provided the software itself is not resold or offered as a hosted service.  This is a source-available license, not an OSI-approved open source license.  See `LICENSE` for full terms.
 
 By using this software:
 
-- You accept all potential risks involved with your use of this Open Source software.
-- You agree that the author shall have no responsibility or liability for any losses or damages incurred in conjunction with your use of this Open Source software.
+- You accept all potential risks involved with your use of this software.
+- You agree that the author shall have no responsibility or liability for any losses or damages incurred in conjunction with your use of this software.
 - You acknowledge that bugs may still be present, unexpected behavior might be observed, and some features may not be completely documented.
 
 **This software is authored by Rodney Marable in his individual capacity and is neither endorsed nor supported by Amazon Web Services.**  You cannot create cases with AWS Technical Support or engage AWS support engineers in public forums if you have any questions, problems, or issues using this software.
@@ -1888,5 +1888,7 @@ By using this software:
 https://github.com/rmarable/ParallelClusterMaker/issues
 
 Pull requests welcome: https://github.com/rmarable/ParallelClusterMaker/pulls
+
+Before opening a pull request, please read [CONTRIBUTING.md](CONTRIBUTING.md) — it covers how contributions are licensed, the commit sign-off every change needs ([DCO.md](DCO.md)), and the three gates CI runs.
 
 AI-assisted contributions are welcome — see [AI_POLICY.md](AI_POLICY.md) for submission guidance.

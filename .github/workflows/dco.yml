@@ -1,0 +1,47 @@
+---
+name: dco
+
+"on":
+  pull_request:
+    branches: ["**"]
+
+jobs:
+  dco:
+    runs-on: ubuntu-latest
+    steps:
+      # Sign-off is checked commit by commit, so the whole range has to be
+      # present -- the default shallow clone has only the tip.
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Every commit carries a Signed-off-by matching its author
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          missing=0
+          for sha in $(git rev-list "${BASE_SHA}..${HEAD_SHA}")
+          do
+              author="$(git show -s --format='%an <%ae>' "${sha}")"
+              if git show -s --format='%B' "${sha}" \
+                  | grep -qiF "Signed-off-by: ${author}"
+              then
+                  continue
+              fi
+              echo "MISSING sign-off"
+              git show -s --format='  commit:   %h %s' "${sha}"
+              echo "  author:   ${author}"
+              echo "  expected: Signed-off-by: ${author}"
+              missing=1
+          done
+          if [ "${missing}" -ne 0 ]
+          then
+              echo
+              echo "Sign off with 'git commit -s', or for a branch already"
+              echo "written: git rebase --signoff ${BASE_SHA}"
+              echo "See DCO.md for the certificate you are signing."
+              exit 1
+          fi
+          echo "every commit in this pull request is signed off"
