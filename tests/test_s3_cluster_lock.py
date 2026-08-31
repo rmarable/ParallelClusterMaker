@@ -70,6 +70,7 @@ class _FakeS3Lock:
         self.created_buckets = []
         self.public_access_blocked = []
         self.race_on_next_get = False
+        self.release_on_next_get = False
         self.existing_buckets = set()
 
     def head_bucket(self, Bucket):
@@ -108,7 +109,18 @@ class _FakeS3Lock:
         self.objects[key]["last_modified"] = when
 
     def get_object(self, Bucket, Key):
-        obj = self.objects[Key]
+        if self.release_on_next_get:
+            # The holder released the lock between our failed IfNoneMatch PUT
+            # and this read -- the key is gone by the time we look.
+            self.release_on_next_get = False
+            self.objects.pop(Key, None)
+        obj = self.objects.get(Key)
+        if obj is None:
+            # Contract-faithful: real S3 GetObject on a missing key returns
+            # NoSuchKey / 404, not a Python KeyError. The old fake did the
+            # dict lookup bare, so the release-during-acquire path could not
+            # be modeled here at all.
+            raise _client_error("NoSuchKey", "GetObject", status=404)
         result = {
             "ETag": obj["etag"],
             "LastModified": obj["last_modified"],
@@ -432,6 +444,45 @@ class TestS3AcquireClusterLock:
                 staleness_ceiling_seconds=7200,
             )
 
+    def test_a_lock_released_between_the_put_and_the_get_is_reacquired(self):
+        """C1: the IfNoneMatch PUT fails because the lock is held, but the
+        holder releases it before the GET -- so the lock is free by the time
+        we look. The acquire must re-attempt and win, not let the GET's
+        NoSuchKey escape as an opaque failure under exactly the contention
+        the lock exists for. _is_missing_key_rejection already documents the
+        reading: a vanished object means nobody holds the lock."""
+        s3 = _FakeS3Lock()
+        s3.objects[_lock_key(CLUSTER)] = {
+            "body": b"{}",
+            "etag": "e0",
+            "last_modified": DateTime.now(timezone.utc),
+        }
+        s3.release_on_next_get = True
+        key = s3_acquire_cluster_lock(
+            s3, locks_bucketname="b", cluster_name=CLUSTER, command="mine"
+        )
+        assert key == _lock_key(CLUSTER)
+        assert _lock_key(CLUSTER) in s3.objects  # this caller now holds it
+
+    def test_a_perpetually_flapping_lock_is_bounded_not_infinite(self):
+        """The retry is bounded: a pathological free/held flap (every PUT
+        finds it held, every GET finds it gone) must terminate with a
+        ClusterLockError, never spin forever."""
+
+        class _Flap(_FakeS3Lock):
+            def put_object(self, **kwargs):
+                if kwargs.get("IfNoneMatch") == "*":
+                    raise _client_error("PreconditionFailed", "PutObject", status=412)
+                return super().put_object(**kwargs)
+
+            def get_object(self, Bucket, Key):
+                raise _client_error("NoSuchKey", "GetObject", status=404)
+
+        with pytest.raises(ClusterLockError, match="repeatedly acquired and released"):
+            s3_acquire_cluster_lock(
+                _Flap(), locks_bucketname="b", cluster_name=CLUSTER, command="mine"
+            )
+
     def test_unrelated_put_object_error_propagates(self):
         class _Denied(_FakeS3Lock):
             def put_object(self, **kwargs):
@@ -441,6 +492,23 @@ class TestS3AcquireClusterLock:
             s3_acquire_cluster_lock(
                 _Denied(), locks_bucketname="b", cluster_name=CLUSTER, command="first"
             )
+
+    def test_an_unrelated_get_object_error_still_propagates(self):
+        """The retry is scoped to NoSuchKey. A denied or transient GET is not
+        evidence the lock is free and must not be swallowed into a retry."""
+
+        class _DeniedGet(_FakeS3Lock):
+            def get_object(self, Bucket, Key):
+                raise _client_error("AccessDenied", "GetObject", status=403)
+
+        s3 = _DeniedGet()
+        s3.objects[_lock_key(CLUSTER)] = {
+            "body": b"{}",
+            "etag": "e0",
+            "last_modified": DateTime.now(timezone.utc),
+        }
+        with pytest.raises(ClientError):
+            s3_acquire_cluster_lock(s3, locks_bucketname="b", cluster_name=CLUSTER, command="mine")
 
     def test_unexpected_describe_exception_is_treated_as_not_terminal(self):
         """An ambiguous describe_cluster failure (network error, transient

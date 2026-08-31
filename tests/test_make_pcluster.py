@@ -2881,6 +2881,11 @@ class TestTheClusterConfigStore:
 
         text, _ = get_cluster_config_object(s3, locks_bucketname="b", cluster_name="osiris")
         assert "ap-south-1" in text, "the racing writer's edit must survive"
+        # C2: the losing conditional put must leave the local file untouched
+        # too -- the pre-check conflict branches promise "Nothing was
+        # written", and writing locally before the put is confirmed left the
+        # local file holding an edit the store had rejected.
+        assert path.read_text() == outer._CONFIG, "the local file must be untouched on conflict"
 
     def test_whitespace_alone_is_not_divergence(self, tmp_path):
         """A hand-edited local file differs in whitespace from a

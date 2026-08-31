@@ -848,6 +848,11 @@ _LOCK_RECLAIMABLE_STATUSES = frozenset(
 )
 
 _LOCK_STALENESS_CEILING_SECONDS = 7200  # 2x the 3600s default create/delete wait ceiling
+# The only path that retries acquisition is a lock released in the window
+# between the IfNoneMatch PUT and the GET below -- each retry means the lock
+# was genuinely free again, so this bounds a pathological free/held flap, not
+# ordinary contention (a held lock raises on the first attempt, never loops).
+_LOCK_ACQUIRE_MAX_ATTEMPTS = 5
 
 
 class ClusterLockError(Exception):
@@ -1600,14 +1605,33 @@ def s3_acquire_cluster_lock(
     now_fn = now_fn or (lambda: DateTime.now(timezone.utc))
     key = _lock_key(cluster_name)
     body = _lock_owner_body(command=command)
-    try:
-        s3.put_object(Bucket=locks_bucketname, Key=key, Body=body, IfNoneMatch="*")
-        return key
-    except _ClientError as e:
-        if not _is_conditional_write_rejection(e):
+    existing = None
+    for _ in range(_LOCK_ACQUIRE_MAX_ATTEMPTS):
+        try:
+            s3.put_object(Bucket=locks_bucketname, Key=key, Body=body, IfNoneMatch="*")
+            return key
+        except _ClientError as e:
+            if not _is_conditional_write_rejection(e):
+                raise
+        try:
+            existing = s3.get_object(Bucket=locks_bucketname, Key=key)
+            break
+        except _ClientError as e:
+            # The IfNoneMatch PUT failed because the lock was held, but the
+            # holder released it before this read -- so it is free now. That
+            # is exactly what _is_missing_key_rejection documents ("a vanished
+            # object means nobody holds the lock"); re-attempt rather than let
+            # the NoSuchKey escape as an opaque failure under contention.
+            if _is_missing_key_rejection(e):
+                continue
             raise
+    else:
+        raise ClusterLockError(
+            f"Could not acquire the lock for cluster {cluster_name!r}: it was "
+            f"repeatedly acquired and released by other operations "
+            f"({_LOCK_ACQUIRE_MAX_ATTEMPTS} attempts). Re-run to retry."
+        )
 
-    existing = s3.get_object(Bucket=locks_bucketname, Key=key)
     etag = existing["ETag"]
     last_modified = existing["LastModified"]
     try:
@@ -6800,7 +6824,12 @@ def _save_cluster_config(
                         f"s3://{locks_bucketname}/{_config_key(cluster_name)} "
                         f"and re-run once they agree."
                     )
-            _write_cluster_config(config_path, config_dict)
+            # Store first, local second. A losing conditional put -- another
+            # machine wrote between the read above and here -- must leave this
+            # machine's file untouched: the sibling pre-checks above all
+            # promise "Nothing was written", and writing locally before the
+            # put is confirmed breaks that promise, leaving the local file
+            # holding an edit the store rejected.
             try:
                 new_etag = put_cluster_config_object(
                     s3,
@@ -6809,15 +6838,21 @@ def _save_cluster_config(
                     text=_dump_cluster_config(config_dict),
                     etag=stored_etag,
                 )
-                _write_mirror_marker(config_path, new_etag)
             except ClusterConfigConflict:
                 raise
             except (_ClientError, BotoCoreError, NoCredentialsError) as e:
+                # Store unreachable (not a conflict): the edit still lands
+                # locally, loudly unmirrored -- the same degradation as the
+                # store-unreachable branch above.
+                _write_cluster_config(config_path, config_dict)
                 print(
                     "*** WARNING ***\n"
                     f"  Config saved locally but not mirrored to "
                     f"s3://{locks_bucketname}/{_config_key(cluster_name)}: {e}"
                 )
+                return config_path
+            _write_cluster_config(config_path, config_dict)
+            _write_mirror_marker(config_path, new_etag)
             return config_path
 
         _write_cluster_config(config_path, config_dict)
