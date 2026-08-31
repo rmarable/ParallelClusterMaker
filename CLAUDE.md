@@ -45,7 +45,7 @@ standing constraints for local development.
   pipeline (Python vars dict → `vars_file.j2` → template) and added to
   `tests/conftest.py`.
 - `pcluster_os` is derived from `base_os` by stripping the `arm` suffix
-  (`pcluster_os = base_os.removesuffix("arm")`, in `make_pcluster.py`) —
+  (`pcluster_os = base_os.removesuffix("arm")`, in `pcluster_core.py`) —
   PCluster's `Os:` field does not accept an `arm` suffix.
 - Eight `base_os` values are supported, two package-manager families:
   `ubuntu2204`, `ubuntu2404`, `ubuntu2204arm`, `ubuntu2404arm`, `rhel9`,
@@ -109,7 +109,7 @@ standing constraints for local development.
   `needs_efa_gdr(instance_type)` (single argument only).
 - `job_hpc-benchmark.sh.j2`'s `--partition` and `--ntasks-per-node` are
   derived from the cluster's own shape (`enable_cpu_queue`,
-  `gpu_ranks_per_node`/`cpu_ranks_per_node` in `make_pcluster.py`) — never
+  `gpu_ranks_per_node`/`cpu_ranks_per_node` in `pcluster_core.py`) — never
   hardcoded.
 - FSx hydration uses one S3 bucket with two prefixes (import and export must
   name the same bucket) — enforced by `_normalize_fsx_buckets` in
