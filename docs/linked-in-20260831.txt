@@ -1,0 +1,5 @@
+ParallelClusterMaker is now available as an MCP server, reachable from Claude Code on your own machine and from https://claude.ai in the browser. The necessary infrastructure deploys into your specified AWS account and can be heavily customized to support a wide range of HPC and ML training use cases.  Slurm accounting is now enabled by default on a lightweight local MariaDB backend.
+
+Common operations like building/destroying cluster stacks, modifying compute/gpu queue configurations, and starting/stopping compute fleets are all supported using human language.  Please note that *submitting* jobs is available only from Claude Code or the CLI, but you can perform all other read-only operations like inspecting job statuses, reviewing queue configurations, and viewing cluster/node states in Claude.ai.
+
+Visit the GitHub repository: https://lnkd.in/ediyyjD
