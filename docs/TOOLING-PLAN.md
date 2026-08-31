@@ -610,3 +610,28 @@ measurement first. Step 9 is the only one I would argue against on its merits.
 - **Whether ruff's isort would survive the 54 `sys.path.insert` files.** The
   rule's documented behaviour says yes; the failure mode if it does not is every
   entry point failing to import.
+
+---
+
+## DECIDED, 2026-08-30: no black
+
+Not adopted, and not on grounds of risk -- the risk was measured and then
+removed. Of 22 negative assertions over Python source carrying a literal
+needle, 4 contained parentheses or spaces a formatter could move; those 4
+now compare with layout stripped (`assert_absent_ignoring_formatting`),
+verified by reintroducing a banned expression wrapped across lines and
+watching the test fail. The `ensure_event_loop` guard, which black broke at
+all 7 sites, walks the AST now and does not care about blank lines.
+
+So the objection that remains is not correctness. It is that black rewrites
+**76 of 85 files**, which buries recent work in `git blame` and invalidates
+the `file:line` citations the docs carry. That is a judgement about history,
+and the answer was no.
+
+**What that leaves behind is worth keeping**: the four layout-proof
+assertions and the AST-based guard are better tests whether or not a
+formatter ever runs. They were written to unblock a decision that went the
+other way, and they stand on their own.
+
+Do not re-open this by citing the vacuity risk -- that part is fixed. Any
+future case for black has to argue the diff.
