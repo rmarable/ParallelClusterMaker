@@ -29,10 +29,13 @@ import yaml
 from concurrent.futures import ThreadPoolExecutor
 import dataclasses
 from typing import Any
-from dataclasses import (asdict as _dc_asdict, dataclass,
-                         field as _dc_field,
-                         fields as _dc_fields,
-                         is_dataclass as _dc_is_dataclass)
+from dataclasses import (
+    asdict as _dc_asdict,
+    dataclass,
+    field as _dc_field,
+    fields as _dc_fields,
+    is_dataclass as _dc_is_dataclass,
+)
 from datetime import datetime as DateTime, timedelta, timezone
 from io import StringIO
 
@@ -206,16 +209,10 @@ def resolve_region_from_az(az, *, ec2_client=None):
     # Client construction inside the try: it is what raises on a malformed
     # region, and it sat above the except clause that names ValueError.
     try:
-        client = ec2_client if ec2_client is not None else boto3.client(
-            "ec2", region_name=az[:-1]
-        )
-        zones = client.describe_availability_zones(ZoneNames=[az]).get(
-            "AvailabilityZones"
-        )
+        client = ec2_client if ec2_client is not None else boto3.client("ec2", region_name=az[:-1])
+        zones = client.describe_availability_zones(ZoneNames=[az]).get("AvailabilityZones")
     except (ValueError, BotoCoreError, NoCredentialsError, _ClientError) as e:
-        raise PClusterMakerError(
-            f"ERROR: Could not verify availability zone '{az}': {e}"
-        ) from e
+        raise PClusterMakerError(f"ERROR: Could not verify availability zone '{az}': {e}") from e
     if not zones:
         raise AvailabilityZoneNotFound(
             f"ERROR: '{az}' is not an availability zone in this account."
@@ -243,11 +240,7 @@ def _validate_cluster_owner(owner):
     The owner is embedded in the Turbot profile string and IAM policy names, so
     it must be lowercase alphanumeric plus hyphens only, no trailing or consecutive hyphens.
     """
-    if (
-        not re.match(r"^[a-z0-9][a-z0-9\-]{0,62}$", owner)
-        or owner.endswith("-")
-        or "--" in owner
-    ):
+    if not re.match(r"^[a-z0-9][a-z0-9\-]{0,62}$", owner) or owner.endswith("-") or "--" in owner:
         sys.exit(
             "cluster_owner must contain only lowercase letters, digits, and hyphens, "
             "start with a letter or digit, and contain no trailing or consecutive hyphens."
@@ -278,8 +271,7 @@ def _resolve_ec2_user(base_os):
     ec2_user = _EC2_USERS.get(base_os)
     if ec2_user is None:
         sys.exit(
-            f"ERROR: '{base_os}' is not a supported base OS. "
-            f"Choose from: {', '.join(_EC2_USERS)}"
+            f"ERROR: '{base_os}' is not a supported base OS. Choose from: {', '.join(_EC2_USERS)}"
         )
     return ec2_user, "/home/" + ec2_user
 
@@ -331,9 +323,7 @@ def _normalize_fsx_buckets(import_bucket, export_bucket, import_path, export_pat
         )
     if export_bucket == "UNDEFINED":
         print("*** WARNING ***")
-        print(
-            "fsx_s3_import bucket is defined but fsx_s3_export_bucket is unspecified!"
-        )
+        print("fsx_s3_import bucket is defined but fsx_s3_export_bucket is unspecified!")
         print("Lustre will hydrate *and* dehydrate from the S3 import bucket path.")
         print("")
         return import_bucket, import_path
@@ -454,9 +444,24 @@ def _check_external_nfs_reachable(server, *, port_timeout=5, showmount_timeout=1
 # _SINFO_STATE_FLAGS did nothing, which is what let an empty flag set pass the
 # whole suite.
 _SINFO_OK_STATES = frozenset(
-    {"idle", "mix", "mixed", "alloc", "allocated", "comp", "completing",
-     "future", "resv", "reserved", "power_up", "powering_up", "power_down",
-     "powering_down", "powered_down", "planned"}
+    {
+        "idle",
+        "mix",
+        "mixed",
+        "alloc",
+        "allocated",
+        "comp",
+        "completing",
+        "future",
+        "resv",
+        "reserved",
+        "power_up",
+        "powering_up",
+        "power_down",
+        "powering_down",
+        "powered_down",
+        "planned",
+    }
 )
 
 # Slurm appends flag characters to a state name (`idle*` unresponsive,
@@ -642,9 +647,7 @@ def load_cluster_defaults(cluster_name, *, repo_root=None):
         with open(path) as fh:
             data = yaml.safe_load(fh) or {}
     except yaml.YAMLError as e:
-        raise PClusterMakerError(
-            f"ERROR: defaults file is not valid YAML: {path}\n  {e}"
-        ) from e
+        raise PClusterMakerError(f"ERROR: defaults file is not valid YAML: {path}\n  {e}") from e
     except OSError as e:
         raise PClusterMakerError(f"ERROR: cannot read defaults file {path}: {e}") from e
     if not isinstance(data, dict):
@@ -735,9 +738,7 @@ def _resolve_access_script_path(cluster_data_root, cluster_name):
     path traversal (e.g. '../other').
     """
     root = os.path.normpath(cluster_data_root)
-    path = os.path.normpath(
-        os.path.join(root, cluster_name, f"access_cluster.{cluster_name}.sh")
-    )
+    path = os.path.normpath(os.path.join(root, cluster_name, f"access_cluster.{cluster_name}.sh"))
     if not path.startswith(root + os.sep):
         sys.exit(
             f"ERROR: Resolved access script path escapes active_clusters/: {path}\n"
@@ -835,11 +836,16 @@ _LOCKS_BUCKET_PREFIX = "parallelclustermaker-locks"
 # queue's update_cluster phase -- the lock module itself has no opinion on
 # which kind of operation it is guarding, by design (see
 # s3_acquire_cluster_lock's own docstring).
-_LOCK_RECLAIMABLE_STATUSES = frozenset({
-    "CREATE_COMPLETE", "CREATE_FAILED",
-    "DELETE_COMPLETE", "DELETE_FAILED",
-    "UPDATE_COMPLETE", "UPDATE_FAILED",
-})
+_LOCK_RECLAIMABLE_STATUSES = frozenset(
+    {
+        "CREATE_COMPLETE",
+        "CREATE_FAILED",
+        "DELETE_COMPLETE",
+        "DELETE_FAILED",
+        "UPDATE_COMPLETE",
+        "UPDATE_FAILED",
+    }
+)
 
 _LOCK_STALENESS_CEILING_SECONDS = 7200  # 2x the 3600s default create/delete wait ceiling
 
@@ -904,8 +910,10 @@ def _create_locks_bucket(s3, *, locks_bucketname, region):
     s3.put_public_access_block(
         Bucket=locks_bucketname,
         PublicAccessBlockConfiguration={
-            "BlockPublicAcls": True, "IgnorePublicAcls": True,
-            "BlockPublicPolicy": True, "RestrictPublicBuckets": True,
+            "BlockPublicAcls": True,
+            "IgnorePublicAcls": True,
+            "BlockPublicPolicy": True,
+            "RestrictPublicBuckets": True,
         },
     )
 
@@ -1022,21 +1030,16 @@ def get_cluster_config_object(s3, *, locks_bucketname, cluster_name):
     can write safely.
     """
     try:
-        obj = s3.get_object(
-            Bucket=locks_bucketname, Key=_config_key(cluster_name)
-        )
+        obj = s3.get_object(Bucket=locks_bucketname, Key=_config_key(cluster_name))
         return obj["Body"].read().decode(), obj.get("ETag")
     except _ClientError as e:
-        _s3_absence_or_raise(
-            e, what=f"s3://{locks_bucketname}/{_config_key(cluster_name)}"
-        )
+        _s3_absence_or_raise(e, what=f"s3://{locks_bucketname}/{_config_key(cluster_name)}")
         return None, None
     except (BotoCoreError, NoCredentialsError, UnicodeDecodeError):
         return None, None
 
 
-def put_cluster_config_object(s3, *, locks_bucketname, cluster_name, text,
-                              etag=None):
+def put_cluster_config_object(s3, *, locks_bucketname, cluster_name, text, etag=None):
     """Write the config back, conditionally when an ETag is supplied.
 
     add_queue and remove_queue take no cluster lock -- they are edits, not
@@ -1052,7 +1055,8 @@ def put_cluster_config_object(s3, *, locks_bucketname, cluster_name, text,
     is the writer of record.
     """
     kwargs = {
-        "Bucket": locks_bucketname, "Key": _config_key(cluster_name),
+        "Bucket": locks_bucketname,
+        "Key": _config_key(cluster_name),
         "Body": text.encode(),
     }
     if etag:
@@ -1086,14 +1090,11 @@ def delete_cluster_config_object(s3, *, locks_bucketname, cluster_name):
     s3.delete_object(Bucket=locks_bucketname, Key=_config_key(cluster_name))
 
 
-def delete_cluster_config_step(s3, *, cf_delete_confirmed, locks_bucketname,
-                               cluster_name):
+def delete_cluster_config_step(s3, *, cf_delete_confirmed, locks_bucketname, cluster_name):
     """The config's half of teardown, under the record's own gate."""
     name = "Delete the shared cluster config"
     if not cf_delete_confirmed:
-        return TeardownStepResult(
-            name, True, "skipped: cluster deletion not confirmed"
-        )
+        return TeardownStepResult(name, True, "skipped: cluster deletion not confirmed")
     try:
         delete_cluster_config_object(
             s3, locks_bucketname=locks_bucketname, cluster_name=cluster_name
@@ -1123,8 +1124,10 @@ def _publish_cluster_record(s3, *, locks_bucketname, cluster_name, repo_root):
         return False
     try:
         put_cluster_record(
-            s3, locks_bucketname=locks_bucketname,
-            cluster_name=cluster_name, record=record,
+            s3,
+            locks_bucketname=locks_bucketname,
+            cluster_name=cluster_name,
+            record=record,
         )
         # The vars file rides along so a machine that did not build this
         # cluster can still finalize it. Best-effort within a best-effort
@@ -1135,8 +1138,10 @@ def _publish_cluster_record(s3, *, locks_bucketname, cluster_name, repo_root):
         if os.path.isfile(_vp):
             try:
                 put_cluster_vars_file(
-                    s3, locks_bucketname=locks_bucketname,
-                    cluster_name=cluster_name, vars_file_path=_vp,
+                    s3,
+                    locks_bucketname=locks_bucketname,
+                    cluster_name=cluster_name,
+                    vars_file_path=_vp,
                 )
             except (_ClientError, BotoCoreError, NoCredentialsError, OSError) as e:
                 print(
@@ -1164,16 +1169,16 @@ def _publish_cluster_config(s3, *, locks_bucketname, cluster_name, repo_root):
     copy. Never raises, for the same reason _publish_cluster_record does
     not -- the cluster exists and is billing by now.
     """
-    path = os.path.join(
-        repo_root, "active_clusters", cluster_name, f"config.{cluster_name}"
-    )
+    path = os.path.join(repo_root, "active_clusters", cluster_name, f"config.{cluster_name}")
     if not os.path.isfile(path):
         return False
     try:
         with open(path) as fh:
             new_etag = put_cluster_config_object(
-                s3, locks_bucketname=locks_bucketname,
-                cluster_name=cluster_name, text=fh.read(),
+                s3,
+                locks_bucketname=locks_bucketname,
+                cluster_name=cluster_name,
+                text=fh.read(),
             )
         # Record what we put there. This is the first mirror of a
         # cluster's config, so it is what lets a later local edit be
@@ -1202,19 +1207,21 @@ def _publish_cluster_state(s3, *, locks_bucketname, cluster_name, repo_root):
     transport which built it could not see, poll, or tear down.
     """
     _publish_cluster_record(
-        s3, locks_bucketname=locks_bucketname, cluster_name=cluster_name,
+        s3,
+        locks_bucketname=locks_bucketname,
+        cluster_name=cluster_name,
         repo_root=repo_root,
     )
     _publish_cluster_config(
-        s3, locks_bucketname=locks_bucketname, cluster_name=cluster_name,
+        s3,
+        locks_bucketname=locks_bucketname,
+        cluster_name=cluster_name,
         repo_root=repo_root,
     )
     # A build that got here succeeded, so any record of an earlier failure
     # under this name is stale. Left behind, it would answer the next
     # "why did my build fail?" with the previous attempt's reason.
-    delete_build_failure(
-        s3, locks_bucketname=locks_bucketname, cluster_name=cluster_name
-    )
+    delete_build_failure(s3, locks_bucketname=locks_bucketname, cluster_name=cluster_name)
 
 
 _S3_ABSENT_CODES = ("NoSuchKey", "NoSuchBucket", "404")
@@ -1270,7 +1277,8 @@ def put_cluster_vars_file(s3, *, locks_bucketname, cluster_name, vars_file_path)
     """
     with open(vars_file_path, "rb") as fh:
         s3.put_object(
-            Bucket=locks_bucketname, Key=_vars_file_key(cluster_name),
+            Bucket=locks_bucketname,
+            Key=_vars_file_key(cluster_name),
             Body=fh.read(),
         )
 
@@ -1278,12 +1286,12 @@ def put_cluster_vars_file(s3, *, locks_bucketname, cluster_name, vars_file_path)
 def get_cluster_vars_file(s3, *, locks_bucketname, cluster_name):
     """The stored vars file as text, or None when there is none."""
     try:
-        resp = s3.get_object(
-            Bucket=locks_bucketname, Key=_vars_file_key(cluster_name)
-        )
+        resp = s3.get_object(Bucket=locks_bucketname, Key=_vars_file_key(cluster_name))
     except Exception as e:
         if _is_missing_key_rejection(e) or type(e).__name__ in (
-            "NoSuchKey", "NoSuchBucket", "ClientError"
+            "NoSuchKey",
+            "NoSuchBucket",
+            "ClientError",
         ):
             return None
         raise
@@ -1317,20 +1325,18 @@ def put_build_failure(s3, *, locks_bucketname, cluster_name, record):
     report one that does not exist.
     """
     body = json.dumps(record, sort_keys=True, default=str).encode()
-    s3.put_object(
-        Bucket=locks_bucketname, Key=_build_failure_key(cluster_name), Body=body
-    )
+    s3.put_object(Bucket=locks_bucketname, Key=_build_failure_key(cluster_name), Body=body)
 
 
 def get_build_failure(s3, *, locks_bucketname, cluster_name):
     """The stored failure record, or None when there is none."""
     try:
-        resp = s3.get_object(
-            Bucket=locks_bucketname, Key=_build_failure_key(cluster_name)
-        )
+        resp = s3.get_object(Bucket=locks_bucketname, Key=_build_failure_key(cluster_name))
     except Exception as e:
         if _is_missing_key_rejection(e) or type(e).__name__ in (
-            "NoSuchKey", "NoSuchBucket", "ClientError"
+            "NoSuchKey",
+            "NoSuchBucket",
+            "ClientError",
         ):
             return None
         raise
@@ -1345,13 +1351,12 @@ def delete_build_failure(s3, *, locks_bucketname, cluster_name):
     DeleteObject succeeds either way, which is what makes this callable
     from the success path without a preceding read."""
     with contextlib.suppress(Exception):
-        s3.delete_object(
-            Bucket=locks_bucketname, Key=_build_failure_key(cluster_name)
-        )
+        s3.delete_object(Bucket=locks_bucketname, Key=_build_failure_key(cluster_name))
 
 
-def _publish_build_failure(s3, *, locks_bucketname, cluster_name, region,
-                           cluster_owner, stage, message, serial=None):
+def _publish_build_failure(
+    s3, *, locks_bucketname, cluster_name, region, cluster_owner, stage, message, serial=None
+):
     """Best-effort publish of a build failure. Never raises.
 
     A failure to record the failure must not replace it: the caller is
@@ -1364,7 +1369,9 @@ def _publish_build_failure(s3, *, locks_bucketname, cluster_name, region,
         return False
     try:
         put_build_failure(
-            s3, locks_bucketname=locks_bucketname, cluster_name=cluster_name,
+            s3,
+            locks_bucketname=locks_bucketname,
+            cluster_name=cluster_name,
             record={
                 "cluster_name": cluster_name,
                 "region": region,
@@ -1377,8 +1384,10 @@ def _publish_build_failure(s3, *, locks_bucketname, cluster_name, region,
         )
         return True
     except Exception as _e:  # noqa: BLE001 - see docstring
-        print(f"WARNING: could not record the build failure: "
-              f"{type(_e).__name__}: {_e}", file=sys.stderr)
+        print(
+            f"WARNING: could not record the build failure: {type(_e).__name__}: {_e}",
+            file=sys.stderr,
+        )
         return False
 
 
@@ -1397,25 +1406,26 @@ def core_get_build_status(cluster_name, *, s3, locks_bucketname):
     _validate_cluster_name(cluster_name)
     if s3 is None or not locks_bucketname:
         return {
-            "cluster_name": cluster_name, "failed": False,
+            "cluster_name": cluster_name,
+            "failed": False,
             "store_reachable": False,
             "detail": "the shared record store is not reachable from here, "
-                      "so whether this build failed cannot be determined",
+            "so whether this build failed cannot be determined",
         }
-    rec = get_build_failure(
-        s3, locks_bucketname=locks_bucketname, cluster_name=cluster_name
-    )
+    rec = get_build_failure(s3, locks_bucketname=locks_bucketname, cluster_name=cluster_name)
     if not rec:
         return {
-            "cluster_name": cluster_name, "failed": False,
+            "cluster_name": cluster_name,
+            "failed": False,
             "store_reachable": True,
             "detail": "no build failure is recorded for this cluster in this "
-                      "account and region. Either the build succeeded, or it "
-                      "failed validation before anything was created -- "
-                      "list_clusters shows which.",
+            "account and region. Either the build succeeded, or it "
+            "failed validation before anything was created -- "
+            "list_clusters shows which.",
         }
     return {
-        "cluster_name": cluster_name, "failed": True,
+        "cluster_name": cluster_name,
+        "failed": True,
         "store_reachable": True,
         "stage": rec.get("stage", ""),
         "message": rec.get("message", ""),
@@ -1442,9 +1452,7 @@ def put_cluster_record(s3, *, locks_bucketname, cluster_name, record):
     if _dc_is_dataclass(record) and not isinstance(record, type):
         record = _dc_asdict(record)
     body = json.dumps(record, sort_keys=True, default=str).encode()
-    s3.put_object(
-        Bucket=locks_bucketname, Key=_records_key(cluster_name), Body=body
-    )
+    s3.put_object(Bucket=locks_bucketname, Key=_records_key(cluster_name), Body=body)
 
 
 def get_cluster_record(s3, *, locks_bucketname, cluster_name):
@@ -1457,14 +1465,10 @@ def get_cluster_record(s3, *, locks_bucketname, cluster_name):
     read-only tier's policy grants this prefix explicitly.
     """
     try:
-        obj = s3.get_object(
-            Bucket=locks_bucketname, Key=_records_key(cluster_name)
-        )
+        obj = s3.get_object(Bucket=locks_bucketname, Key=_records_key(cluster_name))
         data = json.loads(obj["Body"].read())
     except _ClientError as e:
-        return _s3_absence_or_raise(
-            e, what=f"s3://{locks_bucketname}/{_records_key(cluster_name)}"
-        )
+        return _s3_absence_or_raise(e, what=f"s3://{locks_bucketname}/{_records_key(cluster_name)}")
     except (BotoCoreError, NoCredentialsError, ValueError):
         return None
     return data if isinstance(data, dict) else None
@@ -1505,7 +1509,7 @@ def list_cluster_records(s3, *, locks_bucketname):
         for item in resp.get("Contents") or []:
             key = item.get("Key", "")
             if key.startswith("vars/") and key.endswith(".json"):
-                names.append(key[len("vars/"):-len(".json")])
+                names.append(key[len("vars/") : -len(".json")])
         if not resp.get("IsTruncated"):
             return sorted(set(names))
         token = resp.get("NextContinuationToken")
@@ -1517,12 +1521,14 @@ def _lock_owner_body(*, command):
     """JSON, not the local lock's plain-text "owner" file -- the reclaim
     path needs to read the recorded command back out programmatically to
     decide staleness, not just print it for a human."""
-    return json.dumps({
-        "pid": os.getpid(),
-        "host": socket.gethostname(),
-        "command": command,
-        "started": DateTime.now(timezone.utc).isoformat(),
-    }).encode("utf-8")
+    return json.dumps(
+        {
+            "pid": os.getpid(),
+            "host": socket.gethostname(),
+            "command": command,
+            "started": DateTime.now(timezone.utc).isoformat(),
+        }
+    ).encode("utf-8")
 
 
 def _is_missing_key_rejection(e):
@@ -1560,9 +1566,15 @@ def _is_conditional_write_rejection(e):
 
 
 def s3_acquire_cluster_lock(
-    s3, *, locks_bucketname, cluster_name, command,
-    describe_fn=None, region=None,
-    staleness_ceiling_seconds=_LOCK_STALENESS_CEILING_SECONDS, now_fn=None,
+    s3,
+    *,
+    locks_bucketname,
+    cluster_name,
+    command,
+    describe_fn=None,
+    region=None,
+    staleness_ceiling_seconds=_LOCK_STALENESS_CEILING_SECONDS,
+    now_fn=None,
 ):
     """Atomically acquire a per-cluster lock in S3, replacing the local
     mkdir lock's role but visible to every caller regardless of machine.
@@ -1656,7 +1668,13 @@ def s3_release_cluster_lock(s3, *, locks_bucketname, cluster_name):
 
 
 def _acquire_distributed_cluster_lock(
-    s3, *, locks_bucketname, region, cluster_name, command, describe_fn=None,
+    s3,
+    *,
+    locks_bucketname,
+    region,
+    cluster_name,
+    command,
+    describe_fn=None,
 ):
     """CLI-facing composing entry point: ensures the locks bucket exists,
     then acquires the lock, converting ClusterLockError into a
@@ -1670,8 +1688,12 @@ def _acquire_distributed_cluster_lock(
     _create_locks_bucket(s3, locks_bucketname=locks_bucketname, region=region)
     try:
         return s3_acquire_cluster_lock(
-            s3, locks_bucketname=locks_bucketname, cluster_name=cluster_name,
-            command=command, describe_fn=describe_fn, region=region,
+            s3,
+            locks_bucketname=locks_bucketname,
+            cluster_name=cluster_name,
+            command=command,
+            describe_fn=describe_fn,
+            region=region,
         )
     except ClusterLockError as e:
         sys.exit(str(e))
@@ -1875,13 +1897,9 @@ def _validate_ebs_shared_dir(path):
 def _validate_queue_sizes(initial_queue_size, max_queue_size, scaledown_idletime):
     """Raise SystemExit if queue-size parameters are out of range."""
     if scaledown_idletime < 1:
-        sys.exit(
-            f"ERROR: scaledown_idletime must be >= 1 minute (got {scaledown_idletime})."
-        )
+        sys.exit(f"ERROR: scaledown_idletime must be >= 1 minute (got {scaledown_idletime}).")
     if initial_queue_size < 0:
-        sys.exit(
-            f"ERROR: initial_queue_size must be >= 0 (got {initial_queue_size})."
-        )
+        sys.exit(f"ERROR: initial_queue_size must be >= 0 (got {initial_queue_size}).")
     if initial_queue_size > max_queue_size:
         sys.exit(
             f"ERROR: initial_queue_size ({initial_queue_size}) must not exceed "
@@ -2082,7 +2100,7 @@ def _validate_at_least_one_queue(compute_instance_type, gpu_instance_type):
         "created and there is nothing to run jobs on. PCluster rejects the "
         "resulting config, but only after the IAM role, S3 bucket, keypair and "
         "SSH secret have been created. Set compute_instance_type (e.g. "
-        "\"c5.xlarge\") and/or gpu_instance_type."
+        '"c5.xlarge") and/or gpu_instance_type.'
     )
 
 
@@ -2122,7 +2140,8 @@ def _validate_override_types(overrides):
         problems.append(f"{key}={value!r}{hint}")
     if problems:
         raise PClusterMakerError(
-            "cluster parameter(s) have the wrong type: " + "; ".join(problems)
+            "cluster parameter(s) have the wrong type: "
+            + "; ".join(problems)
             + ". Rejected rather than converted, because a wrong-typed value is "
             "accepted silently everywhere downstream and produces a cluster that "
             "differs from what was asked for."
@@ -2130,8 +2149,14 @@ def _validate_override_types(overrides):
 
 
 def build_make_cluster_params(
-    *, cluster_name, cluster_owner, cluster_owner_email, az,
-    headnode_instance_type, overrides=None, repo_root=None,
+    *,
+    cluster_name,
+    cluster_owner,
+    cluster_owner_email,
+    az,
+    headnode_instance_type,
+    overrides=None,
+    repo_root=None,
 ):
     """Build a MakeClusterParams from defaults plus a small override set.
 
@@ -2202,12 +2227,14 @@ def build_make_cluster_params(
     values = dict(MAKE_CLUSTER_DEFAULTS)
     values.update(file_defaults)
     values.update(overrides)
-    values.update({
-        "cluster_name": cluster_name,
-        "cluster_owner": cluster_owner,
-        "cluster_owner_email": cluster_owner_email,
-        "az": az,
-    })
+    values.update(
+        {
+            "cluster_name": cluster_name,
+            "cluster_owner": cluster_owner,
+            "cluster_owner_email": cluster_owner_email,
+            "az": az,
+        }
+    )
 
     _validate_at_least_one_queue(
         values.get("compute_instance_type", ""), values.get("gpu_instance_type", "")
@@ -2297,12 +2324,17 @@ def _ensure_cluster_boundary(iam, *, aws_account_id, region, templates_dir):
     boundary_arn = _cluster_boundary_arn(aws_account_id)
     boundary_doc = _render_policy(
         os.path.join(templates_dir, _CLUSTER_BOUNDARY_TEMPLATE),
-        aws_account_id, region, "", "", "", "", "", "",
+        aws_account_id,
+        region,
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
     )
     try:
-        iam.create_policy(
-            PolicyName=_cluster_boundary_name(), PolicyDocument=boundary_doc
-        )
+        iam.create_policy(PolicyName=_cluster_boundary_name(), PolicyDocument=boundary_doc)
         print(f"  Created cluster permissions boundary: {_cluster_boundary_name()}")
     except _ClientError as e:
         if e.response["Error"]["Code"] != "EntityAlreadyExists":
@@ -2412,9 +2444,22 @@ def _setup_iam(
     # enable_monitoring value — used to detect stale policies left over from
     # an earlier build (e.g. monitoring was enabled, then disabled on a
     # same-serial rebuild).
-    _ALL_SUFFIXES = ["-HeadNode-Compute", "-HeadNode-Storage", "-HeadNode-IAM", "-ComputeNode-Base", "-ClusterNode-Deny", "-HeadNode-Monitoring"]
+    _ALL_SUFFIXES = [
+        "-HeadNode-Compute",
+        "-HeadNode-Storage",
+        "-HeadNode-IAM",
+        "-ComputeNode-Base",
+        "-ClusterNode-Deny",
+        "-HeadNode-Monitoring",
+    ]
 
-    _suffixes = ["-HeadNode-Compute", "-HeadNode-Storage", "-HeadNode-IAM", "-ComputeNode-Base", "-ClusterNode-Deny"]
+    _suffixes = [
+        "-HeadNode-Compute",
+        "-HeadNode-Storage",
+        "-HeadNode-IAM",
+        "-ComputeNode-Base",
+        "-ClusterNode-Deny",
+    ]
     if enable_monitoring:
         _suffixes.append("-HeadNode-Monitoring")
 
@@ -2430,14 +2475,10 @@ def _setup_iam(
     try:
         iam.get_role(RoleName=ec2_iam_role)
         _role_existed = True
-        iam.put_role_permissions_boundary(
-            RoleName=ec2_iam_role, PermissionsBoundary=boundary_arn
-        )
+        iam.put_role_permissions_boundary(RoleName=ec2_iam_role, PermissionsBoundary=boundary_arn)
         attached = {
             p["PolicyName"]
-            for p in iam.list_attached_role_policies(RoleName=ec2_iam_role)[
-                "AttachedPolicies"
-            ]
+            for p in iam.list_attached_role_policies(RoleName=ec2_iam_role)["AttachedPolicies"]
         }
         expected = {ec2_iam_policy + s for s in _suffixes}
         known = {ec2_iam_policy + s for s in _ALL_SUFFIXES}
@@ -2456,8 +2497,12 @@ def _setup_iam(
                 f"{expected - attached} — cleaning up and recreating policies."
             )
         _delete_managed_policies(
-            iam, ec2_iam_role, ec2_iam_policy, aws_account_id,
-            suppress=True, enable_monitoring=True,
+            iam,
+            ec2_iam_role,
+            ec2_iam_policy,
+            aws_account_id,
+            suppress=True,
+            enable_monitoring=True,
         )
     except _ClientError as e:
         if e.response["Error"]["Code"] != "NoSuchEntity":
@@ -2475,14 +2520,16 @@ def _setup_iam(
     )
 
     policies = [
-        ("-HeadNode-Compute",   os.path.join(_tmpl, "HeadNode-Compute.json_src")),
-        ("-HeadNode-Storage",   os.path.join(_tmpl, "HeadNode-Storage.json_src")),
-        ("-HeadNode-IAM",       os.path.join(_tmpl, "HeadNode-IAM.json_src")),
-        ("-ComputeNode-Base",   os.path.join(_tmpl, "ComputeNode-Base.json_src")),
-        ("-ClusterNode-Deny",   os.path.join(_tmpl, "ClusterNode-Deny.json_src")),
+        ("-HeadNode-Compute", os.path.join(_tmpl, "HeadNode-Compute.json_src")),
+        ("-HeadNode-Storage", os.path.join(_tmpl, "HeadNode-Storage.json_src")),
+        ("-HeadNode-IAM", os.path.join(_tmpl, "HeadNode-IAM.json_src")),
+        ("-ComputeNode-Base", os.path.join(_tmpl, "ComputeNode-Base.json_src")),
+        ("-ClusterNode-Deny", os.path.join(_tmpl, "ClusterNode-Deny.json_src")),
     ]
     if enable_monitoring:
-        policies.append(("-HeadNode-Monitoring", os.path.join(_tmpl, "HeadNode-Monitoring.json_src")))
+        policies.append(
+            ("-HeadNode-Monitoring", os.path.join(_tmpl, "HeadNode-Monitoring.json_src"))
+        )
 
     rendered = {sfx: _render_policy(src, *render_args) for sfx, src in policies}
 
@@ -2645,7 +2692,8 @@ def _slurm_document_body(templates_dir=None):
     and not the other.
     """
     d = templates_dir or os.path.join(
-        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "templates")
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "templates"
+    )
     with open(os.path.join(d, "ssm_slurm_readonly.json")) as fh:
         return fh.read()
 
@@ -2667,13 +2715,16 @@ def ensure_slurm_document(ssm, *, templates_dir=None, verbose=True):
                 print(f"  Reusing existing SSM document: {SLURM_READONLY_DOCUMENT}")
             return SLURM_READONLY_DOCUMENT
         ssm.update_document(
-            Name=SLURM_READONLY_DOCUMENT, Content=body,
-            DocumentFormat="JSON", DocumentVersion="$LATEST",
+            Name=SLURM_READONLY_DOCUMENT,
+            Content=body,
+            DocumentFormat="JSON",
+            DocumentVersion="$LATEST",
         )
         ssm.update_document_default_version(
             Name=SLURM_READONLY_DOCUMENT,
-            DocumentVersion=ssm.describe_document(
-                Name=SLURM_READONLY_DOCUMENT)["Document"]["LatestVersion"],
+            DocumentVersion=ssm.describe_document(Name=SLURM_READONLY_DOCUMENT)["Document"][
+                "LatestVersion"
+            ],
         )
         if verbose:
             print(f"  Updated SSM document: {SLURM_READONLY_DOCUMENT}")
@@ -2683,8 +2734,10 @@ def ensure_slurm_document(ssm, *, templates_dir=None, verbose=True):
             if "does not exist" not in str(e):
                 raise
     ssm.create_document(
-        Name=SLURM_READONLY_DOCUMENT, Content=body,
-        DocumentType="Command", DocumentFormat="JSON",
+        Name=SLURM_READONLY_DOCUMENT,
+        Content=body,
+        DocumentType="Command",
+        DocumentFormat="JSON",
     )
     if verbose:
         print(f"  Created SSM document: {SLURM_READONLY_DOCUMENT}")
@@ -2700,13 +2753,13 @@ def delete_slurm_document(ssm, *, verbose=True):
         return True
     except Exception as e:
         if verbose and type(e).__name__ not in ("InvalidDocument",):
-            print(f"  SSM document {SLURM_READONLY_DOCUMENT}: "
-                  f"{type(e).__name__}")
+            print(f"  SSM document {SLURM_READONLY_DOCUMENT}: {type(e).__name__}")
         return False
 
 
-def _setup_mcp_infra(iam, *, aws_account_id, region, mcp_user_pool_id, templates_dir=None,
-                     update_policies=False):
+def _setup_mcp_infra(
+    iam, *, aws_account_id, region, mcp_user_pool_id, templates_dir=None, update_policies=False
+):
     """Create the MCP Lambda execution roles and their managed policies.
 
     Idempotent, like _setup_iam: an existing role or policy is reused
@@ -2754,11 +2807,18 @@ def _setup_mcp_infra(iam, *, aws_account_id, region, mcp_user_pool_id, templates
     boundary_arn = _mcp_boundary_arn(aws_account_id)
     boundary_doc = _render_policy(
         os.path.join(templates_dir, _MCP_BOUNDARY_TEMPLATE),
-        aws_account_id, region, "", "", "", "", "", "", mcp_user_pool_id,
+        aws_account_id,
+        region,
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        mcp_user_pool_id,
     )
     try:
-        iam.create_policy(PolicyName=_mcp_boundary_name(),
-                          PolicyDocument=boundary_doc)
+        iam.create_policy(PolicyName=_mcp_boundary_name(), PolicyDocument=boundary_doc)
         print(f"  Created MCP permissions boundary: {_mcp_boundary_name()}")
     except _ClientError as e:
         if e.response["Error"]["Code"] != "EntityAlreadyExists":
@@ -2767,24 +2827,33 @@ def _setup_mcp_infra(iam, *, aws_account_id, region, mcp_user_pool_id, templates
         # policies is the point. A boundary the deploy credentials can
         # rewrite is not a boundary, so MCPDeployPolicy denies versioning
         # it; changing it is an administrator's action, out of band.
-        current, version_id = _policy_is_current(
-            iam, arn=boundary_arn, rendered=boundary_doc
-        )
+        current, version_id = _policy_is_current(iam, arn=boundary_arn, rendered=boundary_doc)
         if current:
-            print(f"  Reusing MCP permissions boundary: "
-                  f"{_mcp_boundary_name()} ({version_id}, current)")
+            print(
+                f"  Reusing MCP permissions boundary: "
+                f"{_mcp_boundary_name()} ({version_id}, current)"
+            )
         else:
-            print(f"  *** WARNING *** MCP permissions boundary "
-                  f"{_mcp_boundary_name()} ({version_id}) does not match "
-                  f"{_MCP_BOUNDARY_TEMPLATE}. It is deliberately not updated "
-                  f"here; an administrator must change it out of band.")
+            print(
+                f"  *** WARNING *** MCP permissions boundary "
+                f"{_mcp_boundary_name()} ({version_id}) does not match "
+                f"{_MCP_BOUNDARY_TEMPLATE}. It is deliberately not updated "
+                f"here; an administrator must change it out of band."
+            )
 
     policy_arns = {}
     stale_policies = []
     for basename in _mcp_policy_templates():
         rendered = _render_policy(
             os.path.join(templates_dir, basename),
-            aws_account_id, region, "", "", "", "", "", "",
+            aws_account_id,
+            region,
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
             mcp_user_pool_id,
         )
         name = _mcp_policy_name(basename)
@@ -2797,9 +2866,7 @@ def _setup_mcp_infra(iam, *, aws_account_id, region, mcp_user_pool_id, templates
                 raise
             arn = f"arn:aws:iam::{aws_account_id}:policy/{name}"
             policy_arns[basename] = arn
-            current, version_id = _policy_is_current(
-                iam, arn=arn, rendered=rendered
-            )
+            current, version_id = _policy_is_current(iam, arn=arn, rendered=rendered)
             if current:
                 print(f"  Reusing existing MCP policy: {name} ({version_id}, current)")
             elif update_policies:
@@ -2808,10 +2875,7 @@ def _setup_mcp_infra(iam, *, aws_account_id, region, mcp_user_pool_id, templates
                 print(f"  Updated MCP policy: {name} ({version_id} -> {new_id})")
             else:
                 stale_policies.append(name)
-                print(
-                    f"  *** STALE *** MCP policy {name} ({version_id}) does not "
-                    f"match {basename}"
-                )
+                print(f"  *** STALE *** MCP policy {name} ({version_id}) does not match {basename}")
 
     roles = {}
     for tier, (_fn, templates) in _MCP_LAMBDA_TIERS.items():
@@ -2830,9 +2894,7 @@ def _setup_mcp_infra(iam, *, aws_account_id, region, mcp_user_pool_id, templates
             # A role that predates the boundary would otherwise keep the
             # unbounded permissions this whole mechanism exists to cap, and
             # nothing downstream would notice.
-            iam.put_role_permissions_boundary(
-                RoleName=role, PermissionsBoundary=boundary_arn
-            )
+            iam.put_role_permissions_boundary(RoleName=role, PermissionsBoundary=boundary_arn)
             print(f"  Reusing existing MCP role: {role} (boundary reasserted)")
         for basename in templates:
             iam.attach_role_policy(RoleName=role, PolicyArn=policy_arns[basename])
@@ -2846,8 +2908,10 @@ def _setup_mcp_infra(iam, *, aws_account_id, region, mcp_user_pool_id, templates
         )
         for name in stale_policies:
             print(f"    {name}")
-        print("Re-run with --update-policies to push them. Until then the "
-              "deployed permissions are NOT the ones in templates/.")
+        print(
+            "Re-run with --update-policies to push them. Until then the "
+            "deployed permissions are NOT the ones in templates/."
+        )
     return roles
 
 
@@ -2902,9 +2966,7 @@ def _policy_is_current(iam, *, arn, rendered):
     Returns (is_current, deployed_version_id).
     """
     version_id = iam.get_policy(PolicyArn=arn)["Policy"]["DefaultVersionId"]
-    doc = iam.get_policy_version(
-        PolicyArn=arn, VersionId=version_id
-    )["PolicyVersion"]["Document"]
+    doc = iam.get_policy_version(PolicyArn=arn, VersionId=version_id)["PolicyVersion"]["Document"]
     return _decoded_policy_document(doc) == json.loads(rendered), version_id
 
 
@@ -2924,9 +2986,7 @@ def _update_policy_document(iam, *, arn, rendered):
         old = prunable.pop(0)
         iam.delete_policy_version(PolicyArn=arn, VersionId=old["VersionId"])
         versions = [v for v in versions if v["VersionId"] != old["VersionId"]]
-    resp = iam.create_policy_version(
-        PolicyArn=arn, PolicyDocument=rendered, SetAsDefault=True
-    )
+    resp = iam.create_policy_version(PolicyArn=arn, PolicyDocument=rendered, SetAsDefault=True)
     return resp["PolicyVersion"]["VersionId"]
 
 
@@ -2935,12 +2995,12 @@ class OperatorBootstrapResult:
     """What a bootstrap did, or would do under --dry-run."""
 
     policy_arn: str = ""
-    policy_action: str = ""          # created | updated | current
+    policy_action: str = ""  # created | updated | current
     version_id: str = ""
     identity_arn: str = ""
-    principal_type: str = ""         # user | role | root | unknown
+    principal_type: str = ""  # user | role | root | unknown
     principal_name: str = ""
-    attach_action: str = ""          # attached | already | skipped | refused
+    attach_action: str = ""  # attached | already | skipped | refused
     reason: str = ""
     dry_run: bool = False
 
@@ -2975,10 +3035,12 @@ def _principal_from_caller_arn(arn):
 
 
 def _policy_is_attached(iam, *, principal_type, principal_name, policy_arn):
-    lister = (iam.list_attached_user_policies if principal_type == "user"
-              else iam.list_attached_role_policies)
-    kw = ({"UserName": principal_name} if principal_type == "user"
-          else {"RoleName": principal_name})
+    lister = (
+        iam.list_attached_user_policies
+        if principal_type == "user"
+        else iam.list_attached_role_policies
+    )
+    kw = {"UserName": principal_name} if principal_type == "user" else {"RoleName": principal_name}
     for p in lister(**kw).get("AttachedPolicies", []):
         if p.get("PolicyArn") == policy_arn:
             return True
@@ -2986,7 +3048,13 @@ def _policy_is_attached(iam, *, principal_type, principal_name, policy_arn):
 
 
 def bootstrap_operator_policy(
-    iam, sts, *, policy_name, rendered, description="", attach=True,
+    iam,
+    sts,
+    *,
+    policy_name,
+    rendered,
+    description="",
+    attach=True,
     dry_run=False,
 ):
     """Create or converge the operator policy, then attach it to the caller.
@@ -3016,9 +3084,7 @@ def bootstrap_operator_policy(
             result.policy_action, result.version_id = "updated", version_id
         else:
             result.policy_action = "updated"
-            result.version_id = _update_policy_document(
-                iam, arn=arn, rendered=rendered
-            )
+            result.version_id = _update_policy_document(iam, arn=arn, rendered=rendered)
     except _ClientError as e:
         if e.response["Error"]["Code"] != "NoSuchEntity":
             raise
@@ -3035,9 +3101,7 @@ def bootstrap_operator_policy(
 
     ident = sts.get_caller_identity()
     result.identity_arn = ident.get("Arn", "")
-    result.principal_type, result.principal_name = _principal_from_caller_arn(
-        result.identity_arn
-    )
+    result.principal_type, result.principal_name = _principal_from_caller_arn(result.identity_arn)
 
     if not attach:
         result.attach_action = "skipped"
@@ -3053,14 +3117,14 @@ def bootstrap_operator_policy(
         return result
     if result.principal_type == "unknown" or not result.principal_name:
         result.attach_action = "refused"
-        result.reason = (
-            f"could not resolve an attachable principal from {result.identity_arn!r}"
-        )
+        result.reason = f"could not resolve an attachable principal from {result.identity_arn!r}"
         return result
 
     if result.policy_action != "created" and _policy_is_attached(
-        iam, principal_type=result.principal_type,
-        principal_name=result.principal_name, policy_arn=arn,
+        iam,
+        principal_type=result.principal_type,
+        principal_name=result.principal_name,
+        policy_arn=arn,
     ):
         result.attach_action = "already"
         return result
@@ -3188,7 +3252,9 @@ def _delete_mcp_infra(iam, *, aws_account_id, suppress=True, verbose=True):
     for basename, arn in policy_arns.items():
         _try(
             f"policy: {_mcp_policy_name(basename)}",
-            _delete_policy_with_versions, iam, arn,
+            _delete_policy_with_versions,
+            iam,
+            arn,
         )
 
     if verbose:
@@ -3203,11 +3269,17 @@ def _delete_mcp_infra(iam, *, aws_account_id, suppress=True, verbose=True):
     return result
 
 
-def _cleanup_iam_on_failure(iam, ec2_iam_role, ec2_iam_policy, aws_account_id, enable_monitoring=False):
+def _cleanup_iam_on_failure(
+    iam, ec2_iam_role, ec2_iam_policy, aws_account_id, enable_monitoring=False
+):
     """Delete all managed policies and the IAM role after a failed _setup_iam call."""
     _delete_managed_policies(
-        iam, ec2_iam_role, ec2_iam_policy, aws_account_id,
-        suppress=True, enable_monitoring=enable_monitoring,
+        iam,
+        ec2_iam_role,
+        ec2_iam_policy,
+        aws_account_id,
+        suppress=True,
+        enable_monitoring=enable_monitoring,
     )
     with contextlib.suppress(Exception):
         iam.delete_role(RoleName=ec2_iam_role)
@@ -3231,7 +3303,13 @@ def _delete_managed_policies(
     uncap all of them. It costs nothing to leave and _setup_iam recreates
     it only when absent.
     """
-    suffixes = ["-HeadNode-Compute", "-HeadNode-Storage", "-HeadNode-IAM", "-ComputeNode-Base", "-ClusterNode-Deny"]
+    suffixes = [
+        "-HeadNode-Compute",
+        "-HeadNode-Storage",
+        "-HeadNode-IAM",
+        "-ComputeNode-Base",
+        "-ClusterNode-Deny",
+    ]
     if enable_monitoring:
         suffixes.append("-HeadNode-Monitoring")
     for sfx in suffixes:
@@ -3283,9 +3361,7 @@ def _setup_fsx_hydration_iam(
             .replace("<FSX_S3_IMPORT_BUCKET>", fsx_s3_import_bucket)
         )
     with open(
-        os.open(
-            fsx_hydration_policy_template, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600
-        ),
+        os.open(fsx_hydration_policy_template, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600),
         "w",
     ) as fh:
         fh.write(policy)
@@ -3317,7 +3393,7 @@ def _append_key_script(authorized_keys=_AUTHORIZED_KEYS):
     too. Append a newline first if one is needed.
     """
     return (
-        'set -eu; '
+        "set -eu; "
         f'AKEYS="{authorized_keys}"; AKDIR="$(dirname "$AKEYS")"; '
         'mkdir -p "$AKDIR"; chmod 700 "$AKDIR"; '
         'touch "$AKEYS"; chmod 600 "$AKEYS"; '
@@ -3364,15 +3440,15 @@ def _remove_old_key_script(authorized_keys=_AUTHORIZED_KEYS):
     a pattern that matches more than the one key it was given.
     """
     return (
-        'set -eu; '
+        "set -eu; "
         f'AKEYS="{authorized_keys}"; AKDIR="$(dirname "$AKEYS")"; '
-        'IFS= read -r OLDKEY; '
-        'IFS= read -r NEWKEY; '
+        "IFS= read -r OLDKEY; "
+        "IFS= read -r NEWKEY; "
         'OLDPFX="$(printf %s "$OLDKEY" | cut -d" " -f1,2)"; '
         'NEWPFX="$(printf %s "$NEWKEY" | cut -d" " -f1,2)"; '
         '[ -n "$OLDPFX" ] && [ -n "$NEWPFX" ] || { echo "could not parse key material; aborting without touching the live file" >&2; exit 1; }; '
         'TMP="$(mktemp "$AKDIR"/authorized_keys.XXXXXX)"; '
-        'trap \'rm -f "$TMP"\' EXIT; '
+        "trap 'rm -f \"$TMP\"' EXIT; "
         'grep -vF "$OLDPFX" "$AKEYS" > "$TMP" || true; '
         'grep -qF "$NEWPFX" "$TMP" || { echo "new key missing from candidate authorized_keys; aborting without touching the live file" >&2; exit 1; }; '
         'if grep -qF "$OLDPFX" "$TMP"; then echo "old key still present in candidate authorized_keys; aborting without touching the live file" >&2; exit 1; fi; '
@@ -3450,16 +3526,13 @@ def _validate_network(
 
     print(f"  Resolving VPC '{vpc_name}'...")
     if vpc_name == "vpc_default":
-        vpc_info = ec2client.describe_vpcs(
-            Filters=[{"Name": "isDefault", "Values": ["true"]}]
-        )
+        vpc_info = ec2client.describe_vpcs(Filters=[{"Name": "isDefault", "Values": ["true"]}])
     else:
-        vpc_info = ec2client.describe_vpcs(
-            Filters=[{"Name": "tag:Name", "Values": [vpc_name]}]
-        )
+        vpc_info = ec2client.describe_vpcs(Filters=[{"Name": "tag:Name", "Values": [vpc_name]}])
     vpc_ids = [v["VpcId"] for v in vpc_info["Vpcs"]]
     if not vpc_ids:
         import sys
+
         print("")
         print("*** ERROR: VPC not found ***")
         print(f'  No VPC named "{vpc_name}" exists in this account and region.')
@@ -3483,9 +3556,7 @@ def _validate_network(
         subnets = info["Subnets"]
         if not subnets:
             suffix = (
-                " (private subnets only — map-public-ip-on-launch=false)"
-                if private_only
-                else ""
+                " (private subnets only — map-public-ip-on-launch=false)" if private_only else ""
             )
             refer_to_docs_and_quit(
                 f"No subnets found in AZ {target_az} within VPC {vpc_id}{suffix}."
@@ -3515,17 +3586,13 @@ def _validate_network(
     else:
         _private = use_private_compute_subnet == "true"
         _label = "private compute" if _private else "compute"
-        print(
-            f"  Auto-discovering {_label} subnet(s) in: {', '.join(compute_az_list)}..."
-        )
+        print(f"  Auto-discovering {_label} subnet(s) in: {', '.join(compute_az_list)}...")
         compute_subnet_ids = [
             _discover_subnet(caz, private_only=_private) for caz in compute_az_list
         ]
 
     if gpu_subnet_ids_override:
-        gpu_subnet_ids = [
-            s.strip() for s in gpu_subnet_ids_override.split(",") if s.strip()
-        ]
+        gpu_subnet_ids = [s.strip() for s in gpu_subnet_ids_override.split(",") if s.strip()]
         print(f"  Using explicit GPU subnet(s): {', '.join(gpu_subnet_ids)}")
     else:
         _gpu_private = use_private_gpu_subnet == "true"
@@ -3553,12 +3620,8 @@ def _validate_network(
                     "  --use_private_gpu_subnet=true with no --gpu_subnet_ids: "
                     "discovering private subnets rather than reusing compute's."
                 )
-            print(
-                f"  Auto-discovering {_gpu_label} subnet(s) in: {', '.join(_gpu_azs)}..."
-            )
-            gpu_subnet_ids = [
-                _discover_subnet(gaz, private_only=_gpu_private) for gaz in _gpu_azs
-            ]
+            print(f"  Auto-discovering {_gpu_label} subnet(s) in: {', '.join(_gpu_azs)}...")
+            gpu_subnet_ids = [_discover_subnet(gaz, private_only=_gpu_private) for gaz in _gpu_azs]
 
     if enable_loginnode == "true":
         loginnode_subnet_id = _resolve_single_subnet(loginnode_subnet_id, "login node")
@@ -3574,21 +3637,21 @@ def _validate_network(
 
 
 _REGION_TO_LOCATION = {
-    "us-east-1":      "US East (N. Virginia)",
-    "us-east-2":      "US East (Ohio)",
-    "us-west-1":      "US West (N. California)",
-    "us-west-2":      "US West (Oregon)",
-    "ca-central-1":   "Canada (Central)",
-    "ca-west-1":      "Canada West (Calgary)",
-    "eu-west-1":      "Europe (Ireland)",
-    "eu-west-2":      "Europe (London)",
-    "eu-west-3":      "Europe (Paris)",
-    "eu-central-1":   "Europe (Frankfurt)",
-    "eu-central-2":   "Europe (Zurich)",
-    "eu-north-1":     "Europe (Stockholm)",
-    "eu-south-1":     "Europe (Milan)",
-    "eu-south-2":     "Europe (Spain)",
-    "ap-east-1":      "Asia Pacific (Hong Kong)",
+    "us-east-1": "US East (N. Virginia)",
+    "us-east-2": "US East (Ohio)",
+    "us-west-1": "US West (N. California)",
+    "us-west-2": "US West (Oregon)",
+    "ca-central-1": "Canada (Central)",
+    "ca-west-1": "Canada West (Calgary)",
+    "eu-west-1": "Europe (Ireland)",
+    "eu-west-2": "Europe (London)",
+    "eu-west-3": "Europe (Paris)",
+    "eu-central-1": "Europe (Frankfurt)",
+    "eu-central-2": "Europe (Zurich)",
+    "eu-north-1": "Europe (Stockholm)",
+    "eu-south-1": "Europe (Milan)",
+    "eu-south-2": "Europe (Spain)",
+    "ap-east-1": "Asia Pacific (Hong Kong)",
     "ap-southeast-1": "Asia Pacific (Singapore)",
     "ap-southeast-2": "Asia Pacific (Sydney)",
     "ap-southeast-3": "Asia Pacific (Jakarta)",
@@ -3596,13 +3659,13 @@ _REGION_TO_LOCATION = {
     "ap-northeast-1": "Asia Pacific (Tokyo)",
     "ap-northeast-2": "Asia Pacific (Seoul)",
     "ap-northeast-3": "Asia Pacific (Osaka)",
-    "ap-south-1":     "Asia Pacific (Mumbai)",
-    "ap-south-2":     "Asia Pacific (Hyderabad)",
-    "me-south-1":     "Middle East (Bahrain)",
-    "me-central-1":   "Middle East (UAE)",
-    "af-south-1":     "Africa (Cape Town)",
-    "il-central-1":   "Israel (Tel Aviv)",
-    "sa-east-1":      "South America (Sao Paulo)",
+    "ap-south-1": "Asia Pacific (Mumbai)",
+    "ap-south-2": "Asia Pacific (Hyderabad)",
+    "me-south-1": "Middle East (Bahrain)",
+    "me-central-1": "Middle East (UAE)",
+    "af-south-1": "Africa (Cape Town)",
+    "il-central-1": "Israel (Tel Aviv)",
+    "sa-east-1": "South America (Sao Paulo)",
 }
 
 
@@ -3615,12 +3678,12 @@ def _get_od_price(pricing_client, instance_type, region):
         resp = pricing_client.get_products(
             ServiceCode="AmazonEC2",
             Filters=[
-                {"Type": "TERM_MATCH", "Field": "instanceType",    "Value": instance_type},
-                {"Type": "TERM_MATCH", "Field": "location",        "Value": location},
+                {"Type": "TERM_MATCH", "Field": "instanceType", "Value": instance_type},
+                {"Type": "TERM_MATCH", "Field": "location", "Value": location},
                 {"Type": "TERM_MATCH", "Field": "operatingSystem", "Value": "Linux"},
-                {"Type": "TERM_MATCH", "Field": "preInstalledSw",  "Value": "NA"},
-                {"Type": "TERM_MATCH", "Field": "tenancy",         "Value": "Shared"},
-                {"Type": "TERM_MATCH", "Field": "capacitystatus",  "Value": "Used"},
+                {"Type": "TERM_MATCH", "Field": "preInstalledSw", "Value": "NA"},
+                {"Type": "TERM_MATCH", "Field": "tenancy", "Value": "Shared"},
+                {"Type": "TERM_MATCH", "Field": "capacitystatus", "Value": "Used"},
             ],
             MaxResults=1,
         )
@@ -3670,12 +3733,20 @@ def _get_spot_price(ec2client, instance_type):
 
 def _cost_summary_lines(
     *,
-    pricing_client, ec2client,
+    pricing_client,
+    ec2client,
     headnode_instance_type,
-    cpu_instance_types, max_cpu_queue_size, enable_cpu_queue,
-    gpu_instance_types, max_gpu_queue_size, enable_gpu_queue,
-    region, cluster_type,
-    loginnode_instance_type="", loginnode_count=0, enable_loginnode=False,
+    cpu_instance_types,
+    max_cpu_queue_size,
+    enable_cpu_queue,
+    gpu_instance_types,
+    max_gpu_queue_size,
+    enable_gpu_queue,
+    region,
+    cluster_type,
+    loginnode_instance_type="",
+    loginnode_count=0,
+    enable_loginnode=False,
 ):
     """Return list of strings to inject into the build summary.
 
@@ -3764,7 +3835,9 @@ def _cost_summary_lines(
             sp_str = _fmt_spot(sp_min, sp_max, max_cpu_queue_size) if is_spot else None
             if od_str:
                 suffix = f"  [{sp_str}]" if sp_str else ""
-                lines.append(f"    CPU queue  ({label} × {max_cpu_queue_size}):   {od_str}{suffix}{note}")
+                lines.append(
+                    f"    CPU queue  ({label} × {max_cpu_queue_size}):   {od_str}{suffix}{note}"
+                )
             else:
                 lines.append(f"    CPU queue  ({label} × {max_cpu_queue_size}):   unavailable")
 
@@ -3775,7 +3848,9 @@ def _cost_summary_lines(
             sp_str = _fmt_spot(sp_min, sp_max, max_gpu_queue_size) if is_spot else None
             if od_str:
                 suffix = f"  [{sp_str}]" if sp_str else ""
-                lines.append(f"    GPU queue  ({label} × {max_gpu_queue_size}):   {od_str}{suffix}{note}")
+                lines.append(
+                    f"    GPU queue  ({label} × {max_gpu_queue_size}):   {od_str}{suffix}{note}"
+                )
             else:
                 lines.append(f"    GPU queue  ({label} × {max_gpu_queue_size}):   unavailable")
 
@@ -3789,12 +3864,20 @@ def _cost_summary_lines(
 
 def _storage_summary_lines(
     *,
-    ebs_shared_dir, ebs_shared_volume_size, ebs_shared_volume_type,
-    enable_efs, efs_throughput_mode,
-    enable_fsx, fsx_size,
-    enable_fsx_hydration, fsx_s3_import_bucket, fsx_s3_import_path,
-    fsx_s3_export_bucket, fsx_s3_export_path,
-    enable_external_nfs, external_nfs_server,
+    ebs_shared_dir,
+    ebs_shared_volume_size,
+    ebs_shared_volume_type,
+    enable_efs,
+    efs_throughput_mode,
+    enable_fsx,
+    fsx_size,
+    enable_fsx_hydration,
+    fsx_s3_import_bucket,
+    fsx_s3_import_path,
+    fsx_s3_export_bucket,
+    fsx_s3_export_path,
+    enable_external_nfs,
+    external_nfs_server,
 ):
     """Return build-summary lines naming every shared filesystem and its mount point.
 
@@ -3825,8 +3908,7 @@ def _storage_summary_lines(
 
     lines = ["  Shared storage:"]
     lines.append(
-        f"    {ebs_shared_dir:<{col}}EBS ({ebs_shared_volume_type}, "
-        f"{ebs_shared_volume_size} GB)"
+        f"    {ebs_shared_dir:<{col}}EBS ({ebs_shared_volume_type}, {ebs_shared_volume_size} GB)"
     )
     if enable_efs:
         lines.append(f"    {'/efs':<{col}}EFS ({efs_throughput_mode} throughput)")
@@ -3916,9 +3998,7 @@ def _derive_head_node_bootstrap_timeout(*, configured, enable_efs, enable_fsx):
     downward -- only the untouched default is extended.
     """
     if configured != _NODE_BOOTSTRAP_TIMEOUT:
-        return _clamp_int(
-            configured, 1, _CFN_WAIT_CONDITION_MAX, "head_node_bootstrap_timeout"
-        )
+        return _clamp_int(configured, 1, _CFN_WAIT_CONDITION_MAX, "head_node_bootstrap_timeout")
     allowance = max(
         _FSX_PROVISION_ALLOWANCE if enable_fsx else 0,
         _EFS_PROVISION_ALLOWANCE if enable_efs else 0,
@@ -4170,9 +4250,7 @@ def _read_local_vars_file(cluster_name, repo_root):
     reads as untracked, which is what teardown leaves. Defense-in-depth
     path check protects callers that bypass _enumerate_clusters.
     """
-    cluster_dir = os.path.realpath(
-        os.path.join(repo_root, "active_clusters", cluster_name)
-    )
+    cluster_dir = os.path.realpath(os.path.join(repo_root, "active_clusters", cluster_name))
     active_root = os.path.realpath(os.path.join(repo_root, "active_clusters"))
     if not cluster_dir.startswith(active_root + os.sep):
         return None
@@ -4230,46 +4308,45 @@ def _sanitize_record(data, cluster_name):
         return []
 
     return {
-        "cluster_name":           _str("cluster_name", cluster_name),
-        "cluster_owner":          _str("cluster_owner"),
-        "serial":                 _str("serial"),
-        "region":                 _str("region"),
+        "cluster_name": _str("cluster_name", cluster_name),
+        "cluster_owner": _str("cluster_owner"),
+        "serial": _str("serial"),
+        "region": _str("region"),
         "headnode_instance_type": _str("headnode_instance_type"),
-        "enable_loginnode":       _str("enable_loginnode", "false"),
+        "enable_loginnode": _str("enable_loginnode", "false"),
         "loginnode_instance_type": _str("loginnode_instance_type"),
-        "loginnode_count":        _int("loginnode_count"),
-        "cpu_instance_types":     _strlist("cpu_instance_types"),
-        "gpu_instance_types":     _strlist("gpu_instance_types"),
-        "enable_cpu_queue":       _str("enable_cpu_queue", "false"),
-        "enable_gpu_queue":       _str("enable_gpu_queue", "false"),
+        "loginnode_count": _int("loginnode_count"),
+        "cpu_instance_types": _strlist("cpu_instance_types"),
+        "gpu_instance_types": _strlist("gpu_instance_types"),
+        "enable_cpu_queue": _str("enable_cpu_queue", "false"),
+        "enable_gpu_queue": _str("enable_gpu_queue", "false"),
         "initial_cpu_queue_size": _int("initial_cpu_queue_size"),
-        "max_cpu_queue_size":     _int("max_cpu_queue_size"),
+        "max_cpu_queue_size": _int("max_cpu_queue_size"),
         "initial_gpu_queue_size": _int("initial_gpu_queue_size"),
-        "max_gpu_queue_size":     _int("max_gpu_queue_size"),
-        "cluster_type":           _str("cluster_type", "ondemand"),
-        "deployment_date":        _str("deployment_date"),
-        "ssh_keypair":            _str("ssh_keypair"),
-        "ec2_keypair":            _str("ec2_keypair"),
-        "ec2_user":               _str("ec2_user", "ubuntu"),
-        "s3_bucketname":          _str("s3_bucketname"),
-        "enable_monitoring":      _str("enable_monitoring", "false"),
+        "max_gpu_queue_size": _int("max_gpu_queue_size"),
+        "cluster_type": _str("cluster_type", "ondemand"),
+        "deployment_date": _str("deployment_date"),
+        "ssh_keypair": _str("ssh_keypair"),
+        "ec2_keypair": _str("ec2_keypair"),
+        "ec2_user": _str("ec2_user", "ubuntu"),
+        "s3_bucketname": _str("s3_bucketname"),
+        "enable_monitoring": _str("enable_monitoring", "false"),
         # Teardown's inputs; see ClusterRecord for why they are here.
-        "aws_account_id":         _str("aws_account_id"),
-        "az":                     _str("az"),
-        "ec2_iam_policy":         _str("ec2_iam_policy"),
-        "ec2_iam_role":           _str("ec2_iam_role"),
-        "ec2_user_home":          _str("ec2_user_home"),
-        "ssh_secret_name":        _str("ssh_secret_name"),
+        "aws_account_id": _str("aws_account_id"),
+        "az": _str("az"),
+        "ec2_iam_policy": _str("ec2_iam_policy"),
+        "ec2_iam_role": _str("ec2_iam_role"),
+        "ec2_user_home": _str("ec2_user_home"),
+        "ssh_secret_name": _str("ssh_secret_name"),
         "fsx_hydration_iam_policy": _str("fsx_hydration_iam_policy"),
-        "results_bucketname":     _str("results_bucketname"),
-        "enable_external_nfs":    _str("enable_external_nfs", "false"),
-        "enable_fsx_hydration":   _str("enable_fsx_hydration", "false"),
-        "enable_hpc_benchmarks":  _str("enable_hpc_benchmarks", "false"),
+        "results_bucketname": _str("results_bucketname"),
+        "enable_external_nfs": _str("enable_external_nfs", "false"),
+        "enable_fsx_hydration": _str("enable_fsx_hydration", "false"),
+        "enable_hpc_benchmarks": _str("enable_hpc_benchmarks", "false"),
     }
 
 
-def _read_cluster_record(cluster_name, repo_root, *, s3=None,
-                         locks_bucketname=None):
+def _read_cluster_record(cluster_name, repo_root, *, s3=None, locks_bucketname=None):
     """A tracked cluster's metadata, local first, then the shared store.
 
     Local wins deliberately. On the operator's machine the vars file is
@@ -4282,9 +4359,7 @@ def _read_cluster_record(cluster_name, repo_root, *, s3=None,
     if data is not None:
         data = _project_vars_file(data, cluster_name)
     elif s3 is not None and locks_bucketname:
-        data = get_cluster_record(
-            s3, locks_bucketname=locks_bucketname, cluster_name=cluster_name
-        )
+        data = get_cluster_record(s3, locks_bucketname=locks_bucketname, cluster_name=cluster_name)
     if not isinstance(data, dict):
         return None
     return _sanitize_record(data, cluster_name)
@@ -4314,10 +4389,7 @@ def _check_tag_activated(ce_client):
             TagKeys=["ClusterID"], Type="UserDefined", MaxResults=1
         )
         tags = resp.get("CostAllocationTags", [])
-        return any(
-            t.get("TagKey") == "ClusterID" and t.get("Status") == "Active"
-            for t in tags
-        )
+        return any(t.get("TagKey") == "ClusterID" and t.get("Status") == "Active" for t in tags)
     except _ClientError:
         return None
     except BotoCoreError:
@@ -4352,11 +4424,7 @@ def _get_cluster_cost(ce_client, cluster_name, start, end):
             return None, f"network/credential error: {e}"
 
         for period in resp.get("ResultsByTime", []):
-            amount = (
-                period.get("Total", {})
-                .get("UnblendedCost", {})
-                .get("Amount", "0")
-            )
+            amount = period.get("Total", {}).get("UnblendedCost", {}).get("Amount", "0")
             try:
                 total += float(amount)
             except ValueError:
@@ -4468,12 +4536,11 @@ def _update_compute_fleet_lib(cluster_name, region, status):
     wait_ops list -- which is why the fleet paths poll manually and always
     have."""
     import pcluster.lib as pc
+
     ensure_event_loop()
 
     try:
-        return pc.update_compute_fleet(
-            cluster_name=cluster_name, region=region, status=status
-        )
+        return pc.update_compute_fleet(cluster_name=cluster_name, region=region, status=status)
     except Exception as e:
         raise PClusterMakerError(
             f"update-compute-fleet failed for {cluster_name!r} in {region}: "
@@ -4493,11 +4560,13 @@ def _update_cluster_lib(cluster_name, region, config_path):
     across what can be a 30-minute wait, and the library's own polling is
     opaque. Same precedent as create/delete."""
     import pcluster.lib as pc
+
     ensure_event_loop()
 
     try:
         return pc.update_cluster(
-            cluster_name=cluster_name, region=region,
+            cluster_name=cluster_name,
+            region=region,
             cluster_configuration=config_path,
         )
     except Exception as e:
@@ -4528,6 +4597,7 @@ def _describe_cluster_json(cluster_name, region):
     their behavior is unchanged.
     """
     import pcluster.lib as pc
+
     ensure_event_loop()
 
     try:
@@ -4541,9 +4611,7 @@ def _describe_cluster_json(cluster_name, region):
 
 def _get_fleet_status(cluster_name, region, pcluster_bin):
     """Return the current computeFleetStatus string for cluster_name."""
-    return _describe_cluster_json(cluster_name, region).get(
-        "computeFleetStatus", "UNKNOWN"
-    )
+    return _describe_cluster_json(cluster_name, region).get("computeFleetStatus", "UNKNOWN")
 
 
 # Terminal states that mean the requested action has already happened, and
@@ -4621,10 +4689,14 @@ def _poll_fleet(cluster_name, region, target, label, pcluster_bin):
 def _ssh_args(head_ip, ssh_keypair, ec2_user, timeout):
     return [
         "ssh",
-        "-i", ssh_keypair,
-        "-o", f"ConnectTimeout={timeout}",
-        "-o", "StrictHostKeyChecking=accept-new",
-        "-o", "BatchMode=yes",
+        "-i",
+        ssh_keypair,
+        "-o",
+        f"ConnectTimeout={timeout}",
+        "-o",
+        "StrictHostKeyChecking=accept-new",
+        "-o",
+        "BatchMode=yes",
         f"{ec2_user}@{head_ip}",
     ]
 
@@ -4657,15 +4729,16 @@ def check_cfn_status(cluster_name, region, pcluster_bin):
         cs = data.get("clusterStatus", "UNKNOWN")
         cfs = data.get("cloudFormationStackStatus", "UNKNOWN")
         head_node = data.get("headNode", {})
-        head_ip = (
-            head_node.get("publicIpAddress") or
-            head_node.get("privateIpAddress") or ""
-        )
+        head_ip = head_node.get("publicIpAddress") or head_node.get("privateIpAddress") or ""
         if cs in _DEGRADED_CLUSTER_STATES:
-            return True, (
-                f"clusterStatus={cs} -- an update failed and rolled back, so "
-                f"the cluster is running its previous configuration"
-            ), head_ip
+            return (
+                True,
+                (
+                    f"clusterStatus={cs} -- an update failed and rolled back, so "
+                    f"the cluster is running its previous configuration"
+                ),
+                head_ip,
+            )
         if cs not in _HEALTHY_CLUSTER_STATES:
             return False, f"clusterStatus={cs} cloudFormationStackStatus={cfs}", head_ip
         return True, f"clusterStatus={cs}", head_ip
@@ -4753,7 +4826,10 @@ def check_slurm(head_ip, ssh_keypair, ec2_user, timeout):
     """
     try:
         rc, stdout, stderr = _run_ssh(
-            head_ip, ssh_keypair, ec2_user, timeout,
+            head_ip,
+            ssh_keypair,
+            ec2_user,
+            timeout,
             _slurm_remote_cmd('sinfo -h -o "%D %T"'),
         )
         if rc != 0:
@@ -4789,9 +4865,7 @@ def check_s3(s3_bucketname, region):
 def check_postinstall(head_ip, ssh_keypair, ec2_user, timeout):
     marker = "/opt/parallelcluster/shared/custom_action_done"
     try:
-        rc, _, _ = _run_ssh(
-            head_ip, ssh_keypair, ec2_user, timeout, ["test", "-f", marker]
-        )
+        rc, _, _ = _run_ssh(head_ip, ssh_keypair, ec2_user, timeout, ["test", "-f", marker])
         if rc == 0:
             return True, None
         return False, f"marker file absent: {marker}"
@@ -4803,7 +4877,10 @@ def check_postinstall(head_ip, ssh_keypair, ec2_user, timeout):
 
 def check_grafana(head_ip, ssh_keypair, ec2_user, timeout):
     cmd = [
-        "curl", "-sk", "--max-time", "10",
+        "curl",
+        "-sk",
+        "--max-time",
+        "10",
         "https://localhost:443/grafana/api/health",
     ]
     try:
@@ -4932,9 +5009,7 @@ def _serial_launch_time(serial):
     if not match:
         return None
     try:
-        return DateTime.strptime(match.group(1), "%S%M%H%d%m%Y").replace(
-            tzinfo=timezone.utc
-        )
+        return DateTime.strptime(match.group(1), "%S%M%H%d%m%Y").replace(tzinfo=timezone.utc)
     except ValueError:
         return None
 
@@ -4956,9 +5031,7 @@ def _age_str(deployment_date, *, serial=None):
     """
     launched = _serial_launch_time(serial)
     try:
-        dt = launched or DateTime.strptime(
-            deployment_date, "%d-%B-%Y"
-        ).replace(tzinfo=timezone.utc)
+        dt = launched or DateTime.strptime(deployment_date, "%d-%B-%Y").replace(tzinfo=timezone.utc)
         delta = DateTime.now(timezone.utc) - dt
         total_minutes = int(delta.total_seconds() // 60)
         if total_minutes < 60:
@@ -5084,8 +5157,9 @@ class ClusterListEntry:
     status: str
 
 
-def core_list_clusters(*, cluster_records, pcluster_bin, region_filter=None,
-                        owner_filter=None, live=False):
+def core_list_clusters(
+    *, cluster_records, pcluster_bin, region_filter=None, owner_filter=None, live=False
+):
     """List already-resolved clusters, optionally filtered by region/owner,
     with live CloudFormation status. Never raises for one cluster's
     live-status failure -- mirrors today's tolerance (status="ERR" for that
@@ -5099,32 +5173,34 @@ def core_list_clusters(*, cluster_records, pcluster_bin, region_filter=None,
             continue
         age = _age_str(rec.deployment_date, serial=rec.serial)
         status = _live_status(rec.cluster_name, rec.region, pcluster_bin) if live else "LOCAL"
-        entries.append(ClusterListEntry(
-            cluster_name=rec.cluster_name,
-            cluster_owner=rec.cluster_owner,
-            serial=rec.serial,
-            region=rec.region,
-            headnode_instance_type=rec.headnode_instance_type,
-            enable_loginnode=rec.enable_loginnode,
-            loginnode_instance_type=rec.loginnode_instance_type,
-            loginnode_count=rec.loginnode_count,
-            cpu_instance_types=rec.cpu_instance_types,
-            gpu_instance_types=rec.gpu_instance_types,
-            enable_cpu_queue=rec.enable_cpu_queue,
-            enable_gpu_queue=rec.enable_gpu_queue,
-            initial_cpu_queue_size=rec.initial_cpu_queue_size,
-            max_cpu_queue_size=rec.max_cpu_queue_size,
-            initial_gpu_queue_size=rec.initial_gpu_queue_size,
-            max_gpu_queue_size=rec.max_gpu_queue_size,
-            cluster_type=rec.cluster_type,
-            deployment_date=rec.deployment_date,
-            ssh_keypair=rec.ssh_keypair,
-            ec2_user=rec.ec2_user,
-            s3_bucketname=rec.s3_bucketname,
-            enable_monitoring=rec.enable_monitoring,
-            age=age,
-            status=status,
-        ))
+        entries.append(
+            ClusterListEntry(
+                cluster_name=rec.cluster_name,
+                cluster_owner=rec.cluster_owner,
+                serial=rec.serial,
+                region=rec.region,
+                headnode_instance_type=rec.headnode_instance_type,
+                enable_loginnode=rec.enable_loginnode,
+                loginnode_instance_type=rec.loginnode_instance_type,
+                loginnode_count=rec.loginnode_count,
+                cpu_instance_types=rec.cpu_instance_types,
+                gpu_instance_types=rec.gpu_instance_types,
+                enable_cpu_queue=rec.enable_cpu_queue,
+                enable_gpu_queue=rec.enable_gpu_queue,
+                initial_cpu_queue_size=rec.initial_cpu_queue_size,
+                max_cpu_queue_size=rec.max_cpu_queue_size,
+                initial_gpu_queue_size=rec.initial_gpu_queue_size,
+                max_gpu_queue_size=rec.max_gpu_queue_size,
+                cluster_type=rec.cluster_type,
+                deployment_date=rec.deployment_date,
+                ssh_keypair=rec.ssh_keypair,
+                ec2_user=rec.ec2_user,
+                s3_bucketname=rec.s3_bucketname,
+                enable_monitoring=rec.enable_monitoring,
+                age=age,
+                status=status,
+            )
+        )
     return entries
 
 
@@ -5181,21 +5257,29 @@ def _fetch_cw_logs(cluster_name, region, streams, n_lines):
     except _ClientError as e:
         code = e.response["Error"]["Code"]
         if code == "AccessDeniedException":
-            return CloudWatchLogSection(None, {}, (
-                f"CloudWatch unavailable: {code} — add logs:DescribeLogGroups "
-                f"on Resource \"*\" to the operator policy, or use --no_cw"
-            ))
+            return CloudWatchLogSection(
+                None,
+                {},
+                (
+                    f"CloudWatch unavailable: {code} — add logs:DescribeLogGroups "
+                    f'on Resource "*" to the operator policy, or use --no_cw'
+                ),
+            )
         return CloudWatchLogSection(None, {}, f"CloudWatch error: {code}")
     except BotoCoreError as e:
         return CloudWatchLogSection(None, {}, f"CloudWatch network error: {e}")
 
     log_group = _select_cw_log_group(cluster_name, group_names)
     if log_group is None:
-        return CloudWatchLogSection(None, {}, (
-            f"no CloudWatch log group for '{cluster_name}' — PCluster creates "
-            f"/aws/parallelcluster/{cluster_name}-<timestamp> once the head node "
-            "starts logging, which is several minutes into a build"
-        ))
+        return CloudWatchLogSection(
+            None,
+            {},
+            (
+                f"no CloudWatch log group for '{cluster_name}' — PCluster creates "
+                f"/aws/parallelcluster/{cluster_name}-<timestamp> once the head node "
+                "starts logging, which is several minutes into a build"
+            ),
+        )
 
     try:
         existing = []
@@ -5207,10 +5291,14 @@ def _fetch_cw_logs(cluster_name, region, streams, n_lines):
     except _ClientError as e:
         code = e.response["Error"]["Code"]
         if code == "AccessDeniedException":
-            return CloudWatchLogSection(log_group, {}, (
-                f"CloudWatch unavailable: {code} — add logs:DescribeLogStreams "
-                f"to the operator policy, or use --no_cw"
-            ))
+            return CloudWatchLogSection(
+                log_group,
+                {},
+                (
+                    f"CloudWatch unavailable: {code} — add logs:DescribeLogStreams "
+                    f"to the operator policy, or use --no_cw"
+                ),
+            )
         return CloudWatchLogSection(log_group, {}, f"CloudWatch error: {code}")
     except BotoCoreError as e:
         return CloudWatchLogSection(log_group, {}, f"CloudWatch network error: {e}")
@@ -5298,7 +5386,10 @@ class SinfoSection:
 def _diagnose_sinfo(head_ip, ssh_keypair, ec2_user, timeout):
     try:
         rc, stdout, stderr = _run_ssh(
-            head_ip, ssh_keypair, ec2_user, timeout,
+            head_ip,
+            ssh_keypair,
+            ec2_user,
+            timeout,
             _slurm_remote_cmd(shlex.join(["sinfo", "-N", "-l"])),
         )
         if rc == 0:
@@ -5319,7 +5410,8 @@ class SacctSection:
 def _diagnose_sacct(head_ip, ssh_keypair, ec2_user, timeout, hours):
     since = (DateTime.now(timezone.utc) - timedelta(hours=hours)).strftime("%Y-%m-%dT%H:%M:%SZ")
     sacct_cmd = [
-        "sacct", "-X",
+        "sacct",
+        "-X",
         "--state=FAILED,CANCELLED,TIMEOUT,NODE_FAIL",
         f"--starttime={since}",
         "--format=JobID,JobName,State,ExitCode,NodeList,Start,End",
@@ -5327,13 +5419,18 @@ def _diagnose_sacct(head_ip, ssh_keypair, ec2_user, timeout, hours):
     ]
     try:
         rc, stdout, stderr = _run_ssh(
-            head_ip, ssh_keypair, ec2_user, timeout,
+            head_ip,
+            ssh_keypair,
+            ec2_user,
+            timeout,
             _slurm_remote_cmd(shlex.join(sacct_cmd)),
         )
         if rc != 0:
             stderr_short = stderr.strip()[:200]
             if "command not found" in stderr_short or rc == 127:
-                return SacctSection(None, "sacct not available — Slurm accounting is not enabled on this cluster")
+                return SacctSection(
+                    None, "sacct not available — Slurm accounting is not enabled on this cluster"
+                )
             return SacctSection(None, f"sacct failed (rc={rc}): {stderr_short}")
         return SacctSection(_parse_sacct(stdout), None)
     except subprocess.TimeoutExpired:
@@ -5391,16 +5488,25 @@ class DiagnosticReport:
     serial: str
     head_ip: str | None
     head_ip_error: str | None
-    cloudwatch: CloudWatchLogSection | None   # None if include_cloudwatch=False
-    sinfo: SinfoSection | None                 # None if SSH unavailable/unreachable
+    cloudwatch: CloudWatchLogSection | None  # None if include_cloudwatch=False
+    sinfo: SinfoSection | None  # None if SSH unavailable/unreachable
     sacct: SacctSection | None
     local_logs: list
     postinstall: PostinstallSection | None
 
 
-def core_diagnose_cluster(*, cluster_record, pcluster_bin, region_override=None,
-                           timeout=20, cw_lines=50, log_lines=30, hours=24,
-                           include_cloudwatch=True, ssh_available=True):
+def core_diagnose_cluster(
+    *,
+    cluster_record,
+    pcluster_bin,
+    region_override=None,
+    timeout=20,
+    cw_lines=50,
+    log_lines=30,
+    hours=24,
+    include_cloudwatch=True,
+    ssh_available=True,
+):
     """Deep diagnostic for one cluster. Numeric args are trusted as already
     validated -- the CLI shim clamps them before calling, same as
     core_check_cluster_health (timeout/cw_lines/log_lines/hours must stay
@@ -5469,12 +5575,13 @@ def core_diagnose_cluster(*, cluster_record, pcluster_bin, region_override=None,
 @dataclass(frozen=True)
 class AccessInfo:
     cluster_name: str
-    node_type: str    # "HeadNode" | "LoginNode"
-    node_label: str   # "head node" | "login node"
+    node_type: str  # "HeadNode" | "LoginNode"
+    node_label: str  # "head node" | "login node"
 
 
-def core_resolve_access_node_type(rec, cluster_name, *, login_node_requested=False,
-                                    head_node_requested=False):
+def core_resolve_access_node_type(
+    rec, cluster_name, *, login_node_requested=False, head_node_requested=False
+):
     """Decide which node type to connect to. rec is a dict from
     _read_cluster_record, or {} for a missing/unreadable vars file --
     deliberately NOT a ClusterRecord: this reuses _resolve_access_node_type,
@@ -5490,7 +5597,8 @@ def core_resolve_access_node_type(rec, cluster_name, *, login_node_requested=Fal
         raise PClusterMakerError("ERROR: --login_node and --head_node are mutually exclusive.")
 
     node_type, error = _resolve_access_node_type(
-        rec, cluster_name,
+        rec,
+        cluster_name,
         login_node_requested=login_node_requested,
         head_node_requested=head_node_requested,
     )
@@ -5502,7 +5610,12 @@ def core_resolve_access_node_type(rec, cluster_name, *, login_node_requested=Fal
 
 
 def core_ensure_generated_script(
-    *, cluster_data_root, cluster_name, repo_root, template, dest_name,
+    *,
+    cluster_data_root,
+    cluster_name,
+    repo_root,
+    template,
+    dest_name,
 ):
     """Return the path to one of a cluster's generated scripts, rendering
     it if the build never wrote one.
@@ -5527,15 +5640,11 @@ def core_ensure_generated_script(
     root = os.path.normpath(cluster_data_root)
     path = os.path.normpath(os.path.join(root, cluster_name, dest_name))
     if not path.startswith(root + os.sep):
-        raise PClusterMakerError(
-            f"Resolved script path escapes active_clusters/: {path}"
-        )
+        raise PClusterMakerError(f"Resolved script path escapes active_clusters/: {path}")
     if os.path.isfile(path):
         return path
 
-    vars_file_path = os.path.join(
-        repo_root, "src", "vars_files", cluster_name + ".yml"
-    )
+    vars_file_path = os.path.join(repo_root, "src", "vars_files", cluster_name + ".yml")
     if not os.path.isfile(vars_file_path):
         raise PClusterMakerError(
             f"No {dest_name} and no vars file for {cluster_name!r}.\n"
@@ -5548,9 +5657,7 @@ def core_ensure_generated_script(
 
     with open(vars_file_path) as fh:
         ctx = yaml.safe_load(fh) or {}
-    rendered = render_template(
-        os.path.join(repo_root, "templates"), template, **ctx
-    )
+    rendered = render_template(os.path.join(repo_root, "templates"), template, **ctx)
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o755), "w") as fh:
         fh.write(rendered)
@@ -5589,8 +5696,20 @@ _SBATCH_REFUSED_SWITCHES = ("--wrap",)
 # these, not the operator, so a plausible-looking filter destroys work
 # nobody inspected. Explicit job IDs only.
 _SCANCEL_REFUSED_SWITCHES = (
-    "-u", "--user", "--state", "-t", "--partition", "-p",
-    "--qos", "-q", "--name", "-n", "--account", "-A", "--nodelist", "-w",
+    "-u",
+    "--user",
+    "--state",
+    "-t",
+    "--partition",
+    "-p",
+    "--qos",
+    "-q",
+    "--name",
+    "-n",
+    "--account",
+    "-A",
+    "--nodelist",
+    "-w",
 )
 
 
@@ -5622,8 +5741,7 @@ def _validate_slurm_command(command, switches, script, *, allow_writes):
     allowed = _READWRITE_SLURM_COMMANDS if allow_writes else _READONLY_SLURM_COMMANDS
     if command not in allowed:
         return None, (
-            f"ERROR: '{command}' is not available here. This tool runs: "
-            f"{', '.join(allowed)}."
+            f"ERROR: '{command}' is not available here. This tool runs: {', '.join(allowed)}."
         )
     try:
         tokens = shlex.split(switches or "")
@@ -5651,8 +5769,7 @@ def _validate_slurm_command(command, switches, script, *, allow_writes):
             return ["scontrol", "show"] + tokens, None
         if not tokens:
             return None, (
-                "ERROR: scontrol needs a subcommand -- bare scontrol is "
-                "interactive and would hang."
+                "ERROR: scontrol needs a subcommand -- bare scontrol is interactive and would hang."
             )
     if command == "sbatch":
         if not script:
@@ -5700,7 +5817,7 @@ def _sbatch_script_payload(argv, script):
     # decoding fails and returns base64's status as though it were Slurm's.
     return (
         f'tmp="$(mktemp "$HOME/.pcm-sbatch-XXXXXX")"; '
-        f"printf %s {shlex.quote(b64)} | base64 -d > \"$tmp\"; "
+        f'printf %s {shlex.quote(b64)} | base64 -d > "$tmp"; '
         f'rc=0; {quoted} "$tmp" || rc=$?; '
         f'rm -f "$tmp"; exit $rc'
     )
@@ -5710,9 +5827,18 @@ _SBATCH_JOB_ID = re.compile(r"Submitted batch job (\d+)")
 
 
 def core_run_slurm_command(
-    *, cluster_data_root, cluster_name, cluster_record, repo_root,
-    command, switches="", script=None, allow_writes,
-    node_type=None, timeout=120, runner=None,
+    *,
+    cluster_data_root,
+    cluster_name,
+    cluster_record,
+    repo_root,
+    command,
+    switches="",
+    script=None,
+    allow_writes,
+    node_type=None,
+    timeout=120,
+    runner=None,
 ):
     """Run one Slurm command on a cluster node and return its output.
 
@@ -5727,9 +5853,7 @@ def core_run_slurm_command(
     `runner` is an injectable seam for tests and for a future transport;
     it takes (argv, env, timeout) and returns (rc, stdout, stderr).
     """
-    argv, err = _validate_slurm_command(
-        command, switches, script, allow_writes=allow_writes
-    )
+    argv, err = _validate_slurm_command(command, switches, script, allow_writes=allow_writes)
     if err:
         raise PClusterMakerError(err)
 
@@ -5742,8 +5866,10 @@ def core_run_slurm_command(
             raise PClusterMakerError(node_err)
 
     core_ensure_generated_script(
-        cluster_data_root=cluster_data_root, cluster_name=cluster_name,
-        repo_root=repo_root, template="access_cluster.j2",
+        cluster_data_root=cluster_data_root,
+        cluster_name=cluster_name,
+        repo_root=repo_root,
+        template="access_cluster.j2",
         dest_name=f"access_cluster.{cluster_name}.sh",
     )
     access_script = _resolve_access_script_path(cluster_data_root, cluster_name)
@@ -5760,14 +5886,19 @@ def core_run_slurm_command(
         rc, out, errtext = run(["bash", access_script] + remote_cmd, env, timeout)
     except subprocess.TimeoutExpired:
         return SlurmCommandResult(
-            cluster_name=cluster_name, node_type=node_type,
-            command=shlex.join(argv), exit_code=124, stdout="", stderr=(
+            cluster_name=cluster_name,
+            node_type=node_type,
+            command=shlex.join(argv),
+            exit_code=124,
+            stdout="",
+            stderr=(
                 f"ERROR: {command} did not finish within {timeout}s and was "
                 f"stopped here. Whether it reached the cluster is unknown -- "
                 f"check with squeue rather than retrying, which could submit "
                 f"or cancel a second time."
             ),
-            success=False, timed_out=True,
+            success=False,
+            timed_out=True,
         )
 
     job_id = None
@@ -5775,8 +5906,14 @@ def core_run_slurm_command(
         m = _SBATCH_JOB_ID.search(out or "")
         job_id = m.group(1) if m else None
     return SlurmCommandResult(
-        cluster_name=cluster_name, node_type=node_type, command=shlex.join(argv),
-        exit_code=rc, stdout=out, stderr=errtext, success=(rc == 0), job_id=job_id,
+        cluster_name=cluster_name,
+        node_type=node_type,
+        command=shlex.join(argv),
+        exit_code=rc,
+        stdout=out,
+        stderr=errtext,
+        success=(rc == 0),
+        job_id=job_id,
     )
 
 
@@ -5789,8 +5926,17 @@ _SSM_STDOUT_LIMIT = 24000
 
 
 def run_slurm_via_ssm(
-    *, ssm, ec2, cluster_name, node_type, command, switches, ec2_user,
-    timeout=25, poll=1.0, sleeper=None,
+    *,
+    ssm,
+    ec2,
+    cluster_name,
+    node_type,
+    command,
+    switches,
+    ec2_user,
+    timeout=25,
+    poll=1.0,
+    sleeper=None,
 ):
     """Run one read-only Slurm command through the constrained SSM document.
 
@@ -5831,9 +5977,7 @@ def run_slurm_via_ssm(
     deadline = time.time() + timeout
     while True:
         try:
-            inv = ssm.get_command_invocation(
-                CommandId=command_id, InstanceId=instance_id
-            )
+            inv = ssm.get_command_invocation(CommandId=command_id, InstanceId=instance_id)
         except Exception as e:
             # InvocationDoesNotExist is normal for a moment after send.
             if type(e).__name__ != "InvocationDoesNotExist":
@@ -5845,10 +5989,15 @@ def run_slurm_via_ssm(
             rc = inv.get("ResponseCode", -1)
             return rc, out, err, len(out) >= _SSM_STDOUT_LIMIT
         if time.time() >= deadline:
-            return 124, "", (
-                f"ERROR: the command did not finish within {timeout}s. It may "
-                f"still be running on the node; command id {command_id}."
-            ), False
+            return (
+                124,
+                "",
+                (
+                    f"ERROR: the command did not finish within {timeout}s. It may "
+                    f"still be running on the node; command id {command_id}."
+                ),
+                False,
+            )
         sleeper(poll)
 
 
@@ -5858,11 +6007,13 @@ def _slurm_node_instance_id(ec2, cluster_name, node_type):
     The same three-tag filter access_cluster.j2 uses, because it is
     PCluster's tagging contract rather than this toolkit's choice.
     """
-    resp = ec2.describe_instances(Filters=[
-        {"Name": "tag:parallelcluster:cluster-name", "Values": [cluster_name]},
-        {"Name": "tag:parallelcluster:node-type", "Values": [node_type]},
-        {"Name": "instance-state-name", "Values": ["running"]},
-    ])
+    resp = ec2.describe_instances(
+        Filters=[
+            {"Name": "tag:parallelcluster:cluster-name", "Values": [cluster_name]},
+            {"Name": "tag:parallelcluster:node-type", "Values": [node_type]},
+            {"Name": "instance-state-name", "Values": ["running"]},
+        ]
+    )
     for r in resp.get("Reservations", []):
         for i in r.get("Instances", []):
             return i.get("InstanceId")
@@ -5870,8 +6021,15 @@ def _slurm_node_instance_id(ec2, cluster_name, node_type):
 
 
 def core_run_slurm_command_via_ssm(
-    *, cluster_record, cluster_name, command, switches="",
-    node_type=None, timeout=25, ssm=None, ec2=None,
+    *,
+    cluster_record,
+    cluster_name,
+    command,
+    switches="",
+    node_type=None,
+    timeout=25,
+    ssm=None,
+    ec2=None,
 ):
     """The remote half of run_readonly_slurm_command.
 
@@ -5902,8 +6060,11 @@ def core_run_slurm_command_via_ssm(
     rc, out, errtext, truncated = run_slurm_via_ssm(
         ssm=ssm or boto3.client("ssm", region_name=region),
         ec2=ec2 or boto3.client("ec2", region_name=region),
-        cluster_name=cluster_name, node_type=node_type,
-        command=command, switches=switches, ec2_user=ec2_user,
+        cluster_name=cluster_name,
+        node_type=node_type,
+        command=command,
+        switches=switches,
+        ec2_user=ec2_user,
         timeout=timeout,
     )
     if truncated:
@@ -5912,9 +6073,15 @@ def core_run_slurm_command_via_ssm(
             f"Narrow the query -- for example with --partition or --states."
         )
     return SlurmCommandResult(
-        cluster_name=cluster_name, node_type=node_type,
-        command=shlex.join(argv), exit_code=rc, stdout=out, stderr=errtext,
-        success=(rc == 0), timed_out=(rc == 124), truncated=truncated,
+        cluster_name=cluster_name,
+        node_type=node_type,
+        command=shlex.join(argv),
+        exit_code=rc,
+        stdout=out,
+        stderr=errtext,
+        success=(rc == 0),
+        timed_out=(rc == 124),
+        truncated=truncated,
     )
 
 
@@ -5923,8 +6090,12 @@ def _run_access_script(argv, env, timeout):
     a bare scontrol read from it, and on the stdio server the inherited
     stdin is the MCP JSON-RPC channel."""
     r = subprocess.run(
-        argv, env=env, capture_output=True, text=True,
-        stdin=subprocess.DEVNULL, timeout=timeout,
+        argv,
+        env=env,
+        capture_output=True,
+        text=True,
+        stdin=subprocess.DEVNULL,
+        timeout=timeout,
     )
     return r.returncode, r.stdout, r.stderr
 
@@ -5937,11 +6108,11 @@ def _run_access_script(argv, env, timeout):
 @dataclass(frozen=True)
 class TunnelResult:
     cluster_name: str
-    action: str   # "start" | "stop"
+    action: str  # "start" | "stop"
     port: int
     success: bool
     error: str | None
-    output: str = ""   # the script's own stdout/stderr, never printed
+    output: str = ""  # the script's own stdout/stderr, never printed
 
 
 def core_manage_grafana_tunnel(*, cluster_record, tunnel_script_path, port=8443, stop=False):
@@ -5984,17 +6155,23 @@ def core_manage_grafana_tunnel(*, cluster_record, tunnel_script_path, port=8443,
     # still be diagnosed.
     result = subprocess.run(
         ["bash", tunnel_script_path, str(port), action],
-        check=False, capture_output=True, text=True,
+        check=False,
+        capture_output=True,
+        text=True,
     )
     output = (result.stdout or "") + (result.stderr or "")
     if result.returncode != 0:
         return TunnelResult(
-            cluster_name=cluster_name, action=action, port=port, success=False,
+            cluster_name=cluster_name,
+            action=action,
+            port=port,
+            success=False,
             error=f"tunnel script failed to {action} the tunnel (exit {result.returncode})",
             output=output,
         )
-    return TunnelResult(cluster_name=cluster_name, action=action, port=port,
-                        success=True, error=None, output=output)
+    return TunnelResult(
+        cluster_name=cluster_name, action=action, port=port, success=True, error=None, output=output
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -6005,10 +6182,10 @@ def core_manage_grafana_tunnel(*, cluster_record, tunnel_script_path, port=8443,
 @dataclass(frozen=True)
 class FleetActionResult:
     cluster_name: str
-    action: str            # "stop" | "start"
+    action: str  # "stop" | "start"
     status_before: str
-    status_after: str | None   # None unless wait=True
-    plan: str               # "done" | "wait" | "request" -- never "abort", which raises instead
+    status_after: str | None  # None unless wait=True
+    plan: str  # "done" | "wait" | "request" -- never "abort", which raises instead
 
 
 def _core_fleet_action(*, cluster_record, action, target_status, pcluster_bin, region, wait=False):
@@ -6066,8 +6243,12 @@ def core_stop_fleet(*, cluster_record, region, pcluster_bin, wait=False):
     """Stop a cluster's compute fleet. Reused as-is for
     manage_pcluster_queue's phase 1 (not yet migrated)."""
     return _core_fleet_action(
-        cluster_record=cluster_record, action="stop", target_status="STOPPED",
-        pcluster_bin=pcluster_bin, region=region, wait=wait,
+        cluster_record=cluster_record,
+        action="stop",
+        target_status="STOPPED",
+        pcluster_bin=pcluster_bin,
+        region=region,
+        wait=wait,
     )
 
 
@@ -6075,8 +6256,12 @@ def core_start_fleet(*, cluster_record, region, pcluster_bin, wait=False):
     """Start a cluster's compute fleet. Reused as-is for
     manage_pcluster_queue's phase 3 (not yet migrated)."""
     return _core_fleet_action(
-        cluster_record=cluster_record, action="start", target_status="RUNNING",
-        pcluster_bin=pcluster_bin, region=region, wait=wait,
+        cluster_record=cluster_record,
+        action="start",
+        target_status="RUNNING",
+        pcluster_bin=pcluster_bin,
+        region=region,
+        wait=wait,
     )
 
 
@@ -6150,7 +6335,9 @@ def core_rotate_cluster_key(*, cluster_record, region, secret_name=None, dry_run
         # kept here too as real defense-in-depth: an empty serial would
         # otherwise flow straight into a malformed Secrets Manager name via
         # _ssh_secret_name, for an MCP caller with no equivalent preflight.
-        raise PClusterMakerError("ERROR: vars file is missing cluster_serial_number or ec2_keypair.")
+        raise PClusterMakerError(
+            "ERROR: vars file is missing cluster_serial_number or ec2_keypair."
+        )
 
     _require_on_path("ssh")
     _require_on_path("ssh-keygen")
@@ -6196,7 +6383,9 @@ def core_rotate_cluster_key(*, cluster_record, region, secret_name=None, dry_run
             try:
                 old_pub_key = subprocess.run(
                     ["ssh-keygen", "-y", "-f", ssh_keypair],
-                    check=True, capture_output=True, text=True,
+                    check=True,
+                    capture_output=True,
+                    text=True,
                 ).stdout.strip()
             except subprocess.CalledProcessError as e:
                 print(f"  Warning: could not derive the current public key: {e}")
@@ -6214,10 +6403,15 @@ def core_rotate_cluster_key(*, cluster_record, region, secret_name=None, dry_run
         print("Adding new public key to head node authorized_keys...")
         subprocess.run(
             [
-                "ssh", "-i", ssh_keypair,
-                "-o", "StrictHostKeyChecking=accept-new",
-                "-o", "ConnectTimeout=30",
-                "-o", "BatchMode=yes",
+                "ssh",
+                "-i",
+                ssh_keypair,
+                "-o",
+                "StrictHostKeyChecking=accept-new",
+                "-o",
+                "ConnectTimeout=30",
+                "-o",
+                "BatchMode=yes",
                 f"{ec2_user}@{head_ip}",
                 _append_key_script(),
             ],
@@ -6233,10 +6427,15 @@ def core_rotate_cluster_key(*, cluster_record, region, secret_name=None, dry_run
         try:
             subprocess.run(
                 [
-                    "ssh", "-i", new_key_path,
-                    "-o", "StrictHostKeyChecking=accept-new",
-                    "-o", "ConnectTimeout=30",
-                    "-o", "BatchMode=yes",
+                    "ssh",
+                    "-i",
+                    new_key_path,
+                    "-o",
+                    "StrictHostKeyChecking=accept-new",
+                    "-o",
+                    "ConnectTimeout=30",
+                    "-o",
+                    "BatchMode=yes",
                     f"{ec2_user}@{head_ip}",
                     "true",
                 ],
@@ -6253,10 +6452,15 @@ def core_rotate_cluster_key(*, cluster_record, region, secret_name=None, dry_run
             try:
                 subprocess.run(
                     [
-                        "ssh", "-i", new_key_path,
-                        "-o", "StrictHostKeyChecking=accept-new",
-                        "-o", "ConnectTimeout=30",
-                        "-o", "BatchMode=yes",
+                        "ssh",
+                        "-i",
+                        new_key_path,
+                        "-o",
+                        "StrictHostKeyChecking=accept-new",
+                        "-o",
+                        "ConnectTimeout=30",
+                        "-o",
+                        "BatchMode=yes",
                         f"{ec2_user}@{head_ip}",
                         _remove_old_key_script(),
                     ],
@@ -6294,7 +6498,9 @@ def core_rotate_cluster_key(*, cluster_record, region, secret_name=None, dry_run
             except OSError as e:
                 print(f"  Warning: could not write local key file: {e}")
                 print(f"  The new key is safe in Secrets Manager: {secret_name}")
-                print(f"  Retrieve it with: active_clusters/{cluster_name}/retrieve_ssh_key.{cluster_name}.sh")
+                print(
+                    f"  Retrieve it with: active_clusters/{cluster_name}/retrieve_ssh_key.{cluster_name}.sh"
+                )
 
         # 6. Delete old EC2 keypair.
         print(f"Deleting old EC2 keypair: {ec2_keypair}...")
@@ -6324,7 +6530,12 @@ def core_rotate_cluster_key(*, cluster_record, region, secret_name=None, dry_run
     print("=" * 66)
 
     return KeyRotationResult(
-        cluster_name, secret_name, head_ip, local_key_path_updated, old_keypair_deleted, False,
+        cluster_name,
+        secret_name,
+        head_ip,
+        local_key_path_updated,
+        old_keypair_deleted,
+        False,
     )
 
 
@@ -6366,13 +6577,10 @@ def _queue_config_path(cluster_name, repo_root):
         _validate_cluster_name(cluster_name)
     except SystemExit as e:
         raise PClusterMakerError(str(e)) from e
-    return os.path.join(
-        repo_root, "active_clusters", cluster_name, f"config.{cluster_name}"
-    )
+    return os.path.join(repo_root, "active_clusters", cluster_name, f"config.{cluster_name}")
 
 
-def _load_cluster_config(cluster_name, repo_root, *, s3=None,
-                        locks_bucketname=None):
+def _load_cluster_config(cluster_name, repo_root, *, s3=None, locks_bucketname=None):
     """(config, local_path_or_None, etag_or_None), local file first.
 
     Same ordering as the record store, for the same reasons: the local file
@@ -6400,8 +6608,7 @@ def _load_cluster_config(cluster_name, repo_root, *, s3=None,
                 config = _make_yaml().load(text)
             except Exception as exc:
                 raise PClusterMakerError(
-                    f"ERROR: failed to parse the stored config for "
-                    f"'{cluster_name}': {exc}"
+                    f"ERROR: failed to parse the stored config for '{cluster_name}': {exc}"
                 ) from exc
             return config, None, etag
 
@@ -6418,9 +6625,9 @@ def _dump_cluster_config(config_dict):
     buf = StringIO()
     _make_yaml().dump(config_dict, buf)
     result = buf.getvalue()
-    result = re.sub(r'\n(SharedStorage:)', r'\n\n\1', result)
-    result = re.sub(r'\n{3,}(SharedStorage:)', r'\n\n\1', result)
-    result = re.sub(r'\n+(\n  - Name:)', r'\1', result)
+    result = re.sub(r"\n(SharedStorage:)", r"\n\n\1", result)
+    result = re.sub(r"\n{3,}(SharedStorage:)", r"\n\n\1", result)
+    result = re.sub(r"\n+(\n  - Name:)", r"\1", result)
     return result
 
 
@@ -6511,8 +6718,9 @@ def _write_mirror_marker(config_path, etag):
         pass
 
 
-def _save_cluster_config(config_dict, *, config_path, etag, s3=None,
-                         locks_bucketname=None, cluster_name=None):
+def _save_cluster_config(
+    config_dict, *, config_path, etag, s3=None, locks_bucketname=None, cluster_name=None
+):
     """Persist an edited config to wherever it came from.
 
     Both branches are conditional now. A store-sourced config is written
@@ -6539,7 +6747,8 @@ def _save_cluster_config(config_dict, *, config_path, etag, s3=None,
                     pre_edit = fh.read()
             try:
                 stored_text, stored_etag = get_cluster_config_object(
-                    s3, locks_bucketname=locks_bucketname,
+                    s3,
+                    locks_bucketname=locks_bucketname,
                     cluster_name=cluster_name,
                 )
             except PClusterMakerError as e:
@@ -6594,7 +6803,8 @@ def _save_cluster_config(config_dict, *, config_path, etag, s3=None,
             _write_cluster_config(config_path, config_dict)
             try:
                 new_etag = put_cluster_config_object(
-                    s3, locks_bucketname=locks_bucketname,
+                    s3,
+                    locks_bucketname=locks_bucketname,
                     cluster_name=cluster_name,
                     text=_dump_cluster_config(config_dict),
                     etag=stored_etag,
@@ -6614,8 +6824,11 @@ def _save_cluster_config(config_dict, *, config_path, etag, s3=None,
         return config_path
 
     put_cluster_config_object(
-        s3, locks_bucketname=locks_bucketname, cluster_name=cluster_name,
-        text=_dump_cluster_config(config_dict), etag=etag,
+        s3,
+        locks_bucketname=locks_bucketname,
+        cluster_name=cluster_name,
+        text=_dump_cluster_config(config_dict),
+        etag=etag,
     )
     return f"s3://{locks_bucketname}/{_config_key(cluster_name)}"
 
@@ -6630,9 +6843,7 @@ def _write_cluster_config(config_path, config_dict):
     tmp_path = None
     try:
         dir_ = os.path.dirname(config_path)
-        with tempfile.NamedTemporaryFile(
-            mode="w", dir=dir_, delete=False, suffix=".tmp"
-        ) as tmp:
+        with tempfile.NamedTemporaryFile(mode="w", dir=dir_, delete=False, suffix=".tmp") as tmp:
             tmp_path = tmp.name
             tmp.write(_dump_cluster_config(config_dict))
         os.replace(tmp_path, config_path)
@@ -6661,13 +6872,13 @@ def _validate_queue_name(name):
             f"'{name}{COMPUTE_RESOURCE_SUFFIX}' must fit PCluster's "
             f"{PCLUSTER_NAME_MAX_LENGTH}-character name limit"
         )
-    pattern = r'^[a-z][a-z0-9]?$|^[a-z][a-z0-9-]{0,23}[a-z0-9]$'
+    pattern = r"^[a-z][a-z0-9]?$|^[a-z][a-z0-9-]{0,23}[a-z0-9]$"
     if not re.match(pattern, name):
         raise PClusterMakerError(
             f"ERROR: invalid queue name '{name}'. Must start with a lowercase letter, "
             "contain only lowercase letters, digits, and hyphens, and end with a letter or digit."
         )
-    if '--' in name:
+    if "--" in name:
         raise PClusterMakerError(f"ERROR: queue name '{name}' contains consecutive hyphens")
     # PCluster's NameValidator hard-rejects this exact name on queues and
     # compute resources alike.
@@ -6686,11 +6897,18 @@ def _validate_queue_name(name):
 # pattern silently falls behind. This still rejects every shell metacharacter,
 # space, colon, and newline -- the actual injection surface -- without needing
 # to track which naming shape AWS ships next.
-_INSTANCE_TYPE_RE = re.compile(r'^[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?\.[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?$')
+_INSTANCE_TYPE_RE = re.compile(
+    r"^[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?\.[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?$"
+)
 
 
 def _validate_instance_types(raw, require_gpu):
-    from pcluster_aux_data import ec2_instances_full_list, is_arm_instance, is_gpu_instance, parse_instance_type_list
+    from pcluster_aux_data import (
+        ec2_instances_full_list,
+        is_arm_instance,
+        is_gpu_instance,
+        parse_instance_type_list,
+    )
 
     types = parse_instance_type_list(raw)
     if not types:
@@ -6705,9 +6923,13 @@ def _validate_instance_types(raw, require_gpu):
         if itype not in ec2_instances_full_list:
             print(f"WARNING: '{itype}' not found in known instance type list (list may be stale)")
         if require_gpu and not is_gpu_instance(itype):
-            raise PClusterMakerError(f"ERROR: instance type '{itype}' is not a GPU instance but --gpu was specified")
+            raise PClusterMakerError(
+                f"ERROR: instance type '{itype}' is not a GPU instance but --gpu was specified"
+            )
         if not require_gpu and is_gpu_instance(itype):
-            raise PClusterMakerError(f"ERROR: instance type '{itype}' is a GPU instance but --gpu was not specified")
+            raise PClusterMakerError(
+                f"ERROR: instance type '{itype}' is a GPU instance but --gpu was not specified"
+            )
     arm_types = [t for t in types if is_arm_instance(t)]
     x86_types = [t for t in types if not is_arm_instance(t)]
     if arm_types and x86_types:
@@ -6930,8 +7152,7 @@ class QueueSummary:
     instance_types: list
 
 
-def core_list_queues(*, cluster_name, repo_root, s3=None,
-                     locks_bucketname=None):
+def core_list_queues(*, cluster_name, repo_root, s3=None, locks_bucketname=None):
     from pcluster_aux_data import is_gpu_instance
 
     config, _, _ = _load_cluster_config(
@@ -6950,11 +7171,16 @@ def core_list_queues(*, cluster_name, repo_root, s3=None,
             min_count += cr.get("MinCount", 0)
             max_count += cr.get("MaxCount", 0)
         queue_type = "gpu" if any(is_gpu_instance(t) for t in all_types) else "compute"
-        out.append(QueueSummary(
-            name=q.get("Name", ""), queue_type=queue_type,
-            capacity_type=q.get("CapacityType", ""),
-            min_count=min_count, max_count=max_count, instance_types=all_types,
-        ))
+        out.append(
+            QueueSummary(
+                name=q.get("Name", ""),
+                queue_type=queue_type,
+                capacity_type=q.get("CapacityType", ""),
+                min_count=min_count,
+                max_count=max_count,
+                instance_types=all_types,
+            )
+        )
     return out
 
 
@@ -6968,10 +7194,22 @@ class QueueAddResult:
 
 
 def core_add_queue(
-    *, cluster_name, repo_root, queue_type, ec2_instance_type, queue_name=None,
-    capacity_type="spot", initial_size=2, max_size=8, maintain_initial_size=False,
-    root_volume_size=250, root_volume_type="gp3", root_volume_iops=3000,
-    root_volume_throughput=125, s3=None, locks_bucketname=None,
+    *,
+    cluster_name,
+    repo_root,
+    queue_type,
+    ec2_instance_type,
+    queue_name=None,
+    capacity_type="spot",
+    initial_size=2,
+    max_size=8,
+    maintain_initial_size=False,
+    root_volume_size=250,
+    root_volume_type="gp3",
+    root_volume_iops=3000,
+    root_volume_throughput=125,
+    s3=None,
+    locks_bucketname=None,
     describe_fn=None,
 ):
     # Month-day-hour-minute, not %Y%m%d-%H%M: "compute-20260725-1430" is 21
@@ -7002,7 +7240,9 @@ def core_add_queue(
 
     existing_names = [q.get("Name") for q in queues]
     if queue_name in existing_names:
-        raise PClusterMakerError(f"ERROR: queue '{queue_name}' already exists in this cluster config")
+        raise PClusterMakerError(
+            f"ERROR: queue '{queue_name}' already exists in this cluster config"
+        )
 
     subnet_ids = _get_subnet_ids(queues, prefer_gpu=require_gpu)
     custom_actions = _get_custom_actions(queues)
@@ -7025,9 +7265,7 @@ def core_add_queue(
         root_vol_lines.append(f"        Throughput: {root_volume_throughput}")
     root_vol_block = "\n".join(root_vol_lines)
 
-    instances_block = "\n".join(
-        f"        - InstanceType: {t}" for t in instance_types
-    )
+    instances_block = "\n".join(f"        - InstanceType: {t}" for t in instance_types)
 
     subnet_ids_block = "\n".join(f"    - {s}" for s in subnet_ids)
 
@@ -7065,13 +7303,20 @@ ComputeResources:
     new_queue = _make_yaml().load(stanza_yaml)
     queues.append(new_queue)
     config_path = _save_cluster_config(
-        config, config_path=config_path, etag=_config_etag, s3=s3,
-        locks_bucketname=locks_bucketname, cluster_name=cluster_name,
+        config,
+        config_path=config_path,
+        etag=_config_etag,
+        s3=s3,
+        locks_bucketname=locks_bucketname,
+        cluster_name=cluster_name,
     )
 
     return QueueAddResult(
-        cluster_name=cluster_name, queue_name=queue_name, region=region,
-        config_path=config_path, gdr_capable_types=gdr_capable_types,
+        cluster_name=cluster_name,
+        queue_name=queue_name,
+        region=region,
+        config_path=config_path,
+        gdr_capable_types=gdr_capable_types,
     )
 
 
@@ -7083,8 +7328,9 @@ class QueueRemoveResult:
     config_path: str
 
 
-def core_remove_queue(*, cluster_name, repo_root, queue_name, s3=None,
-                      locks_bucketname=None, describe_fn=None):
+def core_remove_queue(
+    *, cluster_name, repo_root, queue_name, s3=None, locks_bucketname=None, describe_fn=None
+):
     config, config_path, _config_etag = _load_cluster_config(
         cluster_name, repo_root, s3=s3, locks_bucketname=locks_bucketname
     )
@@ -7095,28 +7341,38 @@ def core_remove_queue(*, cluster_name, repo_root, queue_name, s3=None,
     existing_names = [q.get("Name") for q in queues]
     if queue_name not in existing_names:
         raise PClusterMakerError(
-            f"ERROR: queue '{queue_name}' not found.\n"
-            f"Available queues: {', '.join(existing_names)}"
+            f"ERROR: queue '{queue_name}' not found.\nAvailable queues: {', '.join(existing_names)}"
         )
 
     if len(queues) == 1:
-        raise PClusterMakerError("ERROR: Cannot remove the last queue. A cluster must have at least one queue.")
+        raise PClusterMakerError(
+            "ERROR: Cannot remove the last queue. A cluster must have at least one queue."
+        )
 
     filtered = [q for q in queues if q.get("Name") != queue_name]
     config["Scheduling"]["SlurmQueues"] = filtered
     config_path = _save_cluster_config(
-        config, config_path=config_path, etag=_config_etag, s3=s3,
-        locks_bucketname=locks_bucketname, cluster_name=cluster_name,
+        config,
+        config_path=config_path,
+        etag=_config_etag,
+        s3=s3,
+        locks_bucketname=locks_bucketname,
+        cluster_name=cluster_name,
     )
 
     return QueueRemoveResult(
-        cluster_name=cluster_name, queue_name=queue_name, region=region, config_path=config_path,
+        cluster_name=cluster_name,
+        queue_name=queue_name,
+        region=region,
+        config_path=config_path,
     )
 
 
 _UPDATE_FAIL_STATES = {
-    "UPDATE_FAILED", "UPDATE_ROLLBACK_IN_PROGRESS",
-    "UPDATE_ROLLBACK_COMPLETE", "UPDATE_ROLLBACK_FAILED",
+    "UPDATE_FAILED",
+    "UPDATE_ROLLBACK_IN_PROGRESS",
+    "UPDATE_ROLLBACK_COMPLETE",
+    "UPDATE_ROLLBACK_FAILED",
 }
 
 
@@ -7162,9 +7418,16 @@ class QueueApplyResult:
     config_path: str
 
 
-def core_apply_cluster_update(*, cluster_name, config_path=None, region,
-                              pcluster_bin, wait=True, s3=None,
-                              locks_bucketname=None):
+def core_apply_cluster_update(
+    *,
+    cluster_name,
+    config_path=None,
+    region,
+    pcluster_bin,
+    wait=True,
+    s3=None,
+    locks_bucketname=None,
+):
     """Phase 2 of the three-phase queue-config update: apply an updated
     cluster configuration to an existing cluster.
 
@@ -7279,13 +7542,18 @@ def core_apply_queue_config(*, cluster_record, config_path, region, pcluster_bin
     )
 
     print(f"[{_fleet_ts()}] Stopping compute fleet...")
-    core_stop_fleet(cluster_record=cluster_record, region=region, pcluster_bin=pcluster_bin, wait=True)
+    core_stop_fleet(
+        cluster_record=cluster_record, region=region, pcluster_bin=pcluster_bin, wait=True
+    )
 
     try:
         print(f"[{_fleet_ts()}] Applying updated cluster configuration...")
         core_apply_cluster_update(
-            cluster_name=cluster_name, config_path=config_path,
-            region=region, pcluster_bin=pcluster_bin, wait=True,
+            cluster_name=cluster_name,
+            config_path=config_path,
+            region=region,
+            pcluster_bin=pcluster_bin,
+            wait=True,
         )
     except SystemExit as e:
         if e.code not in (0, None):
@@ -7294,7 +7562,9 @@ def core_apply_queue_config(*, cluster_record, config_path, region, pcluster_bin
 
     try:
         print(f"[{_fleet_ts()}] Restarting compute fleet...")
-        core_start_fleet(cluster_record=cluster_record, region=region, pcluster_bin=pcluster_bin, wait=True)
+        core_start_fleet(
+            cluster_record=cluster_record, region=region, pcluster_bin=pcluster_bin, wait=True
+        )
     except PClusterMakerError:
         print(_recovery_guidance(cluster_name, region, config_path, "start"))
         raise
@@ -7356,8 +7626,15 @@ def _pclib_head_ip(describe_fn, cluster_name, region):
 
 
 def _sync_performance_results_to_s3(
-    *, head_ip, ssh_keypair, ec2_user, ec2_user_home, cluster_name,
-    cluster_serial_number, results_bucketname, region,
+    *,
+    head_ip,
+    ssh_keypair,
+    ec2_user,
+    ec2_user_home,
+    cluster_name,
+    cluster_serial_number,
+    results_bucketname,
+    region,
 ):
     """subprocess twin of "Push performance results from head node to S3"
     -- best-effort, matching the playbook's own rescue: block (any failure
@@ -7366,14 +7643,27 @@ def _sync_performance_results_to_s3(
     if not head_ip:
         return False, "no head node IP available (cluster may already be gone)"
     cmd = [
-        "ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=30",
-        "-o", "StrictHostKeyChecking=accept-new", "-i", ssh_keypair,
+        "ssh",
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        "ConnectTimeout=30",
+        "-o",
+        "StrictHostKeyChecking=accept-new",
+        "-i",
+        ssh_keypair,
         f"{ec2_user}@{head_ip}",
-        "aws", "s3", "sync",
+        "aws",
+        "s3",
+        "sync",
         f"{ec2_user_home}/hpc-benchmark/{cluster_name}/",
         f"s3://{results_bucketname}/hpc-benchmark-results/{cluster_name}/{cluster_serial_number}/",
-        "--exclude", "*.pyc", "--exclude", "__pycache__/*",
-        "--region", region,
+        "--exclude",
+        "*.pyc",
+        "--exclude",
+        "__pycache__/*",
+        "--region",
+        region,
     ]
     try:
         result = subprocess.run(cmd, capture_output=True, text=True)
@@ -7392,24 +7682,24 @@ def _collect_orphaned_resources(step_results):
     (succeeded=True with a "skipped: ..." detail, from an unconfirmed
     delete) is correctly excluded, since .succeeded is True there."""
     return [
-        f"{r.name} -- {r.detail}" if r.detail else r.name
-        for r in step_results
-        if not r.succeeded
+        f"{r.name} -- {r.detail}" if r.detail else r.name for r in step_results if not r.succeeded
     ]
 
 
 def _collect_retained_resources(
-    *, s3_bucketname, delete_s3_bucketname, enable_hpc_benchmarks,
-    results_bucketname, cluster_name,
+    *,
+    s3_bucketname,
+    delete_s3_bucketname,
+    enable_hpc_benchmarks,
+    results_bucketname,
+    cluster_name,
 ):
     """boto3 twin of "Collect the resources this teardown deliberately
     retained" -- these are choices, not failures, and must never reach
     _orphaned_resources."""
     retained = []
     if not delete_s3_bucketname:
-        retained.append(
-            f"S3 bucket {s3_bucketname} (--delete_s3_bucketname was not true)"
-        )
+        retained.append(f"S3 bucket {s3_bucketname} (--delete_s3_bucketname was not true)")
     if enable_hpc_benchmarks:
         retained.append(
             f"S3 bucket {results_bucketname} (benchmark results, shared by "
@@ -7448,15 +7738,27 @@ def _delete_sns_topic_step(sns, topic_arn):
 
 
 def _format_destruction_summary(
-    *, cluster_name, start_ts, stop_ts, delete_headline,
-    orphaned_resources, retained_resources,
+    *,
+    cluster_name,
+    start_ts,
+    stop_ts,
+    delete_headline,
+    orphaned_resources,
+    retained_resources,
 ):
     """boto3 twin of "Print cluster deletion summary" / "Print cluster
     deletion summary with the resources that survived cleanup" -- one
     function, not two, since the only difference between the playbook's
     pair is whether _orphaned_resources is empty."""
     sep = "=" * 80
-    lines = [sep, "", f"Initiated shutdown: {start_ts}", f"Completed shutdown: {stop_ts}", "", delete_headline]
+    lines = [
+        sep,
+        "",
+        f"Initiated shutdown: {start_ts}",
+        f"Completed shutdown: {stop_ts}",
+        "",
+        delete_headline,
+    ]
     if orphaned_resources:
         lines += [
             f"{len(orphaned_resources)} cleanup step(s) FAILED.",
@@ -7480,8 +7782,15 @@ def _format_destruction_summary(
 
 
 def core_delete_cluster(
-    *, cluster_name, cluster_owner, region, repo_root,
-    delete_s3_bucketname, debug_mode, wait=True, finalize_only=False,
+    *,
+    cluster_name,
+    cluster_owner,
+    region,
+    repo_root,
+    delete_s3_bucketname,
+    debug_mode,
+    wait=True,
+    finalize_only=False,
 ):
     """Tear down a cluster via boto3/pcluster.lib, replacing the
     ansible-playbook subprocess call to delete_pcluster.yml -- which stays
@@ -7520,6 +7829,7 @@ def core_delete_cluster(
     """
     from pcluster_aux_data import p_val
     import pcluster.lib as pc
+
     ensure_event_loop()
 
     _validate_cluster_name(cluster_name)
@@ -7553,7 +7863,8 @@ def core_delete_cluster(
     _have_serial_file = os.path.isfile(cluster_serial_number_file)
     _have_vars_file = os.path.isfile(vars_file_path)
     _store_record = (
-        None if (_have_serial_file and _have_vars_file)
+        None
+        if (_have_serial_file and _have_vars_file)
         else _cluster_record_from_store(cluster_name, region=region)
     )
     _serial_from_store = None
@@ -7566,13 +7877,12 @@ def core_delete_cluster(
             print("")
             print("*** ERROR ***")
             print("Missing cluster_serial_number_file: " + cluster_serial_number_file)
-            print(
-                "  and no serial in the shared store for "
-                f'"{cluster_name}" in {region}.'
-            )
+            print(f'  and no serial in the shared store for "{cluster_name}" in {region}.')
             print("Aborting...")
             return DeleteClusterResult(
-                cluster_name=cluster_name, success=False, exit_code=1,
+                cluster_name=cluster_name,
+                success=False,
+                exit_code=1,
             )
         print(f"Serial resolved from the shared store: {_serial_from_store}")
 
@@ -7585,7 +7895,8 @@ def core_delete_cluster(
         # silently and leaving orphans behind while reporting success.
         # Refuse instead, and say what to do about it.
         _missing = [
-            k for k in ("aws_account_id", "ec2_iam_policy", "ec2_iam_role")
+            k
+            for k in ("aws_account_id", "ec2_iam_policy", "ec2_iam_role")
             if not _store_record.get(k)
         ]
         if _missing:
@@ -7597,7 +7908,9 @@ def core_delete_cluster(
             print("  which has the vars file, or rebuild the record there.")
             print("Aborting...")
             return DeleteClusterResult(
-                cluster_name=cluster_name, success=False, exit_code=1,
+                cluster_name=cluster_name,
+                success=False,
+                exit_code=1,
             )
         print(f"Cluster settings resolved from the shared store for {cluster_name}")
     else:
@@ -7622,8 +7935,11 @@ def core_delete_cluster(
     _lock_s3 = boto3.client("s3", region_name=region)
     locks_bucketname = _derive_locks_bucket(aws_account_id=aws_account_id, region=region)
     _lock_path = _acquire_distributed_cluster_lock(
-        _lock_s3, locks_bucketname=locks_bucketname, region=region,
-        cluster_name=cluster_name, command="kill_pcluster.py",
+        _lock_s3,
+        locks_bucketname=locks_bucketname,
+        region=region,
+        cluster_name=cluster_name,
+        command="kill_pcluster.py",
         describe_fn=pc.describe_cluster,
     )
     try:
@@ -7664,14 +7980,14 @@ def core_delete_cluster(
         # vars file can carry the gate without the key. Same derivation the
         # playbook falls back to, not a restated literal (see CLAUDE.md).
         results_bucketname = _v("results_bucketname") or _derive_results_bucket(
-            aws_account_id=aws_account_id, region=region,
+            aws_account_id=aws_account_id,
+            region=region,
         )
 
         # The rebuild command is recorded in the serial file and nowhere
         # else, so a store-resolved teardown simply has none to report.
         _rebuild_cmd = (
-            None if _serial_from_store
-            else _extract_rebuild_command(cluster_serial_number_file)
+            None if _serial_from_store else _extract_rebuild_command(cluster_serial_number_file)
         )
         _isdir_cdd = os.path.isdir(cluster_data_dir)
 
@@ -7692,10 +8008,14 @@ def core_delete_cluster(
         if enable_hpc_benchmarks and not finalize_only:
             _head_ip = _pclib_head_ip(pc.describe_cluster, cluster_name, region)
             _sync_ok, _sync_detail = _sync_performance_results_to_s3(
-                head_ip=_head_ip, ssh_keypair=ssh_keypair, ec2_user=ec2_user,
-                ec2_user_home=ec2_user_home, cluster_name=cluster_name,
+                head_ip=_head_ip,
+                ssh_keypair=ssh_keypair,
+                ec2_user=ec2_user,
+                ec2_user_home=ec2_user_home,
+                cluster_name=cluster_name,
                 cluster_serial_number=cluster_serial_number,
-                results_bucketname=results_bucketname, region=region,
+                results_bucketname=results_bucketname,
+                region=region,
             )
             if not _sync_ok:
                 print("")
@@ -7713,14 +8033,10 @@ def core_delete_cluster(
             # Only when it says something the cluster status does not --
             # see the create-side printer for why.
             detail = (
-                f" (CloudFormation: {cfn_status})"
-                if cfn_status and cfn_status != status else ""
+                f" (CloudFormation: {cfn_status})" if cfn_status and cfn_status != status else ""
             )
             elapsed = _elapsed_str((attempt + 1) * _DELETE_POLL_SECONDS)
-            print(
-                f"  [ {elapsed} ] {cluster_name}: "
-                f"{status or 'status unavailable'}{detail}"
-            )
+            print(f"  [ {elapsed} ] {cluster_name}: {status or 'status unavailable'}{detail}")
 
         if finalize_only:
             # One describe, no delete call, no wait loop -- so this path
@@ -7730,7 +8046,9 @@ def core_delete_cluster(
             # function timeout where the waiting teardown is not.
             with quiet_missing_config_version_noise():
                 terminal_state = _confirm_stack_is_gone(
-                    pc.describe_cluster, cluster_name, region,
+                    pc.describe_cluster,
+                    cluster_name,
+                    region,
                 )
             if terminal_state not in (_CLUSTER_NOT_FOUND, _DELETE_COMPLETE):
                 print("")
@@ -7740,9 +8058,13 @@ def core_delete_cluster(
                 print("Deleting the IAM role or the S3 bucket out from under a stack that")
                 print("still exists is exactly how a DELETE_FAILED gets manufactured.")
                 print("Poll until the stack is gone, then finalize:")
-                print(f"  pcluster describe-cluster --cluster-name {cluster_name} --region {region}")
+                print(
+                    f"  pcluster describe-cluster --cluster-name {cluster_name} --region {region}"
+                )
                 return DeleteClusterResult(
-                    cluster_name=cluster_name, success=False, exit_code=1,
+                    cluster_name=cluster_name,
+                    success=False,
+                    exit_code=1,
                     rebuild_command=_rebuild_cmd,
                 )
             outcome = ClusterDeleteOutcome(
@@ -7759,8 +8081,12 @@ def core_delete_cluster(
         else:
             with quiet_missing_config_version_noise():
                 outcome = run_cluster_delete_and_classify(
-                    pc.delete_cluster, pc.describe_cluster, cluster_name, region,
-                    progress_fn=_print_teardown_progress, wait=wait,
+                    pc.delete_cluster,
+                    pc.describe_cluster,
+                    cluster_name,
+                    region,
+                    progress_fn=_print_teardown_progress,
+                    wait=wait,
                     delay_seconds=_DELETE_POLL_SECONDS,
                 )
 
@@ -7782,7 +8108,9 @@ def core_delete_cluster(
             print(f"  pcluster describe-cluster --cluster-name {cluster_name} --region {region}")
             print(f"  ./kill_pcluster.py -N {cluster_name} -O {cluster_owner} -A {az}")
             return DeleteClusterResult(
-                cluster_name=cluster_name, success=True, exit_code=0,
+                cluster_name=cluster_name,
+                success=True,
+                exit_code=0,
                 rebuild_command=_rebuild_cmd,
             )
 
@@ -7791,7 +8119,9 @@ def core_delete_cluster(
             print("*** WARNING ***")
             print("Cluster deletion wait timed out -- cluster may still be deleting.")
             print("Check the CloudFormation console before assuming the cluster is gone:")
-            print(f"  aws cloudformation describe-stacks --stack-name parallelcluster-{cluster_name}")
+            print(
+                f"  aws cloudformation describe-stacks --stack-name parallelcluster-{cluster_name}"
+            )
             print("Re-run kill_pcluster.py once the stack reaches DELETE_COMPLETE.")
             print("")
             print("*** WARNING ***")
@@ -7801,11 +8131,19 @@ def core_delete_cluster(
         if outcome.cf_delete_failed:
             print("")
             print("*** WARNING ***")
-            print(f"CloudFormation stack deletion reached DELETE_FAILED for cluster '{cluster_name}'.")
-            print("This usually means a resource (ENI, security group, EFA interface) still has dependencies.")
+            print(
+                f"CloudFormation stack deletion reached DELETE_FAILED for cluster '{cluster_name}'."
+            )
+            print(
+                "This usually means a resource (ENI, security group, EFA interface) still has dependencies."
+            )
             print("IAM roles, SSM parameters, and S3 resources will still be cleaned up below.")
-            print("The SSH keypair, local .pem file, and Secrets Manager secret are preserved so the")
-            print("head node stays reachable for manual troubleshooting until the stack is fully deleted.")
+            print(
+                "The SSH keypair, local .pem file, and Secrets Manager secret are preserved so the"
+            )
+            print(
+                "head node stays reachable for manual troubleshooting until the stack is fully deleted."
+            )
 
         ec2 = boto3.client("ec2", region_name=region)
         iam = boto3.client("iam")
@@ -7816,22 +8154,39 @@ def core_delete_cluster(
 
         credential_results = run_credential_teardown_steps(
             cf_delete_confirmed=outcome.cf_delete_confirmed,
-            ec2=ec2, secretsmanager=secretsmanager,
-            ec2_keypair=ec2_keypair, ssh_keypair=ssh_keypair,
-            ssh_secret_name=ssh_secret_name, cluster_data_dir=cluster_data_dir,
+            ec2=ec2,
+            secretsmanager=secretsmanager,
+            ec2_keypair=ec2_keypair,
+            ssh_keypair=ssh_keypair,
+            ssh_secret_name=ssh_secret_name,
+            cluster_data_dir=cluster_data_dir,
         )
-        credential_results.append(delete_cluster_record_step(
-            _lock_s3, cf_delete_confirmed=outcome.cf_delete_confirmed,
-            locks_bucketname=locks_bucketname, cluster_name=cluster_name,
-        ))
-        credential_results.append(delete_cluster_config_step(
-            _lock_s3, cf_delete_confirmed=outcome.cf_delete_confirmed,
-            locks_bucketname=locks_bucketname, cluster_name=cluster_name,
-        ))
+        credential_results.append(
+            delete_cluster_record_step(
+                _lock_s3,
+                cf_delete_confirmed=outcome.cf_delete_confirmed,
+                locks_bucketname=locks_bucketname,
+                cluster_name=cluster_name,
+            )
+        )
+        credential_results.append(
+            delete_cluster_config_step(
+                _lock_s3,
+                cf_delete_confirmed=outcome.cf_delete_confirmed,
+                locks_bucketname=locks_bucketname,
+                cluster_name=cluster_name,
+            )
+        )
         resource_results = run_resource_teardown_steps(
-            s3=s3, iam=iam, ssm=ssm, ec2=ec2, cluster_name=cluster_name,
-            ec2_iam_role=ec2_iam_role, ec2_iam_policy=ec2_iam_policy,
-            aws_account_id=aws_account_id, s3_bucketname=s3_bucketname,
+            s3=s3,
+            iam=iam,
+            ssm=ssm,
+            ec2=ec2,
+            cluster_name=cluster_name,
+            ec2_iam_role=ec2_iam_role,
+            ec2_iam_policy=ec2_iam_policy,
+            aws_account_id=aws_account_id,
+            s3_bucketname=s3_bucketname,
             delete_s3_bucketname=_delete_s3_bucketname_bool,
             enable_fsx_hydration=enable_fsx_hydration,
             fsx_hydration_iam_policy=fsx_hydration_iam_policy,
@@ -7840,9 +8195,11 @@ def core_delete_cluster(
         )
 
         _retained_resources = _collect_retained_resources(
-            s3_bucketname=s3_bucketname, delete_s3_bucketname=_delete_s3_bucketname_bool,
+            s3_bucketname=s3_bucketname,
+            delete_s3_bucketname=_delete_s3_bucketname_bool,
             enable_hpc_benchmarks=enable_hpc_benchmarks,
-            results_bucketname=results_bucketname, cluster_name=cluster_name,
+            results_bucketname=results_bucketname,
+            cluster_name=cluster_name,
         )
         stop_ts = teardown_timestamp()
 
@@ -7851,14 +8208,18 @@ def core_delete_cluster(
         # from credential+resource results only, matching that ordering.
         sns_topic_arn = f"arn:aws:sns:{region}:{aws_account_id}:sns_alerts_{cluster_name}"
         if _isdir_cdd:
-            _orphaned_for_report = _collect_orphaned_resources(credential_results + resource_results)
+            _orphaned_for_report = _collect_orphaned_resources(
+                credential_results + resource_results
+            )
             report = render_template(
-                os.path.join(repo_root, "templates"), "sns_destruction_summary_report.j2",
+                os.path.join(repo_root, "templates"),
+                "sns_destruction_summary_report.j2",
                 cluster_name=cluster_name,
                 _delete_headline=outcome.delete_headline,
                 start_delete_timer={"stdout": start_ts},
                 stop_delete_timer={"stdout": stop_ts},
-                az=az, cluster_owner=cluster_owner,
+                az=az,
+                cluster_owner=cluster_owner,
                 cluster_serial_number=cluster_serial_number,
                 _orphaned_resources=_orphaned_for_report,
                 _retained_resources=_retained_resources,
@@ -7869,7 +8230,10 @@ def core_delete_cluster(
             ) as fh:
                 fh.write(report)
             _publish_destruction_report(
-                sns, sns_topic_arn, report, f"Cluster Destruction Notice: {cluster_name}",
+                sns,
+                sns_topic_arn,
+                report,
+                f"Cluster Destruction Notice: {cluster_name}",
             )
 
         sns_topic_result = _delete_sns_topic_step(sns, sns_topic_arn)
@@ -7879,7 +8243,9 @@ def core_delete_cluster(
 
         print("")
         for line in _format_destruction_summary(
-            cluster_name=cluster_name, start_ts=start_ts, stop_ts=stop_ts,
+            cluster_name=cluster_name,
+            start_ts=start_ts,
+            stop_ts=stop_ts,
             delete_headline=outcome.delete_headline,
             orphaned_resources=orphaned_resources,
             retained_resources=_retained_resources,
@@ -7889,11 +8255,17 @@ def core_delete_cluster(
         if outcome.cf_delete_failed:
             print("")
             print("*** ERROR ***")
-            print(f"CloudFormation stack deletion reached DELETE_FAILED for cluster '{cluster_name}'.")
+            print(
+                f"CloudFormation stack deletion reached DELETE_FAILED for cluster '{cluster_name}'."
+            )
             print("IAM, SSM, and S3 resources have been cleaned up.")
-            print("The SSH keypair, local .pem file, and Secrets Manager secret were preserved so the")
+            print(
+                "The SSH keypair, local .pem file, and Secrets Manager secret were preserved so the"
+            )
             print("head node remains reachable for troubleshooting.")
-            print("Resolve the remaining CloudFormation dependency and re-run kill_pcluster.py if needed.")
+            print(
+                "Resolve the remaining CloudFormation dependency and re-run kill_pcluster.py if needed."
+            )
             return DeleteClusterResult(cluster_name=cluster_name, success=False, exit_code=1)
 
         if not outcome.cf_delete_confirmed:
@@ -7939,11 +8311,15 @@ def core_delete_cluster(
         print("Finished deleting cluster stack " + cluster_name + "!")
         print("Exiting...")
         return DeleteClusterResult(
-            cluster_name=cluster_name, success=True, exit_code=0,
+            cluster_name=cluster_name,
+            success=True,
+            exit_code=0,
             rebuild_command=_rebuild_cmd,
         )
     finally:
-        s3_release_cluster_lock(_lock_s3, locks_bucketname=locks_bucketname, cluster_name=cluster_name)
+        s3_release_cluster_lock(
+            _lock_s3, locks_bucketname=locks_bucketname, cluster_name=cluster_name
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -8249,9 +8625,7 @@ def _save_private_key_locally(ssh_keypair, private_key_pem):
     populates key material only when it actually minted a new keypair;
     calling this when it did not would overwrite a good .pem with
     nothing."""
-    with open(
-        os.open(ssh_keypair, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w"
-    ) as fh:
+    with open(os.open(ssh_keypair, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w") as fh:
         fh.write(private_key_pem)
 
 
@@ -8283,8 +8657,15 @@ def _store_ssh_secret(secretsmanager, *, ssh_secret_name, cluster_name, ssh_keyp
 
 
 def _cleanup_after_provisioning_failure(
-    *, s3, ec2, secretsmanager, s3_bucketname, ec2_keypair, ssh_secret_name,
-    cluster_name, external_nfs_sg_enabled,
+    *,
+    s3,
+    ec2,
+    secretsmanager,
+    s3_bucketname,
+    ec2_keypair,
+    ssh_secret_name,
+    cluster_name,
+    external_nfs_sg_enabled,
 ):
     """boto3 twin of the block's rescue: -- reuses the teardown-side step
     functions (_delete_s3_bucket_step, _delete_ec2_keypair_step,
@@ -8307,9 +8688,20 @@ def _cleanup_after_provisioning_failure(
 
 
 def provision_s3_keypair_and_secret(
-    *, s3, ec2, secretsmanager, s3_bucketname, region, tags,
-    enable_external_nfs, cluster_name, vpc_id, vpc_cidr,
-    ec2_keypair, ssh_keypair, ssh_secret_name,
+    *,
+    s3,
+    ec2,
+    secretsmanager,
+    s3_bucketname,
+    region,
+    tags,
+    enable_external_nfs,
+    cluster_name,
+    vpc_id,
+    vpc_cidr,
+    ec2_keypair,
+    ssh_keypair,
+    ssh_secret_name,
 ):
     """The single entry point a future core_create_cluster wiring calls:
     create_pcluster.yml's "Create S3 bucket and EC2 keypair, clean up on
@@ -8325,31 +8717,45 @@ def provision_s3_keypair_and_secret(
     external_nfs_sg_id = None
     try:
         _create_s3_bucket_for_cluster(
-            s3, s3_bucketname=s3_bucketname, region=region, tags=tags,
+            s3,
+            s3_bucketname=s3_bucketname,
+            region=region,
+            tags=tags,
         )
         if enable_external_nfs:
             external_nfs_sg_id = _create_external_nfs_sg(
-                ec2, cluster_name=cluster_name, vpc_id=vpc_id, vpc_cidr=vpc_cidr,
+                ec2,
+                cluster_name=cluster_name,
+                vpc_id=vpc_id,
+                vpc_cidr=vpc_cidr,
             )
 
         changed, private_key_pem = _generate_ec2_keypair(ec2, ec2_keypair=ec2_keypair)
         local_pem_exists = os.path.isfile(ssh_keypair)
         _abort_if_keypair_orphaned(
-            changed=changed, local_pem_exists=local_pem_exists,
-            ec2_keypair=ec2_keypair, region=region,
+            changed=changed,
+            local_pem_exists=local_pem_exists,
+            ec2_keypair=ec2_keypair,
+            region=region,
         )
         if changed:
             _save_private_key_locally(ssh_keypair, private_key_pem)
 
         _store_ssh_secret(
-            secretsmanager, ssh_secret_name=ssh_secret_name,
-            cluster_name=cluster_name, ssh_keypair=ssh_keypair,
+            secretsmanager,
+            ssh_secret_name=ssh_secret_name,
+            cluster_name=cluster_name,
+            ssh_keypair=ssh_keypair,
         )
     except Exception:
         _cleanup_after_provisioning_failure(
-            s3=s3, ec2=ec2, secretsmanager=secretsmanager,
-            s3_bucketname=s3_bucketname, ec2_keypair=ec2_keypair,
-            ssh_secret_name=ssh_secret_name, cluster_name=cluster_name,
+            s3=s3,
+            ec2=ec2,
+            secretsmanager=secretsmanager,
+            s3_bucketname=s3_bucketname,
+            ec2_keypair=ec2_keypair,
+            ssh_secret_name=ssh_secret_name,
+            cluster_name=cluster_name,
             external_nfs_sg_enabled=enable_external_nfs,
         )
         raise
@@ -8431,8 +8837,13 @@ def _upload_file_to_s3(s3, *, bucket, key, src):
 
 
 def _stage_monitoring_tarball(
-    s3, *, cluster_data_dir, s3_bucketname, s3_script_path,
-    monitoring_version, monitoring_version_checksum,
+    s3,
+    *,
+    cluster_data_dir,
+    s3_bucketname,
+    s3_script_path,
+    monitoring_version,
+    monitoring_version_checksum,
 ):
     """boto3 twin of "Download aws-parallelcluster-monitoring tarball from
     GitHub" + "Upload monitoring tarball to S3"."""
@@ -8447,8 +8858,14 @@ def _stage_monitoring_tarball(
 
 
 def _stage_docker_compose_plugin(
-    s3, *, s3_bucketname, s3_script_path, docker_compose_version,
-    docker_compose_arch, docker_compose_checksum, docker_compose_local_dest,
+    s3,
+    *,
+    s3_bucketname,
+    s3_script_path,
+    docker_compose_version,
+    docker_compose_arch,
+    docker_compose_checksum,
+    docker_compose_local_dest,
     docker_compose_s3_dest,
 ):
     """boto3 twin of "Download the Docker Compose CLI plugin for Amazon
@@ -8460,20 +8877,36 @@ def _stage_docker_compose_plugin(
         f"{docker_compose_version}/docker-compose-linux-{docker_compose_arch}"
     )
     _download_with_checksum(
-        url, docker_compose_local_dest, docker_compose_checksum, mode=0o755,
+        url,
+        docker_compose_local_dest,
+        docker_compose_checksum,
+        mode=0o755,
     )
     _upload_file_to_s3(
-        s3, bucket=s3_bucketname,
-        key=f"{s3_script_path}/{docker_compose_s3_dest}", src=docker_compose_local_dest,
+        s3,
+        bucket=s3_bucketname,
+        key=f"{s3_script_path}/{docker_compose_s3_dest}",
+        src=docker_compose_local_dest,
     )
 
 
 def stage_and_upload_monitoring_wrapper(
-    s3, *, enable_monitoring, cluster_data_dir, s3_bucketname, s3_script_path,
-    monitoring_version, monitoring_version_checksum, stage_docker_compose,
-    docker_compose_version, docker_compose_arch, docker_compose_checksum,
-    docker_compose_local_dest, docker_compose_s3_dest,
-    monitoring_wrapper_dest, monitoring_s3_dest,
+    s3,
+    *,
+    enable_monitoring,
+    cluster_data_dir,
+    s3_bucketname,
+    s3_script_path,
+    monitoring_version,
+    monitoring_version_checksum,
+    stage_docker_compose,
+    docker_compose_version,
+    docker_compose_arch,
+    docker_compose_checksum,
+    docker_compose_local_dest,
+    docker_compose_s3_dest,
+    monitoring_wrapper_dest,
+    monitoring_s3_dest,
 ):
     """The single entry point matching create_pcluster.yml's "Stage and
     upload monitoring post-install wrapper" block, gated entirely on
@@ -8485,13 +8918,18 @@ def stage_and_upload_monitoring_wrapper(
     if not enable_monitoring:
         return
     _stage_monitoring_tarball(
-        s3, cluster_data_dir=cluster_data_dir, s3_bucketname=s3_bucketname,
-        s3_script_path=s3_script_path, monitoring_version=monitoring_version,
+        s3,
+        cluster_data_dir=cluster_data_dir,
+        s3_bucketname=s3_bucketname,
+        s3_script_path=s3_script_path,
+        monitoring_version=monitoring_version,
         monitoring_version_checksum=monitoring_version_checksum,
     )
     if stage_docker_compose:
         _stage_docker_compose_plugin(
-            s3, s3_bucketname=s3_bucketname, s3_script_path=s3_script_path,
+            s3,
+            s3_bucketname=s3_bucketname,
+            s3_script_path=s3_script_path,
             docker_compose_version=docker_compose_version,
             docker_compose_arch=docker_compose_arch,
             docker_compose_checksum=docker_compose_checksum,
@@ -8499,7 +8937,9 @@ def stage_and_upload_monitoring_wrapper(
             docker_compose_s3_dest=docker_compose_s3_dest,
         )
     _upload_file_to_s3(
-        s3, bucket=s3_bucketname, key=f"{s3_script_path}/{monitoring_s3_dest}",
+        s3,
+        bucket=s3_bucketname,
+        key=f"{s3_script_path}/{monitoring_s3_dest}",
         src=monitoring_wrapper_dest,
     )
 
@@ -8534,7 +8974,13 @@ class ClusterCreateOutcome:
 
 
 def _wait_for_cluster_create(
-    describe_fn, cluster_name, region, *, retries=60, delay_seconds=_CREATE_POLL_SECONDS, sleep_fn=None,
+    describe_fn,
+    cluster_name,
+    region,
+    *,
+    retries=60,
+    delay_seconds=_CREATE_POLL_SECONDS,
+    sleep_fn=None,
     progress_fn=None,
 ):
     """boto3/pcluster.lib twin of "Wait for the cluster head node to reach
@@ -8637,8 +9083,7 @@ def _classify_cluster_create_outcome(terminal_state, cluster_name, describe_resp
         failures = (describe_response or {}).get("failures") or []
         if failures:
             detail = "; ".join(
-                f"{f.get('failureCode', 'UNKNOWN')}: {f.get('failureReason', '')}"
-                for f in failures
+                f"{f.get('failureCode', 'UNKNOWN')}: {f.get('failureReason', '')}" for f in failures
             )
             headline = f"Cluster {cluster_name} creation failed: {detail}"
         else:
@@ -8649,10 +9094,18 @@ def _classify_cluster_create_outcome(terminal_state, cluster_name, describe_resp
 
 
 def run_cluster_create_and_classify(
-    create_fn, describe_fn, cluster_name, region, *,
-    cluster_configuration_path, rollback_on_failure=False,
-    retries=60, delay_seconds=_CREATE_POLL_SECONDS, sleep_fn=None,
-    wait=True, progress_fn=None,
+    create_fn,
+    describe_fn,
+    cluster_name,
+    region,
+    *,
+    cluster_configuration_path,
+    rollback_on_failure=False,
+    retries=60,
+    delay_seconds=_CREATE_POLL_SECONDS,
+    sleep_fn=None,
+    wait=True,
+    progress_fn=None,
 ):
     """The single entry point a future core_create_cluster wiring calls:
     "Launch the new ParallelCluster v3 stack" + the wait + its abort/fail
@@ -8711,23 +9164,35 @@ def run_cluster_create_and_classify(
     )
     if not wait:
         return ClusterCreateOutcome(
-            _KICKED_OFF, False, False,
+            _KICKED_OFF,
+            False,
+            False,
             f"Creation of cluster {cluster_name} was started; not waiting for it "
             f"to finish. Poll with: pcluster describe-cluster --cluster-name "
             f"{cluster_name} --region {region}",
             "",
         )
     terminal_state, last_response = _wait_for_cluster_create(
-        describe_fn, cluster_name, region,
-        retries=retries, delay_seconds=delay_seconds, sleep_fn=sleep_fn,
+        describe_fn,
+        cluster_name,
+        region,
+        retries=retries,
+        delay_seconds=delay_seconds,
+        sleep_fn=sleep_fn,
         progress_fn=progress_fn,
     )
     create_confirmed, create_failed, headline = _classify_cluster_create_outcome(
-        terminal_state, cluster_name, last_response,
+        terminal_state,
+        cluster_name,
+        last_response,
     )
     head_node_public_ip = _extract_head_node_ip(last_response) if create_confirmed else ""
     return ClusterCreateOutcome(
-        terminal_state, create_confirmed, create_failed, headline, head_node_public_ip,
+        terminal_state,
+        create_confirmed,
+        create_failed,
+        headline,
+        head_node_public_ip,
     )
 
 
@@ -8743,7 +9208,14 @@ def run_cluster_create_and_classify(
 # "build first, wire later" split used for every prior slice.
 # ---------------------------------------------------------------------------
 
-_SSH_OPTS = ["-o", "BatchMode=yes", "-o", "ConnectTimeout=30", "-o", "StrictHostKeyChecking=accept-new"]
+_SSH_OPTS = [
+    "-o",
+    "BatchMode=yes",
+    "-o",
+    "ConnectTimeout=30",
+    "-o",
+    "StrictHostKeyChecking=accept-new",
+]
 
 
 def _ssh_argv(ssh_keypair, ec2_user, head_node_ip, remote_command):
@@ -8759,7 +9231,14 @@ def _scp_argv(ssh_keypair, *args):
 
 
 def _wait_for_ssh_port(
-    host, *, port=22, delay=5, timeout=300, poll_interval=1, sleep_fn=None, time_fn=None,
+    host,
+    *,
+    port=22,
+    delay=5,
+    timeout=300,
+    poll_interval=1,
+    sleep_fn=None,
+    time_fn=None,
 ):
     """boto3/Python twin of "Wait for SSH port to be reachable on the head
     node" (wait_for: port 22, delay: 5, timeout: 300, state: started).
@@ -8820,7 +9299,8 @@ def _accept_ssh_fingerprint(head_node_ip, ssh_known_hosts, *, timeout=30):
     -- the Python analog of changed_when: rc == 1."""
     result = subprocess.run(
         ["ssh-keyscan", "-T", str(timeout), "-H", head_node_ip],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     )
     lines = [line for line in result.stdout.splitlines() if line.strip()]
     if not lines:
@@ -8843,12 +9323,16 @@ def _accept_ssh_fingerprint(head_node_ip, ssh_known_hosts, *, timeout=30):
     return added
 
 
-def _create_performance_dir_on_head_node(*, ssh_keypair, ec2_user, head_node_ip, headnode_performance_dir_dest):
+def _create_performance_dir_on_head_node(
+    *, ssh_keypair, ec2_user, head_node_ip, headnode_performance_dir_dest
+):
     """boto3/Python twin of "Create performance directory on the head
     node" (ssh mkdir -p)."""
     subprocess.run(
         _ssh_argv(
-            ssh_keypair, ec2_user, head_node_ip,
+            ssh_keypair,
+            ec2_user,
+            head_node_ip,
             f"mkdir -p {shlex.quote(headnode_performance_dir_dest)}",
         ),
         check=True,
@@ -8887,7 +9371,9 @@ def _transfer_sbatch_script(*, ssh_keypair, ec2_user, ec2_user_home, head_node_i
     )
 
 
-def _copy_performance_source_tree(*, ssh_keypair, ec2_user, head_node_ip, performance_stage_dir, headnode_performance_dir_dest):
+def _copy_performance_source_tree(
+    *, ssh_keypair, ec2_user, head_node_ip, performance_stage_dir, headnode_performance_dir_dest
+):
     """boto3/Python twin of "Copy the performance source tree to its
     final destination on the head node" (scp -r
     "{{ performance_stage_dir }}"/* ...). The playbook's `shell:` module
@@ -8903,7 +9389,9 @@ def _copy_performance_source_tree(*, ssh_keypair, ec2_user, head_node_ip, perfor
         return
     subprocess.run(
         _scp_argv(
-            ssh_keypair, "-r", *sources,
+            ssh_keypair,
+            "-r",
+            *sources,
             f"{ec2_user}@{head_node_ip}:{headnode_performance_dir_dest}",
         ),
         check=True,
@@ -8911,8 +9399,12 @@ def _copy_performance_source_tree(*, ssh_keypair, ec2_user, head_node_ip, perfor
 
 
 def _build_active_perf_dirs(
-    *, ebs_hpc_performance_dir, enable_efs, efs_hpc_performance_dir,
-    enable_fsx, fsx_hpc_performance_dir,
+    *,
+    ebs_hpc_performance_dir,
+    enable_efs,
+    efs_hpc_performance_dir,
+    enable_fsx,
+    fsx_hpc_performance_dir,
 ):
     """boto3/Python twin of "Build list of active HPC performance test
     directories" -- pure function, the ebs directory is unconditional
@@ -8926,7 +9418,9 @@ def _build_active_perf_dirs(
     return dirs
 
 
-def _create_and_own_perf_dirs(*, ssh_keypair, ec2_user, head_node_ip, perf_dirs, headnode_performance_dir_dest):
+def _create_and_own_perf_dirs(
+    *, ssh_keypair, ec2_user, head_node_ip, perf_dirs, headnode_performance_dir_dest
+):
     """boto3/Python twin of the three looped tasks -- "Create HPC
     performance test directories", "Set ownership of HPC performance test
     directories", "Copy performance source tree to HPC performance test
@@ -8945,7 +9439,9 @@ def _create_and_own_perf_dirs(*, ssh_keypair, ec2_user, head_node_ip, perf_dirs,
     for d in perf_dirs:
         subprocess.run(
             _ssh_argv(
-                ssh_keypair, ec2_user, head_node_ip,
+                ssh_keypair,
+                ec2_user,
+                head_node_ip,
                 f"sudo chown -R {shlex.quote(ec2_user)}:{shlex.quote(ec2_user)} {shlex.quote(d)}",
             ),
             check=True,
@@ -8953,7 +9449,9 @@ def _create_and_own_perf_dirs(*, ssh_keypair, ec2_user, head_node_ip, perf_dirs,
     for d in perf_dirs:
         subprocess.run(
             _ssh_argv(
-                ssh_keypair, ec2_user, head_node_ip,
+                ssh_keypair,
+                ec2_user,
+                head_node_ip,
                 f"cp -a {shlex.quote(headnode_performance_dir_dest)}/* {shlex.quote(d)}",
             ),
             check=True,
@@ -8970,10 +9468,21 @@ def _remove_head_node_staging_dir(*, ssh_keypair, ec2_user, head_node_ip, stage_
 
 
 def deploy_staging_and_performance_tree_to_head_node(
-    *, head_node_public_ip, ssh_keypair, ssh_known_hosts, ec2_user, ec2_user_home,
-    stage_dir, enable_hpc_benchmarks, performance_stage_dir,
-    headnode_performance_dir_dest, ebs_hpc_performance_dir, enable_efs,
-    efs_hpc_performance_dir, enable_fsx, fsx_hpc_performance_dir,
+    *,
+    head_node_public_ip,
+    ssh_keypair,
+    ssh_known_hosts,
+    ec2_user,
+    ec2_user_home,
+    stage_dir,
+    enable_hpc_benchmarks,
+    performance_stage_dir,
+    headnode_performance_dir_dest,
+    ebs_hpc_performance_dir,
+    enable_efs,
+    efs_hpc_performance_dir,
+    enable_fsx,
+    fsx_hpc_performance_dir,
 ):
     """The single entry point a future core_create_cluster wiring calls:
     every SSH/SCP task from "Wait for SSH port to be reachable" through
@@ -8992,37 +9501,53 @@ def deploy_staging_and_performance_tree_to_head_node(
 
     if enable_hpc_benchmarks:
         _create_performance_dir_on_head_node(
-            ssh_keypair=ssh_keypair, ec2_user=ec2_user, head_node_ip=head_node_public_ip,
+            ssh_keypair=ssh_keypair,
+            ec2_user=ec2_user,
+            head_node_ip=head_node_public_ip,
             headnode_performance_dir_dest=headnode_performance_dir_dest,
         )
 
     _transfer_staging_dir(
-        ssh_keypair=ssh_keypair, ec2_user=ec2_user, head_node_ip=head_node_public_ip,
+        ssh_keypair=ssh_keypair,
+        ec2_user=ec2_user,
+        head_node_ip=head_node_public_ip,
         stage_dir=stage_dir,
     )
     _transfer_sbatch_script(
-        ssh_keypair=ssh_keypair, ec2_user=ec2_user, ec2_user_home=ec2_user_home,
-        head_node_ip=head_node_public_ip, stage_dir=stage_dir,
+        ssh_keypair=ssh_keypair,
+        ec2_user=ec2_user,
+        ec2_user_home=ec2_user_home,
+        head_node_ip=head_node_public_ip,
+        stage_dir=stage_dir,
     )
 
     if enable_hpc_benchmarks:
         _copy_performance_source_tree(
-            ssh_keypair=ssh_keypair, ec2_user=ec2_user, head_node_ip=head_node_public_ip,
+            ssh_keypair=ssh_keypair,
+            ec2_user=ec2_user,
+            head_node_ip=head_node_public_ip,
             performance_stage_dir=performance_stage_dir,
             headnode_performance_dir_dest=headnode_performance_dir_dest,
         )
         perf_dirs = _build_active_perf_dirs(
-            ebs_hpc_performance_dir=ebs_hpc_performance_dir, enable_efs=enable_efs,
-            efs_hpc_performance_dir=efs_hpc_performance_dir, enable_fsx=enable_fsx,
+            ebs_hpc_performance_dir=ebs_hpc_performance_dir,
+            enable_efs=enable_efs,
+            efs_hpc_performance_dir=efs_hpc_performance_dir,
+            enable_fsx=enable_fsx,
             fsx_hpc_performance_dir=fsx_hpc_performance_dir,
         )
         _create_and_own_perf_dirs(
-            ssh_keypair=ssh_keypair, ec2_user=ec2_user, head_node_ip=head_node_public_ip,
-            perf_dirs=perf_dirs, headnode_performance_dir_dest=headnode_performance_dir_dest,
+            ssh_keypair=ssh_keypair,
+            ec2_user=ec2_user,
+            head_node_ip=head_node_public_ip,
+            perf_dirs=perf_dirs,
+            headnode_performance_dir_dest=headnode_performance_dir_dest,
         )
 
     _remove_head_node_staging_dir(
-        ssh_keypair=ssh_keypair, ec2_user=ec2_user, head_node_ip=head_node_public_ip,
+        ssh_keypair=ssh_keypair,
+        ec2_user=ec2_user,
+        head_node_ip=head_node_public_ip,
         stage_dir=stage_dir,
     )
 
@@ -9056,7 +9581,8 @@ def _create_sns_topic_and_notify(sns, *, cluster_name, cluster_owner_email, star
     by teardown to delete the same topic."""
     topic_arn = sns.create_topic(Name=f"sns_alerts_{cluster_name}")["TopicArn"]
     sns.set_topic_attributes(
-        TopicArn=topic_arn, AttributeName="DisplayName",
+        TopicArn=topic_arn,
+        AttributeName="DisplayName",
         AttributeValue=f"SNS Alerts for Cluster {cluster_name}",
     )
     sns.subscribe(TopicArn=topic_arn, Protocol="email", Endpoint=cluster_owner_email)
@@ -9110,7 +9636,10 @@ def render_and_upload_cluster_config_and_scripts(s3, *, ctx, external_nfs_sg_id,
         (user_postinstall_dest, ctx["user_postinstall_s3_dest"]),
     ):
         _upload_file_to_s3(
-            s3, bucket=ctx["s3_bucketname"], key=f"{ctx['s3_script_path']}/{dest_name}", src=src,
+            s3,
+            bucket=ctx["s3_bucketname"],
+            key=f"{ctx['s3_script_path']}/{dest_name}",
+            src=src,
         )
 
 
@@ -9118,7 +9647,8 @@ def _upload_external_nfs_mount_list(s3, *, ctx):
     """boto3 twin of "PUT the external NFS mount list into
     s3_bucketname"."""
     _upload_file_to_s3(
-        s3, bucket=ctx["s3_bucketname"],
+        s3,
+        bucket=ctx["s3_bucketname"],
         key=f"{ctx['s3_script_path']}/{ctx['external_nfs_mount_list_template_dest']}",
         src=ctx["external_nfs_mount_list_template_src"],
     )
@@ -9141,17 +9671,21 @@ def _create_hpc_results_bucket(s3, *, results_bucketname, region):
     s3.put_public_access_block(
         Bucket=results_bucketname,
         PublicAccessBlockConfiguration={
-            "BlockPublicAcls": True, "IgnorePublicAcls": True,
-            "BlockPublicPolicy": True, "RestrictPublicBuckets": True,
+            "BlockPublicAcls": True,
+            "IgnorePublicAcls": True,
+            "BlockPublicPolicy": True,
+            "RestrictPublicBuckets": True,
         },
     )
     s3.put_bucket_tagging(
         Bucket=results_bucketname,
-        Tagging={"TagSet": [
-            {"Key": "Name", "Value": "ParallelClusterMaker HPC benchmark results"},
-            {"Key": "ClusterStackType", "Value": "ParallelCluster"},
-            {"Key": "DoNotDelete", "Value": "results are retained across cluster rebuilds"},
-        ]},
+        Tagging={
+            "TagSet": [
+                {"Key": "Name", "Value": "ParallelClusterMaker HPC benchmark results"},
+                {"Key": "ClusterStackType", "Value": "ParallelCluster"},
+                {"Key": "DoNotDelete", "Value": "results are retained across cluster rebuilds"},
+            ]
+        },
     )
 
 
@@ -9172,10 +9706,17 @@ def stage_and_upload_hpc_benchmark_driver(s3, *, ctx, region):
     os.chmod(dest, 0o755)
     subprocess.run(
         [
-            "aws", "s3", "sync", f"{ctx['performance_rootdir']}/",
+            "aws",
+            "s3",
+            "sync",
+            f"{ctx['performance_rootdir']}/",
             f"s3://{ctx['s3_bucketname']}/hpc-benchmark/",
-            "--exclude", "*", "--include", "hpc-benchmark.sh",
-            "--region", region,
+            "--exclude",
+            "*",
+            "--include",
+            "hpc-benchmark.sh",
+            "--region",
+            region,
         ],
         check=True,
     )
@@ -9212,7 +9753,11 @@ def print_cluster_launch_summary(ctx, *, launch_timestamp):
     built before the 30-45 minute wait starts, matching the original's
     timing exactly."""
     lines = [
-        "", "=" * 66, "                   Cluster Launch Summary", "=" * 66, "",
+        "",
+        "=" * 66,
+        "                   Cluster Launch Summary",
+        "=" * 66,
+        "",
         f"Cluster Name:      {ctx['cluster_name']}",
         f"SerialDateStamp:   {ctx['cluster_serial_datestamp']}",
         f"Launch Timestamp:  {launch_timestamp}",
@@ -9252,7 +9797,8 @@ def print_cluster_launch_summary(ctx, *, launch_timestamp):
         if ctx.get(flag) == "true":
             lines.append(label)
     lines += [
-        "", "Stack build takes 30-45 minutes. Monitor progress with:",
+        "",
+        "Stack build takes 30-45 minutes. Monitor progress with:",
         f"  pcluster describe-cluster --cluster-name {ctx['cluster_name']} --region {ctx['region']}",
         "",
     ]
@@ -9272,8 +9818,7 @@ STAGING_PREFIX = "staging"
 PERFORMANCE_PREFIX = "performance"
 
 
-def upload_directory_to_s3(s3, *, local_dir, s3_bucketname, prefix,
-                           exclude=_S3_UPLOAD_NEVER):
+def upload_directory_to_s3(s3, *, local_dir, s3_bucketname, prefix, exclude=_S3_UPLOAD_NEVER):
     """Upload a directory tree to S3 with boto3. Returns the keys written.
 
     **boto3, not `aws s3 sync`.** The three subprocess calls this replaces
@@ -9297,9 +9842,9 @@ def upload_directory_to_s3(s3, *, local_dir, s3_bucketname, prefix,
     return written
 
 
-def publish_staging_tree(s3, *, stage_dir, s3_bucketname,
-                         enable_hpc_benchmarks=False,
-                         performance_stage_dir=None):
+def publish_staging_tree(
+    s3, *, stage_dir, s3_bucketname, enable_hpc_benchmarks=False, performance_stage_dir=None
+):
     """Publish the staging tree to S3 before the stack is created.
 
     The head node fetches it during `OnNodeConfigured` rather than having it
@@ -9315,19 +9860,22 @@ def publish_staging_tree(s3, *, stage_dir, s3_bucketname,
     no grant it does not have.
     """
     keys = upload_directory_to_s3(
-        s3, local_dir=stage_dir, s3_bucketname=s3_bucketname,
+        s3,
+        local_dir=stage_dir,
+        s3_bucketname=s3_bucketname,
         prefix=STAGING_PREFIX,
     )
     if enable_hpc_benchmarks and performance_stage_dir:
         keys += upload_directory_to_s3(
-            s3, local_dir=performance_stage_dir,
-            s3_bucketname=s3_bucketname, prefix=PERFORMANCE_PREFIX,
+            s3,
+            local_dir=performance_stage_dir,
+            s3_bucketname=s3_bucketname,
+            prefix=PERFORMANCE_PREFIX,
         )
     return keys
 
 
-def finalize_staging_directory(s3, *, stage_dir, cluster_data_dir,
-                               s3_bucketname, region=None):
+def finalize_staging_directory(s3, *, stage_dir, cluster_data_dir, s3_bucketname, region=None):
     """Copy the staging tree into the cluster data directory, mirror it to
     S3, and remove the staging directory.
 
@@ -9338,14 +9886,25 @@ def finalize_staging_directory(s3, *, stage_dir, cluster_data_dir,
     """
     shutil.copytree(stage_dir, cluster_data_dir, dirs_exist_ok=True)
     upload_directory_to_s3(
-        s3, local_dir=cluster_data_dir, s3_bucketname=s3_bucketname, prefix="",
+        s3,
+        local_dir=cluster_data_dir,
+        s3_bucketname=s3_bucketname,
+        prefix="",
     )
     shutil.rmtree(stage_dir, ignore_errors=True)
 
 
 def render_and_publish_build_summary_report(
-    sns, *, ctx, sns_topic_arn, templates_dir, head_node_public_ip,
-    start_overall_timestamp, start_stack_timestamp, stop_stack_timestamp, stop_overall_timestamp,
+    sns,
+    *,
+    ctx,
+    sns_topic_arn,
+    templates_dir,
+    head_node_public_ip,
+    start_overall_timestamp,
+    start_stack_timestamp,
+    stop_stack_timestamp,
+    stop_overall_timestamp,
 ):
     """boto3/Python twin of "Template the cluster build summary report" +
     "Publish the cluster build summary report via SNS". Renders
@@ -9370,12 +9929,14 @@ def render_and_publish_build_summary_report(
     }
     report = render_template(templates_dir, "sns_build_summary_report.j2", **render_kwargs)
     with open(
-        os.open(ctx["sns_build_summary_report_dest"], os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o644), "w"
+        os.open(ctx["sns_build_summary_report_dest"], os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o644),
+        "w",
     ) as fh:
         fh.write(report)
     with contextlib.suppress(Exception):
         sns.publish(
-            TopicArn=sns_topic_arn, Message=report,
+            TopicArn=sns_topic_arn,
+            Message=report,
             Subject=f"Cluster Deployment Update: {ctx['cluster_name']}",
         )
 
@@ -9407,7 +9968,12 @@ def print_fsx_hydration_helper_locations(ctx):
 
 
 def existing_vars_file_guidance(
-    *, cluster_name, cluster_owner, az, repo_root, vars_file_path,
+    *,
+    cluster_name,
+    cluster_owner,
+    az,
+    repo_root,
+    vars_file_path,
     cluster_build_command,
 ):
     """The abort message for a build that finds a vars file already there.
@@ -9500,10 +10066,12 @@ def _build_failure_message(stage, exc, limit=600):
 # CloudFormation states that mean "a build is in flight". UPDATE_* is not
 # here: an update is a different operation with a different remedy, and
 # create_cluster is not what a caller retries into one.
-_CLUSTER_BUILD_IN_FLIGHT = frozenset({
-    "CREATE_IN_PROGRESS",
-    "CREATE_COMPLETE",
-})
+_CLUSTER_BUILD_IN_FLIGHT = frozenset(
+    {
+        "CREATE_IN_PROGRESS",
+        "CREATE_COMPLETE",
+    }
+)
 
 
 def _describe_cluster_status_quietly(cluster_name, region):
@@ -9521,11 +10089,12 @@ def _describe_cluster_status_quietly(cluster_name, region):
     """
     try:
         import pcluster.lib as pc
+
         ensure_event_loop()
 
-        return pc.describe_cluster(
-            cluster_name=cluster_name, region=region
-        ).get("clusterStatus", "")
+        return pc.describe_cluster(cluster_name=cluster_name, region=region).get(
+            "clusterStatus", ""
+        )
     except Exception:
         return ""
 
@@ -9710,7 +10279,12 @@ class BuildContext:
 
 
 def _print_build_summary(
-    *, ctx, outcome, ec2client, pricing_client, installed_pcluster_version,
+    *,
+    ctx,
+    outcome,
+    ec2client,
+    pricing_client,
+    installed_pcluster_version,
 ):
     """Print the operator-facing build summary. Pure output, nothing escapes.
 
@@ -9922,8 +10496,15 @@ class _PreLaunchProgress:
 
 
 def _provision_pre_launch_resources(
-    *, ctx, vars_file_context, templates_dir, s3_client, ec2client, sns,
-    start_timestamp, progress,
+    *,
+    ctx,
+    vars_file_context,
+    templates_dir,
+    s3_client,
+    ec2client,
+    sns,
+    start_timestamp,
+    progress,
 ):
     """Create everything CloudFormation does not own, before the stack exists.
 
@@ -9961,7 +10542,9 @@ def _provision_pre_launch_resources(
     vpc_id = ctx.vpc_id
 
     progress.sns_topic_arn = _create_sns_topic_and_notify(
-        sns, cluster_name=cluster_name, cluster_owner_email=cluster_owner_email,
+        sns,
+        cluster_name=cluster_name,
+        cluster_owner_email=cluster_owner_email,
         start_timestamp=start_overall_timestamp,
     )
 
@@ -9982,23 +10565,33 @@ def _provision_pre_launch_resources(
 
     secretsmanager = boto3.client("secretsmanager", region_name=region)
     external_nfs_sg_id = provision_s3_keypair_and_secret(
-        s3=s3_client, ec2=ec2client, secretsmanager=secretsmanager,
-        s3_bucketname=s3_bucketname, region=region, tags=_bucket_tags,
-        enable_external_nfs=enable_external_nfs, cluster_name=cluster_name,
-        vpc_id=vpc_id, vpc_cidr=vpc_cidr,
+        s3=s3_client,
+        ec2=ec2client,
+        secretsmanager=secretsmanager,
+        s3_bucketname=s3_bucketname,
+        region=region,
+        tags=_bucket_tags,
+        enable_external_nfs=enable_external_nfs,
+        cluster_name=cluster_name,
+        vpc_id=vpc_id,
+        vpc_cidr=vpc_cidr,
         ec2_keypair=_vars_file_context["ec2_keypair"],
         ssh_keypair=_vars_file_context["ssh_keypair"],
         ssh_secret_name=_vars_file_context["ssh_secret_name"],
     )
 
     render_and_upload_cluster_config_and_scripts(
-        s3_client, ctx=_vars_file_context, external_nfs_sg_id=external_nfs_sg_id,
+        s3_client,
+        ctx=_vars_file_context,
+        external_nfs_sg_id=external_nfs_sg_id,
         templates_dir=_templates_dir,
     )
 
     stage_and_upload_monitoring_wrapper(
-        s3_client, enable_monitoring=enable_monitoring,
-        cluster_data_dir=cluster_data_dir, s3_bucketname=s3_bucketname,
+        s3_client,
+        enable_monitoring=enable_monitoring,
+        cluster_data_dir=cluster_data_dir,
+        s3_bucketname=s3_bucketname,
         s3_script_path=_vars_file_context["s3_script_path"],
         monitoring_version=monitoring_version,
         monitoring_version_checksum=monitoring_version_checksum,
@@ -10024,7 +10617,9 @@ def _provision_pre_launch_resources(
     # from the vars file, which is why it can be published this early
     # at all.
     publish_staging_tree(
-        s3_client, stage_dir=stage_dir, s3_bucketname=s3_bucketname,
+        s3_client,
+        stage_dir=stage_dir,
+        s3_bucketname=s3_bucketname,
         enable_hpc_benchmarks=enable_hpc_benchmarks,
         performance_stage_dir=_vars_file_context.get("performance_stage_dir"),
     )
@@ -10033,9 +10628,17 @@ def _provision_pre_launch_resources(
 
 
 def _render_build_templates(
-    *, templates_dir, cluster_parameters, vars_file_path, cluster_name,
-    cluster_data_dir, stage_dir, repo_root,
-    enable_monitoring, enable_external_nfs, enable_hpc_benchmarks,
+    *,
+    templates_dir,
+    cluster_parameters,
+    vars_file_path,
+    cluster_name,
+    cluster_data_dir,
+    stage_dir,
+    repo_root,
+    enable_monitoring,
+    enable_external_nfs,
+    enable_hpc_benchmarks,
 ):
     """Render the vars file and every staged template; return the merged context.
 
@@ -10050,13 +10653,9 @@ def _render_build_templates(
     module note above core_create_cluster for why the rest stayed put.
     """
     _templates_dir = templates_dir
-    _rendered_vars_file = render_template(
-        _templates_dir, "vars_file.j2", **cluster_parameters
-    )
+    _rendered_vars_file = render_template(_templates_dir, "vars_file.j2", **cluster_parameters)
     print(f"  Writing vars file: {vars_file_path}")
-    with open(
-        os.open(vars_file_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w"
-    ) as _vf:
+    with open(os.open(vars_file_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w") as _vf:
         _vf.write(_rendered_vars_file)
 
     # The templates rendered below reference names (preinstall_s3_dest,
@@ -10088,9 +10687,7 @@ def _render_build_templates(
     ):
         _rendered_install = render_template(_templates_dir, _tmpl_name, **_vars_file_context)
         _install_dest = os.path.join(cluster_data_dir, _dest_name)
-        with open(
-            os.open(_install_dest, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o755), "w"
-        ) as _if:
+        with open(os.open(_install_dest, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o755), "w") as _if:
             _if.write(_rendered_install)
 
     os.makedirs(stage_dir, exist_ok=True)
@@ -10101,9 +10698,7 @@ def _render_build_templates(
     ):
         _rendered_script = render_template(_templates_dir, _tmpl_name, **_vars_file_context)
         _dest_path = os.path.join(stage_dir, _dest_name)
-        with open(
-            os.open(_dest_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o755), "w"
-        ) as _tf:
+        with open(os.open(_dest_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o755), "w") as _tf:
             _tf.write(_rendered_script)
 
     # Tier 2: gated templates whose upload/publish step stays an Ansible
@@ -10117,7 +10712,8 @@ def _render_build_templates(
         with open(
             os.open(
                 _vars_file_context["monitoring_wrapper_dest"],
-                os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o755,
+                os.O_WRONLY | os.O_CREAT | os.O_TRUNC,
+                0o755,
             ),
             "w",
         ) as _mf:
@@ -10129,7 +10725,8 @@ def _render_build_templates(
         with open(
             os.open(
                 _vars_file_context["grafana_tunnel_dest"],
-                os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o755,
+                os.O_WRONLY | os.O_CREAT | os.O_TRUNC,
+                0o755,
             ),
             "w",
         ) as _gf:
@@ -10146,7 +10743,8 @@ def _render_build_templates(
         with open(
             os.open(
                 _vars_file_context["external_nfs_mount_list_template_src"],
-                os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o644,
+                os.O_WRONLY | os.O_CREAT | os.O_TRUNC,
+                0o644,
             ),
             "w",
         ) as _nf1:
@@ -10167,9 +10765,7 @@ def _render_build_templates(
             ("job_hpc-benchmark.sh.j2", "job_hpc-benchmark.sh"),
             ("README-PERFORMANCE.md.j2", "README-PERFORMANCE.md"),
         ):
-            _rendered_perf = render_template(
-                _hpc_benchmark_dir, _tmpl_name, **_vars_file_context
-            )
+            _rendered_perf = render_template(_hpc_benchmark_dir, _tmpl_name, **_vars_file_context)
             _perf_dest = os.path.join(_performance_stage_dir, _dest_name)
             with open(
                 os.open(_perf_dest, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o755), "w"
@@ -10184,14 +10780,14 @@ def _render_build_templates(
         **_vars_file_context,
     )
     _sbatch_dest = os.path.join(stage_dir, "sbatch_default_submission_script.sh")
-    with open(
-        os.open(_sbatch_dest, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o755), "w"
-    ) as _sf:
+    with open(os.open(_sbatch_dest, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o755), "w") as _sf:
         _sf.write(_rendered_sbatch)
     return _vars_file_context
 
 
-def core_create_cluster(*, params, repo_root, region, cluster_build_command, ansible_version, wait=True):
+def core_create_cluster(
+    *, params, repo_root, region, cluster_build_command, ansible_version, wait=True
+):
     """Validate, provision IAM, render the vars file, and build a cluster.
 
     A near-verbatim port of make_pcluster.py's own main() body from just
@@ -10386,12 +10982,15 @@ def core_create_cluster(*, params, repo_root, region, cluster_build_command, ans
             print("")
             print("*** ALREADY BUILDING ***")
             print(f"  {cluster_name} is {_in_flight} in {region}.")
-            print("  Nothing was created by this call and nothing needs "
-                  "cleaning up.")
-            print("  Poll list_clusters(live=True) or check_cluster_health; "
-                  "a build takes 20-45 minutes.")
+            print("  Nothing was created by this call and nothing needs cleaning up.")
+            print(
+                "  Poll list_clusters(live=True) or check_cluster_health; "
+                "a build takes 20-45 minutes."
+            )
             return CreateClusterResult(
-                cluster_name=cluster_name, success=False, exit_code=1,
+                cluster_name=cluster_name,
+                success=False,
+                exit_code=1,
                 kicked_off=True,
                 message=(
                     f"{cluster_name} is already building ({_in_flight}); this "
@@ -10400,13 +10999,18 @@ def core_create_cluster(*, params, repo_root, region, cluster_build_command, ans
                 ),
             )
         for _line in existing_vars_file_guidance(
-            cluster_name=cluster_name, cluster_owner=cluster_owner, az=az,
-            repo_root=repo_root, vars_file_path=vars_file_path,
+            cluster_name=cluster_name,
+            cluster_owner=cluster_owner,
+            az=az,
+            repo_root=repo_root,
+            vars_file_path=vars_file_path,
             cluster_build_command=cluster_build_command,
         ):
             print(_line)
         return CreateClusterResult(
-            cluster_name=cluster_name, success=False, exit_code=1,
+            cluster_name=cluster_name,
+            success=False,
+            exit_code=1,
             message="a vars file for this cluster already exists",
         )
     else:
@@ -10470,7 +11074,9 @@ def core_create_cluster(*, params, repo_root, region, cluster_build_command, ans
     except Exception as _e:
         print(f"ERROR: Network/VPC discovery failed: {_e}", file=sys.stderr)
         return CreateClusterResult(
-            cluster_name=cluster_name, success=False, exit_code=1,
+            cluster_name=cluster_name,
+            success=False,
+            exit_code=1,
             message=f"ERROR: Network/VPC discovery failed: {_e}",
         )
     try:
@@ -10478,7 +11084,9 @@ def core_create_cluster(*, params, repo_root, region, cluster_build_command, ans
     except Exception as _e:
         print(f"ERROR: Could not retrieve AWS account ID: {_e}", file=sys.stderr)
         return CreateClusterResult(
-            cluster_name=cluster_name, success=False, exit_code=1,
+            cluster_name=cluster_name,
+            success=False,
+            exit_code=1,
             message=f"ERROR: Could not retrieve AWS account ID: {_e}",
         )
     try:
@@ -10490,24 +11098,22 @@ def core_create_cluster(*, params, repo_root, region, cluster_build_command, ans
         )
         print(_PCLUSTER_MISSING_MSG, file=sys.stderr)
         return CreateClusterResult(
-            cluster_name=cluster_name, success=False, exit_code=1,
+            cluster_name=cluster_name,
+            success=False,
+            exit_code=1,
             message=_PCLUSTER_MISSING_MSG,
         )
     except Exception as _e:
         print(f"ERROR: Could not check cluster existence: {_e}", file=sys.stderr)
         return CreateClusterResult(
-            cluster_name=cluster_name, success=False, exit_code=1,
+            cluster_name=cluster_name,
+            success=False,
+            exit_code=1,
             message=f"ERROR: Could not check cluster existence: {_e}",
         )
 
     if _describe.returncode == 0:
-        error_msg = (
-            'pcluster stack "'
-            + cluster_name
-            + '" is already deployed in '
-            + region
-            + "!"
-        )
+        error_msg = 'pcluster stack "' + cluster_name + '" is already deployed in ' + region + "!"
         refer_to_docs_and_quit(error_msg)
     else:
         if debug_mode:
@@ -10516,9 +11122,7 @@ def core_create_cluster(*, params, repo_root, region, cluster_build_command, ans
     # Set the state directory for this cluster.
     # Anchored to the repo root so the script works from any CWD.
 
-    cluster_data_dir = (
-        os.path.join(repo_root, "active_clusters", cluster_name) + os.sep
-    )
+    cluster_data_dir = os.path.join(repo_root, "active_clusters", cluster_name) + os.sep
 
     # Check for an existing state directory for this cluster.
 
@@ -10656,9 +11260,7 @@ def core_create_cluster(*, params, repo_root, region, cluster_build_command, ans
         # AWS's own LoginNodesPoolSchema.count floors at 0 (a defined-but-empty
         # pool); no upper bound is enforced there either.
         if loginnode_count < 0:
-            refer_to_docs_and_quit(
-                f"loginnode_count must be >= 0, got {loginnode_count}."
-            )
+            refer_to_docs_and_quit(f"loginnode_count must be >= 0, got {loginnode_count}.")
 
     # Architecture check — the head node and every queue type must share one
     # architecture. The head node is included here because base_os_instance_check
@@ -10673,7 +11275,7 @@ def core_create_cluster(*, params, repo_root, region, cluster_build_command, ans
     _vcpu_map = {}
     _chunk_size = 100
     for _i in range(0, len(_all_instance_types), _chunk_size):
-        _chunk = _all_instance_types[_i:_i + _chunk_size]
+        _chunk = _all_instance_types[_i : _i + _chunk_size]
         _resp = ec2client.describe_instance_types(InstanceTypes=_chunk)
         for _info in _resp["InstanceTypes"]:
             _archs = _info["ProcessorInfo"]["SupportedArchitectures"]
@@ -10738,9 +11340,7 @@ def core_create_cluster(*, params, repo_root, region, cluster_build_command, ans
     # value every node in the queue can satisfy. Zero means the GPU types report
     # no NVIDIA devices, and the job script falls back to CPU-shaped ranks.
     gpu_ranks_per_node = (
-        min(_gpu_count_map.get(t, 0) for t in gpu_instance_types)
-        if gpu_instance_types
-        else 0
+        min(_gpu_count_map.get(t, 0) for t in gpu_instance_types) if gpu_instance_types else 0
     )
 
     # Schedulable vCPUs per node in each queue, taken the same way: the minimum
@@ -10762,9 +11362,7 @@ def core_create_cluster(*, params, repo_root, region, cluster_build_command, ans
     s3_bucketname = "parallelclustermaker-" + cluster_serial_number
     # Long-lived and account+region-scoped, so benchmark results survive the
     # teardown of the per-build bucket above.  See _derive_results_bucket.
-    results_bucketname = _derive_results_bucket(
-        aws_account_id=aws_account_id, region=region
-    )
+    results_bucketname = _derive_results_bucket(aws_account_id=aws_account_id, region=region)
     _resuming = not _serial_was_created
 
     # Lustre options should not be used without setting enable_fsx=true.
@@ -10773,20 +11371,15 @@ def core_create_cluster(*, params, repo_root, region, cluster_build_command, ans
 
     if enable_fsx:
         if (not enable_fsx_hydration) and (
-            (fsx_s3_import_bucket != "UNDEFINED")
-            or (fsx_s3_export_bucket != "UNDEFINED")
+            (fsx_s3_import_bucket != "UNDEFINED") or (fsx_s3_export_bucket != "UNDEFINED")
         ):
-            error_msg = (
-                'All Lustre-S3 interactions require: "enable_fsx_hydration=true"'
-            )
+            error_msg = 'All Lustre-S3 interactions require: "enable_fsx_hydration=true"'
             refer_to_docs_and_quit(error_msg)
     if not enable_fsx:
         if enable_fsx_hydration:
             error_msg = 'All Lustre-to-S3 interactions require: "enable_fsx=true"'
             refer_to_docs_and_quit(error_msg)
-        if (fsx_s3_import_bucket != "UNDEFINED") or (
-            fsx_s3_export_bucket != "UNDEFINED"
-        ):
+        if (fsx_s3_import_bucket != "UNDEFINED") or (fsx_s3_export_bucket != "UNDEFINED"):
             error_msg = 'All Lustre-to-S3 interactions require: "enable_fsx=true"'
             refer_to_docs_and_quit(error_msg)
     p_val("enable_fsx", debug_mode)
@@ -10825,9 +11418,7 @@ def core_create_cluster(*, params, repo_root, region, cluster_build_command, ans
     if enable_external_nfs and (external_nfs_server == ""):
         error_msg = 'Missing: valid setting for "--external_nfs_server"'
         refer_to_docs_and_quit(error_msg)
-    if enable_external_nfs and not re.fullmatch(
-        r"^[a-zA-Z0-9.\-]+$", external_nfs_server
-    ):
+    if enable_external_nfs and not re.fullmatch(r"^[a-zA-Z0-9.\-]+$", external_nfs_server):
         _NFS_MSG = (
             f"ERROR: external_nfs_server contains invalid characters: "
             f"{external_nfs_server!r}\n"
@@ -10835,7 +11426,9 @@ def core_create_cluster(*, params, repo_root, region, cluster_build_command, ans
         )
         print(_NFS_MSG, file=sys.stderr)
         return CreateClusterResult(
-            cluster_name=cluster_name, success=False, exit_code=1,
+            cluster_name=cluster_name,
+            success=False,
+            exit_code=1,
             message=_NFS_MSG,
         )
     else:
@@ -11042,11 +11635,14 @@ def core_create_cluster(*, params, repo_root, region, cluster_build_command, ans
     # machine (see s3_acquire_cluster_lock's own docstring for why the
     # local mkdir lock this replaced could not do that).
     import pcluster.lib as pc
+
     ensure_event_loop()
     _lock_s3 = boto3.client("s3", region_name=region)
     locks_bucketname = _derive_locks_bucket(aws_account_id=aws_account_id, region=region)
     _lock_path = _acquire_distributed_cluster_lock(
-        _lock_s3, locks_bucketname=locks_bucketname, region=region,
+        _lock_s3,
+        locks_bucketname=locks_bucketname,
+        region=region,
         cluster_name=cluster_name,
         command="make_pcluster.py " + " ".join(sys.argv[1:]),
         describe_fn=pc.describe_cluster,
@@ -11057,9 +11653,7 @@ def core_create_cluster(*, params, repo_root, region, cluster_build_command, ans
     iam = boto3.client("iam")
     ec2_iam_policy = "pclustermaker-policy-" + cluster_serial_number
     ec2_iam_role = "pclustermaker-role-" + cluster_serial_number
-    ec2_json_policy_template = os.path.join(
-        cluster_data_dir, "ParallelClusterInstancePolicy.json"
-    )
+    ec2_json_policy_template = os.path.join(cluster_data_dir, "ParallelClusterInstancePolicy.json")
 
     if cluster_type == "spot":
         _ensure_spot_service_linked_role(iam)
@@ -11081,33 +11675,39 @@ def core_create_cluster(*, params, repo_root, region, cluster_build_command, ans
             enable_monitoring=enable_monitoring,
         )
     except Exception as _iam_e:
-        print(
-            f"\n*** ERROR ***\n"
-            f"  Exception during IAM role/policy setup: {_iam_e}"
-        )
+        print(f"\n*** ERROR ***\n  Exception during IAM role/policy setup: {_iam_e}")
         print("Cleaning up any partially-created IAM resources:")
         _cleanup_iam_on_failure(
-            iam, ec2_iam_role, ec2_iam_policy, aws_account_id,
+            iam,
+            ec2_iam_role,
+            ec2_iam_policy,
+            aws_account_id,
             enable_monitoring=enable_monitoring,
         )
         _fail_msg = _build_failure_message("IAM role/policy setup failed", _iam_e)
         _publish_build_failure(
-            _lock_s3, locks_bucketname=locks_bucketname,
-            cluster_name=cluster_name, region=region,
-            cluster_owner=cluster_owner, stage="IAM setup", message=_fail_msg,
+            _lock_s3,
+            locks_bucketname=locks_bucketname,
+            cluster_name=cluster_name,
+            region=region,
+            cluster_owner=cluster_owner,
+            stage="IAM setup",
+            message=_fail_msg,
             serial=cluster_serial_number,
         )
-        s3_release_cluster_lock(_lock_s3, locks_bucketname=locks_bucketname, cluster_name=cluster_name)
+        s3_release_cluster_lock(
+            _lock_s3, locks_bucketname=locks_bucketname, cluster_name=cluster_name
+        )
         return CreateClusterResult(
-            cluster_name=cluster_name, success=False, exit_code=1,
+            cluster_name=cluster_name,
+            success=False,
+            exit_code=1,
             message=_fail_msg,
         )
 
     try:
         if enable_fsx_hydration:
-            fsx_hydration_iam_policy = (
-                "pclustermaker-fsx-s3-policy-" + cluster_serial_number
-            )
+            fsx_hydration_iam_policy = "pclustermaker-fsx-s3-policy-" + cluster_serial_number
             fsx_hydration_json_policy_src = os.path.join(
                 repo_root, "templates", "LustreS3HydrationPolicy.json_src"
             )
@@ -11127,8 +11727,7 @@ def core_create_cluster(*, params, repo_root, region, cluster_build_command, ans
             fsx_hydration_iam_policy = "UNDEFINED"
     except Exception as _iam_e:
         print(
-            f"\n*** ERROR ***\n"
-            f"  Exception during IAM/template setup after role creation: {_iam_e}"
+            f"\n*** ERROR ***\n  Exception during IAM/template setup after role creation: {_iam_e}"
         )
         print("Cleaning up IAM role to prevent orphan:")
         _delete_managed_policies(
@@ -11151,18 +11750,18 @@ def core_create_cluster(*, params, repo_root, region, cluster_build_command, ans
     _build_ctx = BuildContext(
         local_workingdir=repo_root,
         cluster_rootdir=repo_root,
-        ssh_known_hosts=os.path.join(os.path.expanduser('~'), '.ssh', 'known_hosts'),
-        cluster_data_dir=os.path.join(repo_root, 'active_clusters', cluster_name),
-        cluster_template_dir=os.path.join(repo_root, 'templates'),
-        stage_dir=os.path.join('/tmp', '_ParallelClusterMaker_stage', cluster_serial_number),
-        ec2_keypair=cluster_serial_number + '_' + region,
+        ssh_known_hosts=os.path.join(os.path.expanduser("~"), ".ssh", "known_hosts"),
+        cluster_data_dir=os.path.join(repo_root, "active_clusters", cluster_name),
+        cluster_template_dir=os.path.join(repo_root, "templates"),
+        stage_dir=os.path.join("/tmp", "_ParallelClusterMaker_stage", cluster_serial_number),
+        ec2_keypair=cluster_serial_number + "_" + region,
         ssh_secret_name=_ssh_secret_name(cluster_name, cluster_serial_number),
         ebs_root=ebs_shared_dir,
-        efs_root='/efs',
-        fsx_root='/fsx',
-        s3_script_path='cluster_scripts/' + prod_level,
-        efs_pkg_dir='/efs/pkg',
-        fsx_pkg_dir='/fsx/pkg',
+        efs_root="/efs",
+        fsx_root="/fsx",
+        s3_script_path="cluster_scripts/" + prod_level,
+        efs_pkg_dir="/efs/pkg",
+        fsx_pkg_dir="/fsx/pkg",
         aws_account_id=aws_account_id,
         az=az,
         compute_az_list=compute_az_list,
@@ -11171,7 +11770,7 @@ def core_create_cluster(*, params, repo_root, region, cluster_build_command, ans
         gpu_subnet_ids=gpu_subnet_ids,
         use_private_gpu_subnet=use_private_gpu_subnet,
         base_os=base_os,
-        pcluster_os=base_os.removesuffix('arm'),
+        pcluster_os=base_os.removesuffix("arm"),
         cluster_name=cluster_name,
         cluster_owner=cluster_owner,
         cluster_owner_email=cluster_owner_email,
@@ -11215,7 +11814,8 @@ def core_create_cluster(*, params, repo_root, region, cluster_build_command, ans
         gpu_ranks_per_node=gpu_ranks_per_node,
         cpu_ranks_per_node=cpu_ranks_per_node,
         gpu_vcpus_per_node=gpu_vcpus_per_node,
-        enable_efa_gdr=enable_efa and any((needs_efa_gdr(t) for t in cpu_instance_types + gpu_instance_types)),
+        enable_efa_gdr=enable_efa
+        and any((needs_efa_gdr(t) for t in cpu_instance_types + gpu_instance_types)),
         enable_external_nfs=enable_external_nfs,
         enable_loginnode=enable_loginnode,
         loginnode_instance_type=loginnode_instance_type,
@@ -11228,7 +11828,7 @@ def core_create_cluster(*, params, repo_root, region, cluster_build_command, ans
         enable_slurm_accounting=enable_slurm_accounting,
         monitoring_version=monitoring_version,
         monitoring_version_checksum=monitoring_version_checksum,
-        monitoring_s3_dest=f'monitoring-post-install-wrapper.{cluster_name}.sh',
+        monitoring_s3_dest=f"monitoring-post-install-wrapper.{cluster_name}.sh",
         docker_compose_version=docker_compose_version,
         docker_compose_arch=docker_compose_arch,
         docker_compose_checksum=docker_compose_checksum,
@@ -11299,11 +11899,7 @@ def core_create_cluster(*, params, repo_root, region, cluster_build_command, ans
         print("compute_instance_type = " + compute_instance_type)
         print("compute_root_volume_size = " + str(compute_root_volume_size) + " GB")
         print("compute_root_volume_iops = " + str(compute_root_volume_iops))
-        print(
-            "compute_root_volume_throughput = "
-            + str(compute_root_volume_throughput)
-            + " MB/s"
-        )
+        print("compute_root_volume_throughput = " + str(compute_root_volume_throughput) + " MB/s")
         if custom_ami != "NONE":
             print("custom_ami = " + custom_ami)
         print("ebs_shared_dir = " + ebs_shared_dir)
@@ -11312,11 +11908,7 @@ def core_create_cluster(*, params, repo_root, region, cluster_build_command, ans
         if ebs_shared_volume_type in ("gp3", "io1", "io2"):
             print("ebs_shared_volume_iops = " + str(ebs_shared_volume_iops))
         if ebs_shared_volume_type == "gp3":
-            print(
-                "ebs_shared_volume_throughput = "
-                + str(ebs_shared_volume_throughput)
-                + " MB/s"
-            )
+            print("ebs_shared_volume_throughput = " + str(ebs_shared_volume_throughput) + " MB/s")
         print("ebs_encryption = " + str(ebs_encryption))
         print("ec2_user = " + ec2_user)
         print("ec2_user_home = " + ec2_user_home)
@@ -11348,11 +11940,7 @@ def core_create_cluster(*, params, repo_root, region, cluster_build_command, ans
         print("headnode_instance_type = " + headnode_instance_type)
         print("headnode_root_volume_size = " + str(headnode_root_volume_size) + " GB")
         print("headnode_root_volume_iops = " + str(headnode_root_volume_iops))
-        print(
-            "headnode_root_volume_throughput = "
-            + str(headnode_root_volume_throughput)
-            + " MB/s"
-        )
+        print("headnode_root_volume_throughput = " + str(headnode_root_volume_throughput) + " MB/s")
         if placement_group != "NONE":
             print("placement_group = " + placement_group)
         print("prod_level = " + prod_level)
@@ -11407,15 +11995,19 @@ def core_create_cluster(*, params, repo_root, region, cluster_build_command, ans
 
     try:
         _vars_file_context = _render_build_templates(
-            templates_dir=_templates_dir, cluster_parameters=cluster_parameters,
-            vars_file_path=vars_file_path, cluster_name=cluster_name,
-            cluster_data_dir=cluster_data_dir, stage_dir=stage_dir,
-            repo_root=repo_root, enable_monitoring=enable_monitoring,
+            templates_dir=_templates_dir,
+            cluster_parameters=cluster_parameters,
+            vars_file_path=vars_file_path,
+            cluster_name=cluster_name,
+            cluster_data_dir=cluster_data_dir,
+            stage_dir=stage_dir,
+            repo_root=repo_root,
+            enable_monitoring=enable_monitoring,
             enable_external_nfs=enable_external_nfs,
             enable_hpc_benchmarks=enable_hpc_benchmarks,
         )
     except Exception as _render_e:
-        print(f"\n*** ERROR ***\n" f"  Template render failed: {_render_e}")
+        print(f"\n*** ERROR ***\n  Template render failed: {_render_e}")
         print("Cleaning up IAM role to prevent orphan:")
         _fsx = (
             fsx_hydration_iam_policy
@@ -11437,14 +12029,22 @@ def core_create_cluster(*, params, repo_root, region, cluster_build_command, ans
             os.remove(cluster_serial_number_file)
         _fail_msg = _build_failure_message("template render failed", _render_e)
         _publish_build_failure(
-            _lock_s3, locks_bucketname=locks_bucketname,
-            cluster_name=cluster_name, region=region,
-            cluster_owner=cluster_owner, stage="template render", message=_fail_msg,
+            _lock_s3,
+            locks_bucketname=locks_bucketname,
+            cluster_name=cluster_name,
+            region=region,
+            cluster_owner=cluster_owner,
+            stage="template render",
+            message=_fail_msg,
             serial=cluster_serial_number,
         )
-        s3_release_cluster_lock(_lock_s3, locks_bucketname=locks_bucketname, cluster_name=cluster_name)
+        s3_release_cluster_lock(
+            _lock_s3, locks_bucketname=locks_bucketname, cluster_name=cluster_name
+        )
         return CreateClusterResult(
-            cluster_name=cluster_name, success=False, exit_code=1,
+            cluster_name=cluster_name,
+            success=False,
+            exit_code=1,
             message=_fail_msg,
         )
 
@@ -11473,7 +12073,9 @@ def core_create_cluster(*, params, repo_root, region, cluster_build_command, ans
             secretsmanager = boto3.client("secretsmanager", region_name=region)
             _delete_s3_bucket_step(s3_client, s3_bucketname)
             _delete_ec2_keypair_step(ec2client, _vars_file_context["ec2_keypair"])
-            _delete_secrets_manager_secret_step(secretsmanager, _vars_file_context["ssh_secret_name"])
+            _delete_secrets_manager_secret_step(
+                secretsmanager, _vars_file_context["ssh_secret_name"]
+            )
             if enable_external_nfs:
                 _delete_external_nfs_sg_step(ec2client, cluster_name)
         if _progress.sns_topic_arn:
@@ -11481,8 +12083,12 @@ def core_create_cluster(*, params, repo_root, region, cluster_build_command, ans
                 sns.delete_topic(TopicArn=_progress.sns_topic_arn)
         _fsx = fsx_hydration_iam_policy if fsx_hydration_iam_policy != "UNDEFINED" else None
         _delete_managed_policies(
-            iam, ec2_iam_role, ec2_iam_policy, aws_account_id,
-            fsx_policy=_fsx, enable_monitoring=enable_monitoring,
+            iam,
+            ec2_iam_role,
+            ec2_iam_policy,
+            aws_account_id,
+            fsx_policy=_fsx,
+            enable_monitoring=enable_monitoring,
         )
         with contextlib.suppress(Exception):
             iam.delete_role(RoleName=ec2_iam_role)
@@ -11495,8 +12101,13 @@ def core_create_cluster(*, params, repo_root, region, cluster_build_command, ans
         print("Cleaning up IAM resources to allow a clean retry:")
         _fsx = fsx_hydration_iam_policy if fsx_hydration_iam_policy != "UNDEFINED" else None
         _delete_managed_policies(
-            iam, ec2_iam_role, ec2_iam_policy, aws_account_id,
-            suppress=False, fsx_policy=_fsx, enable_monitoring=enable_monitoring,
+            iam,
+            ec2_iam_role,
+            ec2_iam_policy,
+            aws_account_id,
+            suppress=False,
+            fsx_policy=_fsx,
+            enable_monitoring=enable_monitoring,
         )
         try:
             iam.delete_role(RoleName=ec2_iam_role)
@@ -11509,17 +12120,26 @@ def core_create_cluster(*, params, repo_root, region, cluster_build_command, ans
         # after `pcluster create-cluster` returns, and that call alone
         # measured ~39s of the 43.6s total against a 29s gateway ceiling.
         _publish_build_failure(
-            _lock_s3, locks_bucketname=locks_bucketname,
-            cluster_name=cluster_name, region=region,
-            cluster_owner=cluster_owner, stage="cluster launch",
-            message=reason, serial=cluster_serial_number,
+            _lock_s3,
+            locks_bucketname=locks_bucketname,
+            cluster_name=cluster_name,
+            region=region,
+            cluster_owner=cluster_owner,
+            stage="cluster launch",
+            message=reason,
+            serial=cluster_serial_number,
         )
-        s3_release_cluster_lock(_lock_s3, locks_bucketname=locks_bucketname, cluster_name=cluster_name)
+        s3_release_cluster_lock(
+            _lock_s3, locks_bucketname=locks_bucketname, cluster_name=cluster_name
+        )
         # Returned, not exited -- and every call site returns it onward.
         # This is nested, so a bare return here would only leave the helper
         # and let the caller run on to the success path.
         return CreateClusterResult(
-            cluster_name=cluster_name, success=False, exit_code=1, message=reason,
+            cluster_name=cluster_name,
+            success=False,
+            exit_code=1,
+            message=reason,
         )
 
     sns = boto3.client("sns", region_name=region)
@@ -11527,10 +12147,14 @@ def core_create_cluster(*, params, repo_root, region, cluster_build_command, ans
     start_overall_timestamp = teardown_timestamp()
     try:
         sns_topic_arn, external_nfs_sg_id = _provision_pre_launch_resources(
-            ctx=_build_ctx, vars_file_context=_vars_file_context,
-            templates_dir=_templates_dir, s3_client=s3_client,
-            ec2client=ec2client, sns=sns,
-            start_timestamp=start_overall_timestamp, progress=_progress,
+            ctx=_build_ctx,
+            vars_file_context=_vars_file_context,
+            templates_dir=_templates_dir,
+            s3_client=s3_client,
+            ec2client=ec2client,
+            sns=sns,
+            start_timestamp=start_overall_timestamp,
+            progress=_progress,
         )
     except Exception as _early_e:
         print(f"\n*** ERROR ***\n  Exception before cluster launch: {_early_e}")
@@ -11549,14 +12173,22 @@ def core_create_cluster(*, params, repo_root, region, cluster_build_command, ans
         print(f"  Removed local state: {os.path.relpath(vars_file_path, repo_root)}")
         _fail_msg = _build_failure_message("failed before cluster launch", _early_e)
         _publish_build_failure(
-            _lock_s3, locks_bucketname=locks_bucketname,
-            cluster_name=cluster_name, region=region,
-            cluster_owner=cluster_owner, stage="pre-launch", message=_fail_msg,
+            _lock_s3,
+            locks_bucketname=locks_bucketname,
+            cluster_name=cluster_name,
+            region=region,
+            cluster_owner=cluster_owner,
+            stage="pre-launch",
+            message=_fail_msg,
             serial=cluster_serial_number,
         )
-        s3_release_cluster_lock(_lock_s3, locks_bucketname=locks_bucketname, cluster_name=cluster_name)
+        s3_release_cluster_lock(
+            _lock_s3, locks_bucketname=locks_bucketname, cluster_name=cluster_name
+        )
         return CreateClusterResult(
-            cluster_name=cluster_name, success=False, exit_code=1,
+            cluster_name=cluster_name,
+            success=False,
+            exit_code=1,
             message=_fail_msg,
         )
 
@@ -11566,7 +12198,9 @@ def core_create_cluster(*, params, repo_root, region, cluster_build_command, ans
     # stack" immediately after).
 
     start_stack_creation_timestamp = teardown_timestamp()
-    print_cluster_launch_summary(_vars_file_context, launch_timestamp=start_stack_creation_timestamp)
+    print_cluster_launch_summary(
+        _vars_file_context, launch_timestamp=start_stack_creation_timestamp
+    )
 
     line_length = 80
     if debug_mode:
@@ -11599,25 +12233,23 @@ def core_create_cluster(*, params, repo_root, region, cluster_build_command, ans
         # every line carry a duplicate; they diverge exactly when it
         # matters -- a failed create reads CREATE_FAILED beside
         # CloudFormation's ROLLBACK_IN_PROGRESS.
-        detail = (
-            f" (CloudFormation: {cfn_status})"
-            if cfn_status and cfn_status != status else ""
-        )
-        print(
-            f"  [ {elapsed} ] {cluster_name}: {status or 'status unavailable'}{detail}"
-        )
+        detail = f" (CloudFormation: {cfn_status})" if cfn_status and cfn_status != status else ""
+        print(f"  [ {elapsed} ] {cluster_name}: {status or 'status unavailable'}{detail}")
 
     try:
         outcome = run_cluster_create_and_classify(
-            pc.create_cluster, pc.describe_cluster, cluster_name, region,
+            pc.create_cluster,
+            pc.describe_cluster,
+            cluster_name,
+            region,
             delay_seconds=_CREATE_POLL_SECONDS,
             cluster_configuration_path=_vars_file_context["cluster_config_template"],
-            progress_fn=_print_build_progress, wait=wait,
+            progress_fn=_print_build_progress,
+            wait=wait,
         )
     except Exception as _launch_e:
         return _fail_after_launch(
-            f"Exception launching cluster: "
-            f"{pcluster_exception_detail(_launch_e)}"
+            f"Exception launching cluster: {pcluster_exception_detail(_launch_e)}"
         )
 
     if outcome.terminal_state == _KICKED_OFF:
@@ -11636,13 +12268,20 @@ def core_create_cluster(*, params, repo_root, region, cluster_build_command, ans
         print("summary was NOT sent -- both require a running head node. Re-run")
         print("once the cluster reaches CREATE_COMPLETE to finish those steps.")
         _publish_cluster_state(
-            _lock_s3, locks_bucketname=locks_bucketname,
-            cluster_name=cluster_name, repo_root=repo_root,
+            _lock_s3,
+            locks_bucketname=locks_bucketname,
+            cluster_name=cluster_name,
+            repo_root=repo_root,
         )
-        s3_release_cluster_lock(_lock_s3, locks_bucketname=locks_bucketname, cluster_name=cluster_name)
+        s3_release_cluster_lock(
+            _lock_s3, locks_bucketname=locks_bucketname, cluster_name=cluster_name
+        )
         return CreateClusterResult(
-            cluster_name=cluster_name, success=True, exit_code=0,
-            kicked_off=True, message=outcome.create_headline,
+            cluster_name=cluster_name,
+            success=True,
+            exit_code=0,
+            kicked_off=True,
+            message=outcome.create_headline,
         )
 
     if not outcome.create_confirmed:
@@ -11656,15 +12295,21 @@ def core_create_cluster(*, params, repo_root, region, cluster_build_command, ans
         # OnNodeConfigured, so nothing has to reach the node from wherever
         # this process happens to be running.
         finalize_staging_directory(
-            s3_client, stage_dir=stage_dir, cluster_data_dir=cluster_data_dir,
-            s3_bucketname=s3_bucketname, region=region,
+            s3_client,
+            stage_dir=stage_dir,
+            cluster_data_dir=cluster_data_dir,
+            s3_bucketname=s3_bucketname,
+            region=region,
         )
 
         stop_overall_timestamp = teardown_timestamp()
 
         render_and_publish_build_summary_report(
-            sns, ctx=_vars_file_context, sns_topic_arn=sns_topic_arn,
-            templates_dir=_templates_dir, head_node_public_ip=outcome.head_node_public_ip,
+            sns,
+            ctx=_vars_file_context,
+            sns_topic_arn=sns_topic_arn,
+            templates_dir=_templates_dir,
+            head_node_public_ip=outcome.head_node_public_ip,
             start_overall_timestamp=start_overall_timestamp,
             start_stack_timestamp=start_stack_creation_timestamp,
             stop_stack_timestamp=stop_stack_creation_timestamp,
@@ -11672,8 +12317,7 @@ def core_create_cluster(*, params, repo_root, region, cluster_build_command, ans
         )
     except Exception as _post_launch_e:
         return _fail_after_launch(
-            f"Exception after cluster launch: "
-            f"{pcluster_exception_detail(_post_launch_e)}"
+            f"Exception after cluster launch: {pcluster_exception_detail(_post_launch_e)}"
         )
 
     # Append make_pcluster.py's own command line to the cluster_serial_number
@@ -11697,19 +12341,25 @@ def core_create_cluster(*, params, repo_root, region, cluster_build_command, ans
         print(f"WARNING: could not upload serial number to S3: {_s3e}")
 
     _print_build_summary(
-        ctx=_build_ctx, outcome=outcome, ec2client=ec2client,
+        ctx=_build_ctx,
+        outcome=outcome,
+        ec2client=ec2client,
         pricing_client=pricing_client,
         installed_pcluster_version=installed_pcluster_version,
     )
     print("Finished creating ParallelCluster stack " + cluster_name + "!")
     print("Exiting...")
     _publish_cluster_state(
-        _lock_s3, locks_bucketname=locks_bucketname,
-        cluster_name=cluster_name, repo_root=repo_root,
+        _lock_s3,
+        locks_bucketname=locks_bucketname,
+        cluster_name=cluster_name,
+        repo_root=repo_root,
     )
     s3_release_cluster_lock(_lock_s3, locks_bucketname=locks_bucketname, cluster_name=cluster_name)
     return CreateClusterResult(
-        cluster_name=cluster_name, success=True, exit_code=0,
+        cluster_name=cluster_name,
+        success=True,
+        exit_code=0,
         message="cluster created",
     )
 
@@ -11782,8 +12432,14 @@ def _confirm_stack_is_built(describe_fn, cluster_name, region):
 
 
 def core_finalize_cluster_build(
-    *, cluster_name, cluster_owner, region, repo_root, debug_mode=False,
-    s3=None, locks_bucketname=None,
+    *,
+    cluster_name,
+    cluster_owner,
+    region,
+    repo_root,
+    debug_mode=False,
+    s3=None,
+    locks_bucketname=None,
 ):
     """Finish what a wait=False build started.
 
@@ -11804,6 +12460,7 @@ def core_finalize_cluster_build(
     """
     from pcluster_aux_data import p_val
     import pcluster.lib as pc
+
     ensure_event_loop()
 
     _validate_cluster_name(cluster_name)
@@ -11811,9 +12468,7 @@ def core_finalize_cluster_build(
 
     src_dir = os.path.join(repo_root, "src")
     cluster_data_dir = os.path.join(repo_root, "active_clusters", cluster_name)
-    cluster_serial_number_file = os.path.join(
-        cluster_data_dir, cluster_name + ".serial"
-    )
+    cluster_serial_number_file = os.path.join(cluster_data_dir, cluster_name + ".serial")
     vars_file_path = os.path.join(src_dir, "vars_files", cluster_name + ".yml")
 
     # Local first, store second -- the same order _read_cluster_record
@@ -11827,11 +12482,11 @@ def core_finalize_cluster_build(
             try:
                 _stored = get_cluster_vars_file(
                     s3 or boto3.client("s3", region_name=region),
-                    locks_bucketname=locks_bucketname, cluster_name=cluster_name,
+                    locks_bucketname=locks_bucketname,
+                    cluster_name=cluster_name,
                 )
             except (_ClientError, BotoCoreError, NoCredentialsError) as e:
-                print(f"*** WARNING *** could not read the stored vars file: "
-                      f"{type(e).__name__}")
+                print(f"*** WARNING *** could not read the stored vars file: {type(e).__name__}")
         if _stored is None:
             print("")
             print("*** ERROR ***")
@@ -11839,7 +12494,9 @@ def core_finalize_cluster_build(
             print(f"  not on disk at {vars_file_path}")
             print("  and not in the cluster record store")
             return CreateClusterResult(
-                cluster_name=cluster_name, success=False, exit_code=1,
+                cluster_name=cluster_name,
+                success=False,
+                exit_code=1,
                 message="vars file is missing",
             )
         os.makedirs(os.path.dirname(vars_file_path), exist_ok=True)
@@ -11862,7 +12519,9 @@ def core_finalize_cluster_build(
             print("*** ERROR ***")
             print(f"Cannot finalize the build of {cluster_name!r}: no serial")
             return CreateClusterResult(
-                cluster_name=cluster_name, success=False, exit_code=1,
+                cluster_name=cluster_name,
+                success=False,
+                exit_code=1,
                 message="serial file is missing",
             )
         os.makedirs(cluster_data_dir, exist_ok=True)
@@ -11875,12 +12534,13 @@ def core_finalize_cluster_build(
 
     aws_account_id = str(ctx.get("aws_account_id", ""))
     _lock_s3 = boto3.client("s3", region_name=region)
-    locks_bucketname = _derive_locks_bucket(
-        aws_account_id=aws_account_id, region=region
-    )
+    locks_bucketname = _derive_locks_bucket(aws_account_id=aws_account_id, region=region)
     _acquire_distributed_cluster_lock(
-        _lock_s3, locks_bucketname=locks_bucketname, region=region,
-        cluster_name=cluster_name, command="finalize_cluster_build",
+        _lock_s3,
+        locks_bucketname=locks_bucketname,
+        region=region,
+        cluster_name=cluster_name,
+        command="finalize_cluster_build",
         describe_fn=pc.describe_cluster,
     )
     try:
@@ -11895,7 +12555,9 @@ def core_finalize_cluster_build(
             print("Poll until the stack is complete, then finalize:")
             print(f"  pcluster describe-cluster --cluster-name {cluster_name} --region {region}")
             return CreateClusterResult(
-                cluster_name=cluster_name, success=False, exit_code=1,
+                cluster_name=cluster_name,
+                success=False,
+                exit_code=1,
                 message=f"stack is {status}",
             )
 
@@ -11907,7 +12569,9 @@ def core_finalize_cluster_build(
             print("address, so the staging transfer and the access scripts cannot be")
             print("completed. Check that the head node is running.")
             return CreateClusterResult(
-                cluster_name=cluster_name, success=False, exit_code=1,
+                cluster_name=cluster_name,
+                success=False,
+                exit_code=1,
                 message="no head node address",
             )
 
@@ -11928,7 +12592,8 @@ def core_finalize_cluster_build(
         # /tmp, so only this spelling is safe -- same derivation the build
         # itself uses.
         stage_dir = ctx.get("stage_dir") or os.path.join(
-            "/tmp", "_ParallelClusterMaker_stage",
+            "/tmp",
+            "_ParallelClusterMaker_stage",
             str(ctx.get("cluster_serial_number", cluster_name)),
         )
         os.makedirs(stage_dir, exist_ok=True)
@@ -11944,17 +12609,15 @@ def core_finalize_cluster_build(
         for _tmpl_name, _dest_name in _scripts:
             _rendered = render_template(_templates_dir, _tmpl_name, **ctx)
             _dest = os.path.join(stage_dir, _dest_name)
-            with open(
-                os.open(_dest, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o755), "w"
-            ) as _tf:
+            with open(os.open(_dest, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o755), "w") as _tf:
                 _tf.write(_rendered)
             print(f"  Rendered {_dest_name}")
 
         if _flag("enable_monitoring") and ctx.get("grafana_tunnel_dest"):
             _rendered = render_template(_templates_dir, "grafana_tunnel.j2", **ctx)
             with open(
-                os.open(ctx["grafana_tunnel_dest"],
-                        os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o755), "w"
+                os.open(ctx["grafana_tunnel_dest"], os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o755),
+                "w",
             ) as _gf:
                 _gf.write(_rendered)
             print("  Rendered the Grafana tunnel script")
@@ -11965,14 +12628,19 @@ def core_finalize_cluster_build(
         # built the cluster.
         _s3 = boto3.client("s3", region_name=region)
         publish_staging_tree(
-            _s3, stage_dir=stage_dir, s3_bucketname=ctx["s3_bucketname"],
+            _s3,
+            stage_dir=stage_dir,
+            s3_bucketname=ctx["s3_bucketname"],
             enable_hpc_benchmarks=_flag("enable_hpc_benchmarks"),
             performance_stage_dir=ctx.get("performance_stage_dir"),
         )
 
         finalize_staging_directory(
-            _s3, stage_dir=stage_dir, cluster_data_dir=cluster_data_dir,
-            s3_bucketname=ctx["s3_bucketname"], region=region,
+            _s3,
+            stage_dir=stage_dir,
+            cluster_data_dir=cluster_data_dir,
+            s3_bucketname=ctx["s3_bucketname"],
+            region=region,
         )
 
         sns = boto3.client("sns", region_name=region)
@@ -11982,17 +12650,24 @@ def core_finalize_cluster_build(
         # finalization, not the original build, and are labeled as such
         # rather than invented.
         render_and_publish_build_summary_report(
-            sns, ctx=ctx, sns_topic_arn=sns_topic_arn,
-            templates_dir=_templates_dir, head_node_public_ip=head_ip,
-            start_overall_timestamp=start_ts, start_stack_timestamp=start_ts,
-            stop_stack_timestamp=stop_ts, stop_overall_timestamp=stop_ts,
+            sns,
+            ctx=ctx,
+            sns_topic_arn=sns_topic_arn,
+            templates_dir=_templates_dir,
+            head_node_public_ip=head_ip,
+            start_overall_timestamp=start_ts,
+            start_stack_timestamp=start_ts,
+            stop_stack_timestamp=stop_ts,
+            stop_overall_timestamp=stop_ts,
         )
 
         print("")
         print(f"Finished finalizing the build of {cluster_name}!")
         print(f"  Access it with: ./access_cluster.py -N {cluster_name}")
         return CreateClusterResult(
-            cluster_name=cluster_name, success=True, exit_code=0,
+            cluster_name=cluster_name,
+            success=True,
+            exit_code=0,
             message="build finalized",
         )
     finally:
@@ -12150,13 +12825,9 @@ def _delete_secrets_manager_secret_step(secretsmanager, ssh_secret_name):
     exactly -- immediate deletion, no 7-30 day recovery window, consistent
     with this being a secret scoped to one cluster's own lifetime."""
     try:
-        secretsmanager.delete_secret(
-            SecretId=ssh_secret_name, ForceDeleteWithoutRecovery=True
-        )
+        secretsmanager.delete_secret(SecretId=ssh_secret_name, ForceDeleteWithoutRecovery=True)
     except Exception as e:
-        return TeardownStepResult(
-            "Delete SSH private key from Secrets Manager", False, str(e)
-        )
+        return TeardownStepResult("Delete SSH private key from Secrets Manager", False, str(e))
     return TeardownStepResult("Delete SSH private key from Secrets Manager", True)
 
 
@@ -12174,8 +12845,14 @@ def _delete_cluster_data_dir_step(cluster_data_dir):
 
 
 def run_credential_teardown_steps(
-    *, cf_delete_confirmed, ec2, secretsmanager, ec2_keypair, ssh_keypair,
-    ssh_secret_name, cluster_data_dir,
+    *,
+    cf_delete_confirmed,
+    ec2,
+    secretsmanager,
+    ec2_keypair,
+    ssh_keypair,
+    ssh_secret_name,
+    cluster_data_dir,
 ):
     """The four credential-destroying steps, gated together exactly as
     delete_pcluster.yml gates them: only when the CloudFormation stack is
@@ -12190,15 +12867,11 @@ def run_credential_teardown_steps(
     if not cf_delete_confirmed:
         detail = "skipped: cluster deletion not confirmed"
         return [
-            TeardownStepResult(
-                "Delete the EC2 keypair associated with this cluster", True, detail
-            ),
+            TeardownStepResult("Delete the EC2 keypair associated with this cluster", True, detail),
             TeardownStepResult(
                 "Delete the SSH private key associated with this cluster", True, detail
             ),
-            TeardownStepResult(
-                "Delete SSH private key from Secrets Manager", True, detail
-            ),
+            TeardownStepResult("Delete SSH private key from Secrets Manager", True, detail),
             TeardownStepResult("Delete the cluster data directory", True, detail),
         ]
     return [
@@ -12209,8 +12882,7 @@ def run_credential_teardown_steps(
     ]
 
 
-def delete_cluster_record_step(s3, *, cf_delete_confirmed, locks_bucketname,
-                               cluster_name):
+def delete_cluster_record_step(s3, *, cf_delete_confirmed, locks_bucketname, cluster_name):
     """Remove the shared record, under the same positive confirmation the
     four credential steps share.
 
@@ -12227,21 +12899,15 @@ def delete_cluster_record_step(s3, *, cf_delete_confirmed, locks_bucketname,
     """
     name = "Delete the shared cluster record"
     if not cf_delete_confirmed:
-        return TeardownStepResult(
-            name, True, "skipped: cluster deletion not confirmed"
-        )
+        return TeardownStepResult(name, True, "skipped: cluster deletion not confirmed")
     try:
-        delete_cluster_record(
-            s3, locks_bucketname=locks_bucketname, cluster_name=cluster_name
-        )
+        delete_cluster_record(s3, locks_bucketname=locks_bucketname, cluster_name=cluster_name)
         # Any build-failure record under this name goes with it. A torn-down
         # cluster leaving one behind would answer a later "why did my build
         # fail?" with a reason from a cluster that no longer exists. This is
         # suppressed rather than checked: it is housekeeping, and failing the
         # record deletion over it would misreport the step that matters.
-        delete_build_failure(
-            s3, locks_bucketname=locks_bucketname, cluster_name=cluster_name
-        )
+        delete_build_failure(s3, locks_bucketname=locks_bucketname, cluster_name=cluster_name)
         return TeardownStepResult(name, True)
     except (_ClientError, BotoCoreError, NoCredentialsError) as e:
         return TeardownStepResult(name, False, str(e))
@@ -12259,7 +12925,13 @@ def delete_cluster_record_step(s3, *, cf_delete_confirmed, locks_bucketname,
 # task carries no `when:` at all (the managed policies and the IAM role).
 # ---------------------------------------------------------------------------
 
-_MANAGED_POLICY_SUFFIXES = ["-HeadNode-Compute", "-HeadNode-Storage", "-HeadNode-IAM", "-ComputeNode-Base", "-ClusterNode-Deny"]
+_MANAGED_POLICY_SUFFIXES = [
+    "-HeadNode-Compute",
+    "-HeadNode-Storage",
+    "-HeadNode-IAM",
+    "-ComputeNode-Base",
+    "-ClusterNode-Deny",
+]
 
 
 def _delete_s3_bucket_step(s3, s3_bucketname):
@@ -12428,9 +13100,21 @@ def _delete_external_nfs_sg_step(ec2, cluster_name):
 
 
 def run_resource_teardown_steps(
-    *, s3, iam, ssm, ec2, cluster_name, ec2_iam_role, ec2_iam_policy,
-    aws_account_id, s3_bucketname, delete_s3_bucketname, enable_fsx_hydration,
-    fsx_hydration_iam_policy, enable_monitoring, enable_external_nfs,
+    *,
+    s3,
+    iam,
+    ssm,
+    ec2,
+    cluster_name,
+    ec2_iam_role,
+    ec2_iam_policy,
+    aws_account_id,
+    s3_bucketname,
+    delete_s3_bucketname,
+    enable_fsx_hydration,
+    fsx_hydration_iam_policy,
+    enable_monitoring,
+    enable_external_nfs,
 ):
     """The rest of delete_pcluster.yml's cleanup steps, in the playbook's own
     task order. Unlike run_credential_teardown_steps, none of these wait on
@@ -12527,7 +13211,13 @@ def _initiate_cluster_delete(delete_fn, cluster_name, region):
 
 
 def _wait_for_cluster_delete(
-    describe_fn, cluster_name, region, *, retries=80, delay_seconds=_DELETE_POLL_SECONDS, sleep_fn=None,
+    describe_fn,
+    cluster_name,
+    region,
+    *,
+    retries=80,
+    delay_seconds=_DELETE_POLL_SECONDS,
+    sleep_fn=None,
     progress_fn=None,
 ):
     """boto3/pcluster.lib twin of "Wait for the cluster to finish deleting"
@@ -12628,9 +13318,16 @@ def _classify_cluster_delete_outcome(terminal_state, cluster_name):
 
 
 def run_cluster_delete_and_classify(
-    delete_fn, describe_fn, cluster_name, region, *, retries=80,
-    delay_seconds=_DELETE_POLL_SECONDS, sleep_fn=None,
-    wait=True, progress_fn=None,
+    delete_fn,
+    describe_fn,
+    cluster_name,
+    region,
+    *,
+    retries=80,
+    delay_seconds=_DELETE_POLL_SECONDS,
+    sleep_fn=None,
+    wait=True,
+    progress_fn=None,
 ):
     """The single entry point a future core_delete_cluster rewrite calls:
     initiate the delete, wait for a terminal state, and classify it into
@@ -12653,8 +13350,12 @@ def run_cluster_delete_and_classify(
         terminal_state = _KICKED_OFF
     else:
         terminal_state = _wait_for_cluster_delete(
-            describe_fn, cluster_name, region,
-            retries=retries, delay_seconds=delay_seconds, sleep_fn=sleep_fn,
+            describe_fn,
+            cluster_name,
+            region,
+            retries=retries,
+            delay_seconds=delay_seconds,
+            sleep_fn=sleep_fn,
             progress_fn=progress_fn,
         )
     cf_delete_confirmed, cf_delete_failed, headline = _classify_cluster_delete_outcome(

@@ -220,7 +220,8 @@ class TestRotateEntryPointUsesTheSharedScripts:
     def test_core_rotate_cluster_key_does_not_carry_its_own_copies(self):
         path = os.path.join(
             os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-            "src", "pcluster_core.py",
+            "src",
+            "pcluster_core.py",
         )
         with open(path) as fh:
             source = fh.read()
@@ -312,6 +313,7 @@ class _FakeEc2:
         self.import_calls.append(KeyName)
         if KeyName == self.duplicate_once_for and self.import_calls.count(KeyName) == 1:
             from botocore.exceptions import ClientError
+
             raise ClientError(
                 {"Error": {"Code": "InvalidKeyPair.Duplicate", "Message": "dup"}}, "ImportKeyPair"
             )
@@ -336,9 +338,13 @@ class _FakeRotationSubprocess:
     precedes the verify step, remove always follows it), not content --
     both pass an opaque shell script as the remote command."""
 
-    def __init__(self, old_pub_key="ssh-ed25519 OLDKEY old@host",
-                 new_pub_key="ssh-ed25519 NEWKEY new@host",
-                 verify_fails=False, remove_fails=False):
+    def __init__(
+        self,
+        old_pub_key="ssh-ed25519 OLDKEY old@host",
+        new_pub_key="ssh-ed25519 NEWKEY new@host",
+        verify_fails=False,
+        remove_fails=False,
+    ):
         self.old_pub_key = old_pub_key
         self.new_pub_key = new_pub_key
         self.verify_fails = verify_fails
@@ -384,7 +390,11 @@ def _stage(monkeypatch, ec2=None, sm=None, sub=None):
     ec2 = ec2 or _FakeEc2()
     sm = sm or _FakeSecretsManager()
     sub = sub if sub is not None else _FakeRotationSubprocess()
-    monkeypatch.setattr(pcluster_core.boto3, "client", lambda service, **kw: {"ec2": ec2, "secretsmanager": sm}[service])
+    monkeypatch.setattr(
+        pcluster_core.boto3,
+        "client",
+        lambda service, **kw: {"ec2": ec2, "secretsmanager": sm}[service],
+    )
     monkeypatch.setattr(pcluster_core.subprocess, "run", sub)
     return ec2, sm, sub
 
@@ -402,9 +412,15 @@ class TestCoreRotateClusterKey:
 
     def test_describe_instances_failure_raises(self, monkeypatch):
         from botocore.exceptions import ClientError
-        _stage(monkeypatch, ec2=_FakeEc2(describe_raises=ClientError(
-            {"Error": {"Code": "AccessDenied", "Message": "no"}}, "DescribeInstances"
-        )))
+
+        _stage(
+            monkeypatch,
+            ec2=_FakeEc2(
+                describe_raises=ClientError(
+                    {"Error": {"Code": "AccessDenied", "Message": "no"}}, "DescribeInstances"
+                )
+            ),
+        )
         with pytest.raises(PClusterMakerError, match="Could not describe EC2 instances"):
             core_rotate_cluster_key(cluster_record=_record(), region="us-east-1")
 
@@ -463,7 +479,8 @@ class TestCoreRotateClusterKey:
         bad_path.mkdir()
         ec2, sm, sub = _stage(monkeypatch)
         result = core_rotate_cluster_key(
-            cluster_record=_record(ssh_keypair=str(bad_path)), region="us-east-1",
+            cluster_record=_record(ssh_keypair=str(bad_path)),
+            region="us-east-1",
         )
         assert result.local_key_path_updated is False
         # Rotation still completed -- the secret was still updated.
@@ -474,9 +491,14 @@ class TestCoreRotateClusterKey:
 
         class _FlakyDeleteEc2(_FakeEc2):
             def delete_key_pair(self, KeyName):
-                if KeyName == "keycluster-keypair" and "keycluster-keypair" not in self.delete_calls:
+                if (
+                    KeyName == "keycluster-keypair"
+                    and "keycluster-keypair" not in self.delete_calls
+                ):
                     self.delete_calls.append(KeyName)
-                    raise ClientError({"Error": {"Code": "Other", "Message": "boom"}}, "DeleteKeyPair")
+                    raise ClientError(
+                        {"Error": {"Code": "Other", "Message": "boom"}}, "DeleteKeyPair"
+                    )
                 super().delete_key_pair(KeyName)
 
         ec2, sm, sub = _stage(monkeypatch, ec2=_FlakyDeleteEc2())

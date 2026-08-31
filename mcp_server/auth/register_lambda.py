@@ -125,8 +125,11 @@ def register(payload, *, user_pool_id, cognito=None):
         )
     except Exception as e:
         name = type(e).__name__
-        if name in ("InvalidParameterException", "InvalidOAuthFlowException",
-                    "ScopeDoesNotExistException"):
+        if name in (
+            "InvalidParameterException",
+            "InvalidOAuthFlowException",
+            "ScopeDoesNotExistException",
+        ):
             raise RegistrationError("invalid_client_metadata", str(e)) from e
         if name == "LimitExceededException":
             # The pool's app-client quota. Worth naming, because the fix is
@@ -184,14 +187,24 @@ def _discovery_response(path, *, user_pool_id, region):
     base = os.environ.get("MCP_API_BASE_URL", "")
     domain = os.environ.get("MCP_COGNITO_DOMAIN", "")
     if path.endswith("/.well-known/oauth-authorization-server"):
-        return _response(200, discovery.authorization_server_metadata(
-            region=region, user_pool_id=user_pool_id,
-            cognito_domain=domain, api_base_url=base,
-        ))
+        return _response(
+            200,
+            discovery.authorization_server_metadata(
+                region=region,
+                user_pool_id=user_pool_id,
+                cognito_domain=domain,
+                api_base_url=base,
+            ),
+        )
     if path.endswith("/.well-known/oauth-protected-resource"):
-        return _response(200, discovery.protected_resource_metadata(
-            region=region, user_pool_id=user_pool_id, api_base_url=base,
-        ))
+        return _response(
+            200,
+            discovery.protected_resource_metadata(
+                region=region,
+                user_pool_id=user_pool_id,
+                api_base_url=base,
+            ),
+        )
     return None
 
 
@@ -201,14 +214,19 @@ def lambda_handler(event, context):
         # Configuration error, not a client error. A 400 here would tell
         # Claude its own request was malformed and send the operator
         # looking in the wrong place entirely.
-        return _response(500, {
-            "error": "server_error",
-            "error_description": "MCP_USER_POOL_ID is not configured on this function",
-        })
+        return _response(
+            500,
+            {
+                "error": "server_error",
+                "error_description": "MCP_USER_POOL_ID is not configured on this function",
+            },
+        )
 
     region = os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION") or ""
     served = _discovery_response(
-        _request_path(event), user_pool_id=user_pool_id, region=region,
+        _request_path(event),
+        user_pool_id=user_pool_id,
+        region=region,
     )
     if served is not None:
         return served
@@ -217,22 +235,32 @@ def lambda_handler(event, context):
     try:
         payload = json.loads(raw) if isinstance(raw, str) else (raw or {})
     except ValueError as e:
-        return _response(400, {
-            "error": "invalid_client_metadata",
-            "error_description": f"body is not valid JSON: {e}",
-        })
+        return _response(
+            400,
+            {
+                "error": "invalid_client_metadata",
+                "error_description": f"body is not valid JSON: {e}",
+            },
+        )
 
     try:
         body = register(payload, user_pool_id=user_pool_id)
     except RegistrationError as e:
-        return _response(e.status, {
-            "error": e.code, "error_description": str(e),
-        })
+        return _response(
+            e.status,
+            {
+                "error": e.code,
+                "error_description": str(e),
+            },
+        )
     except Exception as e:
-        return _response(500, {
-            "error": "server_error",
-            "error_description": f"{type(e).__name__}: {e}",
-        })
+        return _response(
+            500,
+            {
+                "error": "server_error",
+                "error_description": f"{type(e).__name__}: {e}",
+            },
+        )
 
     # RFC 7591: 201 on successful registration, not 200.
     return _response(201, body)

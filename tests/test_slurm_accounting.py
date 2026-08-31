@@ -31,7 +31,9 @@ def _postinstall(params, _unused=None):
 
     env = jinja2.Environment(
         loader=jinja2.FileSystemLoader(os.path.join(REPO_ROOT, "templates")),
-        undefined=jinja2.StrictUndefined, trim_blocks=True, lstrip_blocks=False,
+        undefined=jinja2.StrictUndefined,
+        trim_blocks=True,
+        lstrip_blocks=False,
         keep_trailing_newline=True,
     )
     return env.get_template("postinstall.j2").render(**params)
@@ -81,8 +83,10 @@ class TestItIsOnByDefault:
         with open(os.path.join(REPO_ROOT, "pcluster_defaults.yml")) as fh:
             shipped = yaml.safe_load(fh)
         assert shipped["enable_slurm_accounting"] == "true"
-        assert (str(shipped["enable_slurm_accounting"]).lower()
-                == MAKE_CLUSTER_DEFAULTS["enable_slurm_accounting"])
+        assert (
+            str(shipped["enable_slurm_accounting"]).lower()
+            == MAKE_CLUSTER_DEFAULTS["enable_slurm_accounting"]
+        )
 
     def test_the_cli_help_states_the_real_default(self):
         """The help text is the only place most operators learn the default,
@@ -136,24 +140,26 @@ class TestNothingHereCanFailTheNode:
         searching backwards for any of them passes even when the
         accounting block's own gate has been removed."""
         lines = body.splitlines()
-        i = next(n for n, l in enumerate(lines)
-                 if "Slurm accounting: installing MariaDB" in l)
-        opener = next((l.strip() for l in reversed(lines[:i])
-                       if l.strip().startswith(("if ", "elif "))), None)
+        i = next(n for n, l in enumerate(lines) if "Slurm accounting: installing MariaDB" in l)
+        opener = next(
+            (l.strip() for l in reversed(lines[:i]) if l.strip().startswith(("if ", "elif "))), None
+        )
         assert opener == 'if [ "$NODE_TYPE" == "HeadNode" ]', (
-            f"the nearest enclosing conditional is {opener!r}, not the "
-            f"head-node gate"
+            f"the nearest enclosing conditional is {opener!r}, not the head-node gate"
         )
 
-    @pytest.mark.parametrize("step", [
-        "apt-get -y install mariadb-server",
-        "systemctl restart mariadb",
-        "CREATE DATABASE IF NOT EXISTS slurm_acct_db",
-        "systemctl enable --now slurmdbd",
-    ])
+    @pytest.mark.parametrize(
+        "step",
+        [
+            "apt-get -y install mariadb-server",
+            "systemctl restart mariadb",
+            "CREATE DATABASE IF NOT EXISTS slurm_acct_db",
+            "systemctl enable --now slurmdbd",
+        ],
+    )
     def test_every_install_step_tolerates_its_own_failure(self, body, step):
         i = body.index(step)
-        window = body[i:i + 700]
+        window = body[i : i + 700]
         assert "||" in window, f"{step!r} has no failure branch"
         assert "WARNING" in window or "_acct_ok=0" in window
 
@@ -238,7 +244,7 @@ class TestSlurmConfIsNotTouchedDuringTheBootstrap:
 
     def test_slurmdbd_is_a_managed_unit_ordered_after_mariadb(self, body):
         assert "/etc/systemd/system/slurmdbd.service" in body
-        unit = body[body.index("[Unit]"):body.index("SLURMDBDUNIT", body.index("[Unit]"))]
+        unit = body[body.index("[Unit]") : body.index("SLURMDBDUNIT", body.index("[Unit]"))]
         assert "After=network-online.target mariadb.service" in unit
         assert "Requires=mariadb.service" in unit
         assert "Restart=on-failure" in unit
@@ -249,14 +255,17 @@ class TestTheDatabaseIsTunedForACoResidentNode:
     def body(self, cluster_params_slurm_accounting):
         return _postinstall(cluster_params_slurm_accounting)
 
-    @pytest.mark.parametrize("setting,value", [
-        ("performance_schema", "OFF"),
-        ("max_connections", "24"),
-        ("innodb_lock_wait_timeout", "900"),
-        ("loose-innodb_snapshot_isolation", "OFF"),
-        ("max_allowed_packet", "16M"),
-        ("bind-address", "127.0.0.1"),
-    ])
+    @pytest.mark.parametrize(
+        "setting,value",
+        [
+            ("performance_schema", "OFF"),
+            ("max_connections", "24"),
+            ("innodb_lock_wait_timeout", "900"),
+            ("loose-innodb_snapshot_isolation", "OFF"),
+            ("max_allowed_packet", "16M"),
+            ("bind-address", "127.0.0.1"),
+        ],
+    )
     def test_the_measured_values_are_the_ones_shipped(self, body, setting, value):
         """Measured on a live c5.xlarge head node: mariadbd 100 MB RSS,
         slurmdbd 12 MB, against 7.7 GB total -- less than the CloudWatch
@@ -307,8 +316,7 @@ class TestBothPackageFamiliesAreCovered:
         assert "apt-get -y install mariadb-server" in body
         assert "dnf -y install" not in body
 
-    def test_the_dnf_family_tries_both_package_names(
-            self, cluster_params_slurm_accounting_rhel):
+    def test_the_dnf_family_tries_both_package_names(self, cluster_params_slurm_accounting_rhel):
         """The fallback is load-bearing, not defensive padding.
 
         Measured on live head nodes, one per distro, and the two disagree:
@@ -326,10 +334,12 @@ class TestBothPackageFamiliesAreCovered:
         body = _postinstall(cluster_params_slurm_accounting_rhel)
         assert "dnf -y install mariadb105-server" in body
         assert "dnf -y install mariadb-server" in body
-        assert (body.index("dnf -y install mariadb105-server")
-                < body.index("dnf -y install mariadb-server")), (
+        assert body.index("dnf -y install mariadb105-server") < body.index(
+            "dnf -y install mariadb-server"
+        ), (
             "the versioned name must be tried first; mariadb-server on "
-            "AL2023 resolves to a different package set")
+            "AL2023 resolves to a different package set"
+        )
         assert "apt-get" not in body
 
 
@@ -365,7 +375,7 @@ class TestTheTuningFileIsActuallyApplied:
         passed while nothing in it applied. The node asks the server."""
         assert "@@innodb_lock_wait_timeout" in body
         i = body.index("@@innodb_lock_wait_timeout")
-        assert "WARNING" in body[i:i + 700]
+        assert "WARNING" in body[i : i + 700]
 
     def test_the_read_back_uses_a_value_the_server_does_not_round(self, body):
         """Measured on `acctproof5`: a request for 767M came back as
@@ -381,7 +391,7 @@ class TestTheTuningFileIsActuallyApplied:
         """The operator needs to know this is not merely a footprint issue:
         Slurm requires innodb_lock_wait_timeout=900 by name."""
         i = body.index("@@innodb_lock_wait_timeout")
-        window = body[i:i + 700]
+        window = body[i : i + 700]
         assert "900" in window and "Slurm" in window
 
 
@@ -401,14 +411,17 @@ class TestTheSizesAreDerivedFromTheNode:
         body = _postinstall(cluster_params_slurm_accounting)
         start = body.index('_mem_mb="$(awk')
         end = body.index('if [ "$_log_mb" -gt 256 ]')
-        return body[start:body.index("\n", end) + 1]
+        return body[start : body.index("\n", end) + 1]
 
-    @pytest.mark.parametrize("mem_kb,pool,log", [
-        (1048576, 128, 32),      # 1 GiB  -- the floor binds
-        (8388608, 819, 204),     # 8 GiB  -- neither cap binds
-        (16777216, 1638, 256),   # 16 GiB -- the log cap binds
-        (67108864, 4096, 256),   # 64 GiB -- both caps bind
-    ])
+    @pytest.mark.parametrize(
+        "mem_kb,pool,log",
+        [
+            (1048576, 128, 32),  # 1 GiB  -- the floor binds
+            (8388608, 819, 204),  # 8 GiB  -- neither cap binds
+            (16777216, 1638, 256),  # 16 GiB -- the log cap binds
+            (67108864, 4096, 256),  # 64 GiB -- both caps bind
+        ],
+    )
     def test_the_derivation_is_run_not_matched(self, snippet, tmp_path, mem_kb, pool, log):
         """Executed under real bash against a fake /proc/meminfo. A source
         match cannot tell a correct formula from one whose bounds are
@@ -441,7 +454,9 @@ class TestTheSizesAreDerivedFromTheNode:
         assert re.search(r"(?m)^innodb_buffer_pool_size\s*=\s*\$\{_pool_mb\}M\s*$", body)
         assert re.search(r"(?m)^innodb_log_file_size\s*=\s*\$\{_log_mb\}M\s*$", body)
 
-    def test_the_config_heredoc_is_unquoted_so_the_sizes_interpolate(self, cluster_params_slurm_accounting):
+    def test_the_config_heredoc_is_unquoted_so_the_sizes_interpolate(
+        self, cluster_params_slurm_accounting
+    ):
         """A quoted heredoc delimiter would ship the literal string
         ${_pool_mb}M to MariaDB, which refuses to start on it -- taking the
         scheduler down with it. The delimiter must be bare."""
@@ -473,7 +488,7 @@ class TestSlurmUserIsReadFromSlurmConf:
 
     def test_it_falls_back_to_slurm_not_root(self, body):
         i = body.index("_slurm_user=")
-        window = body[i:i + 400]
+        window = body[i : i + 400]
         assert "_slurm_user=slurm" in window
         assert "_slurm_user=root" not in window
 
@@ -502,10 +517,12 @@ class TestTheDeferredStepRollsBackWhatItBreaks:
     def deferred(self, cluster_params_slurm_accounting):
         body = _postinstall(cluster_params_slurm_accounting)
         start = body.index("#!/bin/bash\n# Enable Slurm accounting once")
-        return body[start:body.index("\nACCTDEFER")]
+        return body[start : body.index("\nACCTDEFER")]
 
     def test_a_backup_is_taken_before_the_edit(self, deferred):
-        assert deferred.index('cp "$CONF" "$BACKUP"') < deferred.index("AccountingStorageType=accounting_storage/slurmdbd")
+        assert deferred.index('cp "$CONF" "$BACKUP"') < deferred.index(
+            "AccountingStorageType=accounting_storage/slurmdbd"
+        )
 
     def test_every_failure_path_rolls_back(self, deferred):
         assert deferred.count("_rollback ") >= 3, "restart, is-active and sinfo all need one"
@@ -588,15 +605,18 @@ class TestThePurgePolicyIsSet:
     def body(self, cluster_params_slurm_accounting):
         return _postinstall(cluster_params_slurm_accounting)
 
-    @pytest.mark.parametrize("key,value", [
-        ("PurgeEventAfter", "1month"),
-        ("PurgeJobAfter", "1month"),
-        ("PurgeResvAfter", "1month"),
-        ("PurgeStepAfter", "1month"),
-        ("PurgeSuspendAfter", "1month"),
-        ("PurgeTXNAfter", "12months"),
-        ("PurgeUsageAfter", "12months"),
-    ])
+    @pytest.mark.parametrize(
+        "key,value",
+        [
+            ("PurgeEventAfter", "1month"),
+            ("PurgeJobAfter", "1month"),
+            ("PurgeResvAfter", "1month"),
+            ("PurgeStepAfter", "1month"),
+            ("PurgeSuspendAfter", "1month"),
+            ("PurgeTXNAfter", "12months"),
+            ("PurgeUsageAfter", "12months"),
+        ],
+    )
     def test_each_purge_setting_is_named(self, body, key, value):
         assert re.search(rf"(?m)^{key}={value}\s*$", body)
 
@@ -618,13 +638,16 @@ class TestTheDaemonsAgreeOnPortsAndAuth:
     def body(self, cluster_params_slurm_accounting):
         return _postinstall(cluster_params_slurm_accounting)
 
-    @pytest.mark.parametrize("line", [
-        "AuthType=auth/munge",
-        "DbdPort=6819",
-        "StoragePort=3306",
-        "AccountingStoragePort=6819",
-        "JobAcctGatherFrequency=30",
-    ])
+    @pytest.mark.parametrize(
+        "line",
+        [
+            "AuthType=auth/munge",
+            "DbdPort=6819",
+            "StoragePort=3306",
+            "AccountingStoragePort=6819",
+            "JobAcctGatherFrequency=30",
+        ],
+    )
     def test_each_is_stated_rather_than_defaulted(self, body, line):
         assert re.search(rf"(?m)^\s*\"?{re.escape(line)}\"?,?\s*$", body), line
 
@@ -632,7 +655,7 @@ class TestTheDaemonsAgreeOnPortsAndAuth:
         """AuthType=auth/munge means slurmdbd cannot authenticate anything
         before munge is up, and systemd will happily start it first."""
         i = body.index("Description=Slurm DBD accounting daemon")
-        unit = body[i:i + 400]
+        unit = body[i : i + 400]
         assert "munge.service" in unit
 
 
@@ -671,9 +694,9 @@ class TestTheConfigGoesWhereTheServerReadsIt:
                 f.mkdir(parents=True, exist_ok=True)
             else:
                 f.write_text(content)
-        script = ("set -euo pipefail\n"
-                  + snippet.replace("/etc/", f"{etc}/")
-                  + 'echo "${_acct_cnf}"\n')
+        script = (
+            "set -euo pipefail\n" + snippet.replace("/etc/", f"{etc}/") + 'echo "${_acct_cnf}"\n'
+        )
         out = subprocess.run(["bash", "-c", script], capture_output=True, text=True)
         assert out.returncode == 0, out.stderr
         # The last line is the resolved path. Earlier lines can be the
@@ -684,27 +707,39 @@ class TestTheConfigGoesWhereTheServerReadsIt:
 
     def test_the_dnf_family_resolves_to_my_cnf_d(self, snippet, tmp_path):
         """AL2023's real shape, read off a live node."""
-        got = self._resolve(snippet, tmp_path, {
-            "my.cnf": "[mysqld]\n!includedir /etc/my.cnf.d\n",
-            "my.cnf.d": None,
-        })
+        got = self._resolve(
+            snippet,
+            tmp_path,
+            {
+                "my.cnf": "[mysqld]\n!includedir /etc/my.cnf.d\n",
+                "my.cnf.d": None,
+            },
+        )
         assert got == "/etc/my.cnf.d/99-slurm-acct.cnf"
 
     def test_the_debian_family_resolves_to_mariadb_conf_d(self, snippet, tmp_path):
-        got = self._resolve(snippet, tmp_path, {
-            "mysql/my.cnf": "[mysqld]\n!includedir /etc/mysql/mariadb.conf.d/\n",
-            "mysql/mariadb.conf.d": None,
-        })
+        got = self._resolve(
+            snippet,
+            tmp_path,
+            {
+                "mysql/my.cnf": "[mysqld]\n!includedir /etc/mysql/mariadb.conf.d/\n",
+                "mysql/mariadb.conf.d": None,
+            },
+        )
         assert got == "/etc/mysql/mariadb.conf.d/99-slurm-acct.cnf"
 
     def test_the_wrong_directory_existing_does_not_win(self, snippet, tmp_path):
         """The shipped bug in one assertion: both directories present, and
         the answer must still come from what the server says it reads."""
-        got = self._resolve(snippet, tmp_path, {
-            "my.cnf": "[mysqld]\n!includedir /etc/my.cnf.d\n",
-            "my.cnf.d": None,
-            "mysql/mariadb.conf.d": None,      # present but not referenced
-        })
+        got = self._resolve(
+            snippet,
+            tmp_path,
+            {
+                "my.cnf": "[mysqld]\n!includedir /etc/my.cnf.d\n",
+                "my.cnf.d": None,
+                "mysql/mariadb.conf.d": None,  # present but not referenced
+            },
+        )
         assert got == "/etc/my.cnf.d/99-slurm-acct.cnf"
 
     def test_nothing_is_created_before_it_is_tested(self, snippet):
@@ -713,9 +748,14 @@ class TestTheConfigGoesWhereTheServerReadsIt:
         assert "mkdir" not in snippet, snippet
 
     def test_an_absent_includedir_falls_back_without_crashing(self, snippet, tmp_path):
-        got = self._resolve(snippet, tmp_path, {
-            "my.cnf": "[mysqld]\n", "my.cnf.d": None,
-        })
+        got = self._resolve(
+            snippet,
+            tmp_path,
+            {
+                "my.cnf": "[mysqld]\n",
+                "my.cnf.d": None,
+            },
+        )
         assert got == "/etc/my.cnf.d/99-slurm-acct.cnf"
 
     def test_no_config_directory_at_all_is_survivable(self, snippet, tmp_path):
@@ -737,16 +777,16 @@ class TestTheWarningsReachSomebody:
     @pytest.fixture
     def parts(self, cluster_params_slurm_accounting):
         body = _postinstall(cluster_params_slurm_accounting)
-        a = body.index("{% raw %}") if False else body.index(
-            "# Slurm accounting: a local MariaDB")
+        a = body.index("{% raw %}") if False else body.index("# Slurm accounting: a local MariaDB")
         d0 = body.index("sudo tee /usr/local/sbin/pcm-enable-slurm-acct")
         d1 = body.index("\nACCTDEFER")
         return body[a:d0] + body[d1:], body[d0:d1]
 
     def test_no_postinstall_warning_is_written_to_stderr(self, parts):
         outside, _ = parts
-        offenders = [l.strip() for l in outside.splitlines()
-                     if ">&2" in l and not l.lstrip().startswith("#")]
+        offenders = [
+            l.strip() for l in outside.splitlines() if ">&2" in l and not l.lstrip().startswith("#")
+        ]
         assert offenders == [], offenders
 
     def test_the_deferred_unit_keeps_stderr(self, parts):
@@ -759,10 +799,13 @@ class TestTheWarningsReachSomebody:
     def test_the_failure_warnings_still_exist(self, parts):
         """Vacuity guard: the fix is redirecting them, not deleting them."""
         outside, _ = parts
-        for msg in ("MariaDB install failed", "MariaDB did not start",
-                    "could not create the accounting database",
-                    "slurmdbd did not start",
-                    "did not read"):
+        for msg in (
+            "MariaDB install failed",
+            "MariaDB did not start",
+            "could not create the accounting database",
+            "slurmdbd did not start",
+            "did not read",
+        ):
             assert msg in outside, msg
 
 
@@ -788,8 +831,7 @@ class TestNoNodeScriptWarningGoesToStderr:
     capture mechanism, not about stderr being wrong.
     """
 
-    _TEMPLATES = ("preinstall.j2", "postinstall.j2",
-                  "monitoring-post-install-wrapper.j2")
+    _TEMPLATES = ("preinstall.j2", "postinstall.j2", "monitoring-post-install-wrapper.j2")
 
     def _source(self, name):
         with open(os.path.join(REPO_ROOT, "templates", name)) as fh:
@@ -798,12 +840,13 @@ class TestNoNodeScriptWarningGoesToStderr:
     @pytest.mark.parametrize("name", _TEMPLATES)
     def test_no_stderr_redirect_outside_a_systemd_unit(self, name):
         src = self._source(name)
-        if "ACCTDEFER" in src:          # the deferred unit's body is exempt
+        if "ACCTDEFER" in src:  # the deferred unit's body is exempt
             d0 = src.index("sudo tee /usr/local/sbin/pcm-enable-slurm-acct")
             d1 = src.index("\nACCTDEFER")
             src = src[:d0] + src[d1:]
-        offenders = [l.strip() for l in src.splitlines()
-                     if ">&2" in l and not l.lstrip().startswith("#")]
+        offenders = [
+            l.strip() for l in src.splitlines() if ">&2" in l and not l.lstrip().startswith("#")
+        ]
         assert offenders == [], offenders
 
     def test_the_deferred_unit_still_uses_stderr(self):

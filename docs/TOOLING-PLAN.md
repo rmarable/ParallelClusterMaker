@@ -613,25 +613,51 @@ measurement first. Step 9 is the only one I would argue against on its merits.
 
 ---
 
-## DECIDED, 2026-08-30: no black
+## DECIDED 2026-08-30, REVISITED AND DONE 2026-08-31
 
-Not adopted, and not on grounds of risk -- the risk was measured and then
-removed. Of 22 negative assertions over Python source carrying a literal
-needle, 4 contained parentheses or spaces a formatter could move; those 4
-now compare with layout stripped (`assert_absent_ignoring_formatting`),
-verified by reintroducing a banned expression wrapped across lines and
-watching the test fail. The `ensure_event_loop` guard, which black broke at
-all 7 sites, walks the AST now and does not care about blank lines.
+**Formatting is on. It is `ruff format`, not black, and the two are not
+interchangeable.**
 
-So the objection that remains is not correctness. It is that black rewrites
-**76 of 85 files**, which buries recent work in `git blame` and invalidates
-the `file:line` citations the docs carry. That is a judgement about history,
-and the answer was no.
+The original objection was that a formatter would make negative assertions
+stop matching -- and a negative assertion that stops matching *passes*, so
+a rule goes unguarded with the suite green. That was fixed before running
+anything: four assertions compare with layout stripped, one positive
+assertion did too, and the `ensure_event_loop` guard walks the AST. The
+formatter then inserted a blank line after all seven `import pcluster.lib`
+statements, which is precisely what would have broken the old
+line-adjacency version. It did not notice.
 
-**What that leaves behind is worth keeping**: the four layout-proof
-assertions and the AST-based guard are better tests whether or not a
-formatter ever runs. They were written to unblock a decision that went the
-other way, and they stand on their own.
+**Why ruff's formatter over black.** One binary, one config: `line-length
+= 100` governs `ruff check` and `ruff format` together, so the linter
+cannot flag a line the formatter just produced. No second dependency in
+requirements.txt, the Lambda exclusion list, or CI. No version skew
+between two independently-upgraded formatters.
 
-Do not re-open this by citing the vacuity risk -- that part is fixed. Any
-future case for black has to argue the diff.
+**They are NOT the same tool with different names.** Measured on this
+tree at identical line length: they disagree on 61 lines of
+pcluster_core.py and 489 of test_templates.py, mostly line breaks around
+adjacent string literals, in both directions. Neither is wrong. Never run
+black over this repo -- the two would fight every commit.
+
+**What the run cost: 73 files, two loud failures, no silent ones.** Both
+failures were tests keyed to layout, and both told the truth about it.
+One asserted a literal containing its own newline and indentation. The
+other paired each post-lock failure with its record by *line distance* --
+`0 < line - p <= 12` -- which is a fact about whitespace, not about code;
+it is structural now, walking the AST to the enclosing handler or nested
+helper.
+
+**Stale citations, which was the thing to get right.** Nine `file:line`
+citations exist in the normative docs. Eight point at upstream
+ParallelCluster files under `.venv`, which no formatter here touches. Exactly
+one -- `src/pcluster_core.py:2507` -> `:2554` -- moved, and the citation test
+caught it immediately in both directions: it checks every manifest entry is
+cited and every citation is pinned. `docs/sessions.md`'s eleven citations
+are deliberately not maintained, for the same reason CLAUDE-STATE.md's are
+not: those files are dated records, and a narrative that said `:734` in June
+is describing June. That exclusion is now written in the test rather than
+implied by omission.
+
+**Ruff caught two things in my own work during this change**: a variable
+left unused by a rewrite, and earlier the same day, two names unpacked from
+BuildContext that nothing read.

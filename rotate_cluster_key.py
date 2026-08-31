@@ -61,7 +61,7 @@ def main():
         "--turbot_account",
         "-T",
         default=None,
-        help='Turbot account ID (default: auto-detect from vars file)',
+        help="Turbot account ID (default: auto-detect from vars file)",
     )
     parser.add_argument(
         "--dry_run",
@@ -78,8 +78,10 @@ def main():
     vars_file_path = os.path.join(_src_dir, "vars_files", cluster_name + ".yml")
     rec = _read_cluster_record(cluster_name, _repo_root)
     if rec is None:
-        sys.exit(f"ERROR: vars file not found: {vars_file_path}\n"
-                 f"  Has this cluster been created with make_pcluster.py?")
+        sys.exit(
+            f"ERROR: vars file not found: {vars_file_path}\n"
+            f"  Has this cluster been created with make_pcluster.py?"
+        )
     cluster_record = ClusterRecord.from_dict(rec)
 
     if not cluster_record.serial or not cluster_record.ec2_keypair:
@@ -103,7 +105,9 @@ def main():
 
     try:
         core_rotate_cluster_key(
-            cluster_record=cluster_record, region=region, dry_run=args.dry_run,
+            cluster_record=cluster_record,
+            region=region,
+            dry_run=args.dry_run,
         )
     except PClusterMakerError as e:
         sys.exit(str(e))

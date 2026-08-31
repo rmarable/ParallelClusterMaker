@@ -60,11 +60,11 @@ class _LockSpy:
     def acquire(self, s3, *, locks_bucketname, region, cluster_name, command, describe_fn=None):
         if cluster_name in self._held:
             raise SystemExit(
-                f"ERROR: another operation is already running against cluster "
-                f"{cluster_name!r}."
+                f"ERROR: another operation is already running against cluster {cluster_name!r}."
             )
-        self.acquired.append({"cluster": cluster_name, "bucket": locks_bucketname,
-                              "command": command})
+        self.acquired.append(
+            {"cluster": cluster_name, "bucket": locks_bucketname, "command": command}
+        )
         return f"locks/{cluster_name}.lock"
 
     def release(self, s3, *, locks_bucketname, cluster_name):
@@ -77,10 +77,21 @@ def spy(monkeypatch):
     monkeypatch.setattr(tools_mod, "_acquire_distributed_cluster_lock", s.acquire)
     monkeypatch.setattr(tools_mod, "s3_release_cluster_lock", s.release)
     monkeypatch.setattr(tools_mod, "_aws_account_id", lambda: "123456789012")
-    monkeypatch.setattr(tools_mod, "_require_record", lambda name: type(
-        "R", (), {"region": "us-east-2", "cluster_owner": "o", "serial": "s",
-                  "ec2_keypair": "kp", "s3_bucketname": "b"}
-    )())
+    monkeypatch.setattr(
+        tools_mod,
+        "_require_record",
+        lambda name: type(
+            "R",
+            (),
+            {
+                "region": "us-east-2",
+                "cluster_owner": "o",
+                "serial": "s",
+                "ec2_keypair": "kp",
+                "s3_bucketname": "b",
+            },
+        )(),
+    )
     for core in ("core_stop_fleet", "core_start_fleet", "core_apply_queue_config"):
         monkeypatch.setattr(tools_mod, core, lambda **kw: {"ok": True})
     return s
@@ -113,9 +124,7 @@ class TestMutatingToolsTakeTheLock:
     @pytest.mark.asyncio
     async def test_the_lock_targets_the_account_and_region_scoped_bucket(self, spy):
         await _call("stop_fleet", {"cluster_name": "osiris"})
-        assert spy.acquired[0]["bucket"] == (
-            "parallelclustermaker-locks-123456789012-us-east-2"
-        )
+        assert spy.acquired[0]["bucket"] == ("parallelclustermaker-locks-123456789012-us-east-2")
 
     @pytest.mark.asyncio
     async def test_the_owner_string_names_the_mcp_tool(self, spy):
@@ -132,6 +141,7 @@ class TestMutatingToolsTakeTheLock:
         S3 lock's staleness path would eventually reclaim it, but only
         after the ceiling -- an immediate release is the difference between
         a retry working now and working in two hours."""
+
         def _boom(**kw):
             raise RuntimeError("fleet call failed")
 
@@ -148,8 +158,9 @@ class TestMutatingToolsTakeTheLock:
         monkeypatch.setattr(tools_mod, "_acquire_distributed_cluster_lock", s.acquire)
         monkeypatch.setattr(tools_mod, "s3_release_cluster_lock", s.release)
         monkeypatch.setattr(tools_mod, "_aws_account_id", lambda: "123456789012")
-        monkeypatch.setattr(tools_mod, "_require_record", lambda name: type(
-            "R", (), {"region": "us-east-2"})())
+        monkeypatch.setattr(
+            tools_mod, "_require_record", lambda name: type("R", (), {"region": "us-east-2"})()
+        )
         called = []
         monkeypatch.setattr(tools_mod, "core_stop_fleet", lambda **kw: called.append(kw))
 
@@ -183,8 +194,9 @@ class TestReadOnlyToolsDoNotLock:
     def test_the_read_only_policy_grants_no_lock_access(self):
         import json
 
-        doc = json.load(open(os.path.join(
-            REPO_ROOT, "templates", "MCPStateAccessReadOnly.json_src")))
+        doc = json.load(
+            open(os.path.join(REPO_ROOT, "templates", "MCPStateAccessReadOnly.json_src"))
+        )
         resources = []
         for stmt in doc["Statement"]:
             r = stmt["Resource"]
@@ -205,7 +217,8 @@ class TestTheLockIsNotTakenTwice:
         for node in ast.walk(tree):
             if isinstance(node, ast.FunctionDef) and node.name == tool:
                 uses = [
-                    n for n in ast.walk(node)
+                    n
+                    for n in ast.walk(node)
                     if isinstance(n, ast.With)
                     for item in n.items
                     if isinstance(item.context_expr, ast.Call)
@@ -230,7 +243,7 @@ class TestTheLockIsNotTakenTwice:
         the wrapper must be removed or it will deadlock."""
         for name in ("_core_fleet_action", "core_apply_queue_config"):
             src = inspect.getsource(getattr(pcluster_core, name))
-            assert_source_is_real(src, 'test_the_wrapped_cores_really_do_not')
+            assert_source_is_real(src, "test_the_wrapped_cores_really_do_not")
             assert "_acquire_distributed_cluster_lock" not in src, (
                 f"{name} now locks internally -- remove the wrapper-layer lock "
                 f"from mcp_server/tools.py or the two will deadlock"
@@ -253,8 +266,9 @@ class TestTheHeldLockErrorSurvivesTheTransport:
         monkeypatch.setattr(tools_mod, "_acquire_distributed_cluster_lock", s.acquire)
         monkeypatch.setattr(tools_mod, "s3_release_cluster_lock", s.release)
         monkeypatch.setattr(tools_mod, "_aws_account_id", lambda: "123456789012")
-        monkeypatch.setattr(tools_mod, "_require_record",
-                            lambda name: type("R", (), {"region": "us-east-2"})())
+        monkeypatch.setattr(
+            tools_mod, "_require_record", lambda name: type("R", (), {"region": "us-east-2"})()
+        )
         result = await _call("stop_fleet", {"cluster_name": "osiris"})
         assert result.is_error
 
@@ -266,8 +280,9 @@ class TestTheHeldLockErrorSurvivesTheTransport:
         monkeypatch.setattr(tools_mod, "_acquire_distributed_cluster_lock", s.acquire)
         monkeypatch.setattr(tools_mod, "s3_release_cluster_lock", s.release)
         monkeypatch.setattr(tools_mod, "_aws_account_id", lambda: "123456789012")
-        monkeypatch.setattr(tools_mod, "_require_record",
-                            lambda name: type("R", (), {"region": "us-east-2"})())
+        monkeypatch.setattr(
+            tools_mod, "_require_record", lambda name: type("R", (), {"region": "us-east-2"})()
+        )
         result = await _call("stop_fleet", {"cluster_name": "osiris"})
         text = "".join(getattr(b, "text", "") for b in result.content)
         assert "already running" in text
@@ -276,9 +291,7 @@ class TestTheHeldLockErrorSurvivesTheTransport:
         """Pinned on the source too: the behavioural test above passes if
         the acquire call is removed entirely, since then nothing raises."""
         src = inspect.getsource(tools_mod._cluster_lock)
-        code = "\n".join(
-            line for line in src.splitlines() if not line.lstrip().startswith("#")
-        )
+        code = "\n".join(line for line in src.splitlines() if not line.lstrip().startswith("#"))
         assert "except SystemExit" in code
         assert "PClusterMakerError" in code
 

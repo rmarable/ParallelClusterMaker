@@ -52,8 +52,7 @@ class _FakeIam:
     # neither would agree with the code by construction.
     _SENTINEL_DOC = {"Version": "2012-10-17", "Statement": []}
 
-    def __init__(self, existing_policies=(), existing_roles=(),
-                 existing_documents=None):
+    def __init__(self, existing_policies=(), existing_roles=(), existing_documents=None):
         self._existing_policies = set(existing_policies)
         self._existing_roles = set(existing_roles)
         # What is actually present, so a delete can tell absent from real.
@@ -62,9 +61,14 @@ class _FakeIam:
         # {name: [{VersionId, IsDefaultVersion, CreateDate, Document}]}
         docs = existing_documents or {}
         self._versions = {
-            name: [{"VersionId": "v1", "IsDefaultVersion": True,
+            name: [
+                {
+                    "VersionId": "v1",
+                    "IsDefaultVersion": True,
                     "CreateDate": 1,
-                    "Document": docs.get(name, self._SENTINEL_DOC)}]
+                    "Document": docs.get(name, self._SENTINEL_DOC),
+                }
+            ]
             for name in self._existing_policies
         }
         self.created_policies = []
@@ -89,18 +93,23 @@ class _FakeIam:
         self.created_policies.append({"name": PolicyName, "doc": PolicyDocument})
         self._live_policies.add(PolicyName)
         self._versions[PolicyName] = [
-            {"VersionId": "v1", "IsDefaultVersion": True, "CreateDate": 1,
-             "Document": json.loads(PolicyDocument)}
+            {
+                "VersionId": "v1",
+                "IsDefaultVersion": True,
+                "CreateDate": 1,
+                "Document": json.loads(PolicyDocument),
+            }
         ]
         return {"Policy": {"Arn": f"arn:aws:iam::{ACCOUNT}:policy/{PolicyName}"}}
 
-    def create_role(self, RoleName, AssumeRolePolicyDocument, Description="",
-                    PermissionsBoundary=None):
+    def create_role(
+        self, RoleName, AssumeRolePolicyDocument, Description="", PermissionsBoundary=None
+    ):
         if RoleName in self._existing_roles:
             raise self._already("CreateRole")
-        self.created_roles.append({"name": RoleName,
-                                   "trust": AssumeRolePolicyDocument,
-                                   "boundary": PermissionsBoundary})
+        self.created_roles.append(
+            {"name": RoleName, "trust": AssumeRolePolicyDocument, "boundary": PermissionsBoundary}
+        )
         self._live_roles.add(RoleName)
         # A role created without a boundary has none; recording the absence
         # is what lets a test see an unbounded role rather than infer it.
@@ -126,8 +135,7 @@ class _FakeIam:
         deleted" -- so a teardown against an empty account looked exactly
         like a teardown that had done seventeen things."""
         return ClientError(
-            {"Error": {"Code": "NoSuchEntity",
-                       "Message": "The entity does not exist"}}, op
+            {"Error": {"Code": "NoSuchEntity", "Message": "The entity does not exist"}}, op
         )
 
     def delete_role(self, RoleName):
@@ -141,8 +149,16 @@ class _FakeIam:
         if name not in self._live_policies:
             raise self._no_such(op)
         return name, self._versions.setdefault(
-            name, [{"VersionId": "v1", "IsDefaultVersion": True,
-                    "CreateDate": 1, "Document": self._SENTINEL_DOC}])
+            name,
+            [
+                {
+                    "VersionId": "v1",
+                    "IsDefaultVersion": True,
+                    "CreateDate": 1,
+                    "Document": self._SENTINEL_DOC,
+                }
+            ],
+        )
 
     def get_policy(self, PolicyArn):
         _, vs = self._versions_of(PolicyArn, "GetPolicy")
@@ -158,25 +174,32 @@ class _FakeIam:
 
     def list_policy_versions(self, PolicyArn):
         _, vs = self._versions_of(PolicyArn, "ListPolicyVersions")
-        return {"Versions": [
-            {k: v[k] for k in ("VersionId", "IsDefaultVersion", "CreateDate")}
-            for v in vs
-        ]}
+        return {
+            "Versions": [
+                {k: v[k] for k in ("VersionId", "IsDefaultVersion", "CreateDate")} for v in vs
+            ]
+        }
 
     def create_policy_version(self, PolicyArn, PolicyDocument, SetAsDefault=False):
-        """"A managed policy can have up to five versions" -- iam's own
+        """ "A managed policy can have up to five versions" -- iam's own
         service model. Past that, LimitExceeded."""
         _, vs = self._versions_of(PolicyArn, "CreatePolicyVersion")
         if len(vs) >= 5:
             raise ClientError(
-                {"Error": {"Code": "LimitExceeded", "Message": ""}},
-                "CreatePolicyVersion")
+                {"Error": {"Code": "LimitExceeded", "Message": ""}}, "CreatePolicyVersion"
+            )
         nxt = max(int(v["VersionId"][1:]) for v in vs) + 1
         if SetAsDefault:
             for v in vs:
                 v["IsDefaultVersion"] = False
-        vs.append({"VersionId": f"v{nxt}", "IsDefaultVersion": bool(SetAsDefault),
-                   "CreateDate": nxt, "Document": json.loads(PolicyDocument)})
+        vs.append(
+            {
+                "VersionId": f"v{nxt}",
+                "IsDefaultVersion": bool(SetAsDefault),
+                "CreateDate": nxt,
+                "Document": json.loads(PolicyDocument),
+            }
+        )
         return {"PolicyVersion": {"VersionId": f"v{nxt}"}}
 
     def delete_policy_version(self, PolicyArn, VersionId):
@@ -187,8 +210,8 @@ class _FakeIam:
             raise self._no_such("DeletePolicyVersion")
         if v["IsDefaultVersion"]:
             raise ClientError(
-                {"Error": {"Code": "DeleteConflict", "Message": ""}},
-                "DeletePolicyVersion")
+                {"Error": {"Code": "DeleteConflict", "Message": ""}}, "DeletePolicyVersion"
+            )
         vs.remove(v)
 
     def delete_policy(self, PolicyArn):
@@ -197,9 +220,7 @@ class _FakeIam:
         assumed."""
         name, vs = self._versions_of(PolicyArn, "DeletePolicy")
         if len(vs) > 1:
-            raise ClientError(
-                {"Error": {"Code": "DeleteConflict", "Message": ""}},
-                "DeletePolicy")
+            raise ClientError({"Error": {"Code": "DeleteConflict", "Message": ""}}, "DeletePolicy")
         self._live_policies.discard(name)
         self._versions.pop(name, None)
         self.deleted_policies.append(PolicyArn)
@@ -231,7 +252,8 @@ class TestTheTierTableIsInternallyConsistent:
             arns += [r] if isinstance(r, str) else r
         in_policy = {a.rsplit(":function:", 1)[-1] for a in arns}
         handlers = {
-            fn for tier, (fn, _p) in _MCP_LAMBDA_TIERS.items()
+            fn
+            for tier, (fn, _p) in _MCP_LAMBDA_TIERS.items()
             if tier not in ("router", "register", "authorizer")
         }
         assert in_policy == handlers
@@ -239,8 +261,7 @@ class TestTheTierTableIsInternallyConsistent:
     def test_both_stack_mutation_tiers_share_one_policy_set(self):
         """Documented as a deliberate trade-off; pinned so a future edit
         that gives them separate policies is a decision, not a drift."""
-        assert _MCP_LAMBDA_TIERS["stack-mutation"][1] == \
-            _MCP_LAMBDA_TIERS["stack-mutation-node"][1]
+        assert _MCP_LAMBDA_TIERS["stack-mutation"][1] == _MCP_LAMBDA_TIERS["stack-mutation-node"][1]
 
     def test_policy_template_list_is_deduplicated(self):
         templates = _mcp_policy_templates()
@@ -286,9 +307,9 @@ class TestSetupMcpInfra:
         for tier, (_fn, templates) in _MCP_LAMBDA_TIERS.items():
             role = _mcp_role_name(tier)
             got = {arn for r, arn in iam.attached if r == role}
-            want = {
-                f"arn:aws:iam::{ACCOUNT}:policy/{_mcp_policy_name(b)}" for b in templates
-            } | {_MCP_BASIC_EXECUTION_ARN}
+            want = {f"arn:aws:iam::{ACCOUNT}:policy/{_mcp_policy_name(b)}" for b in templates} | {
+                _MCP_BASIC_EXECUTION_ARN
+            }
             assert got == want, tier
 
     def test_the_pool_id_is_substituted_into_the_cognito_policies(self):
@@ -318,8 +339,7 @@ class TestSetupMcpInfra:
         """A re-run after a partial failure must complete, not abort."""
         iam = _FakeIam(
             existing_policies=(
-                {_mcp_policy_name(b) for b in _mcp_policy_templates()}
-                | {_mcp_boundary_name()}
+                {_mcp_policy_name(b) for b in _mcp_policy_templates()} | {_mcp_boundary_name()}
             ),
             existing_roles={_mcp_role_name(t) for t in _MCP_LAMBDA_TIERS},
         )
@@ -363,14 +383,14 @@ def _seeded_iam():
         existing_roles=[_mcp_role_name(t) for t in _MCP_LAMBDA_TIERS],
     )
 
+
 class TestDeleteMcpInfra:
     def test_deletes_every_role_and_policy_the_table_declares(self):
         iam = _seeded_iam()
         _delete_mcp_infra(iam, aws_account_id=ACCOUNT)
         assert set(iam.deleted_roles) == {_mcp_role_name(t) for t in _MCP_LAMBDA_TIERS}
         assert set(iam.deleted_policies) == {
-            f"arn:aws:iam::{ACCOUNT}:policy/{_mcp_policy_name(b)}"
-            for b in _mcp_policy_templates()
+            f"arn:aws:iam::{ACCOUNT}:policy/{_mcp_policy_name(b)}" for b in _mcp_policy_templates()
         }
 
     def test_detaches_before_deleting(self):
@@ -402,13 +422,11 @@ class TestDeleteMcpInfra:
         deleted_iam = _seeded_iam()
         _delete_mcp_infra(deleted_iam, aws_account_id=ACCOUNT)
         created_policy_arns = {
-            f"arn:aws:iam::{ACCOUNT}:policy/{p['name']}"
-            for p in created_iam.created_policies
+            f"arn:aws:iam::{ACCOUNT}:policy/{p['name']}" for p in created_iam.created_policies
         }
         boundary_arn = f"arn:aws:iam::{ACCOUNT}:policy/{_mcp_boundary_name()}"
         assert boundary_arn in created_policy_arns, (
-            "setup no longer creates the boundary; the exception below is "
-            "now hiding a real gap"
+            "setup no longer creates the boundary; the exception below is now hiding a real gap"
         )
         assert boundary_arn not in set(deleted_iam.deleted_policies), (
             "teardown deleted the permissions boundary -- it is meant to "
@@ -452,41 +470,37 @@ class TestTheMcpTeardownCanBeAudited:
     """
 
     def _denied(self, op):
-        return ClientError(
-            {"Error": {"Code": "AccessDenied", "Message": "not authorized"}}, op
-        )
+        return ClientError({"Error": {"Code": "AccessDenied", "Message": "not authorized"}}, op)
 
     def _absent(self, op):
-        return ClientError(
-            {"Error": {"Code": "NoSuchEntity", "Message": "cannot be found"}}, op
-        )
+        return ClientError({"Error": {"Code": "NoSuchEntity", "Message": "cannot be found"}}, op)
 
     def test_a_clean_sweep_reports_what_it_deleted(self, capsys):
         iam = _FakeIam()
-        _setup_mcp_infra(iam, aws_account_id=ACCOUNT, region=REGION,
-                         mcp_user_pool_id=POOL)
+        _setup_mcp_infra(iam, aws_account_id=ACCOUNT, region=REGION, mcp_user_pool_id=POOL)
         capsys.readouterr()
         result = _delete_mcp_infra(iam, aws_account_id=ACCOUNT)
         assert result.ok
         assert not result.failed
-        assert len(result.deleted) == 17, result.deleted   # 7 roles + 10 policies
+        assert len(result.deleted) == 17, result.deleted  # 7 roles + 10 policies
         out = capsys.readouterr().out
         assert "Deleted MCP role:" in out
         assert "Deleted MCP policy:" in out
 
     def test_a_failure_is_named_not_swallowed(self, capsys):
         """The property the old code could not express."""
+
         class _DenyOneRole(_FakeIam):
             def delete_role(self, RoleName):
                 if RoleName.endswith("router-role"):
                     raise ClientError(
-                        {"Error": {"Code": "AccessDenied",
-                                   "Message": "not authorized"}}, "DeleteRole")
+                        {"Error": {"Code": "AccessDenied", "Message": "not authorized"}},
+                        "DeleteRole",
+                    )
                 return super().delete_role(RoleName=RoleName)
 
         iam = _DenyOneRole()
-        _setup_mcp_infra(iam, aws_account_id=ACCOUNT, region=REGION,
-                         mcp_user_pool_id=POOL)
+        _setup_mcp_infra(iam, aws_account_id=ACCOUNT, region=REGION, mcp_user_pool_id=POOL)
         capsys.readouterr()
         result = _delete_mcp_infra(iam, aws_account_id=ACCOUNT)
         assert not result.ok
@@ -501,19 +515,19 @@ class TestTheMcpTeardownCanBeAudited:
 
     def test_the_rest_still_runs_after_one_failure(self):
         """Tolerance is the half that was already right and must stay."""
+
         class _DenyOneRole(_FakeIam):
             def delete_role(self, RoleName):
                 if RoleName.endswith("router-role"):
                     raise ClientError(
-                        {"Error": {"Code": "AccessDenied", "Message": "no"}},
-                        "DeleteRole")
+                        {"Error": {"Code": "AccessDenied", "Message": "no"}}, "DeleteRole"
+                    )
                 return super().delete_role(RoleName=RoleName)
 
         iam = _DenyOneRole()
-        _setup_mcp_infra(iam, aws_account_id=ACCOUNT, region=REGION,
-                         mcp_user_pool_id=POOL)
+        _setup_mcp_infra(iam, aws_account_id=ACCOUNT, region=REGION, mcp_user_pool_id=POOL)
         result = _delete_mcp_infra(iam, aws_account_id=ACCOUNT)
-        assert len(result.deleted) == 16      # everything but the denied role
+        assert len(result.deleted) == 16  # everything but the denied role
         assert len(result.failed) == 1
 
     def test_an_absent_entity_is_absent_not_deleted(self, capsys):
@@ -527,20 +541,20 @@ class TestTheMcpTeardownCanBeAudited:
 
     def test_suppress_false_still_raises(self):
         """The escape hatch an operator uses when they want the traceback."""
+
         class _DenyOneRole(_FakeIam):
             def delete_role(self, RoleName):
                 raise ClientError(
-                    {"Error": {"Code": "AccessDenied", "Message": "no"}},
-                    "DeleteRole")
+                    {"Error": {"Code": "AccessDenied", "Message": "no"}}, "DeleteRole"
+                )
 
         iam = _DenyOneRole()
-        _setup_mcp_infra(iam, aws_account_id=ACCOUNT, region=REGION,
-                         mcp_user_pool_id=POOL)
+        _setup_mcp_infra(iam, aws_account_id=ACCOUNT, region=REGION, mcp_user_pool_id=POOL)
         with pytest.raises(ClientError):
             _delete_mcp_infra(iam, aws_account_id=ACCOUNT, suppress=False)
 
     def test_a_missing_entity_never_raises_even_unsuppressed(self):
-        """"It was not there" is a success for a teardown, so suppress=False
+        """ "It was not there" is a success for a teardown, so suppress=False
         must not turn an empty account into an exception."""
         _delete_mcp_infra(_FakeIam(), aws_account_id=ACCOUNT, suppress=False)
 
@@ -585,9 +599,7 @@ class TestEveryMcpRoleIsBounded:
         expected = f"arn:aws:iam::{ACCOUNT}:policy/{_mcp_boundary_name()}"
         for tier in _MCP_LAMBDA_TIERS:
             role = _mcp_role_name(tier)
-            assert iam.boundaries[role] == expected, (
-                f"pre-existing role {role} is still unbounded"
-            )
+            assert iam.boundaries[role] == expected, f"pre-existing role {role} is still unbounded"
 
     def test_the_boundary_is_created_before_any_role(self):
         """A role cannot be created under a boundary that does not exist,
@@ -597,22 +609,24 @@ class TestEveryMcpRoleIsBounded:
         class _Ordered(_FakeIam):
             def create_policy(self, PolicyName, PolicyDocument):
                 order.append(("policy", PolicyName))
-                return super().create_policy(PolicyName=PolicyName,
-                                             PolicyDocument=PolicyDocument)
+                return super().create_policy(PolicyName=PolicyName, PolicyDocument=PolicyDocument)
 
-            def create_role(self, RoleName, AssumeRolePolicyDocument,
-                            Description="", PermissionsBoundary=None):
+            def create_role(
+                self, RoleName, AssumeRolePolicyDocument, Description="", PermissionsBoundary=None
+            ):
                 order.append(("role", RoleName))
                 return super().create_role(
                     RoleName=RoleName,
                     AssumeRolePolicyDocument=AssumeRolePolicyDocument,
                     Description=Description,
-                    PermissionsBoundary=PermissionsBoundary)
+                    PermissionsBoundary=PermissionsBoundary,
+                )
 
         _run(iam=_Ordered())
         first_role = next(i for i, (k, _) in enumerate(order) if k == "role")
-        boundary_at = next(i for i, (k, n) in enumerate(order)
-                           if k == "policy" and n == _mcp_boundary_name())
+        boundary_at = next(
+            i for i, (k, n) in enumerate(order) if k == "policy" and n == _mcp_boundary_name()
+        )
         assert boundary_at < first_role, (
             "the boundary is created after the first role, so that role "
             "would be created under a boundary that does not exist"
@@ -635,8 +649,7 @@ class TestTheBoundaryCannotBeWeakenedByTheDeployer:
         return _j.loads(_io.open(path, encoding="utf-8").read())
 
     def _statements(self, name, effect):
-        return [s for s in self._doc(name)["Statement"]
-                if s.get("Effect") == effect]
+        return [s for s in self._doc(name)["Statement"] if s.get("Effect") == effect]
 
     def test_the_boundary_is_named_outside_the_lifecycle_pattern(self):
         """MCPDeployPolicy's policy-lifecycle statement covers
@@ -655,8 +668,11 @@ class TestTheBoundaryCannotBeWeakenedByTheDeployer:
             if any(r.endswith("policy/" + _mcp_boundary_name()) for r in res):
                 a = st["Action"]
                 denied |= set(a if isinstance(a, list) else [a])
-        for action in ("iam:CreatePolicyVersion", "iam:SetDefaultPolicyVersion",
-                       "iam:DeletePolicy"):
+        for action in (
+            "iam:CreatePolicyVersion",
+            "iam:SetDefaultPolicyVersion",
+            "iam:DeletePolicy",
+        ):
             assert action in denied, (
                 f"MCPDeployPolicy does not deny {action} on the boundary; "
                 f"the deployer can widen their own ceiling"
@@ -672,9 +688,11 @@ class TestTheBoundaryCannotBeWeakenedByTheDeployer:
     def test_creating_a_role_is_conditioned_on_the_boundary(self):
         """The hinge of the whole design. Without the condition the deployer
         creates an unbounded role and the ceiling never applies."""
-        stmts = [s for s in self._doc("MCPDeployPolicy.json_src")["Statement"]
-                 if "iam:CreateRole" in (s["Action"] if isinstance(s["Action"], list)
-                                         else [s["Action"]])]
+        stmts = [
+            s
+            for s in self._doc("MCPDeployPolicy.json_src")["Statement"]
+            if "iam:CreateRole" in (s["Action"] if isinstance(s["Action"], list) else [s["Action"]])
+        ]
         assert stmts, "MCPDeployPolicy never grants iam:CreateRole"
         for st in stmts:
             cond = st.get("Condition", {}).get("StringEquals", {})
@@ -690,10 +708,14 @@ class TestTheBoundaryCannotBeWeakenedByTheDeployer:
         for st in self._statements("MCPRoleBoundary.json_src", "Deny"):
             a = st["Action"]
             denied |= set(a if isinstance(a, list) else [a])
-        for action in ("iam:CreateUser", "iam:CreateAccessKey",
-                       "iam:AttachUserPolicy", "iam:UpdateAssumeRolePolicy",
-                       "iam:PutRolePermissionsBoundary",
-                       "iam:DeleteRolePermissionsBoundary"):
+        for action in (
+            "iam:CreateUser",
+            "iam:CreateAccessKey",
+            "iam:AttachUserPolicy",
+            "iam:UpdateAssumeRolePolicy",
+            "iam:PutRolePermissionsBoundary",
+            "iam:DeleteRolePermissionsBoundary",
+        ):
             assert action in denied, (
                 f"the boundary permits {action}; a bounded role can still "
                 f"escalate out from under it"

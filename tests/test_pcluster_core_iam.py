@@ -21,9 +21,7 @@ import types
 
 import pytest
 
-sys.path.insert(
-    0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src")
-)
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src"))
 
 from pcluster_core import (
     _validate_fsx_size,
@@ -433,9 +431,9 @@ class TestEbsValidationTakesKeywordsOnly:
         assert calls, "src/pcluster_core.py no longer calls _validate_ebs_config"
         for call in calls:
             assert not call.args, "_validate_ebs_config called with positional args"
-            assert not any(
-                kw.arg is None for kw in call.keywords
-            ), "_validate_ebs_config called with a **kwargs splat"
+            assert not any(kw.arg is None for kw in call.keywords), (
+                "_validate_ebs_config called with a **kwargs splat"
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -517,12 +515,12 @@ class TestValidateQueueSizes:
 
 _RENDER_ARGS = (
     "123456789012",  # aws_account_id
-    "us-east-1",     # region
+    "us-east-1",  # region
     "vpc-abc12345",  # vpc_id
-    "production",    # prod_level
+    "production",  # prod_level
     "test-cluster-00000000000000",  # cluster_serial_number
     "test-cluster",  # cluster_name
-    "testowner",     # cluster_owner
+    "testowner",  # cluster_owner
     "00000000000000",  # cluster_serial_datestamp
 )
 
@@ -551,7 +549,10 @@ class TestRenderPolicy:
     def test_oversized_policy_raises(self, tmp_path):
         # Build a policy that is guaranteed to exceed 6144 bytes when minified.
         long_actions = [f"s3:SomeVeryLongActionName{i:04d}" for i in range(300)]
-        big = {"Version": "2012-10-17", "Statement": [{"Sid": "X", "Effect": "Allow", "Action": long_actions, "Resource": "*"}]}
+        big = {
+            "Version": "2012-10-17",
+            "Statement": [{"Sid": "X", "Effect": "Allow", "Action": long_actions, "Resource": "*"}],
+        }
         src = tmp_path / "big.json_src"
         src.write_text(json.dumps(big))
         with pytest.raises(ValueError) as exc:
@@ -559,8 +560,13 @@ class TestRenderPolicy:
         assert "bytes" in str(exc.value)
 
     def test_all_policies_under_limit(self):
-        for fname in ("HeadNode-Compute", "HeadNode-Storage", "HeadNode-IAM",
-                      "ComputeNode-Base", "HeadNode-Monitoring"):
+        for fname in (
+            "HeadNode-Compute",
+            "HeadNode-Storage",
+            "HeadNode-IAM",
+            "ComputeNode-Base",
+            "HeadNode-Monitoring",
+        ):
             src = os.path.join(TEMPLATE_DIR, f"{fname}.json_src")
             result = _render_policy(src, *_RENDER_ARGS)
             assert len(result.encode()) <= 6144, f"{fname} exceeds 6144 bytes"
@@ -588,17 +594,22 @@ class _FakeIAM:
     def get_role(self, RoleName):
         if not self._role_exists:
             from botocore.exceptions import ClientError
+
             raise ClientError({"Error": {"Code": "NoSuchEntity", "Message": ""}}, "GetRole")
         return {"Role": {"RoleName": RoleName}}
 
     def list_attached_role_policies(self, RoleName):
         return {"AttachedPolicies": [{"PolicyName": n} for n in self.attached_policies]}
 
-    def create_role(self, RoleName, AssumeRolePolicyDocument, Description="",
-                    PermissionsBoundary=None):
+    def create_role(
+        self, RoleName, AssumeRolePolicyDocument, Description="", PermissionsBoundary=None
+    ):
         if self._role_exists:
             from botocore.exceptions import ClientError
-            raise ClientError({"Error": {"Code": "EntityAlreadyExists", "Message": ""}}, "CreateRole")
+
+            raise ClientError(
+                {"Error": {"Code": "EntityAlreadyExists", "Message": ""}}, "CreateRole"
+            )
         self.created_roles.append(RoleName)
         self._role_exists = True
         self.boundaries[RoleName] = PermissionsBoundary
@@ -667,8 +678,10 @@ class TestSetupIam:
     def test_idempotent_when_all_policies_attached(self, capsys):
         iam = _FakeIAM(role_exists=True)
         iam.attached_policies = [
-            "test-policy-HeadNode-Compute", "test-policy-HeadNode-Storage",
-            "test-policy-HeadNode-IAM", "test-policy-ComputeNode-Base",
+            "test-policy-HeadNode-Compute",
+            "test-policy-HeadNode-Storage",
+            "test-policy-HeadNode-IAM",
+            "test-policy-ComputeNode-Base",
         ]
         _setup_iam(iam, "test-role", "test-policy", **_SETUP_KWARGS)
         assert iam.created_roles == []
@@ -692,8 +705,10 @@ class TestSetupIam:
         # treating the superset of attached policies as already-satisfied.
         iam = _FakeIAM(role_exists=True)
         iam.attached_policies = [
-            "test-policy-HeadNode-Compute", "test-policy-HeadNode-Storage",
-            "test-policy-HeadNode-IAM", "test-policy-ComputeNode-Base",
+            "test-policy-HeadNode-Compute",
+            "test-policy-HeadNode-Storage",
+            "test-policy-HeadNode-IAM",
+            "test-policy-ComputeNode-Base",
             "test-policy-HeadNode-Monitoring",
         ]
         _setup_iam(iam, "test-role", "test-policy", enable_monitoring=False, **_SETUP_KWARGS)
@@ -742,8 +757,7 @@ class TestDeleteManagedPolicies:
     def test_deletes_monitoring_policy_when_enabled(self):
         iam = _FakeIAM()
         _delete_managed_policies(
-            iam, "test-role", "test-policy", "123456789012",
-            suppress=False, enable_monitoring=True
+            iam, "test-role", "test-policy", "123456789012", suppress=False, enable_monitoring=True
         )
         deleted_names = [a.split("/")[-1] for a in iam.deleted_policies]
         assert "test-policy-HeadNode-Monitoring" in deleted_names
@@ -751,8 +765,12 @@ class TestDeleteManagedPolicies:
     def test_deletes_fsx_inline_policy(self):
         iam = _FakeIAM()
         _delete_managed_policies(
-            iam, "test-role", "test-policy", "123456789012",
-            suppress=False, fsx_policy="fsx-hydration-policy"
+            iam,
+            "test-role",
+            "test-policy",
+            "123456789012",
+            suppress=False,
+            fsx_policy="fsx-hydration-policy",
         )
         assert ("test-role", "fsx-hydration-policy") in iam.deleted_role_policies
 
@@ -760,8 +778,10 @@ class TestDeleteManagedPolicies:
         class _BrokenIAM(_FakeIAM):
             def detach_role_policy(self, **kw):
                 raise Exception("no such entity")
+
             def delete_policy(self, **kw):
                 raise Exception("no such entity")
+
         iam = _BrokenIAM()
         _delete_managed_policies(iam, "test-role", "test-policy", "123456789012", suppress=True)
 
@@ -775,8 +795,10 @@ class TestCleanupIamOnFailure:
     def test_deletes_policies_and_role(self):
         iam = _FakeIAM(role_exists=True)
         iam.attached_policies = [
-            "test-policy-HeadNode-Compute", "test-policy-HeadNode-Storage",
-            "test-policy-HeadNode-IAM", "test-policy-ComputeNode-Base",
+            "test-policy-HeadNode-Compute",
+            "test-policy-HeadNode-Storage",
+            "test-policy-HeadNode-IAM",
+            "test-policy-ComputeNode-Base",
         ]
         deleted_roles = []
         iam.delete_role = lambda RoleName: deleted_roles.append(RoleName)
@@ -791,8 +813,10 @@ class TestCleanupIamOnFailure:
     def test_includes_monitoring_policy_when_enabled(self):
         iam = _FakeIAM(role_exists=True)
         iam.attached_policies = [
-            "test-policy-HeadNode-Compute", "test-policy-HeadNode-Storage",
-            "test-policy-HeadNode-IAM", "test-policy-ComputeNode-Base",
+            "test-policy-HeadNode-Compute",
+            "test-policy-HeadNode-Storage",
+            "test-policy-HeadNode-IAM",
+            "test-policy-ComputeNode-Base",
             "test-policy-HeadNode-Monitoring",
         ]
         deleted_roles = []
@@ -886,7 +910,9 @@ class TestValidateNetwork:
     def test_explicit_subnets_returned_unchanged(self):
         ec2 = _make_ec2client()
         vpc_id, hn_subnet, compute_subnets, gpu_subnets, cidr, _ln = _validate_network(
-            ec2client=ec2, az="us-east-1a", vpc_name="vpc_default",
+            ec2client=ec2,
+            az="us-east-1a",
+            vpc_name="vpc_default",
             headnode_subnet_id="subnet-explicit-hn",
             compute_az_list=["us-east-1a"],
             compute_subnet_ids_override="subnet-explicit-c1,subnet-explicit-c2",
@@ -900,7 +926,9 @@ class TestValidateNetwork:
     def test_auto_discovers_headnode_subnet(self):
         ec2 = _make_ec2client()
         _, hn_subnet, _, _, _, _ = _validate_network(
-            ec2client=ec2, az="us-east-1a", vpc_name="vpc_default",
+            ec2client=ec2,
+            az="us-east-1a",
+            vpc_name="vpc_default",
             headnode_subnet_id="",
             compute_az_list=["us-east-1a"],
             compute_subnet_ids_override="",
@@ -915,7 +943,9 @@ class TestValidateNetwork:
         ec2 = _make_ec2client(vpcs=[])
         with pytest.raises(SystemExit):
             _validate_network(
-                ec2client=ec2, az="us-east-1a", vpc_name="my-missing-vpc",
+                ec2client=ec2,
+                az="us-east-1a",
+                vpc_name="my-missing-vpc",
                 headnode_subnet_id="",
                 compute_az_list=["us-east-1a"],
                 compute_subnet_ids_override="",
@@ -929,7 +959,9 @@ class TestValidateNetwork:
         ec2 = _make_ec2client(subnets_by_az={"us-east-1a": []})
         with pytest.raises(SystemExit):
             _validate_network(
-                ec2client=ec2, az="us-east-1a", vpc_name="vpc_default",
+                ec2client=ec2,
+                az="us-east-1a",
+                vpc_name="vpc_default",
                 headnode_subnet_id="",
                 compute_az_list=["us-east-1a"],
                 compute_subnet_ids_override="",
@@ -943,7 +975,9 @@ class TestValidateNetwork:
             subnets_by_az={"us-east-1a": [{"SubnetId": "subnet-1"}, {"SubnetId": "subnet-2"}]}
         )
         _, hn_subnet, _, _, _, _ = _validate_network(
-            ec2client=ec2, az="us-east-1a", vpc_name="vpc_default",
+            ec2client=ec2,
+            az="us-east-1a",
+            vpc_name="vpc_default",
             headnode_subnet_id="",
             compute_az_list=[],
             compute_subnet_ids_override="subnet-explicit",
@@ -955,11 +989,11 @@ class TestValidateNetwork:
     def test_gpu_subnet_falls_back_to_compute_subnets(self):
         # Production path: gpu_az_list=None (user didn't set --gpu_az),
         # no gpu_subnet_ids_override — expects gpu_subnet_ids == compute_subnet_ids.
-        ec2 = _make_ec2client(
-            subnets_by_az={"us-east-1a": [{"SubnetId": "subnet-aaa"}]}
-        )
+        ec2 = _make_ec2client(subnets_by_az={"us-east-1a": [{"SubnetId": "subnet-aaa"}]})
         _, _, compute_subnets, gpu_subnets, _, _ = _validate_network(
-            ec2client=ec2, az="us-east-1a", vpc_name="vpc_default",
+            ec2client=ec2,
+            az="us-east-1a",
+            vpc_name="vpc_default",
             headnode_subnet_id="subnet-hn",
             compute_az_list=["us-east-1a"],
             compute_subnet_ids_override="subnet-compute-1",
@@ -969,11 +1003,11 @@ class TestValidateNetwork:
         assert gpu_subnets == compute_subnets
 
     def test_explicit_gpu_subnet_overrides_compute(self):
-        ec2 = _make_ec2client(
-            subnets_by_az={"us-east-1a": [{"SubnetId": "subnet-aaa"}]}
-        )
+        ec2 = _make_ec2client(subnets_by_az={"us-east-1a": [{"SubnetId": "subnet-aaa"}]})
         _, _, compute_subnets, gpu_subnets, _, _ = _validate_network(
-            ec2client=ec2, az="us-east-1a", vpc_name="vpc_default",
+            ec2client=ec2,
+            az="us-east-1a",
+            vpc_name="vpc_default",
             headnode_subnet_id="subnet-hn",
             compute_az_list=["us-east-1a"],
             compute_subnet_ids_override="subnet-compute-1",
@@ -1000,12 +1034,9 @@ def _make_public_private_ec2client():
     }
 
     def describe_subnets(Filters):
-        az = next(
-            (f["Values"][0] for f in Filters if f["Name"] == "availabilityZone"), None
-        )
+        az = next((f["Values"][0] for f in Filters if f["Name"] == "availabilityZone"), None)
         private_only = any(
-            f["Name"] == "map-public-ip-on-launch" and f["Values"] == ["false"]
-            for f in Filters
+            f["Name"] == "map-public-ip-on-launch" and f["Values"] == ["false"] for f in Filters
         )
         table = private if private_only else public
         return {"Subnets": table.get(az, [])}
@@ -1067,7 +1098,9 @@ class TestPrivateGpuSubnetIsNotSilentlyIgnored:
 
         ec2.describe_subnets = _spy
         _validate_network(
-            ec2client=ec2, az="us-east-1a", vpc_name="vpc_default",
+            ec2client=ec2,
+            az="us-east-1a",
+            vpc_name="vpc_default",
             headnode_subnet_id="subnet-hn",
             compute_az_list=["us-east-1a"],
             compute_subnet_ids_override="",
@@ -1077,8 +1110,7 @@ class TestPrivateGpuSubnetIsNotSilentlyIgnored:
         )
         assert any(
             any(
-                f["Name"] == "map-public-ip-on-launch" and f["Values"] == ["false"]
-                for f in filters
+                f["Name"] == "map-public-ip-on-launch" and f["Values"] == ["false"] for f in filters
             )
             for filters in seen
         ), "no describe_subnets call filtered for private subnets"
@@ -1151,16 +1183,16 @@ class TestPrivateGpuSubnetIsNotSilentlyIgnored:
                 (f["Values"][0] for f in Filters if f["Name"] == "availabilityZone"),
                 None,
             )
-            private_only = any(
-                f["Name"] == "map-public-ip-on-launch" for f in Filters
-            )
+            private_only = any(f["Name"] == "map-public-ip-on-launch" for f in Filters)
             if private_only:
                 seen.append(az)
             return _inner(Filters)
 
         ec2.describe_subnets = _spy
         _validate_network(
-            ec2client=ec2, az="us-east-1a", vpc_name="vpc_default",
+            ec2client=ec2,
+            az="us-east-1a",
+            vpc_name="vpc_default",
             headnode_subnet_id="subnet-hn",
             compute_az_list=["us-east-1a"],
             compute_subnet_ids_override="",
@@ -1196,7 +1228,12 @@ class _FakeEC2ForEfa:
 class TestGetEfaInstanceTypes:
     def test_returns_live_types_when_api_succeeds(self):
         pages = [
-            {"InstanceTypes": [{"InstanceType": "p5.48xlarge"}, {"InstanceType": "hpc7a.48xlarge"}]},
+            {
+                "InstanceTypes": [
+                    {"InstanceType": "p5.48xlarge"},
+                    {"InstanceType": "hpc7a.48xlarge"},
+                ]
+            },
             {"InstanceTypes": [{"InstanceType": "c6gn.16xlarge"}]},
         ]
         ec2 = _FakeEC2ForEfa(pages=pages)
@@ -1264,9 +1301,22 @@ class TestEveryRegionalBotoClientIsBoundToTheTargetRegion:
 
     # Services whose endpoint is regional, so a client must say which one.
     _REGIONAL = {
-        "s3", "ec2", "cloudformation", "logs", "secretsmanager", "lambda",
-        "cognito-idp", "ce", "pricing", "fsx", "efs", "sns", "ssm",
-        "resourcegroupstaggingapi", "application-autoscaling", "apigateway",
+        "s3",
+        "ec2",
+        "cloudformation",
+        "logs",
+        "secretsmanager",
+        "lambda",
+        "cognito-idp",
+        "ce",
+        "pricing",
+        "fsx",
+        "efs",
+        "sns",
+        "ssm",
+        "resourcegroupstaggingapi",
+        "application-autoscaling",
+        "apigateway",
         # A registry is per-region, and its hostname carries the region --
         # an unbound client would create the repository in one region and
         # the Lambda would pull from another.
@@ -1325,17 +1375,13 @@ class TestEveryRegionalBotoClientIsBoundToTheTargetRegion:
             for _lineno, service, _bound in self._client_calls(path):
                 if service not in self._REGIONAL and service not in self._GLOBAL:
                     unknown.add(service)
-        assert unknown == set(), (
-            f"classify these services as regional or global: {sorted(unknown)}"
-        )
+        assert unknown == set(), f"classify these services as regional or global: {sorted(unknown)}"
 
     def test_the_scan_finds_the_clients_that_are_there(self):
         """Second vacuity guard: an AST walk that matched nothing would
         pass both checks above in silence."""
         found = [
-            (svc, bound)
-            for path in self._sources()
-            for _l, svc, bound in self._client_calls(path)
+            (svc, bound) for path in self._sources() for _l, svc, bound in self._client_calls(path)
         ]
         assert len(found) >= 10, found
         assert any(svc == "s3" and bound for svc, bound in found)
@@ -1344,7 +1390,8 @@ class TestEveryRegionalBotoClientIsBoundToTheTargetRegion:
         """The exemption is real, not an oversight -- iam and sts clients
         exist unbound on purpose."""
         seen = [
-            svc for path in self._sources()
+            svc
+            for path in self._sources()
             for _l, svc, bound in self._client_calls(path)
             if svc in self._GLOBAL and not bound
         ]

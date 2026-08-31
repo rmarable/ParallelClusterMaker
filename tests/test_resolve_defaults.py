@@ -15,9 +15,7 @@ import types
 
 import pytest
 
-sys.path.insert(
-    0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src")
-)
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src"))
 
 from pcluster_core import (
     _resolve as resolve,
@@ -107,7 +105,9 @@ class TestResolve:
     def test_cast_valueerror_raises_systemexit(self):
         args = _args(max_cpu_queue_size=None)
         with pytest.raises(SystemExit):
-            resolve("max_cpu_queue_size", args, {"max_cpu_queue_size": "not-a-number"}, {}, cast=int)
+            resolve(
+                "max_cpu_queue_size", args, {"max_cpu_queue_size": "not-a-number"}, {}, cast=int
+            )
 
     def test_cast_typeerror_raises_systemexit(self):
         args = _args(max_cpu_queue_size=None)
@@ -190,9 +190,7 @@ class TestLoadDefaultsFile:
     def test_missing_file_raises_systemexit(self, tmp_path):
         toolkit = str(tmp_path / "pcluster_defaults.yml")
         with pytest.raises(SystemExit):
-            _load_defaults_file(
-                str(tmp_path / "nonexistent.yml"), toolkit, "my-cluster"
-            )
+            _load_defaults_file(str(tmp_path / "nonexistent.yml"), toolkit, "my-cluster")
 
     def test_empty_yaml_returns_empty_dict(self, tmp_path):
         f = tmp_path / "empty.yml"
@@ -357,7 +355,9 @@ def test_argparse_help_defaults_match_hardcoded_defaults():
         if name in exempt:
             continue
         claimed = help_match.group(1).strip()
-        assert name in hardcoded, f"--{name} advertises a default but has no _HARDCODED_DEFAULTS entry"
+        assert name in hardcoded, (
+            f"--{name} advertises a default but has no _HARDCODED_DEFAULTS entry"
+        )
         actual = str(hardcoded[name])
         # An empty-string default is described in prose ("unset", '""'), not literally.
         if actual == "":
@@ -382,7 +382,9 @@ def test_required_options_do_not_advertise_a_default():
     for block in _re.findall(r"add_argument\((.*?)\n    \)", src, _re.S):
         if '"--headnode_instance_type"' not in block:
             continue
-        assert block, "test_required_options_do_not_advertise_a_default: nothing to assert absence against"
+        assert block, (
+            "test_required_options_do_not_advertise_a_default: nothing to assert absence against"
+        )
         assert "default = " not in block, (
             "headnode_instance_type is required (make_pcluster.py aborts when unset); "
             "its help must not advertise a default"
@@ -420,7 +422,9 @@ def test_documented_instance_types_are_selectable():
                     line = text[: match.start()].count("\n") + 1
                     bad.append(f"{os.path.basename(path)}:{line} --{match.group(1)}={itype}")
 
-    assert not bad, "documented instance types absent from ec2_instances_full_list: " + "; ".join(bad)
+    assert not bad, "documented instance types absent from ec2_instances_full_list: " + "; ".join(
+        bad
+    )
 
 
 def test_documented_gpu_families_match_the_detector():
@@ -547,9 +551,7 @@ def test_defaults_file_banners_name_their_own_file():
         assert banner, f"{basename} has no filename in its header banner"
         checked += 1
         for line in banner:
-            assert basename in line, (
-                f"{basename} banner names a different file: {line.strip()!r}"
-            )
+            assert basename in line, f"{basename} banner names a different file: {line.strip()!r}"
     # One, not two: isis_defaults.yml and osiris_defaults.yml were purged and
     # gitignored (both held a real VPC name and subnet IDs), leaving
     # pcluster_defaults.yml as the only tracked defaults file. The glob still

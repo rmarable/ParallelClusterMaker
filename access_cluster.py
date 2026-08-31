@@ -37,12 +37,12 @@ def main():
     parser = argparse.ArgumentParser(
         description="access_cluster.py: Provide quick SSH access to ParallelCluster head/login nodes"
     )
-    parser.add_argument(
-        "--cluster_name", "-N", help="cluster name (REQUIRED)", required=True
-    )
+    parser.add_argument("--cluster_name", "-N", help="cluster name (REQUIRED)", required=True)
     _node_group = parser.add_mutually_exclusive_group()
     _node_group.add_argument(
-        "--login_node", "-L", action="store_true",
+        "--login_node",
+        "-L",
+        action="store_true",
         help=(
             "connect to the login node pool instead of the head node "
             "(requires --enable_loginnode=true at build time; when "
@@ -51,7 +51,9 @@ def main():
         ),
     )
     _node_group.add_argument(
-        "--head_node", "-H", action="store_true",
+        "--head_node",
+        "-H",
+        action="store_true",
         help="connect to the head node (default, unless a login node is enabled)",
     )
     args = parser.parse_args()
@@ -59,16 +61,16 @@ def main():
     cluster_name = args.cluster_name
     _validate_cluster_name(cluster_name)
 
-    _cluster_data_root = os.path.join(
-        os.path.dirname(os.path.abspath(__file__)), "active_clusters"
-    )
+    _cluster_data_root = os.path.join(os.path.dirname(os.path.abspath(__file__)), "active_clusters")
     # Rendered on demand when the build never wrote one -- an MCP build
     # returns before the scripts are copied out of stage_dir, and telling
     # the operator to rebuild (as this did) was wrong: the cluster is fine.
     try:
         core_ensure_generated_script(
-            cluster_data_root=_cluster_data_root, cluster_name=cluster_name,
-            repo_root=_repo_root, template="access_cluster.j2",
+            cluster_data_root=_cluster_data_root,
+            cluster_name=cluster_name,
+            repo_root=_repo_root,
+            template="access_cluster.j2",
             dest_name=f"access_cluster.{cluster_name}.sh",
         )
     except PClusterMakerError as e:
@@ -77,7 +79,8 @@ def main():
     rec = _read_cluster_record(cluster_name, _repo_root) or {}
     try:
         info = core_resolve_access_node_type(
-            rec, cluster_name,
+            rec,
+            cluster_name,
             login_node_requested=args.login_node,
             head_node_requested=args.head_node,
         )

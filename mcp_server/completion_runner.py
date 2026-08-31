@@ -27,14 +27,20 @@ from mcp_server.completion import (
 def _log(payload, outcome, extra=""):
     """One structured line per attempt. The log group is retained, so this
     is the record that survives the cluster."""
-    print(json.dumps({
-        "pcm_completion": True,
-        "cluster": payload.get("cluster_name"),
-        "attempt": payload.get("attempt"),
-        "action": outcome.action,
-        "reason": outcome.reason,
-        "extra": extra,
-    }, default=str), flush=True)
+    print(
+        json.dumps(
+            {
+                "pcm_completion": True,
+                "cluster": payload.get("cluster_name"),
+                "attempt": payload.get("attempt"),
+                "action": outcome.action,
+                "reason": outcome.reason,
+                "extra": extra,
+            },
+            default=str,
+        ),
+        flush=True,
+    )
 
 
 def _notify(payload, subject, message):
@@ -48,10 +54,10 @@ def _notify(payload, subject, message):
         account = boto3.client("sts", region_name=region).get_caller_identity()["Account"]
         arn = f"arn:aws:sns:{region}:{account}:sns_alerts_{payload['cluster_name']}"
         boto3.client("sns", region_name=region).publish(
-            TopicArn=arn, Subject=subject[:100], Message=message)
+            TopicArn=arn, Subject=subject[:100], Message=message
+        )
     except Exception as e:  # noqa: BLE001 - see docstring
-        print(f"pcm_completion: SNS notify failed: {type(e).__name__}: {e}",
-              flush=True)
+        print(f"pcm_completion: SNS notify failed: {type(e).__name__}: {e}", flush=True)
 
 
 def _describe_status(cluster_name, region):
@@ -65,10 +71,12 @@ def _describe_status(cluster_name, region):
     try:
         from pcluster_core import ensure_event_loop
         import pcluster.lib as pc
+
         ensure_event_loop()
 
-        return pc.describe_cluster(
-            cluster_name=cluster_name, region=region).get("clusterStatus", "")
+        return pc.describe_cluster(cluster_name=cluster_name, region=region).get(
+            "clusterStatus", ""
+        )
     except Exception as e:  # noqa: BLE001
         from pcluster_core import _describe_says_cluster_is_absent
 
@@ -83,15 +91,15 @@ def _reinvoke(payload):
     from mcp_server.tiers import FUNCTION_NAMES
 
     boto3.client("lambda", region_name=payload["region"]).invoke(
-        FunctionName=os.environ.get(
-            "AWS_LAMBDA_FUNCTION_NAME", FUNCTION_NAMES["stack-mutation"]),
+        FunctionName=os.environ.get("AWS_LAMBDA_FUNCTION_NAME", FUNCTION_NAMES["stack-mutation"]),
         InvocationType="Event",
         Payload=json.dumps(next_payload(payload)).encode(),
     )
 
 
-def run_completion_attempt(payload, *, now=None, describe=None,
-                           finalize=None, reinvoke=None, sleeper=None):
+def run_completion_attempt(
+    payload, *, now=None, describe=None, finalize=None, reinvoke=None, sleeper=None
+):
     """Poll once and act. Injectable seams so a test drives the real
     control flow without AWS."""
     import time
@@ -102,8 +110,10 @@ def run_completion_attempt(payload, *, now=None, describe=None,
 
     status = describe(payload["cluster_name"], payload["region"])
     outcome = decide(
-        status=status, attempt=int(payload.get("attempt", 0)),
-        started_at=float(payload.get("started_at", now)), now=now,
+        status=status,
+        attempt=int(payload.get("attempt", 0)),
+        started_at=float(payload.get("started_at", now)),
+        now=now,
     )
 
     if outcome.action == "retry":
@@ -140,10 +150,11 @@ def run_completion_attempt(payload, *, now=None, describe=None,
         result = finalize(
             cluster_name=payload["cluster_name"],
             cluster_owner=payload["cluster_owner"],
-            region=payload["region"], repo_root=_repo_root(),
-            delete_s3_bucketname=("true" if payload.get("delete_s3_bucketname")
-                                  else "false"),
-            debug_mode=False, finalize_only=True,
+            region=payload["region"],
+            repo_root=_repo_root(),
+            delete_s3_bucketname=("true" if payload.get("delete_s3_bucketname") else "false"),
+            debug_mode=False,
+            finalize_only=True,
         )
     else:
         result = finalize(payload)

@@ -36,8 +36,10 @@ def _run_apply_with_wait(cluster_name, region, config_path):
     cluster_record = ClusterRecord.unknown(cluster_name)
     try:
         core_apply_queue_config(
-            cluster_record=cluster_record, config_path=config_path,
-            region=region, pcluster_bin=_PCLUSTER_BIN,
+            cluster_record=cluster_record,
+            config_path=config_path,
+            region=region,
+            pcluster_bin=_PCLUSTER_BIN,
         )
     except PClusterMakerError as e:
         sys.exit(str(e))
@@ -57,10 +59,7 @@ def _do_list(cluster_name):
         f"{'Queue Name':<{C1}}  {'Type':<{C2}}  {'Capacity':<{C3}}  "
         f"{'Min':^{C4}}  {'Max':^{C5}}  Instance Types"
     )
-    sep = (
-        f"{'':->{ C1}}  {'':->{ C2}}  {'':->{ C3}}  "
-        f"{'':->{ C4}}  {'':->{ C5}}  {'':->14}"
-    )
+    sep = f"{'':->{C1}}  {'':->{C2}}  {'':->{C3}}  {'':->{C4}}  {'':->{C5}}  {'':->14}"
     print(header)
     print(sep)
     for q in queues:
@@ -97,7 +96,8 @@ def _do_add(cluster_name, args):
             root_volume_type=args.root_volume_type,
             root_volume_iops=args.root_volume_iops,
             root_volume_throughput=args.root_volume_throughput,
-            s3=_s3, locks_bucketname=_bucket,
+            s3=_s3,
+            locks_bucketname=_bucket,
         )
     except PClusterMakerError as e:
         sys.exit(str(e))
@@ -148,9 +148,7 @@ def _cluster_store(cluster_name):
         region = rec["region"]
         import boto3
 
-        bucket = _derive_locks_bucket(
-            aws_account_id=_aws_account_id(region), region=region
-        )
+        bucket = _derive_locks_bucket(aws_account_id=_aws_account_id(region), region=region)
         return boto3.client("s3", region_name=region), bucket
     except Exception as e:
         print(
@@ -175,8 +173,11 @@ def _do_remove(cluster_name, args):
     _s3, _bucket = _cluster_store(cluster_name)
     try:
         result = core_remove_queue(
-            cluster_name=cluster_name, repo_root=_repo_root,
-            queue_name=args.queue_name, s3=_s3, locks_bucketname=_bucket,
+            cluster_name=cluster_name,
+            repo_root=_repo_root,
+            queue_name=args.queue_name,
+            s3=_s3,
+            locks_bucketname=_bucket,
         )
     except PClusterMakerError as e:
         sys.exit(str(e))
@@ -193,40 +194,73 @@ def main():
     )
     parser.add_argument("-N", "--cluster_name", required=True, help="Cluster name")
     parser.add_argument(
-        "-A", "--action", required=True, choices=["add", "remove", "list"],
-        help="Action to perform"
+        "-A", "--action", required=True, choices=["add", "remove", "list"], help="Action to perform"
     )
     parser.add_argument(
-        "-T", "--type", dest="queue_type", default=None, choices=["compute", "gpu"],
-        help="Queue type (required for add; ignored for remove and list)"
+        "-T",
+        "--type",
+        dest="queue_type",
+        default=None,
+        choices=["compute", "gpu"],
+        help="Queue type (required for add; ignored for remove and list)",
     )
     parser.add_argument(
-        "-Q", "--queue-name", dest="queue_name", default=None,
-        help="Queue name (optional for add, required for remove)"
+        "-Q",
+        "--queue-name",
+        dest="queue_name",
+        default=None,
+        help="Queue name (optional for add, required for remove)",
     )
     parser.add_argument(
-        "-C", "--capacity", dest="capacity_type", choices=["spot", "ondemand"], default="spot",
-        help="Capacity type (default: spot)"
+        "-C",
+        "--capacity",
+        dest="capacity_type",
+        choices=["spot", "ondemand"],
+        default="spot",
+        help="Capacity type (default: spot)",
     )
     parser.add_argument(
-        "-E", "--ec2-type", dest="ec2_instance_type", default=None,
-        help="Comma-separated instance types"
+        "-E",
+        "--ec2-type",
+        dest="ec2_instance_type",
+        default=None,
+        help="Comma-separated instance types",
     )
-    parser.add_argument("-I", "--initial_size", type=int, default=2, help="Initial queue size (default: 2)")
-    parser.add_argument("-M", "--max_size", type=int, default=8, help="Maximum queue size (default: 8)")
     parser.add_argument(
-        "--maintain_initial_size", choices=["true", "false"], default="false",
-        help="Keep MinCount equal to initial_size (default: false)"
+        "-I", "--initial_size", type=int, default=2, help="Initial queue size (default: 2)"
     )
-    parser.add_argument("--root_volume_size", type=int, default=250, help="Root volume size in GiB (default: 250)")
     parser.add_argument(
-        "--root_volume_type", choices=["gp2", "gp3", "io1", "io2", "st1"], default="gp3",
-        help="Root volume type (default: gp3)"
+        "-M", "--max_size", type=int, default=8, help="Maximum queue size (default: 8)"
     )
-    parser.add_argument("--root_volume_iops", type=int, default=3000, help="Root volume IOPS (default: 3000)")
-    parser.add_argument("--root_volume_throughput", type=int, default=125, help="Root volume throughput MiB/s (default: 125)")
     parser.add_argument(
-        "-W", "--wait", action="store_true", default=False,
+        "--maintain_initial_size",
+        choices=["true", "false"],
+        default="false",
+        help="Keep MinCount equal to initial_size (default: false)",
+    )
+    parser.add_argument(
+        "--root_volume_size", type=int, default=250, help="Root volume size in GiB (default: 250)"
+    )
+    parser.add_argument(
+        "--root_volume_type",
+        choices=["gp2", "gp3", "io1", "io2", "st1"],
+        default="gp3",
+        help="Root volume type (default: gp3)",
+    )
+    parser.add_argument(
+        "--root_volume_iops", type=int, default=3000, help="Root volume IOPS (default: 3000)"
+    )
+    parser.add_argument(
+        "--root_volume_throughput",
+        type=int,
+        default=125,
+        help="Root volume throughput MiB/s (default: 125)",
+    )
+    parser.add_argument(
+        "-W",
+        "--wait",
+        action="store_true",
+        default=False,
         help=(
             "After writing the config, automatically stop the fleet, apply the update, and restart "
             "the fleet, polling every 30s until complete. Without this flag, the required commands "

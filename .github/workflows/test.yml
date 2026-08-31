@@ -44,7 +44,7 @@ jobs:
       - name: Create the venv the lint target expects
         run: python -m venv .venv && .venv/bin/pip install pyflakes ruff
 
-      - name: Run lint
+      - name: Run lint (undefined names, ruff check, ruff format --check)
         run: make lint
 
   shellcheck:

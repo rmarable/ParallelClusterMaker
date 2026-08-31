@@ -109,7 +109,11 @@ class _FakeS3Lock:
 
     def get_object(self, Bucket, Key):
         obj = self.objects[Key]
-        result = {"ETag": obj["etag"], "LastModified": obj["last_modified"], "Body": io.BytesIO(obj["body"])}
+        result = {
+            "ETag": obj["etag"],
+            "LastModified": obj["last_modified"],
+            "Body": io.BytesIO(obj["body"]),
+        }
         if self.race_on_next_get:
             # Simulate a second writer's reclaim landing entirely between our
             # read (which legitimately returns the etag current at read
@@ -155,23 +159,31 @@ class TestDeriveLocksBucket:
 
         params = list(inspect.signature(_derive_locks_bucket).parameters)
         assert params == ["aws_account_id", "region"]
-        assert inspect.signature(_derive_locks_bucket).parameters["aws_account_id"].kind == \
-            inspect.Parameter.KEYWORD_ONLY
+        assert (
+            inspect.signature(_derive_locks_bucket).parameters["aws_account_id"].kind
+            == inspect.Parameter.KEYWORD_ONLY
+        )
 
 
 class TestCreateLocksBucket:
     def test_creates_and_blocks_public_access(self):
         s3 = _FakeS3Lock()
-        _create_locks_bucket(s3, locks_bucketname="parallelclustermaker-locks-123-us-east-2", region="us-east-2")
+        _create_locks_bucket(
+            s3, locks_bucketname="parallelclustermaker-locks-123-us-east-2", region="us-east-2"
+        )
         assert s3.created_buckets == [
-            {"Bucket": "parallelclustermaker-locks-123-us-east-2",
-             "CreateBucketConfiguration": {"LocationConstraint": "us-east-2"}}
+            {
+                "Bucket": "parallelclustermaker-locks-123-us-east-2",
+                "CreateBucketConfiguration": {"LocationConstraint": "us-east-2"},
+            }
         ]
         assert len(s3.public_access_blocked) == 1
 
     def test_omits_location_constraint_for_us_east_1(self):
         s3 = _FakeS3Lock()
-        _create_locks_bucket(s3, locks_bucketname="parallelclustermaker-locks-123-us-east-1", region="us-east-1")
+        _create_locks_bucket(
+            s3, locks_bucketname="parallelclustermaker-locks-123-us-east-1", region="us-east-1"
+        )
         assert "CreateBucketConfiguration" not in s3.created_buckets[0]
 
     def test_idempotent_on_already_owned(self):
@@ -191,7 +203,8 @@ class TestCreateLocksBucket:
         s3 = _FakeS3Lock()
         s3.existing_buckets.add("parallelclustermaker-locks-123-us-east-1")
         _create_locks_bucket(
-            s3, locks_bucketname="parallelclustermaker-locks-123-us-east-1",
+            s3,
+            locks_bucketname="parallelclustermaker-locks-123-us-east-1",
             region="us-east-1",
         )
         assert s3.created_buckets == []
@@ -200,6 +213,7 @@ class TestCreateLocksBucket:
     def test_a_role_that_cannot_create_buckets_still_takes_the_lock(self):
         """The live failure, as a test: AccessDenied on CreateBucket for a
         bucket that already exists and that the role can read and write."""
+
         class _CannotCreate(_FakeS3Lock):
             def create_bucket(self, **kwargs):
                 raise _client_error("AccessDenied", "CreateBucket", status=403)
@@ -232,16 +246,24 @@ class TestIsConditionalWriteRejection:
         assert _is_conditional_write_rejection(_client_error("PreconditionFailed", "PutObject"))
 
     def test_409_by_code(self):
-        assert _is_conditional_write_rejection(_client_error("ConditionalRequestConflict", "PutObject"))
+        assert _is_conditional_write_rejection(
+            _client_error("ConditionalRequestConflict", "PutObject")
+        )
 
     def test_412_by_status_only(self):
-        assert _is_conditional_write_rejection(_client_error("SomethingElse", "PutObject", status=412))
+        assert _is_conditional_write_rejection(
+            _client_error("SomethingElse", "PutObject", status=412)
+        )
 
     def test_409_by_status_only(self):
-        assert _is_conditional_write_rejection(_client_error("SomethingElse", "PutObject", status=409))
+        assert _is_conditional_write_rejection(
+            _client_error("SomethingElse", "PutObject", status=409)
+        )
 
     def test_unrelated_error_is_not_a_rejection(self):
-        assert not _is_conditional_write_rejection(_client_error("AccessDenied", "PutObject", status=403))
+        assert not _is_conditional_write_rejection(
+            _client_error("AccessDenied", "PutObject", status=403)
+        )
 
 
 class TestLockKeyAndOwnerBody:
@@ -261,7 +283,10 @@ class TestS3AcquireClusterLock:
     def test_acquires_when_absent(self):
         s3 = _FakeS3Lock()
         key = s3_acquire_cluster_lock(
-            s3, locks_bucketname="b", cluster_name=CLUSTER, command="make_pcluster.py -N lockme",
+            s3,
+            locks_bucketname="b",
+            cluster_name=CLUSTER,
+            command="make_pcluster.py -N lockme",
         )
         assert key == _lock_key(CLUSTER)
         assert key in s3.objects
@@ -270,7 +295,9 @@ class TestS3AcquireClusterLock:
         s3 = _FakeS3Lock()
         s3_acquire_cluster_lock(s3, locks_bucketname="b", cluster_name=CLUSTER, command="first")
         with pytest.raises(ClusterLockError, match="Another operation"):
-            s3_acquire_cluster_lock(s3, locks_bucketname="b", cluster_name=CLUSTER, command="second")
+            s3_acquire_cluster_lock(
+                s3, locks_bucketname="b", cluster_name=CLUSTER, command="second"
+            )
 
     def test_fails_when_held_and_stale_but_no_describe_fn_supplied(self):
         """Fail safe: a caller with no way to check terminal state (e.g. no
@@ -280,7 +307,10 @@ class TestS3AcquireClusterLock:
         s3.set_last_modified(_lock_key(CLUSTER), DateTime.now(timezone.utc) - timedelta(hours=10))
         with pytest.raises(ClusterLockError):
             s3_acquire_cluster_lock(
-                s3, locks_bucketname="b", cluster_name=CLUSTER, command="second",
+                s3,
+                locks_bucketname="b",
+                cluster_name=CLUSTER,
+                command="second",
                 staleness_ceiling_seconds=7200,
             )
 
@@ -291,8 +321,13 @@ class TestS3AcquireClusterLock:
         describe = _ScriptedDescribe(status="CREATE_IN_PROGRESS")
         with pytest.raises(ClusterLockError):
             s3_acquire_cluster_lock(
-                s3, locks_bucketname="b", cluster_name=CLUSTER, command="second",
-                describe_fn=describe, region="us-east-2", staleness_ceiling_seconds=7200,
+                s3,
+                locks_bucketname="b",
+                cluster_name=CLUSTER,
+                command="second",
+                describe_fn=describe,
+                region="us-east-2",
+                staleness_ceiling_seconds=7200,
             )
         assert describe.calls == [(CLUSTER, "us-east-2")]
 
@@ -306,8 +341,12 @@ class TestS3AcquireClusterLock:
         describe = _ScriptedDescribe(status="CREATE_COMPLETE")
         with pytest.raises(ClusterLockError):
             s3_acquire_cluster_lock(
-                s3, locks_bucketname="b", cluster_name=CLUSTER, command="second",
-                describe_fn=describe, region="us-east-2",
+                s3,
+                locks_bucketname="b",
+                cluster_name=CLUSTER,
+                command="second",
+                describe_fn=describe,
+                region="us-east-2",
             )
         assert describe.calls == [], "must not even check status while the lock is still fresh"
 
@@ -317,8 +356,13 @@ class TestS3AcquireClusterLock:
         s3.set_last_modified(_lock_key(CLUSTER), DateTime.now(timezone.utc) - timedelta(hours=10))
         describe = _ScriptedDescribe(status="CREATE_FAILED")
         key = s3_acquire_cluster_lock(
-            s3, locks_bucketname="b", cluster_name=CLUSTER, command="second",
-            describe_fn=describe, region="us-east-2", staleness_ceiling_seconds=7200,
+            s3,
+            locks_bucketname="b",
+            cluster_name=CLUSTER,
+            command="second",
+            describe_fn=describe,
+            region="us-east-2",
+            staleness_ceiling_seconds=7200,
         )
         assert key == _lock_key(CLUSTER)
         import json
@@ -334,8 +378,13 @@ class TestS3AcquireClusterLock:
         s3.set_last_modified(_lock_key(CLUSTER), DateTime.now(timezone.utc) - timedelta(hours=10))
         describe = _ScriptedDescribe(raises=NotFoundException("gone"))
         key = s3_acquire_cluster_lock(
-            s3, locks_bucketname="b", cluster_name=CLUSTER, command="second",
-            describe_fn=describe, region="us-east-2", staleness_ceiling_seconds=7200,
+            s3,
+            locks_bucketname="b",
+            cluster_name=CLUSTER,
+            command="second",
+            describe_fn=describe,
+            region="us-east-2",
+            staleness_ceiling_seconds=7200,
         )
         assert key == _lock_key(CLUSTER)
 
@@ -352,8 +401,13 @@ class TestS3AcquireClusterLock:
             return {"clusterStatus": "CREATE_COMPLETE"}
 
         s3_acquire_cluster_lock(
-            s3, locks_bucketname="b", cluster_name=CLUSTER, command="second",
-            describe_fn=_strict_describe, region="us-east-2", staleness_ceiling_seconds=7200,
+            s3,
+            locks_bucketname="b",
+            cluster_name=CLUSTER,
+            command="second",
+            describe_fn=_strict_describe,
+            region="us-east-2",
+            staleness_ceiling_seconds=7200,
         )
 
     def test_reclaim_race_raises_cluster_lock_error(self):
@@ -369,8 +423,13 @@ class TestS3AcquireClusterLock:
         describe = _ScriptedDescribe(status="CREATE_FAILED")
         with pytest.raises(ClusterLockError, match="reclaimed it first"):
             s3_acquire_cluster_lock(
-                s3, locks_bucketname="b", cluster_name=CLUSTER, command="second",
-                describe_fn=describe, region="us-east-2", staleness_ceiling_seconds=7200,
+                s3,
+                locks_bucketname="b",
+                cluster_name=CLUSTER,
+                command="second",
+                describe_fn=describe,
+                region="us-east-2",
+                staleness_ceiling_seconds=7200,
             )
 
     def test_unrelated_put_object_error_propagates(self):
@@ -379,7 +438,9 @@ class TestS3AcquireClusterLock:
                 raise _client_error("AccessDenied", "PutObject", status=403)
 
         with pytest.raises(ClientError):
-            s3_acquire_cluster_lock(_Denied(), locks_bucketname="b", cluster_name=CLUSTER, command="first")
+            s3_acquire_cluster_lock(
+                _Denied(), locks_bucketname="b", cluster_name=CLUSTER, command="first"
+            )
 
     def test_unexpected_describe_exception_is_treated_as_not_terminal(self):
         """An ambiguous describe_cluster failure (network error, transient
@@ -392,8 +453,13 @@ class TestS3AcquireClusterLock:
         describe = _ScriptedDescribe(raises=RuntimeError("network blip"))
         with pytest.raises(ClusterLockError):
             s3_acquire_cluster_lock(
-                s3, locks_bucketname="b", cluster_name=CLUSTER, command="second",
-                describe_fn=describe, region="us-east-2", staleness_ceiling_seconds=7200,
+                s3,
+                locks_bucketname="b",
+                cluster_name=CLUSTER,
+                command="second",
+                describe_fn=describe,
+                region="us-east-2",
+                staleness_ceiling_seconds=7200,
             )
 
 
@@ -413,11 +479,14 @@ class TestS3ReleaseClusterLock:
         caller returns or exits -- a raised exception here would mask
         whatever the caller was actually reporting, and a leaked lock is
         recovered automatically by the staleness/reclaim path anyway."""
+
         class _Denied(_FakeS3Lock):
             def delete_object(self, **kwargs):
                 raise _client_error("AccessDenied", "DeleteObject", status=403)
 
-        s3_release_cluster_lock(_Denied(), locks_bucketname="b", cluster_name=CLUSTER)  # must not raise
+        s3_release_cluster_lock(
+            _Denied(), locks_bucketname="b", cluster_name=CLUSTER
+        )  # must not raise
 
 
 class TestAcquireDistributedClusterLock:
@@ -429,7 +498,11 @@ class TestAcquireDistributedClusterLock:
     def test_creates_the_bucket_and_acquires_the_lock(self):
         s3 = _FakeS3Lock()
         key = _acquire_distributed_cluster_lock(
-            s3, locks_bucketname="b", region="us-east-2", cluster_name=CLUSTER, command="first",
+            s3,
+            locks_bucketname="b",
+            region="us-east-2",
+            cluster_name=CLUSTER,
+            command="first",
         )
         assert key == _lock_key(CLUSTER)
         assert s3.created_buckets == [
@@ -439,23 +512,39 @@ class TestAcquireDistributedClusterLock:
     def test_a_held_lock_exits_rather_than_raising(self):
         s3 = _FakeS3Lock()
         _acquire_distributed_cluster_lock(
-            s3, locks_bucketname="b", region="us-east-2", cluster_name=CLUSTER, command="first",
+            s3,
+            locks_bucketname="b",
+            region="us-east-2",
+            cluster_name=CLUSTER,
+            command="first",
         )
         with pytest.raises(SystemExit) as exc:
             _acquire_distributed_cluster_lock(
-                s3, locks_bucketname="b", region="us-east-2", cluster_name=CLUSTER, command="second",
+                s3,
+                locks_bucketname="b",
+                region="us-east-2",
+                cluster_name=CLUSTER,
+                command="second",
             )
         assert "already running" in str(exc.value.code)
 
     def test_describe_fn_is_threaded_through_for_reclaim(self):
         s3 = _FakeS3Lock()
         _acquire_distributed_cluster_lock(
-            s3, locks_bucketname="b", region="us-east-2", cluster_name=CLUSTER, command="first",
+            s3,
+            locks_bucketname="b",
+            region="us-east-2",
+            cluster_name=CLUSTER,
+            command="first",
         )
         s3.set_last_modified(_lock_key(CLUSTER), DateTime.now(timezone.utc) - timedelta(hours=10))
         describe = _ScriptedDescribe(status="CREATE_FAILED")
         key = _acquire_distributed_cluster_lock(
-            s3, locks_bucketname="b", region="us-east-2", cluster_name=CLUSTER, command="second",
+            s3,
+            locks_bucketname="b",
+            region="us-east-2",
+            cluster_name=CLUSTER,
+            command="second",
             describe_fn=describe,
         )
         assert key == _lock_key(CLUSTER)
@@ -471,9 +560,10 @@ class TestTheMcpUserPoolNameIsDerivedNotChosen:
     """
 
     def test_it_keys_on_account_and_region(self):
-        assert _derive_mcp_user_pool_name(
-            aws_account_id="183295445014", region="us-east-1"
-        ) == "parallelclustermaker-mcp-183295445014-us-east-1"
+        assert (
+            _derive_mcp_user_pool_name(aws_account_id="183295445014", region="us-east-1")
+            == "parallelclustermaker-mcp-183295445014-us-east-1"
+        )
 
     def test_two_regions_do_not_collide(self):
         a = _derive_mcp_user_pool_name(aws_account_id="1", region="us-east-1")

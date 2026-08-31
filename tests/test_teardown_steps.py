@@ -71,8 +71,7 @@ class _FakeSecretsManager:
         if self.raise_exc:
             raise self.raise_exc
         assert ForceDeleteWithoutRecovery is True, (
-            "must match --force-delete-without-recovery: immediate delete, "
-            "no recovery window"
+            "must match --force-delete-without-recovery: immediate delete, no recovery window"
         )
         self.deleted.append(SecretId)
 
@@ -136,7 +135,9 @@ class TestDeleteLocalSshKeyStep:
 class TestDeleteSecretsManagerSecretStep:
     def test_success(self):
         sm = _FakeSecretsManager()
-        result = _delete_secrets_manager_secret_step(sm, "parallelcluster/foo/serial/ssh-private-key")
+        result = _delete_secrets_manager_secret_step(
+            sm, "parallelcluster/foo/serial/ssh-private-key"
+        )
         assert result.succeeded is True
         assert sm.deleted == ["parallelcluster/foo/serial/ssh-private-key"]
 
@@ -235,9 +236,7 @@ class TestRunCredentialTeardownSteps:
         )
 
     def test_results_are_returned_in_the_playbooks_own_task_order(self, tmp_path):
-        results = run_credential_teardown_steps(
-            cf_delete_confirmed=True, **self._kwargs(tmp_path)
-        )
+        results = run_credential_teardown_steps(cf_delete_confirmed=True, **self._kwargs(tmp_path))
         assert [r.name for r in results] == [
             "Delete the EC2 keypair associated with this cluster",
             "Delete the SSH private key associated with this cluster",
@@ -664,7 +663,11 @@ class TestWaitForClusterDelete:
         )
         sleeps = []
         state = _wait_for_cluster_delete(
-            describe_fn, "foo", "us-east-1", retries=5, delay_seconds=1,
+            describe_fn,
+            "foo",
+            "us-east-1",
+            retries=5,
+            delay_seconds=1,
             sleep_fn=sleeps.append,
         )
         assert state == "DELETE_COMPLETE"
@@ -675,7 +678,11 @@ class TestWaitForClusterDelete:
         describe_fn = _ScriptedDescribeFn(["DELETE_IN_PROGRESS"])
         sleeps = []
         state = _wait_for_cluster_delete(
-            describe_fn, "foo", "us-east-1", retries=4, delay_seconds=1,
+            describe_fn,
+            "foo",
+            "us-east-1",
+            retries=4,
+            delay_seconds=1,
             sleep_fn=sleeps.append,
         )
         assert state == "TIMED_OUT"
@@ -744,8 +751,13 @@ class TestRunClusterDeleteAndClassify:
         delete_fn = _FakeDeleteFn()
         describe_fn = _ScriptedDescribeFn(["DELETE_IN_PROGRESS", "DELETE_COMPLETE"])
         outcome = run_cluster_delete_and_classify(
-            delete_fn, describe_fn, "foo", "us-east-1",
-            retries=5, delay_seconds=1, sleep_fn=_fake_sleep,
+            delete_fn,
+            describe_fn,
+            "foo",
+            "us-east-1",
+            retries=5,
+            delay_seconds=1,
+            sleep_fn=_fake_sleep,
         )
         assert outcome == ClusterDeleteOutcome(
             "DELETE_COMPLETE", True, False, "Cluster foo has been deleted."
@@ -755,8 +767,13 @@ class TestRunClusterDeleteAndClassify:
         delete_fn = _FakeDeleteFn()
         describe_fn = _ScriptedDescribeFn(["DELETE_FAILED"])
         outcome = run_cluster_delete_and_classify(
-            delete_fn, describe_fn, "foo", "us-east-1",
-            retries=5, delay_seconds=1, sleep_fn=_fake_sleep,
+            delete_fn,
+            describe_fn,
+            "foo",
+            "us-east-1",
+            retries=5,
+            delay_seconds=1,
+            sleep_fn=_fake_sleep,
         )
         assert outcome.terminal_state == "DELETE_FAILED"
         assert outcome.cf_delete_confirmed is False
@@ -766,8 +783,13 @@ class TestRunClusterDeleteAndClassify:
         delete_fn = _FakeDeleteFn()
         describe_fn = _ScriptedDescribeFn(["DELETE_IN_PROGRESS"])
         outcome = run_cluster_delete_and_classify(
-            delete_fn, describe_fn, "foo", "us-east-1",
-            retries=2, delay_seconds=1, sleep_fn=_fake_sleep,
+            delete_fn,
+            describe_fn,
+            "foo",
+            "us-east-1",
+            retries=2,
+            delay_seconds=1,
+            sleep_fn=_fake_sleep,
         )
         assert outcome.terminal_state == "TIMED_OUT"
         assert outcome.cf_delete_confirmed is False
@@ -785,7 +807,12 @@ class TestTeardownWaitFalseKicksOffWithoutPolling:
         delete_fn = _FakeDeleteFn()
         describe_fn = _ScriptedDescribeFn(["DELETE_COMPLETE"])
         run_cluster_delete_and_classify(
-            delete_fn, describe_fn, "foo", "us-east-1", wait=False, sleep_fn=_fake_sleep,
+            delete_fn,
+            describe_fn,
+            "foo",
+            "us-east-1",
+            wait=False,
+            sleep_fn=_fake_sleep,
         )
         assert delete_fn.calls == [("foo", "us-east-1")]
 
@@ -793,7 +820,12 @@ class TestTeardownWaitFalseKicksOffWithoutPolling:
         delete_fn = _FakeDeleteFn()
         describe_fn = _ScriptedDescribeFn(["DELETE_COMPLETE"])
         run_cluster_delete_and_classify(
-            delete_fn, describe_fn, "foo", "us-east-1", wait=False, sleep_fn=_fake_sleep,
+            delete_fn,
+            describe_fn,
+            "foo",
+            "us-east-1",
+            wait=False,
+            sleep_fn=_fake_sleep,
         )
         assert describe_fn.calls == []
 
@@ -808,7 +840,12 @@ class TestTeardownWaitFalseKicksOffWithoutPolling:
         delete_fn = _FakeDeleteFn()
         describe_fn = _ScriptedDescribeFn(["DELETE_COMPLETE"])
         outcome = run_cluster_delete_and_classify(
-            delete_fn, describe_fn, "foo", "us-east-1", wait=False, sleep_fn=_fake_sleep,
+            delete_fn,
+            describe_fn,
+            "foo",
+            "us-east-1",
+            wait=False,
+            sleep_fn=_fake_sleep,
         )
         assert outcome.terminal_state == "KICKED_OFF"
         assert outcome.cf_delete_confirmed is False
@@ -818,7 +855,12 @@ class TestTeardownWaitFalseKicksOffWithoutPolling:
         delete_fn = _FakeDeleteFn()
         describe_fn = _ScriptedDescribeFn(["DELETE_IN_PROGRESS"])
         outcome = run_cluster_delete_and_classify(
-            delete_fn, describe_fn, "foo", "us-east-1", wait=False, sleep_fn=_fake_sleep,
+            delete_fn,
+            describe_fn,
+            "foo",
+            "us-east-1",
+            wait=False,
+            sleep_fn=_fake_sleep,
         )
         assert outcome.terminal_state != "TIMED_OUT"
 
@@ -829,7 +871,12 @@ class TestTeardownWaitFalseKicksOffWithoutPolling:
         delete_fn = _FakeDeleteFn(raise_exc=NotFoundException("gone"))
         describe_fn = _ScriptedDescribeFn(["DELETE_IN_PROGRESS"])
         outcome = run_cluster_delete_and_classify(
-            delete_fn, describe_fn, "foo", "us-east-1", wait=False, sleep_fn=_fake_sleep,
+            delete_fn,
+            describe_fn,
+            "foo",
+            "us-east-1",
+            wait=False,
+            sleep_fn=_fake_sleep,
         )
         assert outcome.terminal_state == "CLUSTER_NOT_FOUND"
         assert outcome.cf_delete_confirmed is True
@@ -838,8 +885,13 @@ class TestTeardownWaitFalseKicksOffWithoutPolling:
         delete_fn = _FakeDeleteFn()
         describe_fn = _ScriptedDescribeFn(["DELETE_COMPLETE"])
         outcome = run_cluster_delete_and_classify(
-            delete_fn, describe_fn, "foo", "us-east-1",
-            retries=5, delay_seconds=1, sleep_fn=_fake_sleep,
+            delete_fn,
+            describe_fn,
+            "foo",
+            "us-east-1",
+            retries=5,
+            delay_seconds=1,
+            sleep_fn=_fake_sleep,
         )
         assert outcome.cf_delete_confirmed is True
         assert describe_fn.calls, "the default must still poll"
@@ -853,8 +905,13 @@ class TestTeardownProgressIsReportedDuringTheWait:
         )
         seen = []
         run_cluster_delete_and_classify(
-            delete_fn, describe_fn, "foo", "us-east-1",
-            retries=5, delay_seconds=1, sleep_fn=_fake_sleep,
+            delete_fn,
+            describe_fn,
+            "foo",
+            "us-east-1",
+            retries=5,
+            delay_seconds=1,
+            sleep_fn=_fake_sleep,
             progress_fn=lambda *a: seen.append(a),
         )
         assert len(seen) == 2
@@ -864,7 +921,12 @@ class TestTeardownProgressIsReportedDuringTheWait:
         describe_fn = _ScriptedDescribeFn(["DELETE_IN_PROGRESS"])
         seen = []
         run_cluster_delete_and_classify(
-            delete_fn, describe_fn, "foo", "us-east-1", wait=False, sleep_fn=_fake_sleep,
+            delete_fn,
+            describe_fn,
+            "foo",
+            "us-east-1",
+            wait=False,
+            sleep_fn=_fake_sleep,
             progress_fn=lambda *a: seen.append(a),
         )
         assert seen == []
@@ -873,8 +935,13 @@ class TestTeardownProgressIsReportedDuringTheWait:
         delete_fn = _FakeDeleteFn()
         describe_fn = _ScriptedDescribeFn(["DELETE_IN_PROGRESS", "DELETE_COMPLETE"])
         outcome = run_cluster_delete_and_classify(
-            delete_fn, describe_fn, "foo", "us-east-1",
-            retries=5, delay_seconds=1, sleep_fn=_fake_sleep,
+            delete_fn,
+            describe_fn,
+            "foo",
+            "us-east-1",
+            retries=5,
+            delay_seconds=1,
+            sleep_fn=_fake_sleep,
         )
         assert outcome.cf_delete_confirmed is True
 
@@ -965,6 +1032,5 @@ class TestEverySurfaceQuotesTheSameTeardownDuration:
         # matched by the stale scan above. Exempt deliberately.
         uncovered = found - set(self._SURFACES) - {"tests/test_teardown_steps.py"}
         assert uncovered == set(), (
-            f"these mention a teardown duration but are not in the manifest: "
-            f"{sorted(uncovered)}"
+            f"these mention a teardown duration but are not in the manifest: {sorted(uncovered)}"
         )

@@ -154,10 +154,7 @@ class TestExcludedPackages:
         """Grounds the whole exclusion list: requirements.txt is the
         development set and must never be installed into an artifact."""
         with open(os.path.join(REPO_ROOT, "requirements.txt")) as fh:
-            dev = [
-                l.strip() for l in fh
-                if l.strip() and not l.startswith("#")
-            ]
+            dev = [l.strip() for l in fh if l.strip() and not l.startswith("#")]
         names = {r.split(">=")[0].split("==")[0].strip() for r in dev}
         assert names & set(EXCLUDED_FROM_LAMBDA), (
             "requirements.txt no longer contains anything excluded -- either "
@@ -178,7 +175,9 @@ class TestBuildSourceArchive:
         """Anything else in there means the source list drifted from the
         leanness claim."""
         assert sorted(sources_for("router")) == [
-            "mcp_server/__init__.py", "mcp_server/router.py", "mcp_server/tiers.py",
+            "mcp_server/__init__.py",
+            "mcp_server/router.py",
+            "mcp_server/tiers.py",
         ]
 
     def test_pycache_is_never_staged(self, tmp_path):
@@ -324,9 +323,9 @@ class TestPruningIsWhatMakesTheArtifactFit:
             if f.endswith((".pyc", ".pyo"))
         ]
         assert leftover == [], leftover
-        assert not any(
-            "__pycache__" in ds for _, ds, _ in os.walk(root)
-        ), "a __pycache__ directory survived"
+        assert not any("__pycache__" in ds for _, ds, _ in os.walk(root)), (
+            "a __pycache__ directory survived"
+        )
 
     def test_the_sources_are_untouched(self, tmp_path):
         """Vacuity guard: deleting everything would satisfy the test above
@@ -342,8 +341,7 @@ class TestPruningIsWhatMakesTheArtifactFit:
         """The point of returning bytes: a build compares against
         ZIP_UNZIPPED_LIMIT_BYTES before uploading, rather than learning
         the ceiling from CreateFunction."""
-        from mcp_server.packaging import (ZIP_UNZIPPED_LIMIT_BYTES,
-                                          prune_for_lambda)
+        from mcp_server.packaging import ZIP_UNZIPPED_LIMIT_BYTES, prune_for_lambda
 
         root = self._staged(tmp_path)
         size = prune_for_lambda(str(root))

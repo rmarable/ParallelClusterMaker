@@ -40,27 +40,29 @@ def _python_files():
     untracked until recently, so a git-only sweep would have skipped the
     newest code."""
     out = subprocess.run(
-        ["git", "ls-files", "*.py"], cwd=REPO_ROOT,
-        capture_output=True, text=True, check=True,
+        ["git", "ls-files", "*.py"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
     )
     files = {os.path.join(REPO_ROOT, p) for p in out.stdout.split()}
     for sub in ("mcp_server", "tests", "src"):
         for dirpath, dirnames, filenames in os.walk(os.path.join(REPO_ROOT, sub)):
             dirnames[:] = [d for d in dirnames if d != "__pycache__"]
-            files.update(
-                os.path.join(dirpath, f) for f in filenames if f.endswith(".py")
-            )
+            files.update(os.path.join(dirpath, f) for f in filenames if f.endswith(".py"))
     return sorted(p for p in files if os.path.isfile(p))
 
 
 def _undefined_names(paths):
     result = subprocess.run(
         [sys.executable, "-m", "pyflakes", *paths],
-        cwd=REPO_ROOT, capture_output=True, text=True,
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
     )
     return [
-        line for line in (result.stdout + result.stderr).splitlines()
-        if "undefined name" in line
+        line for line in (result.stdout + result.stderr).splitlines() if "undefined name" in line
     ]
 
 
@@ -101,6 +103,7 @@ class TestNoUndefinedNames:
         with open(os.path.join(REPO_ROOT, "requirements.txt")) as fh:
             names = {
                 l.strip().split(">=")[0].split("==")[0]
-                for l in fh if l.strip() and not l.startswith("#")
+                for l in fh
+                if l.strip() and not l.startswith("#")
             }
         assert "pyflakes" in names

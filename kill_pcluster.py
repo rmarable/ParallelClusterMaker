@@ -24,6 +24,7 @@ if os.path.realpath(sys.prefix) != os.path.realpath(os.path.join(_repo_root, ".v
 import argparse
 import boto3
 import subprocess  # noqa: F401 -- unused directly; core_delete_cluster's
+
 # results-sync step does the real subprocess.run call (an ssh invocation),
 # but `import subprocess` binds this module's name to the same process-wide
 # module object pcluster_core.py's own `subprocess` name binds to, so tests
@@ -62,12 +63,8 @@ def main():
 
     # Configure arguments for the required variables.
 
-    parser.add_argument(
-        "--az", "-A", help="AWS Availability Zone (REQUIRED)", required=True
-    )
-    parser.add_argument(
-        "--cluster_name", "-N", help="cluster name (REQUIRED)", required=True
-    )
+    parser.add_argument("--az", "-A", help="AWS Availability Zone (REQUIRED)", required=True)
+    parser.add_argument("--cluster_name", "-N", help="cluster name (REQUIRED)", required=True)
     parser.add_argument(
         "--cluster_owner",
         "-O",

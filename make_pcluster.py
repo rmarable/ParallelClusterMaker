@@ -109,7 +109,7 @@ def main():
     parser.add_argument(
         "--ansible_verbosity",
         choices=["-v", "-vv", "-vvv", "-vvvv", ""],
-        help="Set the Ansible verbosity level (default = \"\", no extra verbosity)",
+        help='Set the Ansible verbosity level (default = "", no extra verbosity)',
         required=False,
         default=None,
     )
@@ -336,7 +336,7 @@ def main():
         "--enable_slurm_accounting",
         choices=["true", "false"],
         help="run a local MariaDB on the head node so sacct reports job "
-             "history; accounting dies with the cluster (default = true)",
+        "history; accounting dies with the cluster (default = true)",
         required=False,
         default=None,
     )
@@ -700,9 +700,7 @@ def main():
         # server, which has no flags, unable to honor it at all.
         # --use_defaults survives as the override for a differently-named
         # file, and still wins over this one.
-        _auto_path, _auto_defaults = load_cluster_defaults(
-            args.cluster_name, repo_root=_repo_root
-        )
+        _auto_path, _auto_defaults = load_cluster_defaults(args.cluster_name, repo_root=_repo_root)
         if _auto_path:
             _file_defaults = _auto_defaults
             print(f"Defaults: loaded from {os.path.basename(_auto_path)}")

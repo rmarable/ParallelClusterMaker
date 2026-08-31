@@ -47,7 +47,8 @@ class TestTheMarkerIsExplicit:
 
         b = make_build_event(params={"cluster_name": "osiris"}, region="us-east-1")
         c = make_completion_event(
-            cluster_name="osiris", cluster_owner="rmarable", region="us-east-1")
+            cluster_name="osiris", cluster_owner="rmarable", region="us-east-1"
+        )
         assert is_build_event(b) and not is_completion_event(b)
         assert is_completion_event(c) and not is_build_event(c)
 
@@ -56,8 +57,8 @@ class TestTheMarkerIsExplicit:
         from mcp_server.build import make_build_event
 
         ev = make_build_event(
-            params={"cluster_name": "osiris", "enable_fsx": False},
-            region="us-east-1")
+            params={"cluster_name": "osiris", "enable_fsx": False}, region="us-east-1"
+        )
         assert json.loads(json.dumps(ev)) == ev
 
     def test_region_rides_separately_from_params(self):
@@ -78,33 +79,44 @@ class TestARetriedInvocationCannotLaunchTwice:
     retried build would attempt a second launch of the same cluster."""
 
     def test_the_deploy_pins_zero_retries(self):
-        src = io.open(
-            os.path.join(REPO_ROOT, "mcp_server", "deploy.py"), encoding="utf-8"
-        ).read()
+        src = io.open(os.path.join(REPO_ROOT, "mcp_server", "deploy.py"), encoding="utf-8").read()
         tree = ast.parse(src)
-        fn = next(n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)
-                  and n.name == "_pin_async_retries_to_zero")
-        kw = [k for n in ast.walk(fn) if isinstance(n, ast.Call)
-              for k in n.keywords if k.arg == "MaximumRetryAttempts"]
+        fn = next(
+            n
+            for n in ast.walk(tree)
+            if isinstance(n, ast.FunctionDef) and n.name == "_pin_async_retries_to_zero"
+        )
+        kw = [
+            k
+            for n in ast.walk(fn)
+            if isinstance(n, ast.Call)
+            for k in n.keywords
+            if k.arg == "MaximumRetryAttempts"
+        ]
         assert kw, "the config call sets no MaximumRetryAttempts"
-        assert all(isinstance(k.value, ast.Constant) and k.value.value == 0
-                   for k in kw), "retries must be pinned to 0, not merely set"
+        assert all(isinstance(k.value, ast.Constant) and k.value.value == 0 for k in kw), (
+            "retries must be pinned to 0, not merely set"
+        )
 
     def test_every_function_creation_path_pins_it(self):
         """Two paths reach a live function -- create, and update when it
         already exists. A guard on one of them leaves every redeployed
         function retrying."""
-        src = io.open(
-            os.path.join(REPO_ROOT, "mcp_server", "deploy.py"), encoding="utf-8"
-        ).read()
+        src = io.open(os.path.join(REPO_ROOT, "mcp_server", "deploy.py"), encoding="utf-8").read()
         tree = ast.parse(src)
-        fn = next(n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)
-                  and n.name == "deploy_tier")
-        pins = [n.lineno for n in ast.walk(fn) if isinstance(n, ast.Call)
-                and isinstance(n.func, ast.Name)
-                and n.func.id == "_pin_async_retries_to_zero"]
-        returns = [n.lineno for n in ast.walk(fn) if isinstance(n, ast.Return)
-                   and n.value is not None]
+        fn = next(
+            n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == "deploy_tier"
+        )
+        pins = [
+            n.lineno
+            for n in ast.walk(fn)
+            if isinstance(n, ast.Call)
+            and isinstance(n.func, ast.Name)
+            and n.func.id == "_pin_async_retries_to_zero"
+        ]
+        returns = [
+            n.lineno for n in ast.walk(fn) if isinstance(n, ast.Return) and n.value is not None
+        ]
         assert len(pins) >= 2, (
             f"only {len(pins)} of the function-creation paths pin async "
             f"retries; both create and update reach a live function"
@@ -150,15 +162,16 @@ class TestAFailureNobodyWaitsOnIsStillFound:
         from mcp_server.build import make_build_event
 
         return make_build_event(
-            params={"cluster_name": "osiris", "cluster_owner": "rmarable"},
-            region="us-east-1")
+            params={"cluster_name": "osiris", "cluster_owner": "rmarable"}, region="us-east-1"
+        )
 
     def test_a_returned_failure_is_recorded(self, monkeypatch):
         from mcp_server import build_runner
 
         seen = []
-        monkeypatch.setattr(build_runner, "_record_failure_if_unrecorded",
-                            lambda p, m: seen.append(m) or True)
+        monkeypatch.setattr(
+            build_runner, "_record_failure_if_unrecorded", lambda p, m: seen.append(m) or True
+        )
 
         class _R:
             success = False
@@ -172,8 +185,9 @@ class TestAFailureNobodyWaitsOnIsStillFound:
         from mcp_server import build_runner
 
         seen = []
-        monkeypatch.setattr(build_runner, "_record_failure_if_unrecorded",
-                            lambda p, m: seen.append(m) or True)
+        monkeypatch.setattr(
+            build_runner, "_record_failure_if_unrecorded", lambda p, m: seen.append(m) or True
+        )
 
         def _boom(p, r):
             raise RuntimeError("network discovery failed")
@@ -189,8 +203,9 @@ class TestAFailureNobodyWaitsOnIsStillFound:
         from mcp_server import build_runner
 
         seen = []
-        monkeypatch.setattr(build_runner, "_record_failure_if_unrecorded",
-                            lambda p, m: seen.append(m) or True)
+        monkeypatch.setattr(
+            build_runner, "_record_failure_if_unrecorded", lambda p, m: seen.append(m) or True
+        )
 
         def _exit(p, r):
             raise SystemExit("ERROR: that AZ does not exist")
@@ -233,15 +248,21 @@ class TestAFailureNobodyWaitsOnIsStillFound:
         assert seen["repo_root"] == "/tmp/repo"
         assert seen["wait"] is False, "a background build must never wait"
 
-    @pytest.mark.parametrize("exc,expected", [
-        (TypeError("f() missing 1 required positional argument"),
-         "TypeError: f() missing 1 required positional argument"),
-        (SystemExit("ERROR: that AZ does not exist"),
-         "SystemExit: ERROR: that AZ does not exist"),
-        (RuntimeError(""), "RuntimeError: no detail"),
-    ])
-    def test_the_recorded_message_names_the_type_exactly_once(
-            self, monkeypatch, exc, expected):
+    @pytest.mark.parametrize(
+        "exc,expected",
+        [
+            (
+                TypeError("f() missing 1 required positional argument"),
+                "TypeError: f() missing 1 required positional argument",
+            ),
+            (
+                SystemExit("ERROR: that AZ does not exist"),
+                "SystemExit: ERROR: that AZ does not exist",
+            ),
+            (RuntimeError(""), "RuntimeError: no detail"),
+        ],
+    )
+    def test_the_recorded_message_names_the_type_exactly_once(self, monkeypatch, exc, expected):
         """`pcluster_exception_detail` returns "<Type>: <detail>" -- a whole
         message, not a fragment. Prefixing the type onto it again produced
         `TypeError: TypeError: ...` in the first failure this ever
@@ -255,8 +276,7 @@ class TestAFailureNobodyWaitsOnIsStillFound:
         """
         from mcp_server import build_runner
 
-        monkeypatch.setattr(build_runner, "_record_failure_if_unrecorded",
-                            lambda p, m: True)
+        monkeypatch.setattr(build_runner, "_record_failure_if_unrecorded", lambda p, m: True)
 
         def _boom(p, r):
             raise exc
@@ -271,8 +291,9 @@ class TestAFailureNobodyWaitsOnIsStillFound:
         from mcp_server import build_runner
 
         seen = []
-        monkeypatch.setattr(build_runner, "_record_failure_if_unrecorded",
-                            lambda p, m: seen.append(m) or True)
+        monkeypatch.setattr(
+            build_runner, "_record_failure_if_unrecorded", lambda p, m: seen.append(m) or True
+        )
 
         class _R:
             success = True
@@ -293,15 +314,18 @@ class TestAFailureNobodyWaitsOnIsStillFound:
         class _S3:
             pass
 
-        monkeypatch.setattr("mcp_server.tools._record_store",
-                            lambda region=None: (_S3(), "bucket"))
+        monkeypatch.setattr("mcp_server.tools._record_store", lambda region=None: (_S3(), "bucket"))
         monkeypatch.setattr(
             "pcluster_core.get_build_failure",
-            lambda s3, **kw: calls.__setitem__("get", calls["get"] + 1) or
-            {"stage": "IAM setup", "message": "AccessDenied"})
+            lambda s3, **kw: (
+                calls.__setitem__("get", calls["get"] + 1)
+                or {"stage": "IAM setup", "message": "AccessDenied"}
+            ),
+        )
         monkeypatch.setattr(
             "pcluster_core._publish_build_failure",
-            lambda s3, **kw: calls.__setitem__("put", calls["put"] + 1) or True)
+            lambda s3, **kw: calls.__setitem__("put", calls["put"] + 1) or True,
+        )
 
         assert br._record_failure_if_unrecorded(self._payload(), "build failed") is False
         assert calls["put"] == 0, "it overwrote the stage-specific record"
@@ -316,12 +340,11 @@ class TestAFailureNobodyWaitsOnIsStillFound:
         class _S3:
             pass
 
-        monkeypatch.setattr("mcp_server.tools._record_store",
-                            lambda region=None: (_S3(), "bucket"))
-        monkeypatch.setattr("pcluster_core.get_build_failure",
-                            lambda s3, **kw: None)
-        monkeypatch.setattr("pcluster_core._publish_build_failure",
-                            lambda s3, **kw: put.append(kw) or True)
+        monkeypatch.setattr("mcp_server.tools._record_store", lambda region=None: (_S3(), "bucket"))
+        monkeypatch.setattr("pcluster_core.get_build_failure", lambda s3, **kw: None)
+        monkeypatch.setattr(
+            "pcluster_core._publish_build_failure", lambda s3, **kw: put.append(kw) or True
+        )
 
         assert br._record_failure_if_unrecorded(self._payload(), "bad AZ") is True
         assert put and put[0]["message"] == "bad AZ"
@@ -332,9 +355,10 @@ class TestAFailureNobodyWaitsOnIsStillFound:
         must not become the thing the operator debugs."""
         import mcp_server.build_runner as br
 
-        monkeypatch.setattr("mcp_server.tools._record_store",
-                            lambda region=None: (_ for _ in ()).throw(
-                                RuntimeError("no store")))
+        monkeypatch.setattr(
+            "mcp_server.tools._record_store",
+            lambda region=None: (_ for _ in ()).throw(RuntimeError("no store")),
+        )
         assert br._record_failure_if_unrecorded(self._payload(), "x") is False
 
 
@@ -362,8 +386,10 @@ class TestWhetherTheBuildStartedIsAFactNotAGuess:
                 raise RuntimeError("throttled")
 
         monkeypatch.setattr("boto3.client", lambda *a, **k: _Boom())
-        assert t._start_async_build(
-            type("P", (), {"__dataclass_fields__": {}})(), "us-east-1") is False
+        assert (
+            t._start_async_build(type("P", (), {"__dataclass_fields__": {}})(), "us-east-1")
+            is False
+        )
 
     def test_the_handler_routes_a_build_event(self):
         """A build request and a tools/call arrive on the same function."""
@@ -377,14 +403,12 @@ class TestWhetherTheBuildStartedIsAFactNotAGuess:
         """make_pcluster.py has no gateway in front of it and an operator
         watching a terminal wants the progress output. It must keep calling
         core_create_cluster directly and synchronously."""
-        src = io.open(
-            os.path.join(REPO_ROOT, "make_pcluster.py"), encoding="utf-8"
-        ).read()
-        assert_source_is_real(src, 'test_the_cli_is_untouched')
+        src = io.open(os.path.join(REPO_ROOT, "make_pcluster.py"), encoding="utf-8").read()
+        assert_source_is_real(src, "test_the_cli_is_untouched")
         assert "_start_async_build" not in src
-        assert_source_is_real(src, 'test_the_cli_is_untouched')
+        assert_source_is_real(src, "test_the_cli_is_untouched")
         assert "make_build_event" not in src
-        assert_source_is_real(src, 'test_the_cli_is_untouched')
+        assert_source_is_real(src, "test_the_cli_is_untouched")
         assert "InvocationType" not in src
 
 
@@ -409,20 +433,23 @@ class TestTheTierCanInvokeItselfToBuild:
             os.path.join(REPO_ROOT, "templates", "MCPStackMutation.json_src"),
             encoding="utf-8",
         ).read()
-        doc = json.loads(src.replace("<AWS_ACCOUNT_ID>", "123456789012")
-                            .replace("<AWS_REGION>", "us-east-1"))
+        doc = json.loads(
+            src.replace("<AWS_ACCOUNT_ID>", "123456789012").replace("<AWS_REGION>", "us-east-1")
+        )
         # By Sid, not by action: several statements grant
         # lambda:InvokeFunction and the first of them is PCluster's own
         # function namespace, which has nothing to do with self-invocation.
-        st = next(x for x in doc["Statement"]
-                  if x.get("Sid") == "InvokeItselfForAsyncWork")
+        st = next(x for x in doc["Statement"] if x.get("Sid") == "InvokeItselfForAsyncWork")
         r = st["Resource"]
         return [r] if isinstance(r, str) else r
 
-    @pytest.mark.parametrize("function_name", [
-        "pclustermaker-mcp-stack-mutation",       # the teardown poller
-        "pclustermaker-mcp-stack-mutation-node",  # the build, and create_cluster
-    ])
+    @pytest.mark.parametrize(
+        "function_name",
+        [
+            "pclustermaker-mcp-stack-mutation",  # the teardown poller
+            "pclustermaker-mcp-stack-mutation-node",  # the build, and create_cluster
+        ],
+    )
     def test_each_self_invoking_tier_is_granted_its_own_arn(self, function_name):
         import fnmatch
 
@@ -432,11 +459,14 @@ class TestTheTierCanInvokeItselfToBuild:
             f"silently falls back to running inline and timing out"
         )
 
-    @pytest.mark.parametrize("function_name", [
-        "pclustermaker-mcp-read-only",
-        "pclustermaker-mcp-router",
-        "pclustermaker-mcp-authorizer",
-    ])
+    @pytest.mark.parametrize(
+        "function_name",
+        [
+            "pclustermaker-mcp-read-only",
+            "pclustermaker-mcp-router",
+            "pclustermaker-mcp-authorizer",
+        ],
+    )
     def test_it_reaches_no_further_than_that(self, function_name):
         """The vacuity guard. `function:*` would satisfy the test above and
         hand the build tier invoke on every function in the account."""
@@ -483,11 +513,19 @@ class TestTheCliCanTearDownWhatItDidNotBuild:
     def test_it_still_hands_the_core_what_the_core_needs(self):
         """The vacuity guard. Deleting the checks must not have deleted the
         call, and the core resolves everything else itself."""
-        fn = next(n for n in ast.walk(self._tree())
-                  if isinstance(n, ast.FunctionDef) and n.name == "main")
-        call = next((n for n in ast.walk(fn) if isinstance(n, ast.Call)
-                     and isinstance(n.func, ast.Name)
-                     and n.func.id == "core_delete_cluster"), None)
+        fn = next(
+            n for n in ast.walk(self._tree()) if isinstance(n, ast.FunctionDef) and n.name == "main"
+        )
+        call = next(
+            (
+                n
+                for n in ast.walk(fn)
+                if isinstance(n, ast.Call)
+                and isinstance(n.func, ast.Name)
+                and n.func.id == "core_delete_cluster"
+            ),
+            None,
+        )
         assert call is not None, "the CLI no longer calls core_delete_cluster"
         passed = {k.arg for k in call.keywords}
         assert {"cluster_name", "cluster_owner", "region", "repo_root"} <= passed
@@ -495,14 +533,17 @@ class TestTheCliCanTearDownWhatItDidNotBuild:
     def test_the_core_still_carries_the_fallback(self):
         """The other half of the pair. Removing the CLI's check is only
         correct while the core actually reads the store."""
-        src = io.open(
-            os.path.join(REPO_ROOT, "src", "pcluster_core.py"), encoding="utf-8"
-        ).read()
-        fn = next(n for n in ast.walk(ast.parse(src))
-                  if isinstance(n, ast.FunctionDef)
-                  and n.name == "core_delete_cluster")
-        called = {n.func.id for n in ast.walk(fn) if isinstance(n, ast.Call)
-                  and isinstance(n.func, ast.Name)}
+        src = io.open(os.path.join(REPO_ROOT, "src", "pcluster_core.py"), encoding="utf-8").read()
+        fn = next(
+            n
+            for n in ast.walk(ast.parse(src))
+            if isinstance(n, ast.FunctionDef) and n.name == "core_delete_cluster"
+        )
+        called = {
+            n.func.id
+            for n in ast.walk(fn)
+            if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+        }
         assert "_cluster_record_from_store" in called, (
             "core_delete_cluster no longer reads the store, so the CLI's "
             "check was load-bearing after all"
@@ -526,11 +567,12 @@ class TestTagGetResourcesReachesTheTiersThatNeedIt:
     def _doc(name):
         import json
 
-        src = io.open(os.path.join(REPO_ROOT, "templates", name),
-                      encoding="utf-8").read()
-        for k, v in (("<AWS_ACCOUNT_ID>", "123456789012"),
-                     ("<AWS_REGION>", "us-east-1"),
-                     ("<MCP_USER_POOL_ID>", "us-east-1_XXXXXXXXX")):
+        src = io.open(os.path.join(REPO_ROOT, "templates", name), encoding="utf-8").read()
+        for k, v in (
+            ("<AWS_ACCOUNT_ID>", "123456789012"),
+            ("<AWS_REGION>", "us-east-1"),
+            ("<MCP_USER_POOL_ID>", "us-east-1_XXXXXXXXX"),
+        ):
             src = src.replace(k, v)
         return json.loads(src)
 
@@ -547,24 +589,30 @@ class TestTagGetResourcesReachesTheTiersThatNeedIt:
                 return True
         return False
 
-    @pytest.mark.parametrize("policy", [
-        "MCPStackMutation.json_src",     # stack-mutation and -node
-        "MCPReadOnlyLambda.json_src",    # describe-cluster
-        "MCPFleetToggleLambda.json_src",  # update-compute-fleet
-        "OperatorPolicy.json_src",       # the CLI itself
-    ])
+    @pytest.mark.parametrize(
+        "policy",
+        [
+            "MCPStackMutation.json_src",  # stack-mutation and -node
+            "MCPReadOnlyLambda.json_src",  # describe-cluster
+            "MCPFleetToggleLambda.json_src",  # update-compute-fleet
+            "OperatorPolicy.json_src",  # the CLI itself
+        ],
+    )
     def test_every_policy_that_reads_a_cluster_can_resolve_its_tags(self, policy):
         assert self._granted(self._doc(policy), "tag:GetResources"), (
             f"{policy} cannot call tag:GetResources, which 3.16.0 requires "
             f"to resolve login node load balancers"
         )
 
-    @pytest.mark.parametrize("action", [
-        "elasticloadbalancing:DescribeLoadBalancers",
-        "elasticloadbalancing:DescribeTags",
-        "elasticloadbalancing:DescribeTargetGroups",
-        "elasticloadbalancing:DescribeTargetHealth",
-    ])
+    @pytest.mark.parametrize(
+        "action",
+        [
+            "elasticloadbalancing:DescribeLoadBalancers",
+            "elasticloadbalancing:DescribeTags",
+            "elasticloadbalancing:DescribeTargetGroups",
+            "elasticloadbalancing:DescribeTargetHealth",
+        ],
+    )
     def test_the_operator_can_read_a_login_node_load_balancer(self, action):
         """`pcluster/aws/elb.py` makes exactly these four calls, and
         `describe-cluster` makes them against any cluster with a login node
@@ -586,12 +634,9 @@ class TestTagGetResourcesReachesTheTiersThatNeedIt:
         elasticloadbalancing action here would let anyone holding operator
         credentials reconfigure a load balancer."""
         doc = self._doc("OperatorPolicy.json_src")
-        st = next(x for x in doc["Statement"]
-                  if x.get("Sid") == "LoginNodeLoadBalancerRead")
+        st = next(x for x in doc["Statement"] if x.get("Sid") == "LoginNodeLoadBalancerRead")
         for a in st["Action"]:
-            assert a.split(":")[1].startswith(("Describe", "Get", "List")), (
-                f"{a} is not a read"
-            )
+            assert a.split(":")[1].startswith(("Describe", "Get", "List")), f"{a} is not a read"
 
     def test_the_mcp_boundary_ceiling_permits_it(self):
         """Without this the grant above is nullified, and nothing fails at
@@ -601,24 +646,30 @@ class TestTagGetResourcesReachesTheTiersThatNeedIt:
     def test_the_cluster_boundary_permits_it_too(self):
         assert self._granted(self._doc("ClusterRoleBoundary.json_src"), "tag:GetResources")
 
-    @pytest.mark.parametrize("policy", [
-        "MCPRouterLambda.json_src",
-        "MCPAuthorizerLambda.json_src",
-        "MCPRegisterLambda.json_src",
-    ])
+    @pytest.mark.parametrize(
+        "policy",
+        [
+            "MCPRouterLambda.json_src",
+            "MCPAuthorizerLambda.json_src",
+            "MCPRegisterLambda.json_src",
+        ],
+    )
     def test_it_reaches_no_tier_that_reads_no_cluster(self, policy):
         """The vacuity guard. The router executes no tool logic and the
         authorizer validates a token; neither describes a cluster, so
         neither should have grown this."""
         assert not self._granted(self._doc(policy), "tag:GetResources")
 
-    @pytest.mark.parametrize("policy", [
-        "MCPStackMutation.json_src",
-        "MCPReadOnlyLambda.json_src",
-        "MCPFleetToggleLambda.json_src",
-        "OperatorPolicy.json_src",
-        "MCPRoleBoundary.json_src",
-    ])
+    @pytest.mark.parametrize(
+        "policy",
+        [
+            "MCPStackMutation.json_src",
+            "MCPReadOnlyLambda.json_src",
+            "MCPFleetToggleLambda.json_src",
+            "OperatorPolicy.json_src",
+            "MCPRoleBoundary.json_src",
+        ],
+    )
     def test_each_still_fits_the_managed_policy_limit(self, policy):
         """MCPStackMutation is the one to watch: it was 6,054 of 6,144
         bytes before this grant."""

@@ -113,8 +113,12 @@ def _allowed_action_patterns(fnames):
 
 
 def _denied_actions(fname):
-    return {a for stmt in _policy(fname)["Statement"] if stmt["Effect"] == "Deny"
-            for a in _actions(stmt)}
+    return {
+        a
+        for stmt in _policy(fname)["Statement"]
+        if stmt["Effect"] == "Deny"
+        for a in _actions(stmt)
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -149,10 +153,10 @@ def _client_error(code, operation):
 
 
 class _ContractIam:
-    def __init__(self, existing_policies=(), existing_role=None,
-                 existing_role_boundary=None):
-        self.policies = {name: {"Version": "2012-10-17", "Statement": []}
-                         for name in existing_policies}
+    def __init__(self, existing_policies=(), existing_role=None, existing_role_boundary=None):
+        self.policies = {
+            name: {"Version": "2012-10-17", "Statement": []} for name in existing_policies
+        }
         self.roles = {}
         if existing_role:
             self.roles[existing_role] = {"boundary": existing_role_boundary}
@@ -171,9 +175,13 @@ class _ContractIam:
             raise _client_error("EntityAlreadyExists", "CreatePolicy")
         self.policies[PolicyName] = json.loads(PolicyDocument)
         self.created_policies.append(PolicyName)
-        return {"Policy": {"PolicyName": PolicyName,
-                           "Arn": f"arn:aws:iam::{ACCOUNT}:policy/{PolicyName}",
-                           "DefaultVersionId": "v1"}}
+        return {
+            "Policy": {
+                "PolicyName": PolicyName,
+                "Arn": f"arn:aws:iam::{ACCOUNT}:policy/{PolicyName}",
+                "DefaultVersionId": "v1",
+            }
+        }
 
     def get_role(self, RoleName):
         self.calls.append(("get_role", RoleName))
@@ -194,20 +202,25 @@ class _ContractIam:
             }
         return {"Role": role}
 
-    def create_role(self, RoleName, AssumeRolePolicyDocument, Description="",
-                    PermissionsBoundary=None):
+    def create_role(
+        self, RoleName, AssumeRolePolicyDocument, Description="", PermissionsBoundary=None
+    ):
         self.calls.append(("create_role", RoleName))
         if RoleName in self.roles:
             raise _client_error("EntityAlreadyExists", "CreateRole")
         json.loads(AssumeRolePolicyDocument)
         self.roles[RoleName] = {"boundary": PermissionsBoundary}
         self.attachments[RoleName] = set()
-        self.created_roles.append({"name": RoleName,
-                                   "boundary": PermissionsBoundary})
-        return {"Role": {"Path": "/", "RoleName": RoleName,
-                         "RoleId": "AROAEXAMPLE",
-                         "Arn": f"arn:aws:iam::{ACCOUNT}:role/{RoleName}",
-                         "CreateDate": 1}}
+        self.created_roles.append({"name": RoleName, "boundary": PermissionsBoundary})
+        return {
+            "Role": {
+                "Path": "/",
+                "RoleName": RoleName,
+                "RoleId": "AROAEXAMPLE",
+                "Arn": f"arn:aws:iam::{ACCOUNT}:role/{RoleName}",
+                "CreateDate": 1,
+            }
+        }
 
     def put_role_permissions_boundary(self, RoleName, PermissionsBoundary):
         self.calls.append(("put_role_permissions_boundary", RoleName))
@@ -341,9 +354,7 @@ class TestTheDenyPolicyDeniesOnlyThingsNothingGrants:
         resource, which for escalation primitives is the whole account. The one
         statement that is legitimately scoped lives in the boundary, not here."""
         for stmt in _policy(DENY_POLICY)["Statement"]:
-            assert _resources(stmt) == ["*"], (
-                f"{stmt.get('Sid')} is scoped to {stmt['Resource']}"
-            )
+            assert _resources(stmt) == ["*"], f"{stmt.get('Sid')} is scoped to {stmt['Resource']}"
 
     def test_it_closes_the_escalation_chain_head_node_iam_leaves_open(self):
         """The chain templates/CLAUDE.local.md documents: HeadNode-IAM grants
@@ -358,8 +369,12 @@ class TestTheDenyPolicyDeniesOnlyThingsNothingGrants:
             "HeadNode-IAM, so this test no longer describes the cluster"
         )
         denied = _denied_actions(DENY_POLICY)
-        for link in ("iam:PutRolePolicy", "iam:CreatePolicy",
-                     "iam:CreatePolicyVersion", "iam:SetDefaultPolicyVersion"):
+        for link in (
+            "iam:PutRolePolicy",
+            "iam:CreatePolicy",
+            "iam:CreatePolicyVersion",
+            "iam:SetDefaultPolicyVersion",
+        ):
             assert link in denied
 
 
@@ -372,8 +387,8 @@ class TestTheDenyPolicyReachesEveryNode:
         iam = _ContractIam()
         _setup(iam, tmp_path)
         assert "pclustermaker-policy-s1-ClusterNode-Deny" in iam.created_policies
-        assert "pclustermaker-policy-s1-ClusterNode-Deny" in (
-            iam.attachments["pclustermaker-role-s1"]
+        assert (
+            "pclustermaker-policy-s1-ClusterNode-Deny" in (iam.attachments["pclustermaker-role-s1"])
         )
 
     @pytest.mark.parametrize("enable_monitoring", [False, True])
@@ -391,22 +406,22 @@ class TestTheDenyPolicyReachesEveryNode:
         """An undeleted policy costs nothing but blocks a same-name rebuild and
         accumulates silently."""
         iam = _ContractIam(
-            existing_policies=[
-                "pclustermaker-policy-s1" + s for s in _MANAGED_POLICY_SUFFIXES
-            ],
+            existing_policies=["pclustermaker-policy-s1" + s for s in _MANAGED_POLICY_SUFFIXES],
             existing_role="pclustermaker-role-s1",
         )
         iam.attachments["pclustermaker-role-s1"] = set(iam.policies)
         _delete_managed_policies(
-            iam, "pclustermaker-role-s1", "pclustermaker-policy-s1", ACCOUNT,
-            suppress=False, enable_monitoring=enable_monitoring,
+            iam,
+            "pclustermaker-role-s1",
+            "pclustermaker-policy-s1",
+            ACCOUNT,
+            suppress=False,
+            enable_monitoring=enable_monitoring,
         )
         assert "pclustermaker-policy-s1-ClusterNode-Deny" in iam.deleted_policies
         assert "pclustermaker-policy-s1-ClusterNode-Deny" in iam.detached
 
-    def test_every_node_pool_in_the_cluster_config_carries_it(
-        self, rendered_cluster_config
-    ):
+    def test_every_node_pool_in_the_cluster_config_carries_it(self, rendered_cluster_config):
         """Parsed out of the rendered YAML, not matched as text. The three
         AdditionalIamPolicies sites are byte-identical, so a substring check
         passes with the policy added to only one of them."""
@@ -420,9 +435,7 @@ class TestTheDenyPolicyReachesEveryNode:
             policies = [p["Policy"] for p in pool["Iam"]["AdditionalIamPolicies"]]
             assert arn in policies, f"{name} does not carry ClusterNode-Deny"
 
-    def test_the_head_node_gets_it_through_the_role_instead(
-        self, rendered_cluster_config
-    ):
+    def test_the_head_node_gets_it_through_the_role_instead(self, rendered_cluster_config):
         """The head node has InstanceRole, which PCluster treats as mutually
         exclusive with AdditionalIamPolicies -- so its copy can only come from
         _setup_iam's attach, and this is the fact that also makes the head node
@@ -437,8 +450,7 @@ class TestTheHeadNodeRoleIsCreatedUnderTheBoundary:
         iam = _ContractIam()
         _setup(iam, tmp_path)
         assert iam.created_roles == [
-            {"name": "pclustermaker-role-s1",
-             "boundary": _cluster_boundary_arn(ACCOUNT)}
+            {"name": "pclustermaker-role-s1", "boundary": _cluster_boundary_arn(ACCOUNT)}
         ]
 
     def test_the_boundary_exists_before_the_role_does(self, tmp_path):
@@ -447,8 +459,9 @@ class TestTheHeadNodeRoleIsCreatedUnderTheBoundary:
         both calls succeed against the fake in either order."""
         iam = _ContractIam()
         _setup(iam, tmp_path)
-        created = [c for c in iam.calls if c[0] == "create_policy"
-                   and c[1] == _cluster_boundary_name()]
+        created = [
+            c for c in iam.calls if c[0] == "create_policy" and c[1] == _cluster_boundary_name()
+        ]
         roles = [i for i, c in enumerate(iam.calls) if c[0] == "create_role"]
         assert created, "the boundary was never created"
         assert iam.calls.index(("create_policy", _cluster_boundary_name())) < roles[0]
@@ -456,13 +469,9 @@ class TestTheHeadNodeRoleIsCreatedUnderTheBoundary:
     def test_an_existing_role_has_the_boundary_reasserted(self, tmp_path):
         iam = _ContractIam(existing_role="pclustermaker-role-s1")
         _setup(iam, tmp_path)
-        assert iam.boundary_puts == [
-            ("pclustermaker-role-s1", _cluster_boundary_arn(ACCOUNT))
-        ]
+        assert iam.boundary_puts == [("pclustermaker-role-s1", _cluster_boundary_arn(ACCOUNT))]
 
-    def test_the_reassert_happens_before_the_already_satisfied_early_return(
-        self, tmp_path, capsys
-    ):
+    def test_the_reassert_happens_before_the_already_satisfied_early_return(self, tmp_path, capsys):
         """The case the whole ordering exists for. _setup_iam returns early when
         the role is present with every expected policy attached -- which is what
         a role built by a toolkit predating the boundary looks like on every
@@ -471,9 +480,7 @@ class TestTheHeadNodeRoleIsCreatedUnderTheBoundary:
         """
         role = "pclustermaker-role-s1"
         iam = _ContractIam(
-            existing_policies=[
-                "pclustermaker-policy-s1" + s for s in _MANAGED_POLICY_SUFFIXES
-            ],
+            existing_policies=["pclustermaker-policy-s1" + s for s in _MANAGED_POLICY_SUFFIXES],
             existing_role=role,
         )
         iam.attachments[role] = set(iam.policies)
@@ -493,13 +500,12 @@ class TestTheHeadNodeRoleIsCreatedUnderTheBoundary:
         assert iam.policies[_cluster_boundary_name()] == before
         assert iam.created_roles[0]["boundary"] == _cluster_boundary_arn(ACCOUNT)
 
-    def test_a_create_policy_failure_that_is_not_already_exists_propagates(
-        self, tmp_path
-    ):
+    def test_a_create_policy_failure_that_is_not_already_exists_propagates(self, tmp_path):
         """An AccessDenied on the boundary must not be swallowed as "it already
         exists": the role would then be created against an ARN that resolves to
         nothing, or -- worse, if create_role somehow succeeded -- uncapped. Only
         EntityAlreadyExists is the reuse path."""
+
         class _Denied(_ContractIam):
             def create_policy(self, PolicyName, PolicyDocument):
                 if PolicyName == _cluster_boundary_name():
@@ -526,8 +532,12 @@ class TestTheHeadNodeRoleIsCreatedUnderTheBoundary:
         )
         iam.attachments[role] = set(iam.policies) - {_cluster_boundary_name()}
         _delete_managed_policies(
-            iam, role, "pclustermaker-policy-s1", ACCOUNT,
-            suppress=False, enable_monitoring=True,
+            iam,
+            role,
+            "pclustermaker-policy-s1",
+            ACCOUNT,
+            suppress=False,
+            enable_monitoring=True,
         )
         assert _cluster_boundary_name() in iam.policies
         assert _cluster_boundary_name() not in iam.deleted_policies
@@ -541,7 +551,7 @@ class TestTheHeadNodeRoleIsCreatedUnderTheBoundary:
         boundary is created there and naming it is correct."""
         for relpath in ("kill_pcluster.py",):
             with open(os.path.join(REPO_ROOT, relpath)) as fh:
-                assert_source_is_real(fh.read(), 'test_no_teardown_surface_names_the_boundary')
+                assert_source_is_real(fh.read(), "test_no_teardown_surface_names_the_boundary")
                 assert _cluster_boundary_name() not in fh.read(), (
                     f"{relpath} names the shared cluster boundary"
                 )
@@ -623,8 +633,7 @@ class TestTheBoundaryCeilingCoversWhatTheClusterPoliciesGrant:
                     f"first time an identity policy grants a sibling action"
                 )
         assert len(self._ceiling_services()) < 40, (
-            "the ceiling has grown past a derived union into an allowlist of "
-            "most of AWS"
+            "the ceiling has grown past a derived union into an allowlist of most of AWS"
         )
 
     def test_the_boundary_is_at_least_as_strong_as_the_deny_policy(self):
@@ -645,8 +654,12 @@ class TestTheBoundaryCeilingCoversWhatTheClusterPoliciesGrant:
             if stmt["Effect"] != "Deny" or arn not in _resources(stmt):
                 continue
             covered |= set(_actions(stmt))
-        for action in ("iam:CreatePolicyVersion", "iam:SetDefaultPolicyVersion",
-                       "iam:DeletePolicyVersion", "iam:DeletePolicy"):
+        for action in (
+            "iam:CreatePolicyVersion",
+            "iam:SetDefaultPolicyVersion",
+            "iam:DeletePolicyVersion",
+            "iam:DeletePolicy",
+        ):
             assert action in covered, f"the boundary does not deny {action} on itself"
 
     def test_the_arn_the_document_names_is_the_one_the_code_creates(self):
@@ -708,8 +721,7 @@ class TestTheOperatorCanActuallyCreateAndBindTheBoundary:
     """
 
     def setup_method(self):
-        self.statements = {s.get("Sid"): s
-                           for s in _policy("OperatorPolicy.json_src")["Statement"]}
+        self.statements = {s.get("Sid"): s for s in _policy("OperatorPolicy.json_src")["Statement"]}
 
     def test_the_boundary_is_outside_the_policy_lifecycle_wildcard(self):
         """The premise the two new statements exist for. If the boundary name
@@ -741,9 +753,13 @@ class TestTheOperatorCanActuallyCreateAndBindTheBoundary:
     def test_the_operator_cannot_weaken_the_boundary(self):
         stmt = self.statements["IAMDenyWeakeningTheClusterBoundary"]
         assert stmt["Effect"] == "Deny"
-        for action in ("iam:CreatePolicyVersion", "iam:SetDefaultPolicyVersion",
-                       "iam:DeletePolicyVersion", "iam:DeletePolicy",
-                       "iam:DeleteRolePermissionsBoundary"):
+        for action in (
+            "iam:CreatePolicyVersion",
+            "iam:SetDefaultPolicyVersion",
+            "iam:DeletePolicyVersion",
+            "iam:DeletePolicy",
+            "iam:DeleteRolePermissionsBoundary",
+        ):
             assert action in _actions(stmt)
         assert _cluster_boundary_arn(ACCOUNT) in _resources(stmt)
         assert f"arn:aws:iam::{ACCOUNT}:role/pclustermaker-role-*" in _resources(stmt)

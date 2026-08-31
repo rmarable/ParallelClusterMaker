@@ -71,14 +71,19 @@ def _stage(mod, monkeypatch, status, argv_extra=(), core_result=None, core_raise
         if core_raises is not None:
             raise core_raises
         return core_result or pcluster_core.FleetActionResult(
-            CLUSTER, "stop" if core_name == "core_stop_fleet" else "start", status, None, "request",
+            CLUSTER,
+            "stop" if core_name == "core_stop_fleet" else "start",
+            status,
+            None,
+            "request",
         )
 
     monkeypatch.setattr(mod, core_name, _core)
 
     if hasattr(mod, "ctrlC_Abort"):
         monkeypatch.setattr(
-            mod, "ctrlC_Abort",
+            mod,
+            "ctrlC_Abort",
             lambda *a, **k: calls.append("abort_before_core"),
         )
     monkeypatch.setattr(sys, "argv", [mod.__name__, "-N", CLUSTER] + list(argv_extra))
@@ -96,14 +101,18 @@ def start_mod():
 
 
 class TestStopFleetCliShim:
-    def test_running_fleet_calls_core_stop_fleet_with_wait_false_by_default(self, stop_mod, monkeypatch):
+    def test_running_fleet_calls_core_stop_fleet_with_wait_false_by_default(
+        self, stop_mod, monkeypatch
+    ):
         calls = _stage(stop_mod, monkeypatch, "RUNNING")
         stop_mod.main()
         core_calls = [c for c in calls if isinstance(c, dict)]
         assert core_calls[0]["wait"] is False
         assert core_calls[0]["region"] == REGION
 
-    def test_operator_gets_an_abort_window_before_core_stop_fleet_is_called(self, stop_mod, monkeypatch):
+    def test_operator_gets_an_abort_window_before_core_stop_fleet_is_called(
+        self, stop_mod, monkeypatch
+    ):
         """Stopping the fleet kills in-flight Slurm jobs, so the window has
         to open before the actual update-compute-fleet call, which now
         happens inside core_stop_fleet."""
@@ -163,7 +172,9 @@ class TestStopFleetCliShim:
 
     def test_core_pcluster_maker_error_becomes_a_clean_exit(self, stop_mod, monkeypatch):
         _stage(
-            stop_mod, monkeypatch, "RUNNING",
+            stop_mod,
+            monkeypatch,
+            "RUNNING",
             core_raises=pcluster_core.PClusterMakerError("ERROR: something went wrong"),
         )
         with pytest.raises(SystemExit) as exc:
@@ -223,7 +234,9 @@ class TestStartFleetCliShim:
 
     def test_core_pcluster_maker_error_becomes_a_clean_exit(self, start_mod, monkeypatch):
         _stage(
-            start_mod, monkeypatch, "STOPPED",
+            start_mod,
+            monkeypatch,
+            "STOPPED",
             core_raises=pcluster_core.PClusterMakerError("ERROR: something went wrong"),
         )
         with pytest.raises(SystemExit) as exc:

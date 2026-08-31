@@ -11,9 +11,11 @@ from pcluster_core import _get_od_price, _get_spot_price, _cost_summary_lines
 
 try:
     from botocore.exceptions import ClientError
+
     def _fake_client_error(code):
         return ClientError({"Error": {"Code": code, "Message": code}}, "op")
 except ImportError:
+
     def _fake_client_error(code):
         e = Exception(code)
         e.response = {"Error": {"Code": code, "Message": code}}
@@ -24,18 +26,13 @@ except ImportError:
 # Fake clients
 # ---------------------------------------------------------------------------
 
+
 def _od_response(price_str):
     """Build a minimal realistic Pricing API response for one instance type."""
     payload = {
         "terms": {
             "OnDemand": {
-                "TERM1": {
-                    "priceDimensions": {
-                        "DIM1": {
-                            "pricePerUnit": {"USD": price_str}
-                        }
-                    }
-                }
+                "TERM1": {"priceDimensions": {"DIM1": {"pricePerUnit": {"USD": price_str}}}}
             }
         }
     }
@@ -50,9 +47,7 @@ class _FakePricingClient:
         self.calls = []
 
     def get_products(self, **kwargs):
-        itype = next(
-            f["Value"] for f in kwargs["Filters"] if f["Field"] == "instanceType"
-        )
+        itype = next(f["Value"] for f in kwargs["Filters"] if f["Field"] == "instanceType")
         self.call_count += 1
         self.calls.append(itype)
         val = self._responses.get(itype)
@@ -75,13 +70,17 @@ class _FakeEC2Client:
             return {"SpotPriceHistory": []}
         if isinstance(val, Exception):
             raise val
-        return {"SpotPriceHistory": [{"InstanceType": itype, "SpotPrice": val,
-                                       "AvailabilityZone": "us-east-1a"}]}
+        return {
+            "SpotPriceHistory": [
+                {"InstanceType": itype, "SpotPrice": val, "AvailabilityZone": "us-east-1a"}
+            ]
+        }
 
 
 # ---------------------------------------------------------------------------
 # _get_od_price
 # ---------------------------------------------------------------------------
+
 
 class TestGetOdPrice:
     def test_success(self):
@@ -103,17 +102,13 @@ class TestGetOdPrice:
         assert "not in Pricing location map" in err
 
     def test_access_denied_returns_helpful_message(self):
-        client = _FakePricingClient(
-            {"c8g.2xlarge": _fake_client_error("AccessDeniedException")}
-        )
+        client = _FakePricingClient({"c8g.2xlarge": _fake_client_error("AccessDeniedException")})
         price, err = _get_od_price(client, "c8g.2xlarge", "us-east-1")
         assert price is None
         assert "pricing:GetProducts" in err
 
     def test_other_client_error(self):
-        client = _FakePricingClient(
-            {"c8g.2xlarge": _fake_client_error("ThrottlingException")}
-        )
+        client = _FakePricingClient({"c8g.2xlarge": _fake_client_error("ThrottlingException")})
         price, err = _get_od_price(client, "c8g.2xlarge", "us-east-1")
         assert price is None
         assert "ThrottlingException" in err
@@ -122,6 +117,7 @@ class TestGetOdPrice:
         class _BrokenClient:
             def get_products(self, **kwargs):
                 raise OSError("network down")
+
         price, err = _get_od_price(_BrokenClient(), "c8g.2xlarge", "us-east-1")
         assert price is None
         assert "unreachable" in err
@@ -130,6 +126,7 @@ class TestGetOdPrice:
 # ---------------------------------------------------------------------------
 # _get_spot_price
 # ---------------------------------------------------------------------------
+
 
 class TestGetSpotPrice:
     def test_success(self):
@@ -145,9 +142,7 @@ class TestGetSpotPrice:
         assert "no spot price history" in err
 
     def test_client_error(self):
-        client = _FakeEC2Client(
-            {"c8g.2xlarge": _fake_client_error("UnsupportedOperation")}
-        )
+        client = _FakeEC2Client({"c8g.2xlarge": _fake_client_error("UnsupportedOperation")})
         price, err = _get_spot_price(client, "c8g.2xlarge")
         assert price is None
         assert "UnsupportedOperation" in err
@@ -157,6 +152,7 @@ class TestGetSpotPrice:
 # _cost_summary_lines
 # ---------------------------------------------------------------------------
 
+
 def _make_clients(od_prices=None, spot_prices=None):
     return (
         _FakePricingClient(od_prices or {}),
@@ -165,11 +161,20 @@ def _make_clients(od_prices=None, spot_prices=None):
 
 
 _COST_PARAMS = (
-    "pricing_client", "ec2client", "headnode_instance_type",
-    "cpu_instance_types", "max_cpu_queue_size", "enable_cpu_queue",
-    "gpu_instance_types", "max_gpu_queue_size", "enable_gpu_queue",
-    "region", "cluster_type",
-    "loginnode_instance_type", "loginnode_count", "enable_loginnode",
+    "pricing_client",
+    "ec2client",
+    "headnode_instance_type",
+    "cpu_instance_types",
+    "max_cpu_queue_size",
+    "enable_cpu_queue",
+    "gpu_instance_types",
+    "max_gpu_queue_size",
+    "enable_gpu_queue",
+    "region",
+    "cluster_type",
+    "loginnode_instance_type",
+    "loginnode_count",
+    "enable_loginnode",
 )
 
 
@@ -189,7 +194,8 @@ class TestCostSummaryLinesTakesKeywordsOnly:
 
         params = inspect.signature(_cost_summary_lines).parameters
         positional = [
-            name for name, p in params.items()
+            name
+            for name, p in params.items()
             if p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD)
         ]
         assert not positional, (
@@ -201,10 +207,17 @@ class TestCostSummaryLinesTakesKeywordsOnly:
         pc, ec2 = _make_clients(od_prices={"c8g.2xlarge": "0.31904"})
         with pytest.raises(TypeError):
             _cost_summary_lines(
-                pc, ec2, "c8g.2xlarge",
-                ["c8g.2xlarge"], 8, True,
-                [], 0, False,
-                "us-east-1", "ondemand",
+                pc,
+                ec2,
+                "c8g.2xlarge",
+                ["c8g.2xlarge"],
+                8,
+                True,
+                [],
+                0,
+                False,
+                "us-east-1",
+                "ondemand",
             )
 
     def test_the_signature_still_names_every_parameter_the_summary_needs(self):
@@ -223,7 +236,8 @@ class TestCostSummaryLinesTakesKeywordsOnly:
         with open(os.path.join(repo_root, "src", "pcluster_core.py")) as fh:
             tree = ast.parse(fh.read())
         calls = [
-            node for node in ast.walk(tree)
+            node
+            for node in ast.walk(tree)
             if isinstance(node, ast.Call)
             and getattr(node.func, "id", None) == "_cost_summary_lines"
         ]
@@ -232,7 +246,9 @@ class TestCostSummaryLinesTakesKeywordsOnly:
         for call in calls:
             assert not call.args, "call site passes a positional argument"
             passed = {kw.arg for kw in call.keywords}
-            assert passed, "test_the_make_pcluster_call_site_names_every_argument: nothing to assert absence against"
+            assert passed, (
+                "test_the_make_pcluster_call_site_names_every_argument: nothing to assert absence against"
+            )
             assert None not in passed, "call site splats **kwargs instead of naming"
             assert passed == expected, (
                 f"call site keywords {sorted(passed ^ expected)} do not match the "
@@ -249,14 +265,12 @@ class TestCostSummaryLinesTakesKeywordsOnly:
         with open(os.path.join(repo_root, "src", "pcluster_core.py")) as fh:
             tree = ast.parse(fh.read())
         call = next(
-            node for node in ast.walk(tree)
+            node
+            for node in ast.walk(tree)
             if isinstance(node, ast.Call)
             and getattr(node.func, "id", None) == "_cost_summary_lines"
         )
-        passed = {
-            kw.arg: kw.value.id for kw in call.keywords
-            if isinstance(kw.value, ast.Name)
-        }
+        passed = {kw.arg: kw.value.id for kw in call.keywords if isinstance(kw.value, ast.Name)}
         for name in _COST_PARAMS:
             assert passed.get(name) == name, (
                 f"{name}= is passed {passed.get(name)!r}; the CPU and GPU triples "
@@ -270,13 +284,17 @@ class TestCostSummaryLines:
             od_prices={"c8g.2xlarge": "0.31904"},
         )
         lines = _cost_summary_lines(
-            pricing_client=pc, ec2client=ec2,
+            pricing_client=pc,
+            ec2client=ec2,
             headnode_instance_type="c8g.2xlarge",
-            cpu_instance_types=["c8g.2xlarge"], max_cpu_queue_size=8,
+            cpu_instance_types=["c8g.2xlarge"],
+            max_cpu_queue_size=8,
             enable_cpu_queue=True,
-            gpu_instance_types=[], max_gpu_queue_size=0,
+            gpu_instance_types=[],
+            max_gpu_queue_size=0,
             enable_gpu_queue=False,
-            region="us-east-1", cluster_type="ondemand",
+            region="us-east-1",
+            cluster_type="ondemand",
         )
         assert any("Head node" in l for l in lines)
         assert any("CPU queue" in l for l in lines)
@@ -291,13 +309,17 @@ class TestCostSummaryLines:
             spot_prices={"c8g.2xlarge": "0.1366"},
         )
         lines = _cost_summary_lines(
-            pricing_client=pc, ec2client=ec2,
+            pricing_client=pc,
+            ec2client=ec2,
             headnode_instance_type="c8g.2xlarge",
-            cpu_instance_types=["c8g.2xlarge"], max_cpu_queue_size=4,
+            cpu_instance_types=["c8g.2xlarge"],
+            max_cpu_queue_size=4,
             enable_cpu_queue=True,
-            gpu_instance_types=[], max_gpu_queue_size=0,
+            gpu_instance_types=[],
+            max_gpu_queue_size=0,
             enable_gpu_queue=False,
-            region="us-east-1", cluster_type="spot",
+            region="us-east-1",
+            cluster_type="spot",
         )
         cpu_line = next(l for l in lines if "CPU queue" in l)
         assert "spot" in cpu_line
@@ -308,12 +330,17 @@ class TestCostSummaryLines:
             od_prices={"c8g.2xlarge": "0.31904", "c7g.2xlarge": "0.29000"},
         )
         lines = _cost_summary_lines(
-            pricing_client=pc, ec2client=ec2,
+            pricing_client=pc,
+            ec2client=ec2,
             headnode_instance_type="c8g.2xlarge",
             cpu_instance_types=["c8g.2xlarge", "c7g.2xlarge"],
-            max_cpu_queue_size=8, enable_cpu_queue=True,
-            gpu_instance_types=[], max_gpu_queue_size=0, enable_gpu_queue=False,
-            region="us-east-1", cluster_type="ondemand",
+            max_cpu_queue_size=8,
+            enable_cpu_queue=True,
+            gpu_instance_types=[],
+            max_gpu_queue_size=0,
+            enable_gpu_queue=False,
+            region="us-east-1",
+            cluster_type="ondemand",
         )
         cpu_line = next(l for l in lines if "CPU queue" in l)
         assert "–" in cpu_line  # range separator
@@ -323,12 +350,17 @@ class TestCostSummaryLines:
             od_prices={"c8g.2xlarge": "0.31904", "c8g.2xlarge-twin": "0.31904"},
         )
         lines = _cost_summary_lines(
-            pricing_client=pc, ec2client=ec2,
+            pricing_client=pc,
+            ec2client=ec2,
             headnode_instance_type="c8g.2xlarge",
-            cpu_instance_types=["c8g.2xlarge"], max_cpu_queue_size=2,
+            cpu_instance_types=["c8g.2xlarge"],
+            max_cpu_queue_size=2,
             enable_cpu_queue=True,
-            gpu_instance_types=[], max_gpu_queue_size=0, enable_gpu_queue=False,
-            region="us-east-1", cluster_type="ondemand",
+            gpu_instance_types=[],
+            max_gpu_queue_size=0,
+            enable_gpu_queue=False,
+            region="us-east-1",
+            cluster_type="ondemand",
         )
         cpu_line = next(l for l in lines if "CPU queue" in l)
         assert "–" not in cpu_line
@@ -336,12 +368,17 @@ class TestCostSummaryLines:
     def test_all_types_unavailable_shows_unavailable(self):
         pc, ec2 = _make_clients(od_prices={})
         lines = _cost_summary_lines(
-            pricing_client=pc, ec2client=ec2,
+            pricing_client=pc,
+            ec2client=ec2,
             headnode_instance_type="xx.fake",
-            cpu_instance_types=["xx.fake"], max_cpu_queue_size=4,
+            cpu_instance_types=["xx.fake"],
+            max_cpu_queue_size=4,
             enable_cpu_queue=True,
-            gpu_instance_types=[], max_gpu_queue_size=0, enable_gpu_queue=False,
-            region="us-east-1", cluster_type="ondemand",
+            gpu_instance_types=[],
+            max_gpu_queue_size=0,
+            enable_gpu_queue=False,
+            region="us-east-1",
+            cluster_type="ondemand",
         )
         cpu_line = next(l for l in lines if "CPU queue" in l)
         assert "unavailable" in cpu_line
@@ -351,29 +388,38 @@ class TestCostSummaryLines:
             od_prices={"c8g.2xlarge": "0.31904"},  # c7g.2xlarge missing
         )
         lines = _cost_summary_lines(
-            pricing_client=pc, ec2client=ec2,
+            pricing_client=pc,
+            ec2client=ec2,
             headnode_instance_type="c8g.2xlarge",
             cpu_instance_types=["c8g.2xlarge", "c7g.2xlarge"],
-            max_cpu_queue_size=4, enable_cpu_queue=True,
-            gpu_instance_types=[], max_gpu_queue_size=0, enable_gpu_queue=False,
-            region="us-east-1", cluster_type="ondemand",
+            max_cpu_queue_size=4,
+            enable_cpu_queue=True,
+            gpu_instance_types=[],
+            max_gpu_queue_size=0,
+            enable_gpu_queue=False,
+            region="us-east-1",
+            cluster_type="ondemand",
         )
         cpu_line = next(l for l in lines if "CPU queue" in l)
         assert "unavailable" in cpu_line  # partial note present
-        assert "$" in cpu_line            # price still shown for the successful type
+        assert "$" in cpu_line  # price still shown for the successful type
 
     def test_gpu_queue_shown_when_enabled(self):
         pc, ec2 = _make_clients(
             od_prices={"c8g.2xlarge": "0.31904", "p3.2xlarge": "3.06000"},
         )
         lines = _cost_summary_lines(
-            pricing_client=pc, ec2client=ec2,
+            pricing_client=pc,
+            ec2client=ec2,
             headnode_instance_type="c8g.2xlarge",
-            cpu_instance_types=["c8g.2xlarge"], max_cpu_queue_size=8,
+            cpu_instance_types=["c8g.2xlarge"],
+            max_cpu_queue_size=8,
             enable_cpu_queue=True,
-            gpu_instance_types=["p3.2xlarge"], max_gpu_queue_size=4,
+            gpu_instance_types=["p3.2xlarge"],
+            max_gpu_queue_size=4,
             enable_gpu_queue=True,
-            region="us-east-1", cluster_type="ondemand",
+            region="us-east-1",
+            cluster_type="ondemand",
         )
         assert any("GPU queue" in l for l in lines)
 
@@ -382,12 +428,17 @@ class TestCostSummaryLines:
             od_prices={"c8g.2xlarge": "0.31904"},
         )
         lines = _cost_summary_lines(
-            pricing_client=pc, ec2client=ec2,
+            pricing_client=pc,
+            ec2client=ec2,
             headnode_instance_type="c8g.2xlarge",
-            cpu_instance_types=["c8g.2xlarge"], max_cpu_queue_size=8,
+            cpu_instance_types=["c8g.2xlarge"],
+            max_cpu_queue_size=8,
             enable_cpu_queue=True,
-            gpu_instance_types=[], max_gpu_queue_size=0, enable_gpu_queue=False,
-            region="us-east-1", cluster_type="ondemand",
+            gpu_instance_types=[],
+            max_gpu_queue_size=0,
+            enable_gpu_queue=False,
+            region="us-east-1",
+            cluster_type="ondemand",
         )
         assert not any("GPU queue" in l for l in lines)
 
@@ -399,12 +450,17 @@ class TestCostSummaryLines:
                 raise RuntimeError("boom")
 
         lines = _cost_summary_lines(
-            pricing_client=_BrokenPricing(), ec2client=_FakeEC2Client({}),
+            pricing_client=_BrokenPricing(),
+            ec2client=_FakeEC2Client({}),
             headnode_instance_type="c8g.2xlarge",
-            cpu_instance_types=["c8g.2xlarge"], max_cpu_queue_size=4,
+            cpu_instance_types=["c8g.2xlarge"],
+            max_cpu_queue_size=4,
             enable_cpu_queue=True,
-            gpu_instance_types=[], max_gpu_queue_size=0, enable_gpu_queue=False,
-            region="us-east-1", cluster_type="ondemand",
+            gpu_instance_types=[],
+            max_gpu_queue_size=0,
+            enable_gpu_queue=False,
+            region="us-east-1",
+            cluster_type="ondemand",
         )
         assert all("unavailable" in l or "Estimated" in l for l in lines)
 
@@ -420,10 +476,14 @@ class TestCostSummaryLines:
             pricing_client=_FakePricingClient({"c8g.2xlarge": "0.31904"}),
             ec2client=_FakeEC2Client({}),
             headnode_instance_type="c8g.2xlarge",
-            cpu_instance_types=["c8g.2xlarge"], max_cpu_queue_size=_BrokenArg(),
+            cpu_instance_types=["c8g.2xlarge"],
+            max_cpu_queue_size=_BrokenArg(),
             enable_cpu_queue=True,
-            gpu_instance_types=[], max_gpu_queue_size=0, enable_gpu_queue=False,
-            region="us-east-1", cluster_type="ondemand",
+            gpu_instance_types=[],
+            max_gpu_queue_size=0,
+            enable_gpu_queue=False,
+            region="us-east-1",
+            cluster_type="ondemand",
         )
         assert len(lines) == 1
         assert "unavailable" in lines[0]
@@ -441,29 +501,39 @@ class TestCostSummaryLinesLoginNode:
     def test_absent_when_disabled(self):
         pc, ec2 = _make_clients(od_prices={"c8g.2xlarge": "0.31904"})
         lines = _cost_summary_lines(
-            pricing_client=pc, ec2client=ec2,
+            pricing_client=pc,
+            ec2client=ec2,
             headnode_instance_type="c8g.2xlarge",
-            cpu_instance_types=["c8g.2xlarge"], max_cpu_queue_size=8,
+            cpu_instance_types=["c8g.2xlarge"],
+            max_cpu_queue_size=8,
             enable_cpu_queue=True,
-            gpu_instance_types=[], max_gpu_queue_size=0, enable_gpu_queue=False,
-            region="us-east-1", cluster_type="ondemand",
-            loginnode_instance_type="c8g.xlarge", loginnode_count=1,
+            gpu_instance_types=[],
+            max_gpu_queue_size=0,
+            enable_gpu_queue=False,
+            region="us-east-1",
+            cluster_type="ondemand",
+            loginnode_instance_type="c8g.xlarge",
+            loginnode_count=1,
             enable_loginnode=False,
         )
         assert not any("Login node" in l for l in lines)
 
     def test_present_when_enabled(self):
-        pc, ec2 = _make_clients(
-            od_prices={"c8g.2xlarge": "0.31904", "c8g.xlarge": "0.15952"}
-        )
+        pc, ec2 = _make_clients(od_prices={"c8g.2xlarge": "0.31904", "c8g.xlarge": "0.15952"})
         lines = _cost_summary_lines(
-            pricing_client=pc, ec2client=ec2,
+            pricing_client=pc,
+            ec2client=ec2,
             headnode_instance_type="c8g.2xlarge",
-            cpu_instance_types=["c8g.2xlarge"], max_cpu_queue_size=8,
+            cpu_instance_types=["c8g.2xlarge"],
+            max_cpu_queue_size=8,
             enable_cpu_queue=True,
-            gpu_instance_types=[], max_gpu_queue_size=0, enable_gpu_queue=False,
-            region="us-east-1", cluster_type="ondemand",
-            loginnode_instance_type="c8g.xlarge", loginnode_count=1,
+            gpu_instance_types=[],
+            max_gpu_queue_size=0,
+            enable_gpu_queue=False,
+            region="us-east-1",
+            cluster_type="ondemand",
+            loginnode_instance_type="c8g.xlarge",
+            loginnode_count=1,
             enable_loginnode=True,
         )
         login_line = next(l for l in lines if "Login node" in l)
@@ -476,31 +546,41 @@ class TestCostSummaryLinesLoginNode:
         Pricing API call."""
         pc, ec2 = _make_clients(od_prices={"c8g.xlarge": "0.15952"})
         lines = _cost_summary_lines(
-            pricing_client=pc, ec2client=ec2,
+            pricing_client=pc,
+            ec2client=ec2,
             headnode_instance_type="c8g.xlarge",
-            cpu_instance_types=[], max_cpu_queue_size=0, enable_cpu_queue=False,
-            gpu_instance_types=[], max_gpu_queue_size=0, enable_gpu_queue=False,
-            region="us-east-1", cluster_type="ondemand",
-            loginnode_instance_type="c8g.xlarge", loginnode_count=1,
+            cpu_instance_types=[],
+            max_cpu_queue_size=0,
+            enable_cpu_queue=False,
+            gpu_instance_types=[],
+            max_gpu_queue_size=0,
+            enable_gpu_queue=False,
+            region="us-east-1",
+            cluster_type="ondemand",
+            loginnode_instance_type="c8g.xlarge",
+            loginnode_count=1,
             enable_loginnode=True,
         )
-        assert pc.calls == ["c8g.xlarge"], (
-            f"expected exactly one Pricing API call, got: {pc.calls}"
-        )
+        assert pc.calls == ["c8g.xlarge"], f"expected exactly one Pricing API call, got: {pc.calls}"
         login_line = next(l for l in lines if "Login node" in l)
         assert "0.160" in login_line
 
     def test_different_instance_types_each_get_their_own_lookup(self):
-        pc, ec2 = _make_clients(
-            od_prices={"c8g.2xlarge": "0.31904", "c8g.xlarge": "0.15952"}
-        )
+        pc, ec2 = _make_clients(od_prices={"c8g.2xlarge": "0.31904", "c8g.xlarge": "0.15952"})
         _cost_summary_lines(
-            pricing_client=pc, ec2client=ec2,
+            pricing_client=pc,
+            ec2client=ec2,
             headnode_instance_type="c8g.2xlarge",
-            cpu_instance_types=[], max_cpu_queue_size=0, enable_cpu_queue=False,
-            gpu_instance_types=[], max_gpu_queue_size=0, enable_gpu_queue=False,
-            region="us-east-1", cluster_type="ondemand",
-            loginnode_instance_type="c8g.xlarge", loginnode_count=1,
+            cpu_instance_types=[],
+            max_cpu_queue_size=0,
+            enable_cpu_queue=False,
+            gpu_instance_types=[],
+            max_gpu_queue_size=0,
+            enable_gpu_queue=False,
+            region="us-east-1",
+            cluster_type="ondemand",
+            loginnode_instance_type="c8g.xlarge",
+            loginnode_count=1,
             enable_loginnode=True,
         )
         assert sorted(pc.calls) == ["c8g.2xlarge", "c8g.xlarge"]
@@ -508,12 +588,19 @@ class TestCostSummaryLinesLoginNode:
     def test_count_multiplier_is_applied(self):
         pc, ec2 = _make_clients(od_prices={"c8g.xlarge": "0.15952"})
         lines = _cost_summary_lines(
-            pricing_client=pc, ec2client=ec2,
+            pricing_client=pc,
+            ec2client=ec2,
             headnode_instance_type="c8g.xlarge",
-            cpu_instance_types=[], max_cpu_queue_size=0, enable_cpu_queue=False,
-            gpu_instance_types=[], max_gpu_queue_size=0, enable_gpu_queue=False,
-            region="us-east-1", cluster_type="ondemand",
-            loginnode_instance_type="c8g.xlarge", loginnode_count=3,
+            cpu_instance_types=[],
+            max_cpu_queue_size=0,
+            enable_cpu_queue=False,
+            gpu_instance_types=[],
+            max_gpu_queue_size=0,
+            enable_gpu_queue=False,
+            region="us-east-1",
+            cluster_type="ondemand",
+            loginnode_instance_type="c8g.xlarge",
+            loginnode_count=3,
             enable_loginnode=True,
         )
         login_line = next(l for l in lines if "Login node" in l)
@@ -528,13 +615,19 @@ class TestCostSummaryLinesLoginNode:
             spot_prices={"c8g.2xlarge": "0.1366"},
         )
         lines = _cost_summary_lines(
-            pricing_client=pc, ec2client=ec2,
+            pricing_client=pc,
+            ec2client=ec2,
             headnode_instance_type="c8g.xlarge",
-            cpu_instance_types=["c8g.2xlarge"], max_cpu_queue_size=4,
+            cpu_instance_types=["c8g.2xlarge"],
+            max_cpu_queue_size=4,
             enable_cpu_queue=True,
-            gpu_instance_types=[], max_gpu_queue_size=0, enable_gpu_queue=False,
-            region="us-east-1", cluster_type="spot",
-            loginnode_instance_type="c8g.xlarge", loginnode_count=1,
+            gpu_instance_types=[],
+            max_gpu_queue_size=0,
+            enable_gpu_queue=False,
+            region="us-east-1",
+            cluster_type="spot",
+            loginnode_instance_type="c8g.xlarge",
+            loginnode_count=1,
             enable_loginnode=True,
         )
         login_line = next(l for l in lines if "Login node" in l)
@@ -547,12 +640,19 @@ class TestCostSummaryLinesLoginNode:
         the login-node line gets a fixed annotation in spot mode instead."""
         pc, ec2 = _make_clients(od_prices={"c8g.xlarge": "0.15952"})
         lines = _cost_summary_lines(
-            pricing_client=pc, ec2client=ec2,
+            pricing_client=pc,
+            ec2client=ec2,
             headnode_instance_type="c8g.xlarge",
-            cpu_instance_types=[], max_cpu_queue_size=0, enable_cpu_queue=False,
-            gpu_instance_types=[], max_gpu_queue_size=0, enable_gpu_queue=False,
-            region="us-east-1", cluster_type="spot",
-            loginnode_instance_type="c8g.xlarge", loginnode_count=1,
+            cpu_instance_types=[],
+            max_cpu_queue_size=0,
+            enable_cpu_queue=False,
+            gpu_instance_types=[],
+            max_gpu_queue_size=0,
+            enable_gpu_queue=False,
+            region="us-east-1",
+            cluster_type="spot",
+            loginnode_instance_type="c8g.xlarge",
+            loginnode_count=1,
             enable_loginnode=True,
         )
         login_line = next(l for l in lines if "Login node" in l)
@@ -561,12 +661,19 @@ class TestCostSummaryLinesLoginNode:
     def test_failure_path_shows_unavailable(self):
         pc, ec2 = _make_clients(od_prices={})
         lines = _cost_summary_lines(
-            pricing_client=pc, ec2client=ec2,
+            pricing_client=pc,
+            ec2client=ec2,
             headnode_instance_type="c8g.xlarge",
-            cpu_instance_types=[], max_cpu_queue_size=0, enable_cpu_queue=False,
-            gpu_instance_types=[], max_gpu_queue_size=0, enable_gpu_queue=False,
-            region="us-east-1", cluster_type="ondemand",
-            loginnode_instance_type="xx.fake", loginnode_count=1,
+            cpu_instance_types=[],
+            max_cpu_queue_size=0,
+            enable_cpu_queue=False,
+            gpu_instance_types=[],
+            max_gpu_queue_size=0,
+            enable_gpu_queue=False,
+            region="us-east-1",
+            cluster_type="ondemand",
+            loginnode_instance_type="xx.fake",
+            loginnode_count=1,
             enable_loginnode=True,
         )
         login_line = next(l for l in lines if "Login node" in l)
@@ -670,7 +777,8 @@ class TestClusterAgeComesFromTheSerialNotTheCalendarDate:
         src = inspect.getsource(pcluster_core.core_list_clusters)
         tree = ast.parse(src.lstrip())
         calls = [
-            n for n in ast.walk(tree)
+            n
+            for n in ast.walk(tree)
             if isinstance(n, ast.Call) and getattr(n.func, "id", "") == "_age_str"
         ]
         assert calls, "core_list_clusters no longer computes an age"

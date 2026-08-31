@@ -34,6 +34,12 @@ lint:
 	@# that. They are declared in __all__; tests/test_reexports_survive_autofix.py
 	@# fails if a new unprotected one appears.
 	@.venv/bin/python -m ruff check .
+	@# Formatting, checked not applied. `ruff format` rather than black:
+	@# one binary, one config, and line-length cannot drift between the
+	@# linter and the formatter. They are NOT interchangeable -- measured
+	@# on this tree, they disagree about line breaks around adjacent
+	@# string literals -- so never run black over this repo.
+	@.venv/bin/python -m ruff format --check .
 
 # Every tracked .sh except the Jinja2 templates, discovered rather than listed so
 # a newly added shell script joins the gate without anyone remembering to add it.

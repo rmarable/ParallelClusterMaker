@@ -18,9 +18,7 @@ import pytest
 # pcluster_core attribute, so the module has to be importable during
 # collection of any test file -- running one in isolation failed with
 # ModuleNotFoundError otherwise.
-sys.path.insert(0, os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src"
-))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src"))
 
 # Import Ansible's collection loader before anything can import fastmcp.
 #
@@ -243,9 +241,7 @@ def cluster_params():
         # Ansible registered vars (used by sns/access templates)
         "head_node_public_ip": "1.2.3.4",
         "start_overall_timer": type("R", (), {"stdout": "2026-07-20 10:00:00"})(),
-        "start_stack_creation_timer": type(
-            "R", (), {"stdout": "2026-07-20 10:01:00"}
-        )(),
+        "start_stack_creation_timer": type("R", (), {"stdout": "2026-07-20 10:01:00"})(),
         "stop_stack_creation_timer": type("R", (), {"stdout": "2026-07-20 10:30:00"})(),
         "stop_overall_timer": type("R", (), {"stdout": "2026-07-20 10:35:00"})(),
         "start_delete_timer": type("R", (), {"stdout": "2026-07-20 11:00:00"})(),
@@ -646,9 +642,7 @@ def _no_operator_defaults_file(monkeypatch, tmp_path_factory):
     import pcluster_core
 
     empty = tmp_path_factory.mktemp("no_defaults")
-    monkeypatch.setattr(
-        pcluster_core, "_default_repo_root", lambda: str(empty)
-    )
+    monkeypatch.setattr(pcluster_core, "_default_repo_root", lambda: str(empty))
 
     # The sibling seam. mcp_server.tools._repo_root() is what every MCP
     # tool resolves active_clusters/ and src/vars_files/ against, and it

@@ -23,37 +23,47 @@ def _proc(rc=0, stdout="", stderr=""):
 # check_cfn_status
 # ---------------------------------------------------------------------------
 
+
 class TestCheckCfnStatus:
     def test_create_complete(self, monkeypatch):
-        monkeypatch.setattr(pcluster_core, "_describe_cluster_json",
-                            lambda c, r: {
-            "clusterStatus": "CREATE_COMPLETE",
-            "cloudFormationStackStatus": "CREATE_COMPLETE",
-            "headNode": {"publicIpAddress": "1.2.3.4"},
-        })
+        monkeypatch.setattr(
+            pcluster_core,
+            "_describe_cluster_json",
+            lambda c, r: {
+                "clusterStatus": "CREATE_COMPLETE",
+                "cloudFormationStackStatus": "CREATE_COMPLETE",
+                "headNode": {"publicIpAddress": "1.2.3.4"},
+            },
+        )
         ok, msg, ip = chk.check_cfn_status("mycluster", "us-east-1", "pcluster")
         assert ok is True
         assert "CREATE_COMPLETE" in msg
         assert ip == "1.2.3.4"
 
     def test_non_create_complete_returns_fail(self, monkeypatch):
-        monkeypatch.setattr(pcluster_core, "_describe_cluster_json",
-                            lambda c, r: {
-            "clusterStatus": "UPDATE_FAILED",
-            "cloudFormationStackStatus": "UPDATE_ROLLBACK_COMPLETE",
-            "headNode": {"publicIpAddress": "1.2.3.4"},
-        })
+        monkeypatch.setattr(
+            pcluster_core,
+            "_describe_cluster_json",
+            lambda c, r: {
+                "clusterStatus": "UPDATE_FAILED",
+                "cloudFormationStackStatus": "UPDATE_ROLLBACK_COMPLETE",
+                "headNode": {"publicIpAddress": "1.2.3.4"},
+            },
+        )
         ok, msg, ip = chk.check_cfn_status("mycluster", "us-east-1", "pcluster")
         assert ok is False
         assert "UPDATE_FAILED" in msg
 
     def test_private_ip_fallback(self, monkeypatch):
-        monkeypatch.setattr(pcluster_core, "_describe_cluster_json",
-                            lambda c, r: {
-            "clusterStatus": "CREATE_COMPLETE",
-            "cloudFormationStackStatus": "CREATE_COMPLETE",
-            "headNode": {"privateIpAddress": "10.0.0.5"},
-        })
+        monkeypatch.setattr(
+            pcluster_core,
+            "_describe_cluster_json",
+            lambda c, r: {
+                "clusterStatus": "CREATE_COMPLETE",
+                "cloudFormationStackStatus": "CREATE_COMPLETE",
+                "headNode": {"privateIpAddress": "10.0.0.5"},
+            },
+        )
         ok, msg, ip = chk.check_cfn_status("mycluster", "us-east-1", "pcluster")
         assert ok is True
         assert ip == "10.0.0.5"
@@ -64,8 +74,10 @@ class TestCheckCfnStatus:
         the transport (round 48): _describe_cluster_json raises
         PClusterMakerError where the subprocess form raised
         TimeoutExpired/SystemExit."""
+
         def _raise(c, r):
             raise pcluster_core.PClusterMakerError("describe-cluster timed out")
+
         monkeypatch.setattr(pcluster_core, "_describe_cluster_json", _raise)
         ok, msg, ip = chk.check_cfn_status("mycluster", "us-east-1", "pcluster")
         assert ok is False
@@ -76,14 +88,17 @@ class TestCheckCfnStatus:
         The property is unchanged -- a failed describe becomes a FAIL whose
         message carries the underlying cause, so the operator is not left
         with a bare "check failed"."""
+
         def _raise(c, r):
             raise pcluster_core.PClusterMakerError(
                 "describe-cluster failed for 'mycluster': AccessDeniedException"
             )
+
         monkeypatch.setattr(pcluster_core, "_describe_cluster_json", _raise)
         ok, msg, ip = chk.check_cfn_status("mycluster", "us-east-1", "pcluster")
         assert ok is False
         assert "AccessDeniedException" in msg
+
 
 class TestCheckHeadIp:
     def test_present(self):
@@ -104,10 +119,10 @@ class TestCheckHeadIp:
 # check_ssh
 # ---------------------------------------------------------------------------
 
+
 class TestCheckSsh:
     def test_success(self, monkeypatch):
-        monkeypatch.setattr(subprocess, "run",
-                            lambda *a, **kw: _proc(stdout="OK\n"))
+        monkeypatch.setattr(subprocess, "run", lambda *a, **kw: _proc(stdout="OK\n"))
         ok, err = chk.check_ssh("1.2.3.4", "/tmp/key.pem", "ubuntu", 15)
         assert ok is True
         assert err is None
@@ -115,14 +130,16 @@ class TestCheckSsh:
     def test_timeout(self, monkeypatch):
         def _raise(*a, **kw):
             raise subprocess.TimeoutExpired("ssh", 15)
+
         monkeypatch.setattr(subprocess, "run", _raise)
         ok, err = chk.check_ssh("1.2.3.4", "/tmp/key.pem", "ubuntu", 15)
         assert ok is False
         assert "timed out" in err
 
     def test_nonzero_rc(self, monkeypatch):
-        monkeypatch.setattr(subprocess, "run",
-                            lambda *a, **kw: _proc(rc=255, stderr="Connection refused"))
+        monkeypatch.setattr(
+            subprocess, "run", lambda *a, **kw: _proc(rc=255, stderr="Connection refused")
+        )
         ok, err = chk.check_ssh("1.2.3.4", "/tmp/key.pem", "ubuntu", 15)
         assert ok is False
         assert "rc=255" in err
@@ -165,8 +182,21 @@ class TestCheckSlurmReadsTheNodeStates:
 
     # Each of these is a fleet that cannot run a job while sinfo exits 0.
     @pytest.mark.parametrize(
-        "state", ["down", "down*", "drained", "drained*", "draining", "fail",
-                  "failing", "unknown", "unk*", "inval", "error", "maint"]
+        "state",
+        [
+            "down",
+            "down*",
+            "drained",
+            "drained*",
+            "draining",
+            "fail",
+            "failing",
+            "unknown",
+            "unk*",
+            "inval",
+            "error",
+            "maint",
+        ],
     )
     def test_a_fleet_in_a_bad_state_fails(self, monkeypatch, state):
         ok, err = self._call(monkeypatch, f"4 {state}\n")
@@ -317,9 +347,7 @@ class TestSinfoClassificationIsSharedNotDuplicated:
         import diagnose_pcluster as diag
 
         annotated = diag._format_sinfo(
-            "NODELIST NODES PARTITION STATE\n"
-            "q-1 1 compute drained\n"
-            "q-2 1 compute idle\n"
+            "NODELIST NODES PARTITION STATE\nq-1 1 compute drained\nq-2 1 compute idle\n"
         )
         assert "q-1 1 compute drained   <-- not idle" in annotated
         assert "q-2 1 compute idle\n" in annotated + "\n"
@@ -328,6 +356,7 @@ class TestSinfoClassificationIsSharedNotDuplicated:
 # ---------------------------------------------------------------------------
 # check_postinstall
 # ---------------------------------------------------------------------------
+
 
 class TestCheckPostinstall:
     def test_marker_present(self, monkeypatch):
@@ -347,26 +376,24 @@ class TestCheckPostinstall:
 # check_grafana
 # ---------------------------------------------------------------------------
 
+
 class TestCheckGrafana:
     def test_healthy(self, monkeypatch):
         body = '{"commit": "abc", "database": "ok", "version": "9.x"}'
-        monkeypatch.setattr(subprocess, "run",
-                            lambda *a, **kw: _proc(stdout=body))
+        monkeypatch.setattr(subprocess, "run", lambda *a, **kw: _proc(stdout=body))
         ok, err = chk.check_grafana("1.2.3.4", "/tmp/key.pem", "ubuntu", 15)
         assert ok is True
         assert err is None
 
     def test_database_not_ok(self, monkeypatch):
         body = '{"database": "failing"}'
-        monkeypatch.setattr(subprocess, "run",
-                            lambda *a, **kw: _proc(stdout=body))
+        monkeypatch.setattr(subprocess, "run", lambda *a, **kw: _proc(stdout=body))
         ok, err = chk.check_grafana("1.2.3.4", "/tmp/key.pem", "ubuntu", 15)
         assert ok is False
         assert "unexpected" in err
 
     def test_curl_fails(self, monkeypatch):
-        monkeypatch.setattr(subprocess, "run",
-                            lambda *a, **kw: _proc(rc=7))
+        monkeypatch.setattr(subprocess, "run", lambda *a, **kw: _proc(rc=7))
         ok, err = chk.check_grafana("1.2.3.4", "/tmp/key.pem", "ubuntu", 15)
         assert ok is False
         assert "rc=7" in err
@@ -376,6 +403,7 @@ class TestCheckGrafana:
 # check_s3
 # ---------------------------------------------------------------------------
 
+
 class TestCheckS3:
     def test_success(self, monkeypatch):
         class _FakeS3:
@@ -383,6 +411,7 @@ class TestCheckS3:
                 pass
 
         import boto3
+
         monkeypatch.setattr(boto3, "client", lambda *a, **kw: _FakeS3())
         ok, err = chk.check_s3("my-bucket", "us-east-1")
         assert ok is True
@@ -398,6 +427,7 @@ class TestCheckS3:
                 )
 
         import boto3
+
         monkeypatch.setattr(boto3, "client", lambda *a, **kw: _FakeS3())
         ok, err = chk.check_s3("missing-bucket", "us-east-1")
         assert ok is False
@@ -451,8 +481,11 @@ def _stage_checks(monkeypatch, **overrides):
     """Stub every leaf check to pass, then let each test fail exactly one.
     Patches pcluster_core's own names -- the module core_check_cluster_health
     actually resolves them against."""
-    monkeypatch.setattr(pcluster_core, "check_cfn_status",
-                        lambda n, r, b: (True, "status=CREATE_COMPLETE", "1.2.3.4"))
+    monkeypatch.setattr(
+        pcluster_core,
+        "check_cfn_status",
+        lambda n, r, b: (True, "status=CREATE_COMPLETE", "1.2.3.4"),
+    )
     monkeypatch.setattr(pcluster_core, "check_head_ip", lambda ip: (True, None))
     monkeypatch.setattr(pcluster_core, "check_ssh", lambda *a: (True, None))
     monkeypatch.setattr(pcluster_core, "check_slurm", lambda *a: (True, None))
@@ -616,8 +649,9 @@ class TestCoreCheckClusterHealth:
 _REC = dict(_RECORD_KWARGS)
 
 
-def _stage_main(monkeypatch, argv=("check_pcluster.py", "-N", "mycluster"), rec=None,
-                 core_result=None):
+def _stage_main(
+    monkeypatch, argv=("check_pcluster.py", "-N", "mycluster"), rec=None, core_result=None
+):
     full_rec = dict(_REC)
     full_rec.update(rec or {})
     monkeypatch.setattr(chk, "_read_cluster_record", lambda n, r: full_rec)
@@ -660,7 +694,9 @@ class TestCheckPclusterMainCliShim:
         monkeypatch.setattr(chk, "_read_cluster_record", lambda n, r: None)
         called = []
         monkeypatch.setattr(
-            chk, "core_check_cluster_health", lambda **kw: called.append(1),
+            chk,
+            "core_check_cluster_health",
+            lambda **kw: called.append(1),
         )
         monkeypatch.setattr(sys, "argv", ["check_pcluster.py", "-N", "mycluster"])
         with pytest.raises(SystemExit) as exc:
@@ -671,7 +707,9 @@ class TestCheckPclusterMainCliShim:
 
     def test_timeout_is_clamped_before_being_passed_to_the_core_function(self, monkeypatch):
         seen = {}
-        report = pcluster_core.ClusterHealthReport(cluster_name="mycluster", checks=[], healthy=True)
+        report = pcluster_core.ClusterHealthReport(
+            cluster_name="mycluster", checks=[], healthy=True
+        )
 
         def _core(**kwargs):
             seen.update(kwargs)
@@ -753,7 +791,8 @@ class TestSlurmIsFoundOnANonInteractiveShell:
         import pcluster_core
 
         monkeypatch.setattr(
-            pcluster_core, "_run_ssh",
+            pcluster_core,
+            "_run_ssh",
             lambda *a, **k: (0, "8 idle\n", ""),
         )
         ok, detail = pcluster_core.check_slurm("1.2.3.4", "/k.pem", "ubuntu", 15)
@@ -767,7 +806,8 @@ class TestSlurmIsFoundOnANonInteractiveShell:
         import pcluster_core
 
         monkeypatch.setattr(
-            pcluster_core, "_run_ssh",
+            pcluster_core,
+            "_run_ssh",
             lambda *a, **k: (0, "8 idle~\n", ""),
         )
         ok, detail = pcluster_core.check_slurm("1.2.3.4", "/k.pem", "ubuntu", 15)
@@ -790,7 +830,8 @@ class TestAnUpdatedClusterIsStillHealthy:
         import pcluster_core
 
         monkeypatch.setattr(
-            pcluster_core, "_describe_cluster_json",
+            pcluster_core,
+            "_describe_cluster_json",
             lambda name, region: {
                 "clusterStatus": cluster_status,
                 "cloudFormationStackStatus": cluster_status,
@@ -809,10 +850,17 @@ class TestAnUpdatedClusterIsStillHealthy:
         ok, _, _ = self._status(monkeypatch, "CREATE_COMPLETE")
         assert ok is True
 
-    @pytest.mark.parametrize("bad", [
-        "CREATE_FAILED", "UPDATE_FAILED", "DELETE_IN_PROGRESS",
-        "DELETE_FAILED", "CREATE_IN_PROGRESS", "UPDATE_IN_PROGRESS",
-    ])
+    @pytest.mark.parametrize(
+        "bad",
+        [
+            "CREATE_FAILED",
+            "UPDATE_FAILED",
+            "DELETE_IN_PROGRESS",
+            "DELETE_FAILED",
+            "CREATE_IN_PROGRESS",
+            "UPDATE_IN_PROGRESS",
+        ],
+    )
     def test_the_unhealthy_states_still_fail(self, monkeypatch, bad):
         """The half that matters more: widening the accepted set must not
         turn a broken cluster into a passing one."""

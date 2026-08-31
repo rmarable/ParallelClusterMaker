@@ -71,9 +71,7 @@ def protected_resource_metadata(*, region, user_pool_id, api_base_url):
     base = api_base_url.rstrip("/")
     return {
         "resource": base,
-        "authorization_servers": [
-            cognito_issuer(region=region, user_pool_id=user_pool_id)
-        ],
+        "authorization_servers": [cognito_issuer(region=region, user_pool_id=user_pool_id)],
         "bearer_methods_supported": ["header"],
         "scopes_supported": ["openid"],
     }
@@ -88,6 +86,4 @@ def www_authenticate_header(*, api_base_url):
     discover where to authenticate, and the connector setup dead-ends.
     """
     base = api_base_url.rstrip("/")
-    return (
-        f'Bearer resource_metadata="{base}/.well-known/oauth-protected-resource"'
-    )
+    return f'Bearer resource_metadata="{base}/.well-known/oauth-protected-resource"'

@@ -44,10 +44,16 @@ _MCP_POLICY_NAME = "parallelcluster-mcp-deploy-pclustermaker"
 # collide today either way -- but a name that reads like a handler policy
 # invites a future sweep to take it.
 _MODES = {
-    "operator": (_TEMPLATE, _POLICY_NAME,
-                 "ParallelClusterMaker operator policy — toolkit-level permissions"),
-    "mcp": (_MCP_TEMPLATE, _MCP_POLICY_NAME,
-            "ParallelClusterMaker MCP remote transport deployment permissions"),
+    "operator": (
+        _TEMPLATE,
+        _POLICY_NAME,
+        "ParallelClusterMaker operator policy — toolkit-level permissions",
+    ),
+    "mcp": (
+        _MCP_TEMPLATE,
+        _MCP_POLICY_NAME,
+        "ParallelClusterMaker MCP remote transport deployment permissions",
+    ),
 }
 
 
@@ -103,9 +109,13 @@ def _run_bootstrap(rendered, policy_name, description, *, attach, dry_run):
     from pcluster_core import bootstrap_operator_policy
 
     r = bootstrap_operator_policy(
-        boto3.client("iam"), boto3.client("sts"),
-        policy_name=policy_name, rendered=rendered, description=description,
-        attach=attach, dry_run=dry_run,
+        boto3.client("iam"),
+        boto3.client("sts"),
+        policy_name=policy_name,
+        rendered=rendered,
+        description=description,
+        attach=attach,
+        dry_run=dry_run,
     )
 
     lead = "Would " if r.dry_run else ""
@@ -114,8 +124,10 @@ def _run_bootstrap(rendered, policy_name, description, *, attach, dry_run):
         "updated": f"{lead or 'P'}{'ush' if r.dry_run else 'ushed'} a new default version of",
         "current": "Policy already matches this checkout:",
     }[r.policy_action]
-    print(f"\n{said} {r.policy_arn}"
-          + (f" ({r.version_id})" if r.version_id and r.policy_action != "current" else ""))
+    print(
+        f"\n{said} {r.policy_arn}"
+        + (f" ({r.version_id})" if r.version_id and r.policy_action != "current" else "")
+    )
 
     print(f"Running as: {r.identity_arn}")
     if r.attach_action == "attached":
@@ -124,9 +136,11 @@ def _run_bootstrap(rendered, policy_name, description, *, attach, dry_run):
     elif r.attach_action == "already":
         print(f"Already attached to {r.principal_type} {r.principal_name}")
     elif r.attach_action == "skipped":
-        print(f"Not attached ({r.reason}). Attach it with:\n"
-              f"  aws iam attach-user-policy --user-name <USERNAME> "
-              f"--policy-arn {r.policy_arn}")
+        print(
+            f"Not attached ({r.reason}). Attach it with:\n"
+            f"  aws iam attach-user-policy --user-name <USERNAME> "
+            f"--policy-arn {r.policy_arn}"
+        )
     else:
         sys.exit(
             f"\nERROR: the policy is in place but could not be attached.\n"
@@ -153,7 +167,8 @@ def main():
         )
     )
     parser.add_argument(
-        "-o", "--output",
+        "-o",
+        "--output",
         default=None,
         metavar="FILE",
         help="Write rendered JSON to FILE instead of stdout",
@@ -200,7 +215,7 @@ def main():
         default=None,
         metavar="NAME",
         help=f"Override the policy name (default: {_POLICY_NAME}, "
-             f"or {_MCP_POLICY_NAME} with --mcp)",
+        f"or {_MCP_POLICY_NAME} with --mcp)",
     )
     parser.add_argument(
         "--description",
@@ -238,8 +253,11 @@ def main():
     arn = None
     if args.bootstrap:
         _run_bootstrap(
-            rendered, policy_name, description,
-            attach=not args.no_attach, dry_run=args.dry_run,
+            rendered,
+            policy_name,
+            description,
+            attach=not args.no_attach,
+            dry_run=args.dry_run,
         )
     elif args.create:
         iam = boto3.client("iam")

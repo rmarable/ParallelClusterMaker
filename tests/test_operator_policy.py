@@ -88,12 +88,15 @@ class TestOperatorPolicyIamArnsMatchToolkitNaming:
 
     def test_instance_profile_matches_ec2_iam_role_naming(self):
         resources = self._all_resource_strings("IAMInstanceProfile")
-        pattern = re.compile(r"arn:aws:iam::" + ACCOUNT_ID + r":instance-profile/pclustermaker-role-\*")
+        pattern = re.compile(
+            r"arn:aws:iam::" + ACCOUNT_ID + r":instance-profile/pclustermaker-role-\*"
+        )
         assert any(pattern.fullmatch(r) for r in resources)
 
 
 def _load_generator():
     import importlib.util
+
     spec = importlib.util.spec_from_file_location(
         "generate_operator_policy",
         os.path.join(REPO_ROOT, "generate_operator_policy.py"),
@@ -126,7 +129,8 @@ class TestGeneratorWritesNothingWhenCreateFails:
 
         monkeypatch.setattr(mod, "_create_policy", fake_create)
         monkeypatch.setattr(
-            sys, "argv",
+            sys,
+            "argv",
             ["generate_operator_policy.py", "--create", "-o", str(out)],
         )
         return mod, out

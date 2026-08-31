@@ -90,32 +90,67 @@ PCLUSTER_REQUIREMENT = "aws-parallelcluster==3.15.1"
 TIER_PACKAGES = {
     "router": {
         "requirements": [],
-        "sources": ["mcp_server/__init__.py", "mcp_server/router.py",
-                    "mcp_server/tiers.py"],
+        "sources": ["mcp_server/__init__.py", "mcp_server/router.py", "mcp_server/tiers.py"],
         "handler": "mcp_server.router.lambda_handler",
         "kind": "zip",
     },
     "read-only": {
-        "requirements": [PCLUSTER_REQUIREMENT, "boto3", "botocore",
-                         "Jinja2", "PyYAML", "ruamel.yaml", "jmespath", "fastmcp"],
-        "sources": ["mcp_server/", "src/pcluster_core.py",
-                    "src/pcluster_aux_data.py", "templates/"],
+        "requirements": [
+            PCLUSTER_REQUIREMENT,
+            "boto3",
+            "botocore",
+            "Jinja2",
+            "PyYAML",
+            "ruamel.yaml",
+            "jmespath",
+            "fastmcp",
+        ],
+        "sources": [
+            "mcp_server/",
+            "src/pcluster_core.py",
+            "src/pcluster_aux_data.py",
+            "templates/",
+        ],
         "handler": "mcp_server.handlers.read_only.lambda_handler",
         "kind": "zip",
     },
     "fleet-toggle": {
-        "requirements": [PCLUSTER_REQUIREMENT, "boto3", "botocore",
-                         "Jinja2", "PyYAML", "ruamel.yaml", "jmespath", "fastmcp"],
-        "sources": ["mcp_server/", "src/pcluster_core.py",
-                    "src/pcluster_aux_data.py", "templates/"],
+        "requirements": [
+            PCLUSTER_REQUIREMENT,
+            "boto3",
+            "botocore",
+            "Jinja2",
+            "PyYAML",
+            "ruamel.yaml",
+            "jmespath",
+            "fastmcp",
+        ],
+        "sources": [
+            "mcp_server/",
+            "src/pcluster_core.py",
+            "src/pcluster_aux_data.py",
+            "templates/",
+        ],
         "handler": "mcp_server.handlers.fleet_toggle.lambda_handler",
         "kind": "zip",
     },
     "stack-mutation": {
-        "requirements": [PCLUSTER_REQUIREMENT, "boto3", "botocore",
-                         "Jinja2", "PyYAML", "ruamel.yaml", "jmespath", "fastmcp"],
-        "sources": ["mcp_server/", "src/pcluster_core.py",
-                    "src/pcluster_aux_data.py", "templates/"],
+        "requirements": [
+            PCLUSTER_REQUIREMENT,
+            "boto3",
+            "botocore",
+            "Jinja2",
+            "PyYAML",
+            "ruamel.yaml",
+            "jmespath",
+            "fastmcp",
+        ],
+        "sources": [
+            "mcp_server/",
+            "src/pcluster_core.py",
+            "src/pcluster_aux_data.py",
+            "templates/",
+        ],
         "handler": "mcp_server.handlers.stack_mutation.lambda_handler",
         "kind": "zip",
     },
@@ -124,10 +159,23 @@ TIER_PACKAGES = {
         # Node.js, not a package: create_cluster and update_cluster call
         # assert_valid_node_js() on their first line, and a zip artifact
         # cannot supply a Node runtime. Hence a container image.
-        "requirements": [PCLUSTER_REQUIREMENT, "boto3", "botocore",
-                         "Jinja2", "PyYAML", "ruamel.yaml", "jmespath", "fastmcp"],
-        "sources": ["mcp_server/", "src/pcluster_core.py",
-                    "src/pcluster_aux_data.py", "templates/", "scripts/"],
+        "requirements": [
+            PCLUSTER_REQUIREMENT,
+            "boto3",
+            "botocore",
+            "Jinja2",
+            "PyYAML",
+            "ruamel.yaml",
+            "jmespath",
+            "fastmcp",
+        ],
+        "sources": [
+            "mcp_server/",
+            "src/pcluster_core.py",
+            "src/pcluster_aux_data.py",
+            "templates/",
+            "scripts/",
+        ],
         "handler": "mcp_server.handlers.stack_mutation_node.lambda_handler",
         "kind": "image",
     },
@@ -139,9 +187,12 @@ TIER_PACKAGES = {
     # surface.
     "register": {
         "requirements": ["boto3", "botocore"],
-        "sources": ["mcp_server/__init__.py", "mcp_server/auth/__init__.py",
-                    "mcp_server/auth/register_lambda.py",
-                    "mcp_server/auth/discovery.py"],
+        "sources": [
+            "mcp_server/__init__.py",
+            "mcp_server/auth/__init__.py",
+            "mcp_server/auth/register_lambda.py",
+            "mcp_server/auth/discovery.py",
+        ],
         "handler": "mcp_server.auth.register_lambda.lambda_handler",
         "kind": "zip",
     },
@@ -151,9 +202,12 @@ TIER_PACKAGES = {
         # set, which is not a dependency this tier has -- it is named here
         # explicitly because nothing else in this artifact would pull it.
         "requirements": ["boto3", "botocore", "PyJWT", "cryptography"],
-        "sources": ["mcp_server/__init__.py", "mcp_server/auth/__init__.py",
-                    "mcp_server/auth/authorizer_lambda.py",
-                    "mcp_server/auth/discovery.py"],
+        "sources": [
+            "mcp_server/__init__.py",
+            "mcp_server/auth/__init__.py",
+            "mcp_server/auth/authorizer_lambda.py",
+            "mcp_server/auth/discovery.py",
+        ],
         "handler": "mcp_server.auth.authorizer_lambda.lambda_handler",
         "kind": "zip",
     },
@@ -182,8 +236,7 @@ def validate_requirements(tier):
             bad.append(f"{name} ({EXCLUDED_FROM_LAMBDA[name]})")
     if bad:
         raise ValueError(
-            f"tier {tier!r} requires packages excluded from Lambda artifacts: "
-            + "; ".join(bad)
+            f"tier {tier!r} requires packages excluded from Lambda artifacts: " + "; ".join(bad)
         )
 
 
@@ -213,10 +266,7 @@ def prune_for_lambda(build_dir):
             if name.endswith((".pyc", ".pyo")):
                 os.unlink(os.path.join(dirpath, name))
 
-    return sum(
-        os.path.getsize(os.path.join(r, f))
-        for r, _, fs in os.walk(build_dir) for f in fs
-    )
+    return sum(os.path.getsize(os.path.join(r, f)) for r, _, fs in os.walk(build_dir) for f in fs)
 
 
 def _iter_source_files(repo_root, sources):

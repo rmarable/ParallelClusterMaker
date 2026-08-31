@@ -16,9 +16,7 @@ import types
 
 import pytest
 
-sys.path.insert(
-    0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src")
-)
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src"))
 
 from pcluster_aux_data import (  # noqa: F401
     base_os_efa,
@@ -94,8 +92,12 @@ class TestArmDetection:
 
         repo = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         offenders = []
-        for rel in ["src/pcluster_aux_data.py", "src/pcluster_core.py",
-                    "tests/test_aux_data.py", "make_pcluster.py"]:
+        for rel in [
+            "src/pcluster_aux_data.py",
+            "src/pcluster_core.py",
+            "tests/test_aux_data.py",
+            "make_pcluster.py",
+        ]:
             with open(os.path.join(repo, rel)) as fh:
                 body = fh.read()
             # A literal tuple assignment containing Graviton prefixes.
@@ -374,9 +376,7 @@ def test_ctrlC_abort_removes_existing_files(tmp_path, monkeypatch):
     serial_file.write_text("test-serial")
     vars_file.write_text("vars: true")
 
-    monkeypatch.setattr(
-        time, "sleep", lambda _: (_ for _ in ()).throw(KeyboardInterrupt())
-    )
+    monkeypatch.setattr(time, "sleep", lambda _: (_ for _ in ()).throw(KeyboardInterrupt()))
 
     with pytest.raises(SystemExit):
         aux.ctrlC_Abort(
@@ -399,9 +399,7 @@ def test_ctrlC_abort_skips_missing_files(tmp_path, monkeypatch):
     _mock_boto3(monkeypatch)
     aux = _reload_aux(monkeypatch)
 
-    monkeypatch.setattr(
-        time, "sleep", lambda _: (_ for _ in ()).throw(KeyboardInterrupt())
-    )
+    monkeypatch.setattr(time, "sleep", lambda _: (_ for _ in ()).throw(KeyboardInterrupt()))
 
     with pytest.raises(SystemExit):
         aux.ctrlC_Abort(
@@ -421,9 +419,7 @@ def test_ctrlC_abort_both_paths_none(monkeypatch, capsys):
     _mock_boto3(monkeypatch)
     aux = _reload_aux(monkeypatch)
 
-    monkeypatch.setattr(
-        time, "sleep", lambda _: (_ for _ in ()).throw(KeyboardInterrupt())
-    )
+    monkeypatch.setattr(time, "sleep", lambda _: (_ for _ in ()).throw(KeyboardInterrupt()))
 
     with pytest.raises(SystemExit):
         aux.ctrlC_Abort(
@@ -498,9 +494,7 @@ def test_ctrlC_abort_iam_cleanup_no_fsx(monkeypatch):
     _make_boto3_with_iam(iam, monkeypatch)
     aux = _reload_aux(monkeypatch)
 
-    monkeypatch.setattr(
-        time, "sleep", lambda _: (_ for _ in ()).throw(KeyboardInterrupt())
-    )
+    monkeypatch.setattr(time, "sleep", lambda _: (_ for _ in ()).throw(KeyboardInterrupt()))
 
     with pytest.raises(SystemExit):
         aux.ctrlC_Abort(
@@ -532,9 +526,7 @@ def test_ctrlC_abort_iam_cleanup_with_fsx_and_monitoring(monkeypatch):
     _make_boto3_with_iam(iam, monkeypatch)
     aux = _reload_aux(monkeypatch)
 
-    monkeypatch.setattr(
-        time, "sleep", lambda _: (_ for _ in ()).throw(KeyboardInterrupt())
-    )
+    monkeypatch.setattr(time, "sleep", lambda _: (_ for _ in ()).throw(KeyboardInterrupt()))
 
     with pytest.raises(SystemExit):
         aux.ctrlC_Abort(
@@ -567,9 +559,7 @@ def test_ctrlC_abort_iam_no_account_id_skips_policy_cleanup_but_deletes_role(mon
     _make_boto3_with_iam(iam, monkeypatch)
     aux = _reload_aux(monkeypatch)
 
-    monkeypatch.setattr(
-        time, "sleep", lambda _: (_ for _ in ()).throw(KeyboardInterrupt())
-    )
+    monkeypatch.setattr(time, "sleep", lambda _: (_ for _ in ()).throw(KeyboardInterrupt()))
 
     with pytest.raises(SystemExit):
         aux.ctrlC_Abort(
@@ -605,9 +595,7 @@ def test_ctrlC_abort_iam_no_such_entity_is_graceful(monkeypatch, capsys):
     _make_boto3_with_iam(_BrokenIAM(), monkeypatch)
     aux = _reload_aux(monkeypatch)
 
-    monkeypatch.setattr(
-        time, "sleep", lambda _: (_ for _ in ()).throw(KeyboardInterrupt())
-    )
+    monkeypatch.setattr(time, "sleep", lambda _: (_ for _ in ()).throw(KeyboardInterrupt()))
 
     with pytest.raises(SystemExit):
         aux.ctrlC_Abort(
@@ -628,38 +616,68 @@ def test_ctrlC_abort_iam_no_such_entity_is_graceful(monkeypatch, capsys):
 
 
 class TestIsGpuInstance:
-    @pytest.mark.parametrize("itype", [
-        "g4dn.xlarge", "g4dn.12xlarge", "g4dn.metal",
-        "g4ad.xlarge", "g4ad.16xlarge",
-        "g5.xlarge", "g5.48xlarge",
-        "g5g.xlarge", "g5g.metal",
-        "g6.xlarge", "g6.48xlarge",
-        "p3.2xlarge", "p3.16xlarge", "p3dn.24xlarge",
-        "p4d.24xlarge", "p4de.24xlarge",
-        "p5.48xlarge",
-    ])
+    @pytest.mark.parametrize(
+        "itype",
+        [
+            "g4dn.xlarge",
+            "g4dn.12xlarge",
+            "g4dn.metal",
+            "g4ad.xlarge",
+            "g4ad.16xlarge",
+            "g5.xlarge",
+            "g5.48xlarge",
+            "g5g.xlarge",
+            "g5g.metal",
+            "g6.xlarge",
+            "g6.48xlarge",
+            "p3.2xlarge",
+            "p3.16xlarge",
+            "p3dn.24xlarge",
+            "p4d.24xlarge",
+            "p4de.24xlarge",
+            "p5.48xlarge",
+        ],
+    )
     def test_gpu_instances_detected(self, itype):
         assert is_gpu_instance(itype)
 
-    @pytest.mark.parametrize("itype", [
-        "c8g.xlarge", "m7i.large", "r6i.2xlarge",
-        "trn1.32xlarge", "inf2.48xlarge",
-        "hpc7g.16xlarge", "i4i.32xlarge",
-    ])
+    @pytest.mark.parametrize(
+        "itype",
+        [
+            "c8g.xlarge",
+            "m7i.large",
+            "r6i.2xlarge",
+            "trn1.32xlarge",
+            "inf2.48xlarge",
+            "hpc7g.16xlarge",
+            "i4i.32xlarge",
+        ],
+    )
     def test_non_gpu_instances_not_detected(self, itype):
         assert not is_gpu_instance(itype)
 
 
 class TestNeedsEfaGdr:
-    @pytest.mark.parametrize("itype", [
-        "p4d.24xlarge", "p4de.24xlarge", "p5.48xlarge",
-    ])
+    @pytest.mark.parametrize(
+        "itype",
+        [
+            "p4d.24xlarge",
+            "p4de.24xlarge",
+            "p5.48xlarge",
+        ],
+    )
     def test_gdr_instances_detected(self, itype):
         assert needs_efa_gdr(itype)
 
-    @pytest.mark.parametrize("itype", [
-        "g4dn.12xlarge", "g5.48xlarge", "p3.16xlarge", "c8g.xlarge",
-    ])
+    @pytest.mark.parametrize(
+        "itype",
+        [
+            "g4dn.12xlarge",
+            "g5.48xlarge",
+            "p3.16xlarge",
+            "c8g.xlarge",
+        ],
+    )
     def test_non_gdr_instances_not_detected(self, itype):
         assert not needs_efa_gdr(itype)
 
@@ -778,26 +796,32 @@ class TestDeriveRanksPerNode:
         assert derive_ranks_per_node(instance_types=[], vcpu_map={}) == 0
 
     def test_a_single_type_gets_its_own_count(self):
-        assert derive_ranks_per_node(
-            instance_types=["c8g.2xlarge"], vcpu_map={"c8g.2xlarge": 8}
-        ) == 8
+        assert (
+            derive_ranks_per_node(instance_types=["c8g.2xlarge"], vcpu_map={"c8g.2xlarge": 8}) == 8
+        )
 
     def test_a_mixed_queue_takes_the_minimum(self):
         """A queue may hold several instance types, and only the smallest one's
         count fits on every node -- a job shaped to the largest goes pending when
         the fleet hands it a smaller one."""
-        assert derive_ranks_per_node(
-            instance_types=["c8g.8xlarge", "c8g.2xlarge", "c8g.4xlarge"],
-            vcpu_map={"c8g.8xlarge": 32, "c8g.2xlarge": 8, "c8g.4xlarge": 16},
-        ) == 8
+        assert (
+            derive_ranks_per_node(
+                instance_types=["c8g.8xlarge", "c8g.2xlarge", "c8g.4xlarge"],
+                vcpu_map={"c8g.8xlarge": 32, "c8g.2xlarge": 8, "c8g.4xlarge": 16},
+            )
+            == 8
+        )
 
     def test_a_type_missing_from_the_map_floors_at_one_not_zero(self):
         """`sbatch --ntasks=0` is rejected outright, so an instance type EC2
         answered without VCpuInfo must not render an unsubmittable script."""
-        assert derive_ranks_per_node(
-            instance_types=["c8g.2xlarge", "future.type"],
-            vcpu_map={"c8g.2xlarge": 8},
-        ) == 1
+        assert (
+            derive_ranks_per_node(
+                instance_types=["c8g.2xlarge", "future.type"],
+                vcpu_map={"c8g.2xlarge": 8},
+            )
+            == 1
+        )
 
     def test_the_signature_is_keyword_only(self):
         import inspect
@@ -872,12 +896,15 @@ class TestParseInstanceTypeList:
 
     def test_multiple_types_with_spaces(self):
         assert parse_instance_type_list("c8g.2xlarge, c7g.2xlarge, c6g.2xlarge") == [
-            "c8g.2xlarge", "c7g.2xlarge", "c6g.2xlarge"
+            "c8g.2xlarge",
+            "c7g.2xlarge",
+            "c6g.2xlarge",
         ]
 
     def test_deduplication_preserves_order(self):
         assert parse_instance_type_list("c5.xlarge,c5.xlarge,c6i.xlarge") == [
-            "c5.xlarge", "c6i.xlarge"
+            "c5.xlarge",
+            "c6i.xlarge",
         ]
 
     def test_empty_string_returns_empty_list(self):
@@ -894,26 +921,42 @@ class TestParseInstanceTypeList:
 
     def test_mixed_whitespace(self):
         assert parse_instance_type_list("  c5.xlarge ,  c6i.xlarge  ") == [
-            "c5.xlarge", "c6i.xlarge"
+            "c5.xlarge",
+            "c6i.xlarge",
         ]
 
 
 class TestQueueTypeValidation:
     """Verify that is_gpu_instance correctly separates CPU and GPU queue types."""
 
-    @pytest.mark.parametrize("itype", [
-        "g4dn.xlarge", "g5.2xlarge", "p3.8xlarge", "p4d.24xlarge", "p5.48xlarge",
-    ])
+    @pytest.mark.parametrize(
+        "itype",
+        [
+            "g4dn.xlarge",
+            "g5.2xlarge",
+            "p3.8xlarge",
+            "p4d.24xlarge",
+            "p5.48xlarge",
+        ],
+    )
     def test_gpu_types_rejected_from_cpu_queue(self, itype):
         assert is_gpu_instance(itype), (
             f"{itype} should be detected as GPU and rejected from compute_instance_type"
         )
 
-    @pytest.mark.parametrize("itype", [
-        "c8g.2xlarge", "c7g.2xlarge", "c6g.2xlarge",
-        "m7i.large", "r6i.2xlarge", "hpc7g.16xlarge",
-        "trn1.32xlarge", "inf2.48xlarge",
-    ])
+    @pytest.mark.parametrize(
+        "itype",
+        [
+            "c8g.2xlarge",
+            "c7g.2xlarge",
+            "c6g.2xlarge",
+            "m7i.large",
+            "r6i.2xlarge",
+            "hpc7g.16xlarge",
+            "trn1.32xlarge",
+            "inf2.48xlarge",
+        ],
+    )
     def test_non_gpu_types_allowed_in_cpu_queue(self, itype):
         assert not is_gpu_instance(itype), (
             f"{itype} incorrectly detected as GPU — should be allowed in compute_instance_type"

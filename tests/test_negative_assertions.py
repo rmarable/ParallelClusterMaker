@@ -41,7 +41,8 @@ def _tests_asserting_absence_over_source():
             if not any(marker in body for marker in _READS_SOURCE):
                 continue
             negatives = [
-                st for st in ast.walk(node)
+                st
+                for st in ast.walk(node)
                 if isinstance(st, ast.Assert)
                 and isinstance(st.test, ast.Compare)
                 and st.test.ops
@@ -80,8 +81,7 @@ class TestEveryNegativeSourceAssertionProvesItsHaystack:
                 for st in ast.walk(fn)
             )
             truthy = any(
-                isinstance(st, ast.Assert)
-                and ast.unparse(st.test) in haystacks
+                isinstance(st, ast.Assert) and ast.unparse(st.test) in haystacks
                 for st in ast.walk(fn)
             )
             if not (proves or positive or truthy):
@@ -89,8 +89,7 @@ class TestEveryNegativeSourceAssertionProvesItsHaystack:
         assert offenders == [], (
             "negative assertion(s) over Python source with nothing proving the "
             "haystack was read. Add `assert_source_is_real(src, label)` from "
-            "conftest, or assert something that IS present:\n  "
-            + "\n  ".join(offenders)
+            "conftest, or assert something that IS present:\n  " + "\n  ".join(offenders)
         )
 
     def test_the_sweep_actually_finds_tests(self):

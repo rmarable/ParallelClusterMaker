@@ -221,7 +221,13 @@ class _FakeS3:
 
 
 class _FakeEc2:
-    def __init__(self, sg_already_exists=False, keypair_already_exists=False, raise_on_sg=None, raise_on_keypair=None):
+    def __init__(
+        self,
+        sg_already_exists=False,
+        keypair_already_exists=False,
+        raise_on_sg=None,
+        raise_on_keypair=None,
+    ):
         self.sg_already_exists = sg_already_exists
         self.keypair_already_exists = keypair_already_exists
         self.raise_on_sg = raise_on_sg
@@ -273,9 +279,7 @@ class _FakeSecretsManager:
     def create_secret(self, Name, Description, SecretString, Tags):
         if self.raise_on_create:
             raise self.raise_on_create
-        self.created_secrets.append(
-            {"Name": Name, "SecretString": SecretString, "Tags": Tags}
-        )
+        self.created_secrets.append({"Name": Name, "SecretString": SecretString, "Tags": Tags})
 
     def delete_secret(self, SecretId, ForceDeleteWithoutRecovery):
         self.deleted_secrets.append(SecretId)
@@ -285,11 +289,16 @@ class TestCreateS3BucketForCluster:
     def test_creates_and_tags(self):
         s3 = _FakeS3()
         _create_s3_bucket_for_cluster(
-            s3, s3_bucketname="my-bucket", region="us-west-2",
+            s3,
+            s3_bucketname="my-bucket",
+            region="us-west-2",
             tags={"ClusterID": "foo", "ProdLevel": "dev"},
         )
         assert s3.created_buckets == [
-            {"Bucket": "my-bucket", "CreateBucketConfiguration": {"LocationConstraint": "us-west-2"}}
+            {
+                "Bucket": "my-bucket",
+                "CreateBucketConfiguration": {"LocationConstraint": "us-west-2"},
+            }
         ]
         assert s3.tags["my-bucket"] == {
             "TagSet": [{"Key": "ClusterID", "Value": "foo"}, {"Key": "ProdLevel", "Value": "dev"}]
@@ -298,14 +307,20 @@ class TestCreateS3BucketForCluster:
     def test_us_east_1_omits_location_constraint(self):
         s3 = _FakeS3()
         _create_s3_bucket_for_cluster(
-            s3, s3_bucketname="my-bucket", region="us-east-1", tags={},
+            s3,
+            s3_bucketname="my-bucket",
+            region="us-east-1",
+            tags={},
         )
         assert s3.created_buckets == [{"Bucket": "my-bucket"}]
 
     def test_already_owned_is_not_a_failure(self):
         s3 = _FakeS3(already_owned=True)
         _create_s3_bucket_for_cluster(
-            s3, s3_bucketname="my-bucket", region="us-west-2", tags={"x": "y"},
+            s3,
+            s3_bucketname="my-bucket",
+            region="us-west-2",
+            tags={"x": "y"},
         )
         assert s3.tags["my-bucket"]  # tagging still applied
 
@@ -313,7 +328,10 @@ class TestCreateS3BucketForCluster:
         s3 = _FakeS3(raise_on_create=_client_error("AccessDenied", "CreateBucket"))
         with pytest.raises(ClientError):
             _create_s3_bucket_for_cluster(
-                s3, s3_bucketname="my-bucket", region="us-west-2", tags={},
+                s3,
+                s3_bucketname="my-bucket",
+                region="us-west-2",
+                tags={},
             )
 
 
@@ -321,7 +339,10 @@ class TestCreateExternalNfsSg:
     def test_creates_with_correct_ports_and_protocols(self):
         ec2 = _FakeEc2()
         group_id = _create_external_nfs_sg(
-            ec2, cluster_name="foo", vpc_id="vpc-123", vpc_cidr="10.1.0.0/16",
+            ec2,
+            cluster_name="foo",
+            vpc_id="vpc-123",
+            vpc_cidr="10.1.0.0/16",
         )
         assert group_id == "sg-created0001"
         assert ec2.created_sgs == [{"GroupName": "pcluster-foo-externalNfs", "VpcId": "vpc-123"}]
@@ -342,7 +363,10 @@ class TestCreateExternalNfsSg:
     def test_duplicate_returns_existing_group_id_without_authorizing(self):
         ec2 = _FakeEc2(sg_already_exists=True)
         group_id = _create_external_nfs_sg(
-            ec2, cluster_name="foo", vpc_id="vpc-123", vpc_cidr=None,
+            ec2,
+            cluster_name="foo",
+            vpc_id="vpc-123",
+            vpc_cidr=None,
         )
         assert group_id == "sg-existing0001"
         assert ec2.authorized is None
@@ -377,20 +401,26 @@ class TestAbortIfKeypairOrphaned:
     def test_raises_when_not_changed_and_no_local_file(self):
         with pytest.raises(_ClusterProvisioningError, match="foo-key"):
             _abort_if_keypair_orphaned(
-                changed=False, local_pem_exists=False,
-                ec2_keypair="foo-key", region="us-west-2",
+                changed=False,
+                local_pem_exists=False,
+                ec2_keypair="foo-key",
+                region="us-west-2",
             )
 
     def test_does_not_raise_when_changed(self):
         _abort_if_keypair_orphaned(
-            changed=True, local_pem_exists=False,
-            ec2_keypair="foo-key", region="us-west-2",
+            changed=True,
+            local_pem_exists=False,
+            ec2_keypair="foo-key",
+            region="us-west-2",
         )
 
     def test_does_not_raise_when_local_file_exists(self):
         _abort_if_keypair_orphaned(
-            changed=False, local_pem_exists=True,
-            ec2_keypair="foo-key", region="us-west-2",
+            changed=False,
+            local_pem_exists=True,
+            ec2_keypair="foo-key",
+            region="us-west-2",
         )
 
 
@@ -411,8 +441,10 @@ class TestStoreSshSecret:
         pem.write_text(_FAKE_PEM)
         sm = _FakeSecretsManager()
         _store_ssh_secret(
-            sm, ssh_secret_name="parallelcluster/foo/x/ssh-private-key",
-            cluster_name="foo", ssh_keypair=str(pem),
+            sm,
+            ssh_secret_name="parallelcluster/foo/x/ssh-private-key",
+            cluster_name="foo",
+            ssh_keypair=str(pem),
         )
         assert sm.created_secrets[0]["SecretString"] == _FAKE_PEM
         assert sm.created_secrets[0]["Name"] == "parallelcluster/foo/x/ssh-private-key"
@@ -420,9 +452,14 @@ class TestStoreSshSecret:
     def test_tolerates_resource_exists_exception(self, tmp_path):
         pem = tmp_path / "cluster.pem"
         pem.write_text(_FAKE_PEM)
-        sm = _FakeSecretsManager(raise_on_create=_client_error("ResourceExistsException", "CreateSecret"))
+        sm = _FakeSecretsManager(
+            raise_on_create=_client_error("ResourceExistsException", "CreateSecret")
+        )
         _store_ssh_secret(
-            sm, ssh_secret_name="x", cluster_name="foo", ssh_keypair=str(pem),
+            sm,
+            ssh_secret_name="x",
+            cluster_name="foo",
+            ssh_keypair=str(pem),
         )  # must not raise
 
     def test_other_failure_propagates(self, tmp_path):
@@ -437,9 +474,13 @@ class TestCleanupAfterProvisioningFailure:
     def test_cleans_up_bucket_keypair_and_secret(self):
         s3, ec2, sm = _FakeS3(), _FakeEc2(), _FakeSecretsManager()
         _cleanup_after_provisioning_failure(
-            s3=s3, ec2=ec2, secretsmanager=sm,
-            s3_bucketname="my-bucket", ec2_keypair="foo-key",
-            ssh_secret_name="x", cluster_name="foo",
+            s3=s3,
+            ec2=ec2,
+            secretsmanager=sm,
+            s3_bucketname="my-bucket",
+            ec2_keypair="foo-key",
+            ssh_secret_name="x",
+            cluster_name="foo",
             external_nfs_sg_enabled=False,
         )
         assert s3.deleted_buckets == ["my-bucket"]
@@ -450,9 +491,13 @@ class TestCleanupAfterProvisioningFailure:
     def test_deletes_the_sg_only_when_external_nfs_is_enabled(self):
         s3, ec2, sm = _FakeS3(), _FakeEc2(), _FakeSecretsManager()
         _cleanup_after_provisioning_failure(
-            s3=s3, ec2=ec2, secretsmanager=sm,
-            s3_bucketname="my-bucket", ec2_keypair="foo-key",
-            ssh_secret_name="x", cluster_name="foo",
+            s3=s3,
+            ec2=ec2,
+            secretsmanager=sm,
+            s3_bucketname="my-bucket",
+            ec2_keypair="foo-key",
+            ssh_secret_name="x",
+            cluster_name="foo",
             external_nfs_sg_enabled=True,
         )
         assert ec2.deleted_sgs == ["sg-existing0001"]
@@ -478,11 +523,18 @@ class TestCleanupAfterProvisioningFailure:
 class TestProvisionS3KeypairAndSecret:
     def _kwargs(self, s3, ec2, sm, ssh_keypair, **overrides):
         base = dict(
-            s3=s3, ec2=ec2, secretsmanager=sm,
-            s3_bucketname="my-bucket", region="us-west-2", tags={"ClusterID": "foo"},
-            enable_external_nfs=False, cluster_name="foo",
-            vpc_id="vpc-123", vpc_cidr="10.1.0.0/16",
-            ec2_keypair="foo-key", ssh_keypair=ssh_keypair,
+            s3=s3,
+            ec2=ec2,
+            secretsmanager=sm,
+            s3_bucketname="my-bucket",
+            region="us-west-2",
+            tags={"ClusterID": "foo"},
+            enable_external_nfs=False,
+            cluster_name="foo",
+            vpc_id="vpc-123",
+            vpc_cidr="10.1.0.0/16",
+            ec2_keypair="foo-key",
+            ssh_keypair=ssh_keypair,
             ssh_secret_name="x",
         )
         base.update(overrides)
@@ -491,9 +543,7 @@ class TestProvisionS3KeypairAndSecret:
     def test_happy_path_no_external_nfs(self, tmp_path):
         s3, ec2, sm = _FakeS3(), _FakeEc2(), _FakeSecretsManager()
         ssh_keypair = str(tmp_path / "cluster.pem")
-        result = provision_s3_keypair_and_secret(
-            **self._kwargs(s3, ec2, sm, ssh_keypair)
-        )
+        result = provision_s3_keypair_and_secret(**self._kwargs(s3, ec2, sm, ssh_keypair))
         assert result is None
         assert s3.created_buckets
         assert ec2.created_keypairs == ["foo-key"]
@@ -517,9 +567,7 @@ class TestProvisionS3KeypairAndSecret:
         sm = _FakeSecretsManager()
         ssh_keypair = tmp_path / "cluster.pem"
         ssh_keypair.write_text(_FAKE_PEM)
-        provision_s3_keypair_and_secret(
-            **self._kwargs(s3, ec2, sm, str(ssh_keypair))
-        )
+        provision_s3_keypair_and_secret(**self._kwargs(s3, ec2, sm, str(ssh_keypair)))
         assert sm.created_secrets
         assert sm.created_secrets[0]["SecretString"] == _FAKE_PEM
 
@@ -544,18 +592,14 @@ class TestProvisionS3KeypairAndSecret:
         sm = _FakeSecretsManager()
         ssh_keypair = str(tmp_path / "cluster.pem")
         with pytest.raises(ClientError) as exc:
-            provision_s3_keypair_and_secret(
-                **self._kwargs(s3, ec2, sm, ssh_keypair)
-            )
+            provision_s3_keypair_and_secret(**self._kwargs(s3, ec2, sm, ssh_keypair))
         assert exc.value.response["Error"]["Code"] == "AccessDenied"
         assert s3.deleted_buckets == ["my-bucket"]
 
     def test_private_key_material_never_appears_in_output(self, tmp_path, capsys):
         s3, ec2, sm = _FakeS3(), _FakeEc2(), _FakeSecretsManager()
         ssh_keypair = str(tmp_path / "cluster.pem")
-        provision_s3_keypair_and_secret(
-            **self._kwargs(s3, ec2, sm, ssh_keypair)
-        )
+        provision_s3_keypair_and_secret(**self._kwargs(s3, ec2, sm, ssh_keypair))
         out = capsys.readouterr()
         assert "THIS-IS-FAKE-KEY-MATERIAL" not in out.out
         assert "THIS-IS-FAKE-KEY-MATERIAL" not in out.err
@@ -600,7 +644,9 @@ class TestDownloadWithChecksum:
         content = b"the-tarball-bytes"
         monkeypatch.setattr(pcluster_core.urllib.request, "urlopen", _fake_urlopen(content))
         dest = tmp_path / "out.tar.gz"
-        _download_with_checksum("https://example.invalid/x", str(dest), _sha256_of(content), mode=0o644)
+        _download_with_checksum(
+            "https://example.invalid/x", str(dest), _sha256_of(content), mode=0o644
+        )
         assert dest.read_bytes() == content
 
     def test_file_mode_is_set_correctly(self, tmp_path, monkeypatch):
@@ -609,7 +655,9 @@ class TestDownloadWithChecksum:
         content = b"plugin-binary"
         monkeypatch.setattr(pcluster_core.urllib.request, "urlopen", _fake_urlopen(content))
         dest = tmp_path / "out"
-        _download_with_checksum("https://example.invalid/x", str(dest), _sha256_of(content), mode=0o755)
+        _download_with_checksum(
+            "https://example.invalid/x", str(dest), _sha256_of(content), mode=0o755
+        )
         assert stat.S_IMODE(dest.stat().st_mode) == 0o755
 
     def test_checksum_mismatch_raises_and_leaves_no_file(self, tmp_path, monkeypatch):
@@ -618,7 +666,9 @@ class TestDownloadWithChecksum:
         monkeypatch.setattr(pcluster_core.urllib.request, "urlopen", _fake_urlopen(content))
         dest = tmp_path / "out.tar.gz"
         with pytest.raises(ValueError, match="checksum mismatch"):
-            _download_with_checksum("https://example.invalid/x", str(dest), wrong_checksum, mode=0o644)
+            _download_with_checksum(
+                "https://example.invalid/x", str(dest), wrong_checksum, mode=0o644
+            )
         assert not dest.exists()
         assert list(tmp_path.iterdir()) == []  # no leftover temp file either
 
@@ -626,19 +676,26 @@ class TestDownloadWithChecksum:
         dest = tmp_path / "out.tar.gz"
         with pytest.raises(ValueError, match="unsupported checksum algorithm"):
             _download_with_checksum(
-                "https://example.invalid/x", str(dest), "md5:abc123", mode=0o644,
+                "https://example.invalid/x",
+                str(dest),
+                "md5:abc123",
+                mode=0o644,
             )
         assert not dest.exists()
 
     def test_network_failure_leaves_no_partial_file(self, tmp_path, monkeypatch):
         monkeypatch.setattr(
-            pcluster_core.urllib.request, "urlopen",
+            pcluster_core.urllib.request,
+            "urlopen",
             _fake_urlopen(raise_exc=OSError("network unreachable")),
         )
         dest = tmp_path / "out.tar.gz"
         with pytest.raises(OSError):
             _download_with_checksum(
-                "https://example.invalid/x", str(dest), _sha256_of(b"x"), mode=0o644,
+                "https://example.invalid/x",
+                str(dest),
+                _sha256_of(b"x"),
+                mode=0o644,
             )
         assert not dest.exists()
         assert list(tmp_path.iterdir()) == []
@@ -651,8 +708,12 @@ class TestUploadFileToS3:
         s3 = _FakeS3()
         _upload_file_to_s3(s3, bucket="my-bucket", key="scripts/f.txt", src=str(src))
         assert s3.uploaded == [
-            {"src": str(src), "bucket": "my-bucket", "key": "scripts/f.txt",
-             "extra": {"ServerSideEncryption": "AES256"}}
+            {
+                "src": str(src),
+                "bucket": "my-bucket",
+                "key": "scripts/f.txt",
+                "extra": {"ServerSideEncryption": "AES256"},
+            }
         ]
         assert "ACL" not in s3.uploaded[0]["extra"]
 
@@ -662,13 +723,18 @@ class TestStageMonitoringTarball:
         content = b"tarball-bytes"
         urls = []
         monkeypatch.setattr(
-            pcluster_core.urllib.request, "urlopen", _fake_urlopen(content, calls=urls),
+            pcluster_core.urllib.request,
+            "urlopen",
+            _fake_urlopen(content, calls=urls),
         )
         s3 = _FakeS3()
         _stage_monitoring_tarball(
-            s3, cluster_data_dir=str(tmp_path), s3_bucketname="my-bucket",
+            s3,
+            cluster_data_dir=str(tmp_path),
+            s3_bucketname="my-bucket",
             s3_script_path="cluster_scripts/prod",
-            monitoring_version="v2.6.0", monitoring_version_checksum=_sha256_of(content),
+            monitoring_version="v2.6.0",
+            monitoring_version_checksum=_sha256_of(content),
         )
         assert urls == [
             "https://github.com/aws-samples/aws-parallelcluster-monitoring/"
@@ -685,13 +751,18 @@ class TestStageDockerComposePlugin:
         content = b"docker-compose-binary"
         urls = []
         monkeypatch.setattr(
-            pcluster_core.urllib.request, "urlopen", _fake_urlopen(content, calls=urls),
+            pcluster_core.urllib.request,
+            "urlopen",
+            _fake_urlopen(content, calls=urls),
         )
         s3 = _FakeS3()
         dest = tmp_path / "docker-compose-linux-aarch64-v2.29.7"
         _stage_docker_compose_plugin(
-            s3, s3_bucketname="my-bucket", s3_script_path="cluster_scripts/prod",
-            docker_compose_version="v2.29.7", docker_compose_arch="aarch64",
+            s3,
+            s3_bucketname="my-bucket",
+            s3_script_path="cluster_scripts/prod",
+            docker_compose_version="v2.29.7",
+            docker_compose_arch="aarch64",
             docker_compose_checksum=_sha256_of(content),
             docker_compose_local_dest=str(dest),
             docker_compose_s3_dest="docker-compose-linux-aarch64-v2.29.7",
@@ -707,11 +778,16 @@ class TestStageDockerComposePlugin:
 class TestStageAndUploadMonitoringWrapper:
     def _kwargs(self, tmp_path, wrapper_path, **overrides):
         base = dict(
-            enable_monitoring=True, cluster_data_dir=str(tmp_path),
-            s3_bucketname="my-bucket", s3_script_path="cluster_scripts/prod",
-            monitoring_version="v2.6.0", monitoring_version_checksum=None,
-            stage_docker_compose=False, docker_compose_version="v2.29.7",
-            docker_compose_arch="aarch64", docker_compose_checksum=None,
+            enable_monitoring=True,
+            cluster_data_dir=str(tmp_path),
+            s3_bucketname="my-bucket",
+            s3_script_path="cluster_scripts/prod",
+            monitoring_version="v2.6.0",
+            monitoring_version_checksum=None,
+            stage_docker_compose=False,
+            docker_compose_version="v2.29.7",
+            docker_compose_arch="aarch64",
+            docker_compose_checksum=None,
             docker_compose_local_dest=str(tmp_path / "docker-compose"),
             docker_compose_s3_dest="docker-compose-linux-aarch64-v2.29.7",
             monitoring_wrapper_dest=str(wrapper_path),
@@ -723,28 +799,38 @@ class TestStageAndUploadMonitoringWrapper:
     def test_disabled_monitoring_does_nothing(self, tmp_path, monkeypatch):
         urls = []
         monkeypatch.setattr(
-            pcluster_core.urllib.request, "urlopen", _fake_urlopen(calls=urls),
+            pcluster_core.urllib.request,
+            "urlopen",
+            _fake_urlopen(calls=urls),
         )
         s3 = _FakeS3()
         wrapper = tmp_path / "wrapper.sh"
         wrapper.write_text("#!/bin/bash\n")
         stage_and_upload_monitoring_wrapper(
-            s3, **self._kwargs(tmp_path, wrapper, enable_monitoring=False),
+            s3,
+            **self._kwargs(tmp_path, wrapper, enable_monitoring=False),
         )
         assert urls == []
         assert s3.uploaded == []
 
-    def test_enabled_without_docker_compose_stages_tarball_and_wrapper_only(self, tmp_path, monkeypatch):
+    def test_enabled_without_docker_compose_stages_tarball_and_wrapper_only(
+        self, tmp_path, monkeypatch
+    ):
         tarball = b"tarball-bytes"
         monkeypatch.setattr(
-            pcluster_core.urllib.request, "urlopen", _fake_urlopen(tarball),
+            pcluster_core.urllib.request,
+            "urlopen",
+            _fake_urlopen(tarball),
         )
         s3 = _FakeS3()
         wrapper = tmp_path / "wrapper.sh"
         wrapper.write_text("#!/bin/bash\n")
         stage_and_upload_monitoring_wrapper(
-            s3, **self._kwargs(
-                tmp_path, wrapper, monitoring_version_checksum=_sha256_of(tarball),
+            s3,
+            **self._kwargs(
+                tmp_path,
+                wrapper,
+                monitoring_version_checksum=_sha256_of(tarball),
             ),
         )
         keys = [u["key"] for u in s3.uploaded]
@@ -757,15 +843,18 @@ class TestStageAndUploadMonitoringWrapper:
         compose = b"compose-binary"
         responses = iter([tarball, compose])
         monkeypatch.setattr(
-            pcluster_core.urllib.request, "urlopen",
+            pcluster_core.urllib.request,
+            "urlopen",
             lambda url, timeout=None: _FakeUrlopenResponse(next(responses)),
         )
         s3 = _FakeS3()
         wrapper = tmp_path / "wrapper.sh"
         wrapper.write_text("#!/bin/bash\n")
         stage_and_upload_monitoring_wrapper(
-            s3, **self._kwargs(
-                tmp_path, wrapper,
+            s3,
+            **self._kwargs(
+                tmp_path,
+                wrapper,
                 monitoring_version_checksum=_sha256_of(tarball),
                 stage_docker_compose=True,
                 docker_compose_checksum=_sha256_of(compose),
@@ -779,15 +868,19 @@ class TestStageAndUploadMonitoringWrapper:
         tarball = b"tarball-bytes"
         urls = []
         monkeypatch.setattr(
-            pcluster_core.urllib.request, "urlopen", _fake_urlopen(tarball, calls=urls),
+            pcluster_core.urllib.request,
+            "urlopen",
+            _fake_urlopen(tarball, calls=urls),
         )
         s3 = _FakeS3()
         wrapper = tmp_path / "wrapper.sh"
         wrapper.write_text("#!/bin/bash\n")
         with pytest.raises(ValueError, match="checksum mismatch"):
             stage_and_upload_monitoring_wrapper(
-                s3, **self._kwargs(
-                    tmp_path, wrapper,
+                s3,
+                **self._kwargs(
+                    tmp_path,
+                    wrapper,
                     monitoring_version_checksum=_sha256_of(b"wrong-bytes"),
                     stage_docker_compose=True,
                     docker_compose_checksum=_sha256_of(b"whatever"),
@@ -851,8 +944,13 @@ def test_rollback_states_collapse_into_create_failed_in_the_installed_package():
 
     for raw in (CFN.ROLLBACK_IN_PROGRESS, CFN.ROLLBACK_FAILED, CFN.ROLLBACK_COMPLETE):
         assert cloud_formation_status_to_cluster_status(raw) == ClusterStatus.CREATE_FAILED
-    assert cloud_formation_status_to_cluster_status(CFN.CREATE_FAILED) == ClusterStatus.CREATE_FAILED
-    assert cloud_formation_status_to_cluster_status(CFN.CREATE_COMPLETE) == ClusterStatus.CREATE_COMPLETE
+    assert (
+        cloud_formation_status_to_cluster_status(CFN.CREATE_FAILED) == ClusterStatus.CREATE_FAILED
+    )
+    assert (
+        cloud_formation_status_to_cluster_status(CFN.CREATE_COMPLETE)
+        == ClusterStatus.CREATE_COMPLETE
+    )
 
 
 class TestWaitForClusterCreate:
@@ -860,7 +958,12 @@ class TestWaitForClusterCreate:
         resp = {"clusterStatus": "CREATE_COMPLETE", "headNode": {"publicIpAddress": "1.2.3.4"}}
         describe_fn = _ScriptedDescribeFn([resp])
         state, last = _wait_for_cluster_create(
-            describe_fn, "foo", "us-east-1", retries=5, delay_seconds=1, sleep_fn=_fake_sleep,
+            describe_fn,
+            "foo",
+            "us-east-1",
+            retries=5,
+            delay_seconds=1,
+            sleep_fn=_fake_sleep,
         )
         assert state == "CREATE_COMPLETE"
         assert last == resp
@@ -869,20 +972,32 @@ class TestWaitForClusterCreate:
         resp = {"clusterStatus": "CREATE_FAILED"}
         describe_fn = _ScriptedDescribeFn([resp])
         state, last = _wait_for_cluster_create(
-            describe_fn, "foo", "us-east-1", retries=5, delay_seconds=1, sleep_fn=_fake_sleep,
+            describe_fn,
+            "foo",
+            "us-east-1",
+            retries=5,
+            delay_seconds=1,
+            sleep_fn=_fake_sleep,
         )
         assert state == "CREATE_FAILED"
         assert last == resp
 
     def test_still_building_then_completes(self):
-        describe_fn = _ScriptedDescribeFn([
-            {"clusterStatus": "CREATE_IN_PROGRESS"},
-            {"clusterStatus": "CREATE_IN_PROGRESS"},
-            {"clusterStatus": "CREATE_COMPLETE"},
-        ])
+        describe_fn = _ScriptedDescribeFn(
+            [
+                {"clusterStatus": "CREATE_IN_PROGRESS"},
+                {"clusterStatus": "CREATE_IN_PROGRESS"},
+                {"clusterStatus": "CREATE_COMPLETE"},
+            ]
+        )
         sleeps = []
         state, last = _wait_for_cluster_create(
-            describe_fn, "foo", "us-east-1", retries=5, delay_seconds=1, sleep_fn=sleeps.append,
+            describe_fn,
+            "foo",
+            "us-east-1",
+            retries=5,
+            delay_seconds=1,
+            sleep_fn=sleeps.append,
         )
         assert state == "CREATE_COMPLETE"
         assert len(describe_fn.calls) == 3
@@ -891,7 +1006,12 @@ class TestWaitForClusterCreate:
     def test_times_out_after_retries_exhausted(self):
         describe_fn = _ScriptedDescribeFn([{"clusterStatus": "CREATE_IN_PROGRESS"}])
         state, last = _wait_for_cluster_create(
-            describe_fn, "foo", "us-east-1", retries=4, delay_seconds=1, sleep_fn=_fake_sleep,
+            describe_fn,
+            "foo",
+            "us-east-1",
+            retries=4,
+            delay_seconds=1,
+            sleep_fn=_fake_sleep,
         )
         assert state == "TIMED_OUT"
         assert last is None
@@ -901,7 +1021,12 @@ class TestWaitForClusterCreate:
         resp = {"clusterStatus": "CREATE_COMPLETE"}
         describe_fn = _ScriptedDescribeFn([RuntimeError("throttled"), resp])
         state, last = _wait_for_cluster_create(
-            describe_fn, "foo", "us-east-1", retries=5, delay_seconds=1, sleep_fn=_fake_sleep,
+            describe_fn,
+            "foo",
+            "us-east-1",
+            retries=5,
+            delay_seconds=1,
+            sleep_fn=_fake_sleep,
         )
         assert state == "CREATE_COMPLETE"
         assert last == resp
@@ -910,7 +1035,12 @@ class TestWaitForClusterCreate:
         describe_fn = _ScriptedDescribeFn([RuntimeError("AccessDenied")])
         with pytest.raises(RuntimeError, match="AccessDenied"):
             _wait_for_cluster_create(
-                describe_fn, "foo", "us-east-1", retries=3, delay_seconds=1, sleep_fn=_fake_sleep,
+                describe_fn,
+                "foo",
+                "us-east-1",
+                retries=3,
+                delay_seconds=1,
+                sleep_fn=_fake_sleep,
             )
 
 
@@ -933,7 +1063,9 @@ class TestExtractHeadNodeIp:
 class TestClassifyClusterCreateOutcome:
     def test_create_complete_is_confirmed(self):
         confirmed, failed, headline = _classify_cluster_create_outcome(
-            "CREATE_COMPLETE", "foo", {"clusterStatus": "CREATE_COMPLETE"},
+            "CREATE_COMPLETE",
+            "foo",
+            {"clusterStatus": "CREATE_COMPLETE"},
         )
         assert confirmed is True
         assert failed is False
@@ -952,7 +1084,9 @@ class TestClassifyClusterCreateOutcome:
 
     def test_create_failed_without_failures_detail(self):
         confirmed, failed, headline = _classify_cluster_create_outcome(
-            "CREATE_FAILED", "foo", {"clusterStatus": "CREATE_FAILED"},
+            "CREATE_FAILED",
+            "foo",
+            {"clusterStatus": "CREATE_FAILED"},
         )
         assert failed is True
         assert headline == "Cluster foo creation failed (CREATE_FAILED)."
@@ -968,12 +1102,17 @@ class TestRunClusterCreateAndClassify:
     def _kwargs(self, create_fn, describe_fn, **overrides):
         base = dict(
             cluster_configuration_path="/tmp/config.foo",
-            retries=5, delay_seconds=1, sleep_fn=_fake_sleep,
+            retries=5,
+            delay_seconds=1,
+            sleep_fn=_fake_sleep,
         )
         base.update(overrides)
         return dict(
-            create_fn=create_fn, describe_fn=describe_fn,
-            cluster_name="foo", region="us-east-1", **base,
+            create_fn=create_fn,
+            describe_fn=describe_fn,
+            cluster_name="foo",
+            region="us-east-1",
+            **base,
         )
 
     def test_passes_the_configuration_path_not_content(self):
@@ -997,8 +1136,11 @@ class TestRunClusterCreateAndClassify:
         )
         outcome = run_cluster_create_and_classify(**self._kwargs(create_fn, describe_fn))
         assert outcome == ClusterCreateOutcome(
-            "CREATE_COMPLETE", True, False,
-            "Cluster foo was created successfully.", "1.2.3.4",
+            "CREATE_COMPLETE",
+            True,
+            False,
+            "Cluster foo was created successfully.",
+            "1.2.3.4",
         )
 
     def test_create_call_failure_propagates_immediately_no_tolerance(self):
@@ -1024,9 +1166,7 @@ class TestRunClusterCreateAndClassify:
     def test_timeout_flow_has_no_head_node_ip(self):
         create_fn = _FakeCreateFn()
         describe_fn = _ScriptedDescribeFn([{"clusterStatus": "CREATE_IN_PROGRESS"}])
-        outcome = run_cluster_create_and_classify(
-            **self._kwargs(create_fn, describe_fn, retries=2)
-        )
+        outcome = run_cluster_create_and_classify(**self._kwargs(create_fn, describe_fn, retries=2))
         assert outcome.terminal_state == "TIMED_OUT"
         assert outcome.create_confirmed is False
         assert outcome.head_node_public_ip == ""
@@ -1103,7 +1243,10 @@ class TestWaitForSshPort:
         conn = _FailNTimesThenSucceed(fail_times=0)
         monkeypatch.setattr(pcluster_core.socket, "create_connection", conn)
         _wait_for_ssh_port(
-            "1.2.3.4", delay=5, timeout=300, sleep_fn=lambda s: None,
+            "1.2.3.4",
+            delay=5,
+            timeout=300,
+            sleep_fn=lambda s: None,
             time_fn=_SequencedClock([0]),
         )
         assert conn.calls == 1
@@ -1113,7 +1256,10 @@ class TestWaitForSshPort:
         monkeypatch.setattr(pcluster_core.socket, "create_connection", conn)
         sleeps = []
         _wait_for_ssh_port(
-            "1.2.3.4", delay=5, timeout=300, sleep_fn=sleeps.append,
+            "1.2.3.4",
+            delay=5,
+            timeout=300,
+            sleep_fn=sleeps.append,
             time_fn=_SequencedClock([0]),
         )
         assert sleeps[0] == 5
@@ -1123,7 +1269,11 @@ class TestWaitForSshPort:
         monkeypatch.setattr(pcluster_core.socket, "create_connection", conn)
         sleeps = []
         _wait_for_ssh_port(
-            "1.2.3.4", delay=5, timeout=300, poll_interval=1, sleep_fn=sleeps.append,
+            "1.2.3.4",
+            delay=5,
+            timeout=300,
+            poll_interval=1,
+            sleep_fn=sleeps.append,
             time_fn=_SequencedClock([0, 1, 2, 3]),
         )
         assert conn.calls == 3
@@ -1134,7 +1284,10 @@ class TestWaitForSshPort:
         monkeypatch.setattr(pcluster_core.socket, "create_connection", conn)
         with pytest.raises(TimeoutError, match="1.2.3.4"):
             _wait_for_ssh_port(
-                "1.2.3.4", delay=5, timeout=300, sleep_fn=lambda s: None,
+                "1.2.3.4",
+                delay=5,
+                timeout=300,
+                sleep_fn=lambda s: None,
                 time_fn=_SequencedClock([0, 1000]),
             )
 
@@ -1166,7 +1319,8 @@ class TestRemoveStaleKnownHostsEntry:
 
     def test_never_raises_regardless_of_ssh_keygen_failure(self, tmp_path, monkeypatch):
         monkeypatch.setattr(
-            pcluster_core.subprocess, "run",
+            pcluster_core.subprocess,
+            "run",
             lambda *a, **k: (_ for _ in ()).throw(RuntimeError("no such file")),
         )
         _remove_stale_known_hosts_entry("1.2.3.4", str(tmp_path / "known_hosts"))  # must not raise
@@ -1176,18 +1330,22 @@ class TestAcceptSshFingerprint:
     def test_appends_new_fingerprint_lines(self, tmp_path, monkeypatch):
         known_hosts = tmp_path / "known_hosts"
         monkeypatch.setattr(
-            pcluster_core.subprocess, "run",
+            pcluster_core.subprocess,
+            "run",
             lambda *a, **k: _FakeCompletedProcess(0, stdout="1.2.3.4 ssh-ed25519 AAAA...\n"),
         )
         added = _accept_ssh_fingerprint("1.2.3.4", str(known_hosts))
         assert added is True
         assert "1.2.3.4 ssh-ed25519 AAAA..." in known_hosts.read_text()
 
-    def test_already_present_line_is_not_duplicated_and_reports_unchanged(self, tmp_path, monkeypatch):
+    def test_already_present_line_is_not_duplicated_and_reports_unchanged(
+        self, tmp_path, monkeypatch
+    ):
         known_hosts = tmp_path / "known_hosts"
         known_hosts.write_text("1.2.3.4 ssh-ed25519 AAAA...\n")
         monkeypatch.setattr(
-            pcluster_core.subprocess, "run",
+            pcluster_core.subprocess,
+            "run",
             lambda *a, **k: _FakeCompletedProcess(0, stdout="1.2.3.4 ssh-ed25519 AAAA...\n"),
         )
         added = _accept_ssh_fingerprint("1.2.3.4", str(known_hosts))
@@ -1197,7 +1355,8 @@ class TestAcceptSshFingerprint:
     def test_no_host_key_at_all_raises(self, tmp_path, monkeypatch):
         known_hosts = tmp_path / "known_hosts"
         monkeypatch.setattr(
-            pcluster_core.subprocess, "run",
+            pcluster_core.subprocess,
+            "run",
             lambda *a, **k: _FakeCompletedProcess(0, stdout=""),
         )
         with pytest.raises(RuntimeError, match="no host key"):
@@ -1209,7 +1368,9 @@ class TestCreatePerformanceDirOnHeadNode:
         runner = _RecordingRun()
         monkeypatch.setattr(subprocess, "run", runner)
         _create_performance_dir_on_head_node(
-            ssh_keypair="/x.pem", ec2_user="ubuntu", head_node_ip="1.2.3.4",
+            ssh_keypair="/x.pem",
+            ec2_user="ubuntu",
+            head_node_ip="1.2.3.4",
             headnode_performance_dir_dest="/home/ubuntu/hpc-benchmark/foo",
         )
         cmd = runner.calls[0]
@@ -1222,7 +1383,9 @@ class TestTransferStagingDir:
         runner = _RecordingRun()
         monkeypatch.setattr(subprocess, "run", runner)
         _transfer_staging_dir(
-            ssh_keypair="/x.pem", ec2_user="ubuntu", head_node_ip="1.2.3.4",
+            ssh_keypair="/x.pem",
+            ec2_user="ubuntu",
+            head_node_ip="1.2.3.4",
             stage_dir="/tmp/_stage/serial123",
         )
         assert runner.calls[0][0] == "ssh"
@@ -1237,7 +1400,9 @@ class TestTransferStagingDir:
         monkeypatch.setattr(subprocess, "run", runner)
         with pytest.raises(subprocess.CalledProcessError):
             _transfer_staging_dir(
-                ssh_keypair="/x.pem", ec2_user="ubuntu", head_node_ip="1.2.3.4",
+                ssh_keypair="/x.pem",
+                ec2_user="ubuntu",
+                head_node_ip="1.2.3.4",
                 stage_dir="/tmp/_stage/serial123",
             )
         assert all(c[0] != "scp" for c in runner.calls)
@@ -1248,8 +1413,11 @@ class TestTransferSbatchScript:
         runner = _RecordingRun()
         monkeypatch.setattr(subprocess, "run", runner)
         _transfer_sbatch_script(
-            ssh_keypair="/x.pem", ec2_user="ubuntu", ec2_user_home="/home/ubuntu",
-            head_node_ip="1.2.3.4", stage_dir="/tmp/_stage/serial123",
+            ssh_keypair="/x.pem",
+            ec2_user="ubuntu",
+            ec2_user_home="/home/ubuntu",
+            head_node_ip="1.2.3.4",
+            stage_dir="/tmp/_stage/serial123",
         )
         cmd = runner.calls[0]
         assert cmd[0] == "scp"
@@ -1266,7 +1434,9 @@ class TestCopyPerformanceSourceTree:
         runner = _RecordingRun()
         monkeypatch.setattr(subprocess, "run", runner)
         _copy_performance_source_tree(
-            ssh_keypair="/x.pem", ec2_user="ubuntu", head_node_ip="1.2.3.4",
+            ssh_keypair="/x.pem",
+            ec2_user="ubuntu",
+            head_node_ip="1.2.3.4",
             performance_stage_dir=str(perf_dir),
             headnode_performance_dir_dest="/home/ubuntu/hpc-benchmark/foo",
         )
@@ -1281,7 +1451,9 @@ class TestCopyPerformanceSourceTree:
         runner = _RecordingRun()
         monkeypatch.setattr(subprocess, "run", runner)
         _copy_performance_source_tree(
-            ssh_keypair="/x.pem", ec2_user="ubuntu", head_node_ip="1.2.3.4",
+            ssh_keypair="/x.pem",
+            ec2_user="ubuntu",
+            head_node_ip="1.2.3.4",
             performance_stage_dir=str(perf_dir),
             headnode_performance_dir_dest="/home/ubuntu/hpc-benchmark/foo",
         )
@@ -1291,16 +1463,20 @@ class TestCopyPerformanceSourceTree:
 class TestBuildActivePerfDirs:
     def test_ebs_always_included(self):
         dirs = _build_active_perf_dirs(
-            ebs_hpc_performance_dir="/shared/hpc", enable_efs=False,
-            efs_hpc_performance_dir="/efs/hpc", enable_fsx=False,
+            ebs_hpc_performance_dir="/shared/hpc",
+            enable_efs=False,
+            efs_hpc_performance_dir="/efs/hpc",
+            enable_fsx=False,
             fsx_hpc_performance_dir="/fsx/hpc",
         )
         assert dirs == ["/shared/hpc"]
 
     def test_efs_and_fsx_appended_when_enabled(self):
         dirs = _build_active_perf_dirs(
-            ebs_hpc_performance_dir="/shared/hpc", enable_efs=True,
-            efs_hpc_performance_dir="/efs/hpc", enable_fsx=True,
+            ebs_hpc_performance_dir="/shared/hpc",
+            enable_efs=True,
+            efs_hpc_performance_dir="/efs/hpc",
+            enable_fsx=True,
             fsx_hpc_performance_dir="/fsx/hpc",
         )
         assert dirs == ["/shared/hpc", "/efs/hpc", "/fsx/hpc"]
@@ -1314,7 +1490,9 @@ class TestCreateAndOwnPerfDirs:
         runner = _RecordingRun()
         monkeypatch.setattr(subprocess, "run", runner)
         _create_and_own_perf_dirs(
-            ssh_keypair="/x.pem", ec2_user="ubuntu", head_node_ip="1.2.3.4",
+            ssh_keypair="/x.pem",
+            ec2_user="ubuntu",
+            head_node_ip="1.2.3.4",
             perf_dirs=["/shared/hpc", "/efs/hpc"],
             headnode_performance_dir_dest="/home/ubuntu/hpc-benchmark/foo",
         )
@@ -1332,8 +1510,11 @@ class TestCreateAndOwnPerfDirs:
         runner = _RecordingRun()
         monkeypatch.setattr(subprocess, "run", runner)
         _create_and_own_perf_dirs(
-            ssh_keypair="/x.pem", ec2_user="ubuntu", head_node_ip="1.2.3.4",
-            perf_dirs=[], headnode_performance_dir_dest="/home/ubuntu/hpc-benchmark/foo",
+            ssh_keypair="/x.pem",
+            ec2_user="ubuntu",
+            head_node_ip="1.2.3.4",
+            perf_dirs=[],
+            headnode_performance_dir_dest="/home/ubuntu/hpc-benchmark/foo",
         )
         assert runner.calls == []
 
@@ -1343,7 +1524,9 @@ class TestRemoveHeadNodeStagingDir:
         runner = _RecordingRun()
         monkeypatch.setattr(subprocess, "run", runner)
         _remove_head_node_staging_dir(
-            ssh_keypair="/x.pem", ec2_user="ubuntu", head_node_ip="1.2.3.4",
+            ssh_keypair="/x.pem",
+            ec2_user="ubuntu",
+            head_node_ip="1.2.3.4",
             stage_dir="/tmp/_stage/serial123",
         )
         assert runner.calls[0][-1] == "rm -rf /tmp/_stage/serial123"
@@ -1355,13 +1538,16 @@ class TestDeployStagingAndPerformanceTreeToHeadNode:
             head_node_public_ip="1.2.3.4",
             ssh_keypair="/x.pem",
             ssh_known_hosts=str(tmp_path / "ssh" / "known_hosts"),
-            ec2_user="ubuntu", ec2_user_home="/home/ubuntu",
+            ec2_user="ubuntu",
+            ec2_user_home="/home/ubuntu",
             stage_dir=str(tmp_path / "_stage" / "serial123"),
             enable_hpc_benchmarks=False,
             performance_stage_dir=str(tmp_path / "perf_stage"),
             headnode_performance_dir_dest="/home/ubuntu/hpc-benchmark/foo",
-            ebs_hpc_performance_dir="/shared/hpc", enable_efs=False,
-            efs_hpc_performance_dir="/efs/hpc", enable_fsx=False,
+            ebs_hpc_performance_dir="/shared/hpc",
+            enable_efs=False,
+            efs_hpc_performance_dir="/efs/hpc",
+            enable_fsx=False,
             fsx_hpc_performance_dir="/fsx/hpc",
         )
         base.update(overrides)
@@ -1369,13 +1555,16 @@ class TestDeployStagingAndPerformanceTreeToHeadNode:
 
     def _stub_everything(self, monkeypatch):
         monkeypatch.setattr(
-            subprocess, "run",
+            subprocess,
+            "run",
             lambda cmd, *a, **k: _FakeCompletedProcess(
-                0, stdout="1.2.3.4 ssh-ed25519 AAAA...\n" if cmd[0] == "ssh-keyscan" else "",
+                0,
+                stdout="1.2.3.4 ssh-ed25519 AAAA...\n" if cmd[0] == "ssh-keyscan" else "",
             ),
         )
         monkeypatch.setattr(
-            pcluster_core.socket, "create_connection",
+            pcluster_core.socket,
+            "create_connection",
             lambda addr, timeout=None: _FakeSocketCtx(),
         )
         monkeypatch.setattr(pcluster_core.time, "sleep", lambda s: None)
@@ -1383,7 +1572,9 @@ class TestDeployStagingAndPerformanceTreeToHeadNode:
     def test_empty_head_node_ip_does_nothing(self, tmp_path, monkeypatch):
         self._stub_everything(monkeypatch)
         calls = []
-        monkeypatch.setattr(subprocess, "run", lambda *a, **k: calls.append(a) or _FakeCompletedProcess(0))
+        monkeypatch.setattr(
+            subprocess, "run", lambda *a, **k: calls.append(a) or _FakeCompletedProcess(0)
+        )
         deploy_staging_and_performance_tree_to_head_node(
             **self._kwargs(tmp_path, head_node_public_ip=""),
         )
@@ -1520,7 +1711,9 @@ def _extend_ctx_for_full_pipeline(cluster_params, tmp_path):
         "external_nfs_mount_list_template_src": str(external_nfs_mount_list_src),
         "performance_rootdir": str(performance_rootdir),
         "performance_stage_dir": str(performance_stage_dir),
-        "sns_build_summary_report_dest": str(cluster_data_dir / "sns_build_summary.test-cluster.txt"),
+        "sns_build_summary_report_dest": str(
+            cluster_data_dir / "sns_build_summary.test-cluster.txt"
+        ),
     }
 
 
@@ -1528,7 +1721,9 @@ class TestCreateSnsTopicAndNotify:
     def test_creates_subscribes_and_notifies(self):
         sns = _FakeSns()
         arn = _create_sns_topic_and_notify(
-            sns, cluster_name="foo", cluster_owner_email="owner@example.com",
+            sns,
+            cluster_name="foo",
+            cluster_owner_email="owner@example.com",
             start_timestamp="2026-01-01 00:00:00",
         )
         assert arn == "arn:aws:sns:us-east-1:123456789012:sns_alerts_foo"
@@ -1542,7 +1737,10 @@ class TestRenderAndUploadClusterConfigAndScripts:
         ctx = _extend_ctx_for_full_pipeline(cluster_params, tmp_path)
         s3 = _FakeS3()
         render_and_upload_cluster_config_and_scripts(
-            s3, ctx=ctx, external_nfs_sg_id="sg-abc123", templates_dir=REPO_ROOT_TEMPLATES,
+            s3,
+            ctx=ctx,
+            external_nfs_sg_id="sg-abc123",
+            templates_dir=REPO_ROOT_TEMPLATES,
         )
         assert os.path.isfile(ctx["cluster_config_template"])
         assert "sg-abc123" in open(ctx["cluster_config_template"]).read()
@@ -1553,7 +1751,9 @@ class TestRenderAndUploadClusterConfigAndScripts:
         assert f"{ctx['s3_script_path']}/{ctx['user_preinstall_s3_dest']}" in keys
         assert f"{ctx['s3_script_path']}/{ctx['user_postinstall_s3_dest']}" in keys
 
-    def test_does_not_collide_when_ctx_already_carries_external_nfs_sg(self, cluster_params, tmp_path):
+    def test_does_not_collide_when_ctx_already_carries_external_nfs_sg(
+        self, cluster_params, tmp_path
+    ):
         """cluster_params already carries its own external_nfs_sg (built
         for other templates); this must not raise a "multiple values for
         keyword argument" TypeError."""
@@ -1561,7 +1761,10 @@ class TestRenderAndUploadClusterConfigAndScripts:
         assert "external_nfs_sg" in ctx  # the fixture's own precondition
         s3 = _FakeS3()
         render_and_upload_cluster_config_and_scripts(
-            s3, ctx=ctx, external_nfs_sg_id="sg-the-real-one", templates_dir=REPO_ROOT_TEMPLATES,
+            s3,
+            ctx=ctx,
+            external_nfs_sg_id="sg-the-real-one",
+            templates_dir=REPO_ROOT_TEMPLATES,
         )
         assert "sg-the-real-one" in open(ctx["cluster_config_template"]).read()
         assert "sg-0abc123externalnfs" not in open(ctx["cluster_config_template"]).read()
@@ -1581,7 +1784,9 @@ class TestCreateHpcResultsBucket:
     def test_creates_public_access_block_and_tags(self):
         s3 = _FakeS3()
         s3.put_public_access_block = lambda **kw: setattr(s3, "_pab", kw)
-        _create_hpc_results_bucket(s3, results_bucketname="parallelclustermaker-results-x", region="us-west-2")
+        _create_hpc_results_bucket(
+            s3, results_bucketname="parallelclustermaker-results-x", region="us-west-2"
+        )
         assert s3.created_buckets
         assert s3.tags["parallelclustermaker-results-x"]["TagSet"][0]["Key"] == "Name"
 
@@ -1642,9 +1847,11 @@ class TestFinalizeStagingDirectory:
                 uploads.append((filename, bucket, key))
 
         finalize_staging_directory(
-            _S3(), stage_dir=str(stage_dir),
+            _S3(),
+            stage_dir=str(stage_dir),
             cluster_data_dir=str(cluster_data_dir),
-            s3_bucketname="my-bucket", region="us-east-1",
+            s3_bucketname="my-bucket",
+            region="us-east-1",
         )
         assert (cluster_data_dir / "f.sh").exists()
         assert not stage_dir.exists()
@@ -1655,8 +1862,7 @@ class TestFinalizeStagingDirectory:
         # boto3 now, not `aws s3 sync`: the CLI is not in the container
         # tier's image, so the subprocess this replaces was a dependency on
         # a binary that is absent wherever this runs remotely.
-        assert not any(k.endswith(".pem") for k in keys), (
-            f"a private key reached S3: {keys}")
+        assert not any(k.endswith(".pem") for k in keys), f"a private key reached S3: {keys}"
 
 
 class TestRenderAndPublishBuildSummaryReport:
@@ -1664,10 +1870,15 @@ class TestRenderAndPublishBuildSummaryReport:
         ctx = _extend_ctx_for_full_pipeline(cluster_params, tmp_path)
         sns = _FakeSns()
         render_and_publish_build_summary_report(
-            sns, ctx=ctx, sns_topic_arn="arn:aws:sns:us-east-1:123456789012:sns_alerts_foo",
-            templates_dir=REPO_ROOT_TEMPLATES, head_node_public_ip="1.2.3.4",
-            start_overall_timestamp="t1", start_stack_timestamp="t2",
-            stop_stack_timestamp="t3", stop_overall_timestamp="t4",
+            sns,
+            ctx=ctx,
+            sns_topic_arn="arn:aws:sns:us-east-1:123456789012:sns_alerts_foo",
+            templates_dir=REPO_ROOT_TEMPLATES,
+            head_node_public_ip="1.2.3.4",
+            start_overall_timestamp="t1",
+            start_stack_timestamp="t2",
+            stop_stack_timestamp="t3",
+            stop_overall_timestamp="t4",
         )
         assert os.path.isfile(ctx["sns_build_summary_report_dest"])
         report = open(ctx["sns_build_summary_report_dest"]).read()
@@ -1680,9 +1891,15 @@ class TestRenderAndPublishBuildSummaryReport:
         ctx = _extend_ctx_for_full_pipeline(cluster_params, tmp_path)
         sns = _FakeSns(raise_on_publish=RuntimeError("throttled"))
         render_and_publish_build_summary_report(
-            sns, ctx=ctx, sns_topic_arn="arn:x", templates_dir=REPO_ROOT_TEMPLATES,
-            head_node_public_ip="1.2.3.4", start_overall_timestamp="t1",
-            start_stack_timestamp="t2", stop_stack_timestamp="t3", stop_overall_timestamp="t4",
+            sns,
+            ctx=ctx,
+            sns_topic_arn="arn:x",
+            templates_dir=REPO_ROOT_TEMPLATES,
+            head_node_public_ip="1.2.3.4",
+            start_overall_timestamp="t1",
+            start_stack_timestamp="t2",
+            stop_stack_timestamp="t3",
+            stop_overall_timestamp="t4",
         )  # must not raise
         assert os.path.isfile(ctx["sns_build_summary_report_dest"])  # written anyway
 
@@ -1713,12 +1930,17 @@ class TestWaitFalseKicksOffWithoutPolling:
     def _kwargs(self, create_fn, describe_fn, **overrides):
         base = dict(
             cluster_configuration_path="/tmp/config.foo",
-            retries=5, delay_seconds=1, sleep_fn=_fake_sleep,
+            retries=5,
+            delay_seconds=1,
+            sleep_fn=_fake_sleep,
         )
         base.update(overrides)
         return dict(
-            create_fn=create_fn, describe_fn=describe_fn,
-            cluster_name="foo", region="us-east-1", **base,
+            create_fn=create_fn,
+            describe_fn=describe_fn,
+            cluster_name="foo",
+            region="us-east-1",
+            **base,
         )
 
     def test_wait_false_still_launches_the_cluster(self):
@@ -1805,21 +2027,28 @@ class TestBuildProgressIsReportedDuringTheWait:
     def _kwargs(self, create_fn, describe_fn, **overrides):
         base = dict(
             cluster_configuration_path="/tmp/config.foo",
-            retries=5, delay_seconds=1, sleep_fn=_fake_sleep,
+            retries=5,
+            delay_seconds=1,
+            sleep_fn=_fake_sleep,
         )
         base.update(overrides)
         return dict(
-            create_fn=create_fn, describe_fn=describe_fn,
-            cluster_name="foo", region="us-east-1", **base,
+            create_fn=create_fn,
+            describe_fn=describe_fn,
+            cluster_name="foo",
+            region="us-east-1",
+            **base,
         )
 
     def test_progress_fn_fires_once_per_non_terminal_poll(self):
         create_fn = _FakeCreateFn()
-        describe_fn = _ScriptedDescribeFn([
-            {"clusterStatus": "CREATE_IN_PROGRESS"},
-            {"clusterStatus": "CREATE_IN_PROGRESS"},
-            {"clusterStatus": "CREATE_COMPLETE"},
-        ])
+        describe_fn = _ScriptedDescribeFn(
+            [
+                {"clusterStatus": "CREATE_IN_PROGRESS"},
+                {"clusterStatus": "CREATE_IN_PROGRESS"},
+                {"clusterStatus": "CREATE_COMPLETE"},
+            ]
+        )
         seen = []
         run_cluster_create_and_classify(
             **self._kwargs(create_fn, describe_fn, progress_fn=lambda *a: seen.append(a))
@@ -1833,11 +2062,15 @@ class TestBuildProgressIsReportedDuringTheWait:
         only clusterStatus would hide the one thing an operator watching a
         slow build wants to see."""
         create_fn = _FakeCreateFn()
-        describe_fn = _ScriptedDescribeFn([
-            {"clusterStatus": "CREATE_IN_PROGRESS",
-             "cloudFormationStackStatus": "CREATE_IN_PROGRESS"},
-            {"clusterStatus": "CREATE_COMPLETE"},
-        ])
+        describe_fn = _ScriptedDescribeFn(
+            [
+                {
+                    "clusterStatus": "CREATE_IN_PROGRESS",
+                    "cloudFormationStackStatus": "CREATE_IN_PROGRESS",
+                },
+                {"clusterStatus": "CREATE_COMPLETE"},
+            ]
+        )
         seen = []
         run_cluster_create_and_classify(
             **self._kwargs(create_fn, describe_fn, progress_fn=lambda *a: seen.append(a))
@@ -1848,10 +2081,12 @@ class TestBuildProgressIsReportedDuringTheWait:
         """The default must stay None: every existing caller and test that
         does not opt in must behave exactly as before."""
         create_fn = _FakeCreateFn()
-        describe_fn = _ScriptedDescribeFn([
-            {"clusterStatus": "CREATE_IN_PROGRESS"},
-            {"clusterStatus": "CREATE_COMPLETE"},
-        ])
+        describe_fn = _ScriptedDescribeFn(
+            [
+                {"clusterStatus": "CREATE_IN_PROGRESS"},
+                {"clusterStatus": "CREATE_COMPLETE"},
+            ]
+        )
         outcome = run_cluster_create_and_classify(**self._kwargs(create_fn, describe_fn))
         assert outcome.create_confirmed is True
 
@@ -1860,7 +2095,8 @@ class TestBuildProgressIsReportedDuringTheWait:
         describe_fn = _ScriptedDescribeFn([{"clusterStatus": "CREATE_IN_PROGRESS"}])
         seen = []
         run_cluster_create_and_classify(
-            **self._kwargs(create_fn, describe_fn, wait=False,
-                           progress_fn=lambda *a: seen.append(a))
+            **self._kwargs(
+                create_fn, describe_fn, wait=False, progress_fn=lambda *a: seen.append(a)
+            )
         )
         assert seen == []

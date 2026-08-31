@@ -46,9 +46,9 @@ class TestThePrivateKeyIsNeverUploadedToS3:
         """CLAUDE.md's rule is one shared exclusion, not one restated per call
         site: a caller that has to remember to pass it is a caller that can
         forget."""
-        default = inspect.signature(
-            pcluster_core.upload_directory_to_s3
-        ).parameters["exclude"].default
+        default = (
+            inspect.signature(pcluster_core.upload_directory_to_s3).parameters["exclude"].default
+        )
         assert default is pcluster_core._S3_UPLOAD_NEVER, (
             "upload_directory_to_s3 no longer defaults to the shared exclusion, "
             f"so a call site can omit it and ship the key: {default!r}"
@@ -68,14 +68,9 @@ class TestThePrivateKeyIsNeverUploadedToS3:
             for kw in node.keywords:
                 if kw.arg != "exclude":
                     continue
-                if not (
-                    isinstance(kw.value, ast.Name)
-                    and kw.value.id == "_S3_UPLOAD_NEVER"
-                ):
+                if not (isinstance(kw.value, ast.Name) and kw.value.id == "_S3_UPLOAD_NEVER"):
                     offenders.append(ast.unparse(kw))
-        assert not offenders, (
-            f"an upload_directory_to_s3 call passes its own exclude: {offenders}"
-        )
+        assert not offenders, f"an upload_directory_to_s3 call passes its own exclude: {offenders}"
 
     def test_the_exclusion_is_actually_applied(self):
         """Vacuity guard on the three above: a constant nothing reads is not a
@@ -95,7 +90,10 @@ class TestThePrivateKeyIsNeverUploadedToS3:
             open(os.path.join(td, "osiris.pem"), "w").write("PRIVATE")
             open(os.path.join(td, "vars_file.yml"), "w").write("k: v")
             pcluster_core.upload_directory_to_s3(
-                s3, local_dir=td, s3_bucketname="b", prefix="p",
+                s3,
+                local_dir=td,
+                s3_bucketname="b",
+                prefix="p",
             )
         assert any(k.endswith("vars_file.yml") for k in s3.keys), s3.keys
         assert not any(k.endswith(".pem") for k in s3.keys), (
@@ -114,15 +112,12 @@ class TestParametersTheBuildDependsOn:
         the unverified-download behavior the S3 staging exists to avoid."""
         source = _source("_stage_monitoring_tarball")
         assert "_download_with_checksum(" in source, (
-            "the monitoring tarball is no longer downloaded through the "
-            "checksum-verifying helper"
+            "the monitoring tarball is no longer downloaded through the checksum-verifying helper"
         )
         assert "monitoring_version_checksum" in source, (
             "the download is not verified against monitoring_version_checksum"
         )
-        assert "github.com" in source or "monitoring_url" in source, (
-            "unexpected download source"
-        )
+        assert "github.com" in source or "monitoring_url" in source, "unexpected download source"
 
     def test_the_monitoring_checksum_variable_is_threaded_end_to_end(self):
         """A checksum that references an undefined variable is worse than none —
@@ -151,9 +146,7 @@ class TestParametersTheBuildDependsOn:
                     f"deleter and the readers have diverged"
                 )
         deleter = _source("_delete_grafana_ssm_param_step")
-        assert suffix in deleter, (
-            "the teardown step no longer names the Grafana parameter path"
-        )
+        assert suffix in deleter, "the teardown step no longer names the Grafana parameter path"
 
 
 # The functions a create actually runs through. Adding a stage here is
@@ -241,22 +234,18 @@ class TestEveryOptionalFeatureStaysBehindItsFlag:
         # Vacuity guard: if nothing matched, the token list has gone stale and
         # this proves nothing. A self-gated call counts -- it is the same gate
         # one level down, which is why it is accepted above.
-        matched = {
-            n for n in all_calls
-            if n and any(tok in n.lower() for tok in tokens)
-        }
+        matched = {n for n in all_calls if n and any(tok in n.lower() for tok in tokens)}
         assert matched & (gated | {n for n in matched if self._self_gated(n, flag)}), (
             f"{func_name}: no {flag}-gated call found; the token list is stale"
         )
 
     def test_the_build_gates_every_benchmark_call(self):
-        self._check(_BUILD_PATH, "enable_hpc_benchmarks",
-                    self._GATED["enable_hpc_benchmarks"])
+        self._check(_BUILD_PATH, "enable_hpc_benchmarks", self._GATED["enable_hpc_benchmarks"])
 
     def test_the_build_gates_every_monitoring_call(self):
-        self._check(_BUILD_PATH, "enable_monitoring",
-                    self._GATED["enable_monitoring"])
+        self._check(_BUILD_PATH, "enable_monitoring", self._GATED["enable_monitoring"])
 
     def test_the_teardown_gates_every_benchmark_call(self):
-        self._check("core_delete_cluster", "enable_hpc_benchmarks",
-                    self._GATED["enable_hpc_benchmarks"])
+        self._check(
+            "core_delete_cluster", "enable_hpc_benchmarks", self._GATED["enable_hpc_benchmarks"]
+        )

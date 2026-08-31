@@ -84,8 +84,11 @@ def main():
     )
     parser.add_argument("-N", "--cluster_name", required=True, help="Cluster name")
     parser.add_argument(
-        "-T", "--timeout", type=int, default=15,
-        help=f"SSH timeout in seconds (default: 15, min: {_MIN_TIMEOUT}, max: {_MAX_TIMEOUT})"
+        "-T",
+        "--timeout",
+        type=int,
+        default=15,
+        help=f"SSH timeout in seconds (default: 15, min: {_MIN_TIMEOUT}, max: {_MAX_TIMEOUT})",
     )
     args = parser.parse_args()
 

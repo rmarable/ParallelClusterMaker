@@ -65,6 +65,7 @@ def _proc(rc=0, stdout="", stderr=""):
 # _validate_region
 # ---------------------------------------------------------------------------
 
+
 class TestValidateRegion:
     def test_valid_regions(self):
         for r in ("us-east-1", "eu-west-2", "ap-southeast-1", "us-gov-east-1", "ap-southeast-2"):
@@ -87,15 +88,20 @@ class TestValidateRegion:
 # _get_fleet_status
 # ---------------------------------------------------------------------------
 
+
 class TestGetFleetStatus:
     def test_returns_status(self, monkeypatch):
-        monkeypatch.setattr(pcluster_core, "_describe_cluster_json",
-                            lambda c, r: {"computeFleetStatus": "STOPPED"})
+        monkeypatch.setattr(
+            pcluster_core, "_describe_cluster_json", lambda c, r: {"computeFleetStatus": "STOPPED"}
+        )
         assert _get_fleet_status("mycluster", "us-east-1", "/bin/pcluster") == "STOPPED"
 
     def test_missing_key_returns_unknown(self, monkeypatch):
-        monkeypatch.setattr(pcluster_core, "_describe_cluster_json",
-                            lambda c, r: {"clusterStatus": "CREATE_COMPLETE"})
+        monkeypatch.setattr(
+            pcluster_core,
+            "_describe_cluster_json",
+            lambda c, r: {"clusterStatus": "CREATE_COMPLETE"},
+        )
         assert _get_fleet_status("mycluster", "us-east-1", "/bin/pcluster") == "UNKNOWN"
 
 
@@ -103,23 +109,31 @@ class TestGetFleetStatus:
 # _poll_fleet
 # ---------------------------------------------------------------------------
 
+
 class TestPollFleet:
     def test_returns_when_target_reached(self, monkeypatch):
-        monkeypatch.setattr(pcluster_core, "_describe_cluster_json",
-                            lambda c, r: {"computeFleetStatus": "STOPPED"})
+        monkeypatch.setattr(
+            pcluster_core, "_describe_cluster_json", lambda c, r: {"computeFleetStatus": "STOPPED"}
+        )
         monkeypatch.setattr("pcluster_core.time.sleep", lambda _: None)
         _poll_fleet("mycluster", "us-east-1", "STOPPED", "fleet stop", "/bin/pcluster")
 
     def test_protected_state_exits(self, monkeypatch):
-        monkeypatch.setattr(pcluster_core, "_describe_cluster_json",
-                            lambda c, r: {"computeFleetStatus": "PROTECTED"})
+        monkeypatch.setattr(
+            pcluster_core,
+            "_describe_cluster_json",
+            lambda c, r: {"computeFleetStatus": "PROTECTED"},
+        )
         monkeypatch.setattr("pcluster_core.time.sleep", lambda _: None)
         with pytest.raises(SystemExit, match="PROTECTED"):
             _poll_fleet("mycluster", "us-east-1", "STOPPED", "fleet stop", "/bin/pcluster")
 
     def test_timeout_exits(self, monkeypatch):
-        monkeypatch.setattr(pcluster_core, "_describe_cluster_json",
-                            lambda c, r: {"computeFleetStatus": "STOP_REQUESTED"})
+        monkeypatch.setattr(
+            pcluster_core,
+            "_describe_cluster_json",
+            lambda c, r: {"computeFleetStatus": "STOP_REQUESTED"},
+        )
         monkeypatch.setattr("pcluster_core.time.sleep", lambda _: None)
         with pytest.raises(SystemExit, match="timed out"):
             _poll_fleet("mycluster", "us-east-1", "STOPPED", "fleet stop", "/bin/pcluster")
@@ -148,6 +162,7 @@ class TestPollFleet:
         traceback and never told the user the fleet operation was still
         running in AWS. (The call is pcluster.lib rather than a subprocess
         since round 48; the interrupt window is the same.)"""
+
         def _describe(c, r):
             raise KeyboardInterrupt
 
@@ -164,28 +179,35 @@ class TestPollFleet:
 # _fleet_action_plan
 # ---------------------------------------------------------------------------
 
+
 class TestFleetActionPlan:
-    @pytest.mark.parametrize("status,action,expected", [
-        ("PROTECTED", "stop", "abort"),
-        ("PROTECTED", "start", "abort"),
-        ("STOPPED", "stop", "done"),
-        ("DISABLED", "stop", "done"),
-        ("RUNNING", "start", "done"),
-        ("ENABLED", "start", "done"),
-        ("STOP_REQUESTED", "stop", "wait"),
-        ("START_REQUESTED", "start", "wait"),
-        ("RUNNING", "stop", "request"),
-        ("STOPPED", "start", "request"),
-        ("UNKNOWN", "stop", "request"),
-        ("UNKNOWN", "start", "request"),
-    ])
+    @pytest.mark.parametrize(
+        "status,action,expected",
+        [
+            ("PROTECTED", "stop", "abort"),
+            ("PROTECTED", "start", "abort"),
+            ("STOPPED", "stop", "done"),
+            ("DISABLED", "stop", "done"),
+            ("RUNNING", "start", "done"),
+            ("ENABLED", "start", "done"),
+            ("STOP_REQUESTED", "stop", "wait"),
+            ("START_REQUESTED", "start", "wait"),
+            ("RUNNING", "stop", "request"),
+            ("STOPPED", "start", "request"),
+            ("UNKNOWN", "stop", "request"),
+            ("UNKNOWN", "start", "request"),
+        ],
+    )
     def test_plan(self, status, action, expected):
         assert _fleet_action_plan(status, action) == expected
 
-    @pytest.mark.parametrize("status,action", [
-        ("STOPPING", "stop"),
-        ("STARTING", "start"),
-    ])
+    @pytest.mark.parametrize(
+        "status,action",
+        [
+            ("STOPPING", "stop"),
+            ("STARTING", "start"),
+        ],
+    )
     def test_transitional_states_are_not_reissued(self, status, action):
         """PCluster's ComputeFleetStatus enum includes STOPPING and STARTING.
         Both scripts previously matched only the *_REQUESTED variants, so a
@@ -193,10 +215,13 @@ class TestFleetActionPlan:
         update-compute-fleet call against an already-transitioning fleet."""
         assert _fleet_action_plan(status, action) == "wait"
 
-    @pytest.mark.parametrize("status,action,expected", [
-        ("STOPPING", "start", "request"),
-        ("STARTING", "stop", "request"),
-    ])
+    @pytest.mark.parametrize(
+        "status,action,expected",
+        [
+            ("STOPPING", "start", "request"),
+            ("STARTING", "stop", "request"),
+        ],
+    )
     def test_opposite_transition_still_requests(self, status, action, expected):
         assert _fleet_action_plan(status, action) == expected
 
@@ -215,6 +240,7 @@ class TestFleetActionPlan:
 # there is only one implementation left to get wrong.
 # ---------------------------------------------------------------------------
 
+
 def _stage_core(monkeypatch, status, run_calls=None, poll_calls=None):
     run_calls = run_calls if run_calls is not None else []
     poll_calls = poll_calls if poll_calls is not None else []
@@ -223,14 +249,23 @@ def _stage_core(monkeypatch, status, run_calls=None, poll_calls=None):
     # in the same CLI-ish shape the assertions already expect, so they keep
     # reading as "what was requested" rather than "which kwargs were passed".
     monkeypatch.setattr(
-        pcluster_core, "_update_compute_fleet_lib",
+        pcluster_core,
+        "_update_compute_fleet_lib",
         lambda cluster, region, status: run_calls.append(
-            ["update-compute-fleet", "--cluster-name", cluster,
-             "--region", region, "--status", status]
+            [
+                "update-compute-fleet",
+                "--cluster-name",
+                cluster,
+                "--region",
+                region,
+                "--status",
+                status,
+            ]
         ),
     )
     monkeypatch.setattr(
-        pcluster_core, "_poll_fleet",
+        pcluster_core,
+        "_poll_fleet",
         lambda cluster, region, target, label, binary: poll_calls.append(target),
     )
     return run_calls, poll_calls
@@ -239,7 +274,9 @@ def _stage_core(monkeypatch, status, run_calls=None, poll_calls=None):
 class TestCoreStopFleet:
     def test_running_fleet_gets_stop_requested(self, monkeypatch):
         run_calls, _ = _stage_core(monkeypatch, "RUNNING")
-        result = core_stop_fleet(cluster_record=_record(), region="us-east-1", pcluster_bin="pcluster")
+        result = core_stop_fleet(
+            cluster_record=_record(), region="us-east-1", pcluster_bin="pcluster"
+        )
         assert "update-compute-fleet" in run_calls[0]
         assert "STOP_REQUESTED" in run_calls[0]
         assert "START_REQUESTED" not in run_calls[0]
@@ -249,7 +286,9 @@ class TestCoreStopFleet:
 
     def test_already_stopped_fleet_makes_no_api_call(self, monkeypatch):
         run_calls, _ = _stage_core(monkeypatch, "STOPPED")
-        result = core_stop_fleet(cluster_record=_record(), region="us-east-1", pcluster_bin="pcluster")
+        result = core_stop_fleet(
+            cluster_record=_record(), region="us-east-1", pcluster_bin="pcluster"
+        )
         assert run_calls == []
         assert result.plan == "done"
         assert result.status_after == "STOPPED"
@@ -262,14 +301,19 @@ class TestCoreStopFleet:
 
     def test_stop_in_progress_makes_no_duplicate_api_call(self, monkeypatch):
         run_calls, _ = _stage_core(monkeypatch, "STOP_REQUESTED")
-        result = core_stop_fleet(cluster_record=_record(), region="us-east-1", pcluster_bin="pcluster")
+        result = core_stop_fleet(
+            cluster_record=_record(), region="us-east-1", pcluster_bin="pcluster"
+        )
         assert run_calls == []
         assert result.plan == "wait"
 
     def test_wait_polls_for_stopped_not_running(self, monkeypatch):
         _, poll_calls = _stage_core(monkeypatch, "RUNNING")
         result = core_stop_fleet(
-            cluster_record=_record(), region="us-east-1", pcluster_bin="pcluster", wait=True,
+            cluster_record=_record(),
+            region="us-east-1",
+            pcluster_bin="pcluster",
+            wait=True,
         )
         assert poll_calls == ["STOPPED"]
         assert result.status_after == "STOPPED"
@@ -282,7 +326,10 @@ class TestCoreStopFleet:
     def test_wait_still_polls_when_a_stop_is_already_in_progress(self, monkeypatch):
         run_calls, poll_calls = _stage_core(monkeypatch, "STOPPING")
         result = core_stop_fleet(
-            cluster_record=_record(), region="us-east-1", pcluster_bin="pcluster", wait=True,
+            cluster_record=_record(),
+            region="us-east-1",
+            pcluster_bin="pcluster",
+            wait=True,
         )
         assert poll_calls == ["STOPPED"]
         assert run_calls == []
@@ -290,12 +337,16 @@ class TestCoreStopFleet:
 
     def test_region_argument_is_what_gets_used_not_the_record(self, monkeypatch):
         seen = {}
-        monkeypatch.setattr(pcluster_core, "_get_fleet_status", lambda n, r, b: seen.setdefault("region", r) or "RUNNING")
         monkeypatch.setattr(
-            pcluster_core, "_update_compute_fleet_lib", lambda c, r, status: None
+            pcluster_core,
+            "_get_fleet_status",
+            lambda n, r, b: seen.setdefault("region", r) or "RUNNING",
         )
+        monkeypatch.setattr(pcluster_core, "_update_compute_fleet_lib", lambda c, r, status: None)
         core_stop_fleet(
-            cluster_record=_record(region="us-east-1"), region="eu-west-1", pcluster_bin="pcluster",
+            cluster_record=_record(region="us-east-1"),
+            region="eu-west-1",
+            pcluster_bin="pcluster",
         )
         assert seen["region"] == "eu-west-1"
 
@@ -303,7 +354,9 @@ class TestCoreStopFleet:
 class TestCoreStartFleet:
     def test_stopped_fleet_gets_start_requested(self, monkeypatch):
         run_calls, _ = _stage_core(monkeypatch, "STOPPED")
-        result = core_start_fleet(cluster_record=_record(), region="us-east-1", pcluster_bin="pcluster")
+        result = core_start_fleet(
+            cluster_record=_record(), region="us-east-1", pcluster_bin="pcluster"
+        )
         assert "update-compute-fleet" in run_calls[0]
         assert "START_REQUESTED" in run_calls[0]
         assert "STOP_REQUESTED" not in run_calls[0]
@@ -311,7 +364,9 @@ class TestCoreStartFleet:
 
     def test_already_running_fleet_makes_no_api_call(self, monkeypatch):
         run_calls, _ = _stage_core(monkeypatch, "RUNNING")
-        result = core_start_fleet(cluster_record=_record(), region="us-east-1", pcluster_bin="pcluster")
+        result = core_start_fleet(
+            cluster_record=_record(), region="us-east-1", pcluster_bin="pcluster"
+        )
         assert run_calls == []
         assert result.plan == "done"
 
@@ -324,7 +379,10 @@ class TestCoreStartFleet:
     def test_wait_polls_for_running_not_stopped(self, monkeypatch):
         _, poll_calls = _stage_core(monkeypatch, "STOPPED")
         core_start_fleet(
-            cluster_record=_record(), region="us-east-1", pcluster_bin="pcluster", wait=True,
+            cluster_record=_record(),
+            region="us-east-1",
+            pcluster_bin="pcluster",
+            wait=True,
         )
         assert poll_calls == ["RUNNING"]
 
@@ -346,17 +404,26 @@ class TestCoreApplyClusterUpdate:
         run_calls = run_calls if run_calls is not None else []
         poll_calls = poll_calls if poll_calls is not None else []
         monkeypatch.setattr(
-            pcluster_core, "_update_cluster_lib",
+            pcluster_core,
+            "_update_cluster_lib",
             lambda cluster, region, config_path: (
                 run_calls.append(
-                    ["update-cluster", "--cluster-name", cluster,
-                     "--cluster-configuration", config_path, "--region", region]
+                    [
+                        "update-cluster",
+                        "--cluster-name",
+                        cluster,
+                        "--cluster-configuration",
+                        config_path,
+                        "--region",
+                        region,
+                    ]
                 ),
                 {"ok": True},
             )[1],
         )
         monkeypatch.setattr(
-            pcluster_core, "_poll_cluster_update",
+            pcluster_core,
+            "_poll_cluster_update",
             lambda cluster, region, binary: poll_calls.append(cluster),
         )
         return run_calls, poll_calls
@@ -364,8 +431,10 @@ class TestCoreApplyClusterUpdate:
     def test_issues_update_cluster_with_the_config_path(self, monkeypatch):
         run_calls, _ = self._stage(monkeypatch)
         core_apply_cluster_update(
-            cluster_name="foo", config_path="/tmp/cfg.yaml",
-            region="us-east-1", pcluster_bin="pcluster",
+            cluster_name="foo",
+            config_path="/tmp/cfg.yaml",
+            region="us-east-1",
+            pcluster_bin="pcluster",
         )
         assert run_calls[0][0] == "update-cluster"
         assert "/tmp/cfg.yaml" in run_calls[0]
@@ -374,16 +443,22 @@ class TestCoreApplyClusterUpdate:
     def test_wait_true_polls_to_a_terminal_update_state(self, monkeypatch):
         _, poll_calls = self._stage(monkeypatch)
         core_apply_cluster_update(
-            cluster_name="foo", config_path="/tmp/cfg.yaml",
-            region="us-east-1", pcluster_bin="pcluster", wait=True,
+            cluster_name="foo",
+            config_path="/tmp/cfg.yaml",
+            region="us-east-1",
+            pcluster_bin="pcluster",
+            wait=True,
         )
         assert poll_calls == ["foo"]
 
     def test_wait_false_returns_without_polling(self, monkeypatch):
         run_calls, poll_calls = self._stage(monkeypatch)
         core_apply_cluster_update(
-            cluster_name="foo", config_path="/tmp/cfg.yaml",
-            region="us-east-1", pcluster_bin="pcluster", wait=False,
+            cluster_name="foo",
+            config_path="/tmp/cfg.yaml",
+            region="us-east-1",
+            pcluster_bin="pcluster",
+            wait=False,
         )
         assert run_calls, "the update must still be requested"
         assert poll_calls == [], "wait=False must not poll"
@@ -393,8 +468,10 @@ class TestCoreApplyClusterUpdate:
         cannot restart the fleet until the update has actually finished."""
         _, poll_calls = self._stage(monkeypatch)
         core_apply_cluster_update(
-            cluster_name="foo", config_path="/tmp/cfg.yaml",
-            region="us-east-1", pcluster_bin="pcluster",
+            cluster_name="foo",
+            config_path="/tmp/cfg.yaml",
+            region="us-east-1",
+            pcluster_bin="pcluster",
         )
         assert poll_calls == ["foo"]
 
@@ -425,20 +502,25 @@ class TestApplyQueueConfigStaysBlocking:
         only shows up as a failed update against a live fleet."""
         seen = []
         monkeypatch.setattr(
-            pcluster_core, "core_stop_fleet",
+            pcluster_core,
+            "core_stop_fleet",
             lambda **kw: seen.append(("stop", kw.get("wait"))),
         )
         monkeypatch.setattr(
-            pcluster_core, "core_apply_cluster_update",
+            pcluster_core,
+            "core_apply_cluster_update",
             lambda **kw: seen.append(("update", kw.get("wait"))),
         )
         monkeypatch.setattr(
-            pcluster_core, "core_start_fleet",
+            pcluster_core,
+            "core_start_fleet",
             lambda **kw: seen.append(("start", kw.get("wait"))),
         )
         core_apply_queue_config(
-            cluster_record=_record(), config_path="/tmp/cfg.yaml",
-            region="us-east-1", pcluster_bin="pcluster",
+            cluster_record=_record(),
+            config_path="/tmp/cfg.yaml",
+            region="us-east-1",
+            pcluster_bin="pcluster",
         )
         assert seen == [("stop", True), ("update", True), ("start", True)]
 
@@ -485,8 +567,7 @@ class TestTheDescribeHelperFailsCatchably:
             pcluster_core._describe_cluster_json("mycluster", "us-east-1")
         except BaseException as e:
             assert not isinstance(e, SystemExit), (
-                "SystemExit here kills a long-lived MCP server rather than "
-                "failing one tool call"
+                "SystemExit here kills a long-lived MCP server rather than failing one tool call"
             )
         else:
             pytest.fail("expected the failure to propagate")
@@ -511,7 +592,8 @@ class TestTheDescribeHelperFailsCatchably:
         dependency is back."""
         called = []
         monkeypatch.setattr(
-            pcluster_core.subprocess, "run",
+            pcluster_core.subprocess,
+            "run",
             lambda *a, **kw: called.append(a) or _proc(),
         )
         import types as _types
@@ -575,14 +657,19 @@ class TestALibraryFailureNamesItsCause:
     @pytest.mark.parametrize(
         "wrapper,libname,kwargs",
         [
-            ("_update_compute_fleet_lib", "update_compute_fleet",
-             {"cluster_name": "c", "region": "us-east-1", "status": "STOP_REQUESTED"}),
-            ("_update_cluster_lib", "update_cluster",
-             {"cluster_name": "c", "region": "us-east-1", "config_path": "/tmp/x.yaml"}),
+            (
+                "_update_compute_fleet_lib",
+                "update_compute_fleet",
+                {"cluster_name": "c", "region": "us-east-1", "status": "STOP_REQUESTED"},
+            ),
+            (
+                "_update_cluster_lib",
+                "update_cluster",
+                {"cluster_name": "c", "region": "us-east-1", "config_path": "/tmp/x.yaml"},
+            ),
         ],
     )
-    def test_the_reason_reaches_the_operator(self, monkeypatch, wrapper,
-                                             libname, kwargs):
+    def test_the_reason_reaches_the_operator(self, monkeypatch, wrapper, libname, kwargs):
         monkeypatch.setenv("AWS_REGION", "us-east-1")
         monkeypatch.setenv("AWS_DEFAULT_REGION", "us-east-1")
         self._raising_lib(monkeypatch, libname, self._bad_request())

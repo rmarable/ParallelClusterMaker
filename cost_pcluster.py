@@ -101,14 +101,19 @@ def main():
     parser = argparse.ArgumentParser(
         description="Report actual AWS spend per cluster via Cost Explorer."
     )
-    parser.add_argument("-N", "--cluster_name", default=None,
-                        help="Single cluster name (default: all in active_clusters/)")
-    parser.add_argument("-O", "--owner", default=None,
-                        help="Filter to clusters owned by this user")
-    parser.add_argument("-D", "--days", type=int, default=30,
-                        help="Lookback window in days (default: 30, max: 365)")
-    parser.add_argument("-J", "--json", action="store_true",
-                        help="Emit JSON array instead of table")
+    parser.add_argument(
+        "-N",
+        "--cluster_name",
+        default=None,
+        help="Single cluster name (default: all in active_clusters/)",
+    )
+    parser.add_argument("-O", "--owner", default=None, help="Filter to clusters owned by this user")
+    parser.add_argument(
+        "-D", "--days", type=int, default=30, help="Lookback window in days (default: 30, max: 365)"
+    )
+    parser.add_argument(
+        "-J", "--json", action="store_true", help="Emit JSON array instead of table"
+    )
     args = parser.parse_args()
 
     if args.cluster_name:
@@ -160,8 +165,7 @@ def main():
 
     if args.json:
         out = [
-            {"cluster": r[0], "owner": r[1], "region": r[2],
-             "period": period, "cost_usd": r[3]}
+            {"cluster": r[0], "owner": r[1], "region": r[2], "period": period, "cost_usd": r[3]}
             for r in rows
         ]
         print(json.dumps(out, indent=2))

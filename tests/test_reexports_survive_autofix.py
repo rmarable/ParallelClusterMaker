@@ -27,13 +27,18 @@ REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 def _unused_imports():
     files = subprocess.run(
-        ["git", "ls-files", "*.py"], cwd=REPO_ROOT,
-        capture_output=True, text=True, check=True,
+        ["git", "ls-files", "*.py"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
     ).stdout.split()
     files = [f for f in files if not f.startswith("tests/")]
     out = subprocess.run(
         [sys.executable, "-m", "pyflakes", *files],
-        cwd=REPO_ROOT, capture_output=True, text=True,
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
     ).stdout
     return [ln for ln in out.splitlines() if "imported but unused" in ln]
 
@@ -64,12 +69,15 @@ class TestNoReExportIsLeftForAutofixToDelete:
             + "\n  ".join(offenders)
         )
 
-    @pytest.mark.parametrize("module,symbol", [
-        ("check_pcluster.py", "check_slurm"),
-        ("cost_pcluster.py", "_safe"),
-        ("diagnose_pcluster.py", "_format_sinfo"),
-        ("list_pcluster.py", "_age_str"),
-    ])
+    @pytest.mark.parametrize(
+        "module,symbol",
+        [
+            ("check_pcluster.py", "check_slurm"),
+            ("cost_pcluster.py", "_safe"),
+            ("diagnose_pcluster.py", "_format_sinfo"),
+            ("list_pcluster.py", "_age_str"),
+        ],
+    )
     def test_the_re_exports_are_actually_reachable(self, module, symbol):
         """Vacuity guard. __all__ satisfies the linter whether or not the
         name is really exported, so assert the import still works."""
@@ -77,7 +85,11 @@ class TestNoReExportIsLeftForAutofixToDelete:
         assert hasattr(mod, symbol), f"{module} no longer re-exports {symbol}"
 
     def test_the_shims_declare_what_they_re_export(self):
-        for path in ("check_pcluster.py", "cost_pcluster.py",
-                     "diagnose_pcluster.py", "list_pcluster.py"):
+        for path in (
+            "check_pcluster.py",
+            "cost_pcluster.py",
+            "diagnose_pcluster.py",
+            "list_pcluster.py",
+        ):
             src = open(os.path.join(REPO_ROOT, path)).read()
             assert "__all__" in src, f"{path} lost its __all__"

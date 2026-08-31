@@ -23,13 +23,19 @@ import pytest
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(REPO_ROOT, "src"))
 
-DOC = {"Version": "2012-10-17", "Statement": [
-    {"Sid": "S", "Effect": "Allow", "Action": "sts:GetCallerIdentity",
-     "Resource": "*"}]}
+DOC = {
+    "Version": "2012-10-17",
+    "Statement": [
+        {"Sid": "S", "Effect": "Allow", "Action": "sts:GetCallerIdentity", "Resource": "*"}
+    ],
+}
 RENDERED = json.dumps(DOC)
-OTHER = json.dumps({"Version": "2012-10-17", "Statement": [
-    {"Sid": "S", "Effect": "Allow", "Action": "iam:ListRoles",
-     "Resource": "*"}]})
+OTHER = json.dumps(
+    {
+        "Version": "2012-10-17",
+        "Statement": [{"Sid": "S", "Effect": "Allow", "Action": "iam:ListRoles", "Resource": "*"}],
+    }
+)
 ACCT = "123456789012"
 NAME = "parallelcluster-operator-pclustermaker"
 ARN = f"arn:aws:iam::{ACCT}:policy/{NAME}"
@@ -37,6 +43,7 @@ ARN = f"arn:aws:iam::{ACCT}:policy/{NAME}"
 
 def _err(code):
     from botocore.exceptions import ClientError
+
     return ClientError({"Error": {"Code": code, "Message": code}}, "op")
 
 
@@ -57,19 +64,21 @@ class _IAM:
     version list is real rather than a counter.
     """
 
-    def __init__(self, *, exists=False, document=None, attached=(), versions=1,
-                 default_index=None):
+    def __init__(self, *, exists=False, document=None, attached=(), versions=1, default_index=None):
         self.exists = exists
         self.document = document
         # default_index defaults to the newest, but must be settable: with
         # the newest version in force, deleting the in-force version and
         # deleting the oldest are the same call, and the mutation hides.
         d = versions - 1 if default_index is None else default_index
-        self.versions = [
-            {"VersionId": f"v{i + 1}", "IsDefaultVersion": i == d,
-             "CreateDate": i}
-            for i in range(versions)
-        ] if exists else []
+        self.versions = (
+            [
+                {"VersionId": f"v{i + 1}", "IsDefaultVersion": i == d, "CreateDate": i}
+                for i in range(versions)
+            ]
+            if exists
+            else []
+        )
         self.attached = list(attached)
         self.calls = []
 
@@ -97,8 +106,7 @@ class _IAM:
         for v in self.versions:
             v["IsDefaultVersion"] = False
         vid = f"v{len(self.versions) + 1}"
-        self.versions.append({"VersionId": vid, "IsDefaultVersion": True,
-                              "CreateDate": 99})
+        self.versions.append({"VersionId": vid, "IsDefaultVersion": True, "CreateDate": 99})
         self.document = PolicyDocument
         return {"PolicyVersion": {"VersionId": vid}}
 
@@ -106,8 +114,7 @@ class _IAM:
         self.calls.append(("create_policy", PolicyName))
         self.exists = True
         self.document = PolicyDocument
-        self.versions = [{"VersionId": "v1", "IsDefaultVersion": True,
-                          "CreateDate": 0}]
+        self.versions = [{"VersionId": "v1", "IsDefaultVersion": True, "CreateDate": 0}]
         return {"Policy": {"Arn": ARN, "DefaultVersionId": "v1"}}
 
     def list_attached_user_policies(self, UserName):
@@ -128,12 +135,14 @@ class _IAM:
 @pytest.fixture
 def core():
     import pcluster_core
+
     return pcluster_core
 
 
 def _boot(core, iam, sts, **kw):
     return core.bootstrap_operator_policy(
-        iam, sts, policy_name=NAME, rendered=RENDERED, description="d", **kw)
+        iam, sts, policy_name=NAME, rendered=RENDERED, description="d", **kw
+    )
 
 
 class TestAFreshCloneNeedsOneCommand:
@@ -196,23 +205,26 @@ class TestItStaysUnderIamsVersionCeiling:
         briefly unenforced. With the newest in force that never happens by
         accident, because oldest-first and not-the-default pick the same
         version -- so only the oldest-in-force case can see the filter."""
-        iam, sts = _IAM(exists=True, document=OTHER, versions=5,
-                        default_index=default_index), _STS()
-        default_before = [v["VersionId"] for v in iam.versions
-                          if v["IsDefaultVersion"]][0]
+        iam, sts = (
+            _IAM(exists=True, document=OTHER, versions=5, default_index=default_index),
+            _STS(),
+        )
+        default_before = [v["VersionId"] for v in iam.versions if v["IsDefaultVersion"]][0]
         _boot(core, iam, sts)
         deleted = [v for c, v in iam.calls if c == "delete_policy_version"]
-        assert default_before not in deleted, (
-            f"deleted the version in force ({default_before})")
+        assert default_before not in deleted, f"deleted the version in force ({default_before})"
 
 
 class TestItAttachesToWhoeverIsActuallyRunningIt:
-    @pytest.mark.parametrize("arn,ptype,pname", [
-        (f"arn:aws:iam::{ACCT}:user/alice", "user", "alice"),
-        (f"arn:aws:iam::{ACCT}:user/eng/bob", "user", "bob"),
-        (f"arn:aws:sts::{ACCT}:assumed-role/AdminRole/sess", "role", "AdminRole"),
-        (f"arn:aws:iam::{ACCT}:role/BuildRole", "role", "BuildRole"),
-    ])
+    @pytest.mark.parametrize(
+        "arn,ptype,pname",
+        [
+            (f"arn:aws:iam::{ACCT}:user/alice", "user", "alice"),
+            (f"arn:aws:iam::{ACCT}:user/eng/bob", "user", "bob"),
+            (f"arn:aws:sts::{ACCT}:assumed-role/AdminRole/sess", "role", "AdminRole"),
+            (f"arn:aws:iam::{ACCT}:role/BuildRole", "role", "BuildRole"),
+        ],
+    )
     def test_each_caller_shape_resolves(self, core, arn, ptype, pname):
         """The assumed-role shape is the one that bites: it is neither an IAM
         role ARN nor something attach-role-policy accepts -- that wants the
@@ -246,10 +258,18 @@ class TestDryRunChangesNothing:
     def test_no_mutating_call_is_made(self, core, exists, doc):
         iam, sts = _IAM(exists=exists, document=doc), _STS()
         r = _boot(core, iam, sts, dry_run=True)
-        mutations = [c for c, _ in iam.calls
-                     if c in ("create_policy", "create_policy_version",
-                              "attach_user_policy", "attach_role_policy",
-                              "delete_policy_version")]
+        mutations = [
+            c
+            for c, _ in iam.calls
+            if c
+            in (
+                "create_policy",
+                "create_policy_version",
+                "attach_user_policy",
+                "attach_role_policy",
+                "delete_policy_version",
+            )
+        ]
         assert mutations == [], mutations
         assert r.dry_run
 
@@ -283,7 +303,7 @@ class TestTheOneLinerReadsAsASetupCommand:
     def test_bootstrap_does_not_dump_the_document(self):
         src = self._main_src()
         i = src.index("elif not args.bootstrap:")
-        assert "print(rendered)" in src[i:i + 500]
+        assert "print(rendered)" in src[i : i + 500]
 
     def test_the_document_is_still_reachable_without_bootstrap(self):
         """Vacuity guard: the fix is a condition, not deleting the output."""
@@ -298,16 +318,23 @@ class TestItIsNotReachableFromAnyMcpSurface:
         grants IAM to its own caller has no ceiling."""
         import glob
         import re
+
         for path in glob.glob(os.path.join(REPO_ROOT, "templates", "MCP*.json_src")):
             doc = json.loads(re.sub(r"<[A-Z_]+>", ACCT, open(path).read()))
-            acts = [a for st in doc["Statement"] if st.get("Effect") == "Allow"
-                    for a in ([st["Action"]] if isinstance(st.get("Action"), str)
-                              else st.get("Action", []))]
+            acts = [
+                a
+                for st in doc["Statement"]
+                if st.get("Effect") == "Allow"
+                for a in (
+                    [st["Action"]] if isinstance(st.get("Action"), str) else st.get("Action", [])
+                )
+            ]
             assert "iam:AttachUserPolicy" not in acts, os.path.basename(path)
             assert "iam:PutUserPolicy" not in acts, os.path.basename(path)
 
     def test_no_mcp_tool_exposes_the_bootstrap(self):
         import glob
+
         for path in glob.glob(os.path.join(REPO_ROOT, "mcp_server", "*.py")):
-            assert_source_is_real(open(path).read(), 'test_no_mcp_tool_exposes_the_bootstrap')
+            assert_source_is_real(open(path).read(), "test_no_mcp_tool_exposes_the_bootstrap")
             assert "bootstrap_operator_policy" not in open(path).read(), path

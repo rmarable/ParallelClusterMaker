@@ -25,6 +25,7 @@ def _proc(rc=0, stdout="", stderr=""):
 # _tail_lines
 # ---------------------------------------------------------------------------
 
+
 class TestTailLines:
     def test_returns_last_n_lines(self):
         text = "a\nb\nc\nd\ne"
@@ -90,6 +91,7 @@ class TestFormatSinfo:
 # _parse_sacct
 # ---------------------------------------------------------------------------
 
+
 class TestParseSacct:
     def test_returns_none_on_empty(self):
         assert dx._parse_sacct("") is None
@@ -120,6 +122,7 @@ class TestParseSacct:
 # ec2_user validation
 # ---------------------------------------------------------------------------
 
+
 class TestEc2UserValidation:
     def test_valid_ubuntu(self):
         assert "ubuntu" in dx._VALID_EC2_USERS
@@ -143,6 +146,7 @@ class TestEc2UserValidation:
 # ---------------------------------------------------------------------------
 # cw_lines / log_lines clamping
 # ---------------------------------------------------------------------------
+
 
 class TestLineClamping:
     def test_cw_lines_max(self):
@@ -201,6 +205,7 @@ class TestArgumentBounds:
 
     def test_check_pcluster_shares_the_same_bounds(self):
         import check_pcluster as cp
+
         assert cp._MIN_TIMEOUT >= 1
         assert cp._MAX_TIMEOUT >= 15
 
@@ -218,6 +223,7 @@ class TestArgumentBounds:
 # _select_cw_log_group
 # ---------------------------------------------------------------------------
 
+
 class TestSelectCwLogGroup:
     """PCluster suffixes the log group with the stack's creation timestamp
     (cluster_stack.py: f"{CW_LOG_GROUP_NAME_PREFIX}{stack_name}-{timestamp}"), so
@@ -226,9 +232,10 @@ class TestSelectCwLogGroup:
     a missing IAM permission."""
 
     def test_picks_the_group_for_the_cluster(self):
-        assert _select_cw_log_group(
-            "osiris", ["/aws/parallelcluster/osiris-202607260359"]
-        ) == "/aws/parallelcluster/osiris-202607260359"
+        assert (
+            _select_cw_log_group("osiris", ["/aws/parallelcluster/osiris-202607260359"])
+            == "/aws/parallelcluster/osiris-202607260359"
+        )
 
     def test_a_bare_cluster_name_is_not_a_log_group(self):
         """The name diagnose_pcluster.py used to construct. It never exists."""
@@ -256,28 +263,28 @@ class TestSelectCwLogGroup:
     def test_another_clusters_group_is_not_claimed(self):
         """A describe_log_groups prefix query for "osiris-" cannot return these, but
         a caller passing an unfiltered listing must not have them matched either."""
-        assert _select_cw_log_group(
-            "osiris",
-            [
-                "/aws/parallelcluster/anubis-202607260359",
-                "/aws/parallelcluster/gilgamesh-202607260359",
-            ],
-        ) is None
+        assert (
+            _select_cw_log_group(
+                "osiris",
+                [
+                    "/aws/parallelcluster/anubis-202607260359",
+                    "/aws/parallelcluster/gilgamesh-202607260359",
+                ],
+            )
+            is None
+        )
 
     def test_a_longer_cluster_name_sharing_the_prefix_is_rejected(self):
-        """"osiris-test" starts with "osiris-", so a startswith-only match would
+        """ "osiris-test" starts with "osiris-", so a startswith-only match would
         return another cluster's logs. The 12-digit suffix is what excludes it."""
-        assert _select_cw_log_group(
-            "osiris", ["/aws/parallelcluster/osiris-test-202607260359"]
-        ) is None
+        assert (
+            _select_cw_log_group("osiris", ["/aws/parallelcluster/osiris-test-202607260359"])
+            is None
+        )
 
-    @pytest.mark.parametrize(
-        "suffix", ["20260726035", "2026072603599", "20260726035z", ""]
-    )
+    @pytest.mark.parametrize("suffix", ["20260726035", "2026072603599", "20260726035z", ""])
     def test_a_malformed_timestamp_is_rejected(self, suffix):
-        assert _select_cw_log_group(
-            "osiris", [f"/aws/parallelcluster/osiris-{suffix}"]
-        ) is None
+        assert _select_cw_log_group("osiris", [f"/aws/parallelcluster/osiris-{suffix}"]) is None
 
     def test_no_groups_at_all(self):
         assert _select_cw_log_group("osiris", []) is None
@@ -288,36 +295,49 @@ class TestSelectCwLogGroup:
 # Workstream 1 migration (docs/parallelclustermaker-mcp-plan.md).
 # ---------------------------------------------------------------------------
 
+
 class TestGetHeadIp:
     def test_success_public_ip(self, monkeypatch):
-        monkeypatch.setattr(pcluster_core, "_describe_cluster_json",
-                            lambda c, r: {
-            "clusterStatus": "CREATE_COMPLETE",
-            "headNode": {"publicIpAddress": "1.2.3.4"},
-        })
+        monkeypatch.setattr(
+            pcluster_core,
+            "_describe_cluster_json",
+            lambda c, r: {
+                "clusterStatus": "CREATE_COMPLETE",
+                "headNode": {"publicIpAddress": "1.2.3.4"},
+            },
+        )
         ip, err = pcluster_core._get_head_ip("mycluster", "us-east-1", "pcluster")
         assert ip == "1.2.3.4"
         assert err is None
 
     def test_private_ip_fallback(self, monkeypatch):
-        monkeypatch.setattr(pcluster_core, "_describe_cluster_json",
-                            lambda c, r: {
-            "clusterStatus": "CREATE_COMPLETE",
-            "headNode": {"privateIpAddress": "10.0.0.5"},
-        })
+        monkeypatch.setattr(
+            pcluster_core,
+            "_describe_cluster_json",
+            lambda c, r: {
+                "clusterStatus": "CREATE_COMPLETE",
+                "headNode": {"privateIpAddress": "10.0.0.5"},
+            },
+        )
         ip, err = pcluster_core._get_head_ip("mycluster", "us-east-1", "pcluster")
         assert ip == "10.0.0.5"
 
     def test_non_create_complete_status(self, monkeypatch):
-        monkeypatch.setattr(pcluster_core, "_describe_cluster_json",
-                            lambda c, r: {"clusterStatus": "UPDATE_FAILED", "headNode": {}})
+        monkeypatch.setattr(
+            pcluster_core,
+            "_describe_cluster_json",
+            lambda c, r: {"clusterStatus": "UPDATE_FAILED", "headNode": {}},
+        )
         ip, err = pcluster_core._get_head_ip("mycluster", "us-east-1", "pcluster")
         assert ip is None
         assert "UPDATE_FAILED" in err
 
     def test_no_ip_in_response(self, monkeypatch):
-        monkeypatch.setattr(pcluster_core, "_describe_cluster_json",
-                            lambda c, r: {"clusterStatus": "CREATE_COMPLETE", "headNode": {}})
+        monkeypatch.setattr(
+            pcluster_core,
+            "_describe_cluster_json",
+            lambda c, r: {"clusterStatus": "CREATE_COMPLETE", "headNode": {}},
+        )
         ip, err = pcluster_core._get_head_ip("mycluster", "us-east-1", "pcluster")
         assert ip is None
         assert "no IP address" in err
@@ -331,6 +351,7 @@ class TestGetHeadIp:
         raises PClusterMakerError rather than the SystemExit the subprocess
         form used, deliberately -- SystemExit is a BaseException and would
         kill a long-lived MCP server rather than fail one call."""
+
         def _boom(c, r):
             raise pcluster_core.PClusterMakerError("AccessDenied")
 
@@ -344,6 +365,7 @@ class TestGetHeadIp:
 # _fetch_cw_logs
 # ---------------------------------------------------------------------------
 
+
 class _Paginator:
     def __init__(self, pages):
         self._pages = pages
@@ -353,8 +375,14 @@ class _Paginator:
 
 
 class _FakeLogsClient:
-    def __init__(self, groups=None, streams=None, events_by_stream=None,
-                 groups_error=None, streams_error=None):
+    def __init__(
+        self,
+        groups=None,
+        streams=None,
+        events_by_stream=None,
+        groups_error=None,
+        streams_error=None,
+    ):
         self._groups = groups or []
         self._streams = streams or []
         self._events_by_stream = events_by_stream or {}
@@ -379,6 +407,7 @@ class _FakeLogsClient:
 
 def _cw_error(code):
     from botocore.exceptions import ClientError
+
     return ClientError({"Error": {"Code": code, "Message": code}}, "op")
 
 
@@ -432,10 +461,12 @@ class TestFetchCwLogs:
 # _diagnose_sinfo / _diagnose_sacct / _diagnose_local_logs / _diagnose_postinstall
 # ---------------------------------------------------------------------------
 
+
 class TestDiagnoseSinfo:
     def test_nodes_reported(self, monkeypatch):
         monkeypatch.setattr(
-            pcluster_core.subprocess, "run",
+            pcluster_core.subprocess,
+            "run",
             lambda *a, **kw: _proc(stdout=f"{_SINFO_HEADER}\ncompute-1 1 cpu idle 4 8000 none"),
         )
         section = pcluster_core._diagnose_sinfo("1.2.3.4", "/tmp/key.pem", "ubuntu", 15)
@@ -458,6 +489,7 @@ class TestDiagnoseSinfo:
     def test_timeout(self, monkeypatch):
         def _raise(*a, **kw):
             raise subprocess.TimeoutExpired("ssh", 15)
+
         monkeypatch.setattr(pcluster_core.subprocess, "run", _raise)
         section = pcluster_core._diagnose_sinfo("1.2.3.4", "/tmp/key.pem", "ubuntu", 15)
         assert section.error == "sinfo timed out"
@@ -479,7 +511,8 @@ class TestDiagnoseSacct:
 
     def test_sacct_not_available(self, monkeypatch):
         monkeypatch.setattr(
-            pcluster_core.subprocess, "run",
+            pcluster_core.subprocess,
+            "run",
             lambda *a, **kw: _proc(rc=127, stderr="sacct: command not found"),
         )
         section = pcluster_core._diagnose_sacct("1.2.3.4", "/tmp/key.pem", "ubuntu", 15, 24)
@@ -495,7 +528,9 @@ class TestDiagnoseSacct:
 
 class TestDiagnoseLocalLogs:
     def test_all_four_logs_checked_in_order(self, monkeypatch):
-        monkeypatch.setattr(pcluster_core.subprocess, "run", lambda *a, **kw: _proc(stdout="line1\nline2"))
+        monkeypatch.setattr(
+            pcluster_core.subprocess, "run", lambda *a, **kw: _proc(stdout="line1\nline2")
+        )
         tails = pcluster_core._diagnose_local_logs("1.2.3.4", "/tmp/key.pem", "ubuntu", 15, 30)
         assert [t.path for t in tails] == pcluster_core._LOCAL_LOGS
         assert all(t.error is None for t in tails)
@@ -518,6 +553,7 @@ class TestDiagnoseLocalLogs:
     def test_timeout_error_text(self, monkeypatch):
         def _raise(*a, **kw):
             raise subprocess.TimeoutExpired("ssh", 15)
+
         monkeypatch.setattr(pcluster_core.subprocess, "run", _raise)
         tails = pcluster_core._diagnose_local_logs("1.2.3.4", "/tmp/key.pem", "ubuntu", 15, 30)
         assert all(t.error == "timed out" for t in tails)
@@ -525,6 +561,7 @@ class TestDiagnoseLocalLogs:
     def test_os_error_text_carries_error_prefix(self, monkeypatch):
         def _raise(*a, **kw):
             raise OSError("no route to host")
+
         monkeypatch.setattr(pcluster_core.subprocess, "run", _raise)
         tails = pcluster_core._diagnose_local_logs("1.2.3.4", "/tmp/key.pem", "ubuntu", 15, 30)
         assert all(t.error == "error: no route to host" for t in tails)
@@ -546,6 +583,7 @@ class TestDiagnosePostinstall:
     def test_timeout_error_text(self, monkeypatch):
         def _raise(*a, **kw):
             raise subprocess.TimeoutExpired("ssh", 15)
+
         monkeypatch.setattr(pcluster_core.subprocess, "run", _raise)
         section = pcluster_core._diagnose_postinstall("1.2.3.4", "/tmp/key.pem", "ubuntu", 15)
         assert section.error == "timed out"
@@ -553,6 +591,7 @@ class TestDiagnosePostinstall:
     def test_os_error_text_carries_error_prefix(self, monkeypatch):
         def _raise(*a, **kw):
             raise OSError("connection reset")
+
         monkeypatch.setattr(pcluster_core.subprocess, "run", _raise)
         section = pcluster_core._diagnose_postinstall("1.2.3.4", "/tmp/key.pem", "ubuntu", 15)
         assert section.error == "error: connection reset"
@@ -593,24 +632,37 @@ def _record(**overrides):
     return pcluster_core.ClusterRecord(**{**_RECORD_KWARGS, **overrides})
 
 
-def _stage_diagnose(monkeypatch, head_ip=("1.2.3.4", None), cw=None, sinfo=None,
-                     sacct=None, local_logs=None, postinstall=None):
+def _stage_diagnose(
+    monkeypatch,
+    head_ip=("1.2.3.4", None),
+    cw=None,
+    sinfo=None,
+    sacct=None,
+    local_logs=None,
+    postinstall=None,
+):
     monkeypatch.setattr(pcluster_core, "_get_head_ip", lambda *a, **kw: head_ip)
     monkeypatch.setattr(
-        pcluster_core, "_fetch_cw_logs",
-        lambda *a, **kw: cw or pcluster_core.CloudWatchLogSection("/aws/parallelcluster/x", {}, None),
+        pcluster_core,
+        "_fetch_cw_logs",
+        lambda *a, **kw: (
+            cw or pcluster_core.CloudWatchLogSection("/aws/parallelcluster/x", {}, None)
+        ),
     )
     monkeypatch.setattr(
-        pcluster_core, "_diagnose_sinfo",
+        pcluster_core,
+        "_diagnose_sinfo",
         lambda *a, **kw: sinfo or pcluster_core.SinfoSection("", None),
     )
     monkeypatch.setattr(
-        pcluster_core, "_diagnose_sacct",
+        pcluster_core,
+        "_diagnose_sacct",
         lambda *a, **kw: sacct or pcluster_core.SacctSection(None, None),
     )
     monkeypatch.setattr(pcluster_core, "_diagnose_local_logs", lambda *a, **kw: local_logs or [])
     monkeypatch.setattr(
-        pcluster_core, "_diagnose_postinstall",
+        pcluster_core,
+        "_diagnose_postinstall",
         lambda *a, **kw: postinstall or pcluster_core.PostinstallSection(True, None),
     )
 
@@ -628,17 +680,24 @@ class TestCoreDiagnoseCluster:
         cw_called = []
         _stage_diagnose(monkeypatch, head_ip=(None, "cluster not in CREATE_COMPLETE state"))
         monkeypatch.setattr(
-            pcluster_core, "_fetch_cw_logs",
-            lambda *a, **kw: cw_called.append(1) or pcluster_core.CloudWatchLogSection(None, {}, None),
+            pcluster_core,
+            "_fetch_cw_logs",
+            lambda *a, **kw: (
+                cw_called.append(1) or pcluster_core.CloudWatchLogSection(None, {}, None)
+            ),
         )
-        report = pcluster_core.core_diagnose_cluster(cluster_record=_record(), pcluster_bin="pcluster")
+        report = pcluster_core.core_diagnose_cluster(
+            cluster_record=_record(), pcluster_bin="pcluster"
+        )
         assert cw_called == [1]
         assert report.head_ip is None
         assert report.head_ip_error == "cluster not in CREATE_COMPLETE state"
 
     def test_ssh_sections_are_none_when_head_ip_unresolved(self, monkeypatch):
         _stage_diagnose(monkeypatch, head_ip=(None, "unreachable"))
-        report = pcluster_core.core_diagnose_cluster(cluster_record=_record(), pcluster_bin="pcluster")
+        report = pcluster_core.core_diagnose_cluster(
+            cluster_record=_record(), pcluster_bin="pcluster"
+        )
         assert report.sinfo is None
         assert report.sacct is None
         assert report.postinstall is None
@@ -646,7 +705,9 @@ class TestCoreDiagnoseCluster:
 
     def test_ssh_sections_populated_when_head_ip_resolves(self, monkeypatch):
         _stage_diagnose(monkeypatch)
-        report = pcluster_core.core_diagnose_cluster(cluster_record=_record(), pcluster_bin="pcluster")
+        report = pcluster_core.core_diagnose_cluster(
+            cluster_record=_record(), pcluster_bin="pcluster"
+        )
         assert report.sinfo is not None
         assert report.sacct is not None
         assert report.postinstall is not None
@@ -658,7 +719,8 @@ class TestCoreDiagnoseCluster:
         sinfo_called = []
         _stage_diagnose(monkeypatch)
         monkeypatch.setattr(
-            pcluster_core, "_diagnose_sinfo",
+            pcluster_core,
+            "_diagnose_sinfo",
             lambda *a, **kw: sinfo_called.append(1) or pcluster_core.SinfoSection("", None),
         )
         report = pcluster_core.core_diagnose_cluster(
@@ -671,8 +733,11 @@ class TestCoreDiagnoseCluster:
         cw_called = []
         _stage_diagnose(monkeypatch)
         monkeypatch.setattr(
-            pcluster_core, "_fetch_cw_logs",
-            lambda *a, **kw: cw_called.append(1) or pcluster_core.CloudWatchLogSection(None, {}, None),
+            pcluster_core,
+            "_fetch_cw_logs",
+            lambda *a, **kw: (
+                cw_called.append(1) or pcluster_core.CloudWatchLogSection(None, {}, None)
+            ),
         )
         report = pcluster_core.core_diagnose_cluster(
             cluster_record=_record(), pcluster_bin="pcluster", include_cloudwatch=False
@@ -738,6 +803,7 @@ class TestCoreDiagnoseCluster:
 # diagnose_pcluster.py's main()/_print_report -- CLI glue only.
 # ---------------------------------------------------------------------------
 
+
 def _base_report(**overrides):
     defaults = dict(
         cluster_name="mycluster",
@@ -756,13 +822,13 @@ def _base_report(**overrides):
 
 
 class TestDiagnosePclusterMainCliShim:
-    def _stage_main(self, monkeypatch, rec=None, report=None, argv=("diagnose_pcluster.py", "-N", "mycluster")):
+    def _stage_main(
+        self, monkeypatch, rec=None, report=None, argv=("diagnose_pcluster.py", "-N", "mycluster")
+    ):
         full_rec = dict(_RECORD_KWARGS)
         full_rec.update(rec or {})
         monkeypatch.setattr(dx, "_read_cluster_record", lambda n, r: full_rec)
-        monkeypatch.setattr(
-            dx, "core_diagnose_cluster", lambda **kw: report or _base_report()
-        )
+        monkeypatch.setattr(dx, "core_diagnose_cluster", lambda **kw: report or _base_report())
         monkeypatch.setattr(sys, "argv", list(argv))
 
     def test_missing_vars_file_exits_immediately(self, monkeypatch, capsys):
@@ -778,7 +844,8 @@ class TestDiagnosePclusterMainCliShim:
     def test_invalid_ec2_user_error_reaches_the_operator(self, monkeypatch, capsys):
         self._stage_main(monkeypatch)
         monkeypatch.setattr(
-            dx, "core_diagnose_cluster",
+            dx,
+            "core_diagnose_cluster",
             lambda **kw: (_ for _ in ()).throw(
                 pcluster_core.PClusterMakerError("ERROR: unrecognized ec2_user 'root'")
             ),
@@ -795,8 +862,12 @@ class TestDiagnosePclusterMainCliShim:
         report = _base_report(
             head_ip=None,
             head_ip_error="cluster not in CREATE_COMPLETE state",
-            cloudwatch=pcluster_core.CloudWatchLogSection("/aws/parallelcluster/x", {"cfn-init": ["line"]}, None),
-            sinfo=None, sacct=None, postinstall=None,
+            cloudwatch=pcluster_core.CloudWatchLogSection(
+                "/aws/parallelcluster/x", {"cfn-init": ["line"]}, None
+            ),
+            sinfo=None,
+            sacct=None,
+            postinstall=None,
         )
         self._stage_main(monkeypatch, report=report)
         with pytest.raises(SystemExit) as exc:
@@ -810,7 +881,9 @@ class TestDiagnosePclusterMainCliShim:
 
     def test_full_report_prints_all_five_sections(self, monkeypatch, capsys):
         report = _base_report(
-            cloudwatch=pcluster_core.CloudWatchLogSection("/aws/parallelcluster/x", {"cfn-init": ["boot ok"]}, None),
+            cloudwatch=pcluster_core.CloudWatchLogSection(
+                "/aws/parallelcluster/x", {"cfn-init": ["boot ok"]}, None
+            ),
             sinfo=pcluster_core.SinfoSection("  compute-1 idle", None),
             sacct=pcluster_core.SacctSection("  1042 myjob FAILED", None),
             local_logs=[pcluster_core.LocalLogTail("/var/log/x.log", "tail content", None)],
@@ -833,7 +906,9 @@ class TestDiagnosePclusterMainCliShim:
 
     def test_local_log_error_prints_parenthesized_message(self, monkeypatch, capsys):
         report = _base_report(
-            local_logs=[pcluster_core.LocalLogTail("/var/log/x.log", None, "unavailable — No such file")]
+            local_logs=[
+                pcluster_core.LocalLogTail("/var/log/x.log", None, "unavailable — No such file")
+            ]
         )
         self._stage_main(monkeypatch, report=report)
         dx.main()
@@ -868,8 +943,12 @@ class TestDiagnoseFindsSlurmOnTheHeadNode:
         import pcluster_core
 
         cmds = self._captured(
-            monkeypatch, pcluster_core._diagnose_sinfo,
-            "1.2.3.4", "/k.pem", "ubuntu", 15,
+            monkeypatch,
+            pcluster_core._diagnose_sinfo,
+            "1.2.3.4",
+            "/k.pem",
+            "ubuntu",
+            15,
         )
         assert cmds and "/opt/slurm/bin" in cmds[0], cmds
         assert "sinfo" in cmds[0], cmds
@@ -878,8 +957,13 @@ class TestDiagnoseFindsSlurmOnTheHeadNode:
         import pcluster_core
 
         cmds = self._captured(
-            monkeypatch, pcluster_core._diagnose_sacct,
-            "1.2.3.4", "/k.pem", "ubuntu", 15, 24,
+            monkeypatch,
+            pcluster_core._diagnose_sacct,
+            "1.2.3.4",
+            "/k.pem",
+            "ubuntu",
+            15,
+            24,
         )
         assert cmds and "/opt/slurm/bin" in cmds[0], cmds
         assert "sacct" in cmds[0], cmds
@@ -891,8 +975,13 @@ class TestDiagnoseFindsSlurmOnTheHeadNode:
         import pcluster_core
 
         cmds = self._captured(
-            monkeypatch, pcluster_core._diagnose_sacct,
-            "1.2.3.4", "/k.pem", "ubuntu", 15, 24,
+            monkeypatch,
+            pcluster_core._diagnose_sacct,
+            "1.2.3.4",
+            "/k.pem",
+            "ubuntu",
+            15,
+            24,
         )
         for flag in ("--noheader", "--state=", "--format=", "--starttime="):
             assert flag in cmds[0], (flag, cmds[0])
@@ -903,7 +992,11 @@ class TestDiagnoseFindsSlurmOnTheHeadNode:
         import pcluster_core
 
         cmds = self._captured(
-            monkeypatch, pcluster_core._diagnose_postinstall,
-            "1.2.3.4", "/k.pem", "ubuntu", 15,
+            monkeypatch,
+            pcluster_core._diagnose_postinstall,
+            "1.2.3.4",
+            "/k.pem",
+            "ubuntu",
+            15,
         )
         assert cmds and "/opt/slurm/bin" not in cmds[0], cmds

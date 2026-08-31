@@ -22,13 +22,19 @@ def _log(payload, outcome, extra=""):
     """One structured line per build. The function's log group is retained,
     so this is the record that survives the invocation."""
     params = payload.get("params") or {}
-    print(json.dumps({
-        "pcm_build": True,
-        "cluster": params.get("cluster_name"),
-        "region": payload.get("region"),
-        "outcome": outcome,
-        "extra": extra,
-    }, default=str), flush=True)
+    print(
+        json.dumps(
+            {
+                "pcm_build": True,
+                "cluster": params.get("cluster_name"),
+                "region": payload.get("region"),
+                "outcome": outcome,
+                "extra": extra,
+            },
+            default=str,
+        ),
+        flush=True,
+    )
 
 
 def _record_failure_if_unrecorded(payload, message):
@@ -52,18 +58,19 @@ def _record_failure_if_unrecorded(payload, message):
         s3, bucket = _record_store(region)
         if s3 is None:
             return False
-        if get_build_failure(
-            s3, locks_bucketname=bucket, cluster_name=cluster_name
-        ):
+        if get_build_failure(s3, locks_bucketname=bucket, cluster_name=cluster_name):
             return False
         return _publish_build_failure(
-            s3, locks_bucketname=bucket, cluster_name=cluster_name,
-            region=region, cluster_owner=params.get("cluster_owner", ""),
-            stage="validation", message=message,
+            s3,
+            locks_bucketname=bucket,
+            cluster_name=cluster_name,
+            region=region,
+            cluster_owner=params.get("cluster_owner", ""),
+            stage="validation",
+            message=message,
         )
     except Exception as e:  # noqa: BLE001 - see docstring
-        print(f"pcm_build: could not record the failure: "
-              f"{type(e).__name__}: {e}", flush=True)
+        print(f"pcm_build: could not record the failure: {type(e).__name__}: {e}", flush=True)
         return False
 
 
@@ -88,11 +95,12 @@ def run_build(payload, *, create=None):
 
         def create(p, r):
             return core_create_cluster(
-                params=MakeClusterParams(**p), region=r,
+                params=MakeClusterParams(**p),
+                region=r,
                 repo_root=payload.get("repo_root") or _repo_root(),
-                cluster_build_command=(
-                    f"mcp create_cluster {p.get('cluster_name', '')}"),
-                ansible_version="", wait=False,
+                cluster_build_command=(f"mcp create_cluster {p.get('cluster_name', '')}"),
+                ansible_version="",
+                wait=False,
             )
 
     try:

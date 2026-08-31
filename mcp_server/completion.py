@@ -52,7 +52,7 @@ class CompletionOutcome:
     is imported by a Lambda handler and must not drag in a dependency."""
 
     def __init__(self, action, reason, attempt=0):
-        self.action = action        # "finalize" | "retry" | "give_up"
+        self.action = action  # "finalize" | "retry" | "give_up"
         self.reason = reason
         self.attempt = attempt
 
@@ -60,13 +60,22 @@ class CompletionOutcome:
         return f"CompletionOutcome({self.action!r}, {self.reason!r}, {self.attempt})"
 
     def __eq__(self, other):
-        return (isinstance(other, CompletionOutcome)
-                and (self.action, self.reason, self.attempt)
-                == (other.action, other.reason, other.attempt))
+        return isinstance(other, CompletionOutcome) and (
+            self.action,
+            self.reason,
+            self.attempt,
+        ) == (other.action, other.reason, other.attempt)
 
 
-def decide(*, status, attempt, started_at, now, max_attempts=MAX_ATTEMPTS,
-           deadline_seconds=DEADLINE_SECONDS):
+def decide(
+    *,
+    status,
+    attempt,
+    started_at,
+    now,
+    max_attempts=MAX_ATTEMPTS,
+    deadline_seconds=DEADLINE_SECONDS,
+):
     """Whether to finalize, poll again, or stop. No AWS, no clock, no I/O.
 
     Separated from everything that touches AWS so the bound can be tested
@@ -82,19 +91,16 @@ def decide(*, status, attempt, started_at, now, max_attempts=MAX_ATTEMPTS,
     """
     elapsed = now - started_at
     if status in _GONE or status == "":
-        return CompletionOutcome("finalize", f"stack is {status or 'absent'}",
-                                 attempt)
+        return CompletionOutcome("finalize", f"stack is {status or 'absent'}", attempt)
     if status in _FAILED:
         # Nothing to finalize: the stack is still there and an operator has
         # to look. Finalizing here would strip the IAM and the credentials
         # needed to investigate, which is the opposite of useful.
         return CompletionOutcome("give_up", f"stack is {status}", attempt)
     if attempt >= max_attempts:
-        return CompletionOutcome(
-            "give_up", f"gave up after {attempt} attempts", attempt)
+        return CompletionOutcome("give_up", f"gave up after {attempt} attempts", attempt)
     if elapsed >= deadline_seconds:
-        return CompletionOutcome(
-            "give_up", f"deadline passed ({int(elapsed)}s)", attempt)
+        return CompletionOutcome("give_up", f"deadline passed ({int(elapsed)}s)", attempt)
     return CompletionOutcome("retry", f"status={status or 'unreadable'}", attempt)
 
 
@@ -112,8 +118,9 @@ def is_completion_event(event):
     return isinstance(event, dict) and event.get("_pcm_completion") is True
 
 
-def make_completion_event(*, cluster_name, cluster_owner, region,
-                          delete_s3_bucketname=True, started_at=None):
+def make_completion_event(
+    *, cluster_name, cluster_owner, region, delete_s3_bucketname=True, started_at=None
+):
     return {
         "_pcm_completion": True,
         "cluster_name": cluster_name,

@@ -164,8 +164,8 @@ class TestItRunsOnlyForSpotAndOnlyBeforeAnythingIsCreated:
         # rindex, not index: the `def` line contains the call string as a
         # substring, and matching it finds a window with no gate in it.
         i = src.rindex("_ensure_spot_service_linked_role(iam)")
-        assert "def " not in src[src.rindex("\n", 0, i):i]
-        window = src[max(0, i - 200):i]
+        assert "def " not in src[src.rindex("\n", 0, i) : i]
+        window = src[max(0, i - 200) : i]
         assert 'cluster_type == "spot"' in window
 
     def test_it_precedes_the_first_iam_mutation(self):
@@ -174,8 +174,11 @@ class TestItRunsOnlyForSpotAndOnlyBeforeAnythingIsCreated:
         managed policies, a role, a keypair and a bucket to sweep."""
         with open(os.path.join(REPO_ROOT, "src", "pcluster_core.py")) as fh:
             lines = fh.readlines()
-        check = [n for n, l in enumerate(lines)
-                 if "_ensure_spot_service_linked_role(iam)" in l and "def " not in l]
+        check = [
+            n
+            for n, l in enumerate(lines)
+            if "_ensure_spot_service_linked_role(iam)" in l and "def " not in l
+        ]
         setup = [n for n, l in enumerate(lines) if "_setup_iam(" in l and "def " not in l]
         assert check and setup
         assert max(check) < min(setup), "the check must run before _setup_iam"
@@ -186,20 +189,25 @@ class TestTheGrantIsTheOperatorsNotTheNodes:
         """A head node reachable by any Slurm job must not hold an IAM write
         action. It needs the role to exist, never to create it -- which is
         precisely why this is done operator-side."""
-        for name in ("HeadNode-IAM.json_src", "HeadNode-Compute.json_src",
-                     "HeadNode-Storage.json_src", "ComputeNode-Base.json_src"):
+        for name in (
+            "HeadNode-IAM.json_src",
+            "HeadNode-Compute.json_src",
+            "HeadNode-Storage.json_src",
+            "ComputeNode-Base.json_src",
+        ):
             acts = _actions(_policy(name))
             assert not any(
-                a == "iam:*" or a.startswith("iam:CreateServiceLinkedRole")
-                for a in acts
+                a == "iam:*" or a.startswith("iam:CreateServiceLinkedRole") for a in acts
             ), name
 
     def test_the_operator_can_create_exactly_this_one_role(self):
         doc = _policy("OperatorPolicy.json_src")
-        hits = [st for st in doc["Statement"]
-                if "iam:CreateServiceLinkedRole" in (
-                    [st["Action"]] if isinstance(st.get("Action"), str)
-                    else st.get("Action", []))]
+        hits = [
+            st
+            for st in doc["Statement"]
+            if "iam:CreateServiceLinkedRole"
+            in ([st["Action"]] if isinstance(st.get("Action"), str) else st.get("Action", []))
+        ]
         assert len(hits) == 1, "exactly one statement should grant it"
         res = hits[0]["Resource"]
         res = [res] if isinstance(res, str) else res
@@ -218,10 +226,12 @@ class TestTheGrantIsTheOperatorsNotTheNodes:
         nodes, ever. `MCPClusterBuild` carries it because `MCPStackMutation`
         has no bytes left."""
         doc = _policy("MCPClusterBuild.json_src")
-        hits = [st for st in doc["Statement"]
-                if "iam:CreateServiceLinkedRole" in (
-                    [st["Action"]] if isinstance(st.get("Action"), str)
-                    else st.get("Action", []))]
+        hits = [
+            st
+            for st in doc["Statement"]
+            if "iam:CreateServiceLinkedRole"
+            in ([st["Action"]] if isinstance(st.get("Action"), str) else st.get("Action", []))
+        ]
         assert len(hits) == 1, "the build tier must be able to ensure the role"
         res = hits[0]["Resource"]
         res = [res] if isinstance(res, str) else res
@@ -233,10 +243,14 @@ class TestTheGrantIsTheOperatorsNotTheNodes:
         """Only the tier that builds clusters needs it. A read-only or
         fleet-toggle tier holding an IAM create action misrepresents itself."""
         import glob
+
         for path in glob.glob(os.path.join(TEMPLATES, "MCP*.json_src")):
             name = os.path.basename(path)
-            if name in ("MCPClusterBuild.json_src", "MCPDeployPolicy.json_src",
-                        "MCPRoleBoundary.json_src"):
+            if name in (
+                "MCPClusterBuild.json_src",
+                "MCPDeployPolicy.json_src",
+                "MCPRoleBoundary.json_src",
+            ):
                 continue
             assert "iam:CreateServiceLinkedRole" not in _actions(_policy(name)), name
 

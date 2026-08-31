@@ -38,8 +38,7 @@ class TestTheLoopTerminates:
         assert decide(status="", attempt=1, started_at=0, now=60).action == "finalize"
 
     def test_attempts_are_capped(self):
-        d = decide(status="DELETE_IN_PROGRESS", attempt=MAX_ATTEMPTS,
-                   started_at=0, now=1)
+        d = decide(status="DELETE_IN_PROGRESS", attempt=MAX_ATTEMPTS, started_at=0, now=1)
         assert d.action == "give_up"
         assert "attempts" in d.reason
 
@@ -47,8 +46,7 @@ class TestTheLoopTerminates:
         """The two bounds are not redundant. A fast poll loop exhausts
         attempts first; a slow or stalled one exhausts the clock first, and
         either alone leaves the other case unbounded."""
-        d = decide(status="DELETE_IN_PROGRESS", attempt=1, started_at=0,
-                   now=DEADLINE_SECONDS + 1)
+        d = decide(status="DELETE_IN_PROGRESS", attempt=1, started_at=0, now=DEADLINE_SECONDS + 1)
         assert d.action == "give_up"
         assert "deadline" in d.reason
 
@@ -57,10 +55,11 @@ class TestTheLoopTerminates:
         is gone -- the rule `_confirm_stack_is_gone` is built on. It waits,
         and the same two bounds stop it waiting forever."""
         assert decide(status=None, attempt=1, started_at=0, now=60).action == "retry"
-        assert decide(status=None, attempt=MAX_ATTEMPTS, started_at=0,
-                      now=60).action == "give_up"
-        assert decide(status=None, attempt=1, started_at=0,
-                      now=DEADLINE_SECONDS + 1).action == "give_up"
+        assert decide(status=None, attempt=MAX_ATTEMPTS, started_at=0, now=60).action == "give_up"
+        assert (
+            decide(status=None, attempt=1, started_at=0, now=DEADLINE_SECONDS + 1).action
+            == "give_up"
+        )
 
     def test_a_failed_delete_does_not_finalize(self):
         """DELETE_FAILED means the stack is still there and someone has to
@@ -73,21 +72,29 @@ class TestTheLoopTerminates:
     def test_every_status_reaches_a_terminal_decision(self):
         """Exhaustive over the states CloudFormation can report: no input
         leaves the loop running past its bounds."""
-        states = [None, "", "DELETE_IN_PROGRESS", "DELETE_COMPLETE",
-                  "DELETE_FAILED", "CREATE_COMPLETE", "UPDATE_IN_PROGRESS",
-                  "ROLLBACK_COMPLETE", "nonsense"]
+        states = [
+            None,
+            "",
+            "DELETE_IN_PROGRESS",
+            "DELETE_COMPLETE",
+            "DELETE_FAILED",
+            "CREATE_COMPLETE",
+            "UPDATE_IN_PROGRESS",
+            "ROLLBACK_COMPLETE",
+            "nonsense",
+        ]
         for s in states:
             at_cap = decide(status=s, attempt=MAX_ATTEMPTS, started_at=0, now=1)
             assert at_cap.action in ("finalize", "give_up"), (s, at_cap)
-            past_deadline = decide(status=s, attempt=0, started_at=0,
-                                   now=DEADLINE_SECONDS + 1)
+            past_deadline = decide(status=s, attempt=0, started_at=0, now=DEADLINE_SECONDS + 1)
             assert past_deadline.action in ("finalize", "give_up"), (s, past_deadline)
 
     def test_the_attempt_counter_actually_advances(self):
         """Vacuity guard for the cap: a payload that never increments makes
         every bound above unreachable."""
-        p = make_completion_event(cluster_name="osiris", cluster_owner="rm",
-                                  region="us-east-1", started_at=0)
+        p = make_completion_event(
+            cluster_name="osiris", cluster_owner="rm", region="us-east-1", started_at=0
+        )
         assert p["attempt"] == 0
         for i in range(1, 5):
             p = next_payload(p)
@@ -97,12 +104,17 @@ class TestTheLoopTerminates:
     def test_a_bounded_run_cannot_exceed_the_cap(self):
         """Drive the real decision function in a loop the way the handler
         will, with a status that never becomes terminal."""
-        p = make_completion_event(cluster_name="osiris", cluster_owner="rm",
-                                  region="us-east-1", started_at=0)
+        p = make_completion_event(
+            cluster_name="osiris", cluster_owner="rm", region="us-east-1", started_at=0
+        )
         now, seen = 0.0, 0
         while True:
-            d = decide(status="DELETE_IN_PROGRESS", attempt=p["attempt"],
-                       started_at=p["started_at"], now=now)
+            d = decide(
+                status="DELETE_IN_PROGRESS",
+                attempt=p["attempt"],
+                started_at=p["started_at"],
+                now=now,
+            )
             seen += 1
             if d.action != "retry":
                 break
@@ -114,17 +126,21 @@ class TestTheLoopTerminates:
 
 class TestTheCompletionEventIsRecognizedByAMarker:
     def test_a_completion_event_is_detected(self):
-        ev = make_completion_event(cluster_name="a", cluster_owner="b",
-                                   region="us-east-1")
+        ev = make_completion_event(cluster_name="a", cluster_owner="b", region="us-east-1")
         assert is_completion_event(ev)
 
     def test_a_tools_call_is_not(self):
         """Keyed on an explicit marker, never on the absence of something:
         a malformed or unrelated event must not be mistaken for a
         completion poll and start deleting things."""
-        for ev in ({"jsonrpc": "2.0", "method": "tools/call"}, {}, None,
-                   {"body": "{}"}, {"_pcm_completion": "yes"},
-                   {"_pcm_completion": False}):
+        for ev in (
+            {"jsonrpc": "2.0", "method": "tools/call"},
+            {},
+            None,
+            {"body": "{}"},
+            {"_pcm_completion": "yes"},
+            {"_pcm_completion": False},
+        ):
             assert not is_completion_event(ev), ev
 
 
@@ -136,9 +152,12 @@ class TestTheRunnerActsOnTheDecision:
 
     def _payload(self, attempt=0, started_at=0.0):
         return {
-            "_pcm_completion": True, "cluster_name": "osiris",
-            "cluster_owner": "rm", "region": "us-east-1",
-            "delete_s3_bucketname": True, "attempt": attempt,
+            "_pcm_completion": True,
+            "cluster_name": "osiris",
+            "cluster_owner": "rm",
+            "region": "us-east-1",
+            "delete_s3_bucketname": True,
+            "attempt": attempt,
             "started_at": started_at,
         }
 
@@ -152,7 +171,8 @@ class TestTheRunnerActsOnTheDecision:
             message = ""
 
         out = run_completion_attempt(
-            self._payload(), now=60,
+            self._payload(),
+            now=60,
             describe=lambda n, r: "",
             finalize=lambda p: calls.append(p) or _R(),
             reinvoke=lambda p: reinvokes.append(p),
@@ -166,7 +186,8 @@ class TestTheRunnerActsOnTheDecision:
 
         reinvokes, finals = [], []
         out = run_completion_attempt(
-            self._payload(attempt=3), now=60,
+            self._payload(attempt=3),
+            now=60,
             describe=lambda n, r: "DELETE_IN_PROGRESS",
             finalize=lambda p: finals.append(p),
             reinvoke=lambda p: reinvokes.append(p),
@@ -183,10 +204,12 @@ class TestTheRunnerActsOnTheDecision:
 
         finals = []
         out = run_completion_attempt(
-            self._payload(), now=60,
+            self._payload(),
+            now=60,
             describe=lambda n, r: "DELETE_FAILED",
             finalize=lambda p: finals.append(p),
-            reinvoke=lambda p: None, sleeper=lambda s: None,
+            reinvoke=lambda p: None,
+            sleeper=lambda s: None,
         )
         assert out["action"] == "give_up"
         assert not finals
@@ -198,17 +221,19 @@ class TestTheRunnerActsOnTheDecision:
         from mcp_server.completion import MAX_ATTEMPTS
 
         sent = []
-        monkeypatch.setattr(cr, "_notify",
-                            lambda p, s, m: sent.append((s, m)))
+        monkeypatch.setattr(cr, "_notify", lambda p, s, m: sent.append((s, m)))
         cr.run_completion_attempt(
-            self._payload(attempt=MAX_ATTEMPTS), now=60,
+            self._payload(attempt=MAX_ATTEMPTS),
+            now=60,
             describe=lambda n, r: "DELETE_IN_PROGRESS",
-            finalize=lambda p: None, reinvoke=lambda p: None,
+            finalize=lambda p: None,
+            reinvoke=lambda p: None,
             sleeper=lambda s: None,
         )
         assert sent, "gave up without telling anyone"
         assert "finalize_cluster_teardown" in sent[0][1], (
-            "the notification does not say how to recover")
+            "the notification does not say how to recover"
+        )
 
     def test_a_failed_finalize_notifies_too(self, monkeypatch):
         import mcp_server.completion_runner as cr
@@ -221,8 +246,11 @@ class TestTheRunnerActsOnTheDecision:
             message = "AccessDenied on iam:DeletePolicy"
 
         cr.run_completion_attempt(
-            self._payload(), now=60, describe=lambda n, r: "",
-            finalize=lambda p: _R(), reinvoke=lambda p: None,
+            self._payload(),
+            now=60,
+            describe=lambda n, r: "",
+            finalize=lambda p: _R(),
+            reinvoke=lambda p: None,
             sleeper=lambda s: None,
         )
         assert sent, "a failed cleanup told nobody"
@@ -236,10 +264,12 @@ class TestTheRunnerActsOnTheDecision:
 
         finals = []
         out = run_completion_attempt(
-            self._payload(), now=60,
+            self._payload(),
+            now=60,
             describe=lambda n, r: None,
             finalize=lambda p: finals.append(p),
-            reinvoke=lambda p: None, sleeper=lambda s: None,
+            reinvoke=lambda p: None,
+            sleeper=lambda s: None,
         )
         assert out["action"] == "retry"
         assert not finals

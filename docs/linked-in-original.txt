@@ -1,0 +1,11 @@
+ParallelClusterMaker is a toolkit for building and tearing down AWS ParallelCluster HPC environments without writing pcluster's YAML config by hand or babysitting the AWS console. It wraps cluster creation, IAM policy management, shared storage (FSx for Lustre, EFS, EBS, external NFS), Grafana monitoring, operational cost estimation, and teardown into a single Ansible-and-Python workflow, supporting Ubuntu, RHEL 9, and Amazon Linux 2023 on both x86_64 and ARM architectures.
+
+It covers burst capacity for CFD, genomics, and molecular dynamics workloads that outgrow an on-prem cluster; short-lived GPU fleets for ML training and inference benchmarking; academic and research groups that need reproducible, disposable HPC environments without a standing cluster to maintain; and any team that wants Slurm-based batch scheduling on AWS without stitching together the IAM, storage, and bootstrap plumbing themselves.
+
+The harder problem is dealing with failure modes that don't show up until a cluster is half-built and billing: bootstrap timeouts that don't account for FSx or EFS provisioning time, package managers that silently upgrade a kernel mid-boot, IAM policies scoped wide enough to let a compute job escalate privileges or delete another cluster's logs, and teardown paths that report success while orphaning resources or destroying the only copy of a failed build's diagnostic logs. Every failure observed on a real cluster build has been traced through the actual CloudWatch node logs and pinned to a test that fails if it returns.
+
+ParallelClusterMaker started out as a personal project to help my AWS Enterprise Support customers get a handle on running cloud-based HPC workloads, and it kept growing after Jeff Barr, AWS's Chief Evangelist, tweeted the earliest version on June 7, 2019. Seven years (!!!) and a full rewrite later, it's the same core idea — now with GPU-aware scheduling, integrated benchmarking, and the failure-hardening described above.
+
+AI-assisted contributions are accepted under a public policy: the tool or model must be disclosed, a human remains responsible for every line submitted, and fully autonomous agents may not open issues or pull requests. Commits that used AI assistance name it in the commit trailer, the same as any other co-author.
+
+Visit the GitHub repository: https://lnkd.in/ediyyjD

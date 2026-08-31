@@ -115,7 +115,7 @@ class TestReadClusterRecord:
 
     def test_cpu_instance_types_as_comma_string(self, tmp_path):
         content = _MINIMAL_VARS.replace(
-            "cpu_instance_types:\n  - \"c8g.2xlarge\"",
+            'cpu_instance_types:\n  - "c8g.2xlarge"',
             'cpu_instance_types: "c8g.2xlarge, c7g.2xlarge"',
         )
         root = _make_cluster_tree(tmp_path, "mycluster", content)
@@ -123,8 +123,9 @@ class TestReadClusterRecord:
         assert rec["cpu_instance_types"] == ["c8g.2xlarge", "c7g.2xlarge"]
 
     def test_deployment_date_single_digit_day(self, tmp_path):
-        content = _MINIMAL_VARS.replace('DEPLOYMENT_DATE: "20-July-2026"',
-                                        'DEPLOYMENT_DATE: "4-July-2026"')
+        content = _MINIMAL_VARS.replace(
+            'DEPLOYMENT_DATE: "20-July-2026"', 'DEPLOYMENT_DATE: "4-July-2026"'
+        )
         root = _make_cluster_tree(tmp_path, "mycluster", content)
         rec = _read_cluster_record("mycluster", str(root))
         assert rec["deployment_date"] == "4-July-2026"
@@ -162,6 +163,7 @@ class TestReadClusterRecord:
 class TestAgeStr:
     def _import(self):
         import importlib.util
+
         spec = importlib.util.spec_from_file_location(
             "list_pcluster",
             os.path.join(_repo_root, "list_pcluster.py"),
@@ -181,6 +183,7 @@ class TestAgeStr:
         # _age_str has day precision — a same-day cluster shows hours or minutes
         mod = self._import()
         from datetime import datetime, timezone
+
         today = datetime.now(timezone.utc).strftime("%-d-%B-%Y")
         result = mod._age_str(today)
         assert result != "?"
@@ -205,6 +208,7 @@ class TestAgeStr:
 
 def _import_list_pcluster():
     import importlib.util
+
     spec = importlib.util.spec_from_file_location(
         "list_pcluster", os.path.join(_repo_root, "list_pcluster.py")
     )

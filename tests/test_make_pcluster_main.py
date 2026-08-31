@@ -89,8 +89,7 @@ class _FakeEc2:
     def describe_instance_types(self, InstanceTypes=None, **kw):
         return {
             "InstanceTypes": [
-                {"InstanceType": t,
-                 "ProcessorInfo": {"SupportedArchitectures": [_arch_for(t)]}}
+                {"InstanceType": t, "ProcessorInfo": {"SupportedArchitectures": [_arch_for(t)]}}
                 for t in (InstanceTypes or [])
             ]
         }
@@ -101,8 +100,7 @@ class _FakeEc2:
     def describe_spot_price_history(self, InstanceTypes=None, **kw):
         return {
             "SpotPriceHistory": [
-                {"InstanceType": t, "SpotPrice": "0.05",
-                 "Timestamp": "2026-07-20T00:00:00Z"}
+                {"InstanceType": t, "SpotPrice": "0.05", "Timestamp": "2026-07-20T00:00:00Z"}
                 for t in (InstanceTypes or [])
             ]
         }
@@ -194,9 +192,7 @@ class _FakeS3Client:
     def head_bucket(self, Bucket=None, **kw):
         if self.bucket_exists:
             return {}
-        raise ClientError(
-            {"Error": {"Code": "404", "Message": "Not Found"}}, "HeadBucket"
-        )
+        raise ClientError({"Error": {"Code": "404", "Message": "Not Found"}}, "HeadBucket")
 
     def create_bucket(self, **kwargs):
         self.created_buckets.append(kwargs)
@@ -218,21 +214,35 @@ class _FakeS3Client:
         existing = self._objects.get(Key)
         if IfNoneMatch == "*" and existing is not None:
             raise ClientError(
-                {"Error": {"Code": "PreconditionFailed", "Message": ""},
-                 "ResponseMetadata": {"HTTPStatusCode": 412}}, "PutObject",
+                {
+                    "Error": {"Code": "PreconditionFailed", "Message": ""},
+                    "ResponseMetadata": {"HTTPStatusCode": 412},
+                },
+                "PutObject",
             )
         if IfMatch is not None and (existing is None or existing["etag"] != IfMatch):
             raise ClientError(
-                {"Error": {"Code": "PreconditionFailed", "Message": ""},
-                 "ResponseMetadata": {"HTTPStatusCode": 412}}, "PutObject",
+                {
+                    "Error": {"Code": "PreconditionFailed", "Message": ""},
+                    "ResponseMetadata": {"HTTPStatusCode": 412},
+                },
+                "PutObject",
             )
         etag = self._new_etag()
-        self._objects[Key] = {"body": Body, "etag": etag, "last_modified": DateTime.now(timezone.utc)}
+        self._objects[Key] = {
+            "body": Body,
+            "etag": etag,
+            "last_modified": DateTime.now(timezone.utc),
+        }
         return {"ETag": etag}
 
     def get_object(self, Bucket, Key):
         obj = self._objects[Key]
-        return {"ETag": obj["etag"], "LastModified": obj["last_modified"], "Body": io.BytesIO(obj["body"])}
+        return {
+            "ETag": obj["etag"],
+            "LastModified": obj["last_modified"],
+            "Body": io.BytesIO(obj["body"]),
+        }
 
     def delete_object(self, Bucket, Key):
         self._objects.pop(Key, None)
@@ -295,8 +305,12 @@ class _FakePcLibCreate(types.ModuleType):
 
     def create_cluster(self, cluster_name, cluster_configuration, region, rollback_on_failure):
         self.create_calls.append(
-            {"cluster_name": cluster_name, "cluster_configuration": cluster_configuration,
-             "region": region, "rollback_on_failure": rollback_on_failure}
+            {
+                "cluster_name": cluster_name,
+                "cluster_configuration": cluster_configuration,
+                "region": region,
+                "rollback_on_failure": rollback_on_failure,
+            }
         )
         if self.create_raises:
             raise self.create_raises
@@ -364,11 +378,16 @@ def staged(mp, tmp_path, monkeypatch):
     secretsmanager = _FakeSecretsManager()
     sns = _FakeSns()
     s3_client = _FakeS3Client()
-    clients = {"ec2": _FakeEc2(), "sts": _FakeSts(), "iam": iam,
-               "s3": s3_client, "pricing": object(),
-               "secretsmanager": secretsmanager, "sns": sns}
-    monkeypatch.setattr(mp.boto3, "client",
-                        lambda name, **kw: clients.get(name, object()))
+    clients = {
+        "ec2": _FakeEc2(),
+        "sts": _FakeSts(),
+        "iam": iam,
+        "s3": s3_client,
+        "pricing": object(),
+        "secretsmanager": secretsmanager,
+        "sns": sns,
+    }
+    monkeypatch.setattr(mp.boto3, "client", lambda name, **kw: clients.get(name, object()))
     monkeypatch.setattr(mp.boto3, "resource", lambda *a, **k: _FakeS3Resource())
 
     pc_lib = _FakePcLibCreate()
@@ -394,22 +413,32 @@ def staged(mp, tmp_path, monkeypatch):
     monkeypatch.setattr(mp.subprocess, "run", _run)
     # _wait_for_ssh_port's real socket.create_connection would otherwise try
     # an actual TCP connection to the fake head node IP.
-    monkeypatch.setattr(pcluster_core.socket, "create_connection",
-                        lambda addr, timeout=None: _FakeSocketCtx())
+    monkeypatch.setattr(
+        pcluster_core.socket, "create_connection", lambda addr, timeout=None: _FakeSocketCtx()
+    )
     # _wait_for_ssh_port unconditionally sleeps `delay` seconds before its
     # first probe; no test here needs real wall-clock timing.
     monkeypatch.setattr(pcluster_core.time, "sleep", lambda s: None)
     monkeypatch.setattr(
-        pcluster_core, "_validate_network",
-        lambda *a, **k: ("vpc-0abc", "subnet-0head", ["subnet-0cpu"],
-                         ["subnet-0gpu"], "10.0.0.0/16", "subnet-0login"),
+        pcluster_core,
+        "_validate_network",
+        lambda *a, **k: (
+            "vpc-0abc",
+            "subnet-0head",
+            ["subnet-0cpu"],
+            ["subnet-0gpu"],
+            "10.0.0.0/16",
+            "subnet-0login",
+        ),
     )
     monkeypatch.setattr(
-        pcluster_core, "_load_or_create_serial",
+        pcluster_core,
+        "_load_or_create_serial",
         lambda data_dir, name: (
-            os.path.join(str(tmp_path), "active_clusters", name,
-                         name + ".serial"),
-            SERIAL, DATESTAMP, True,
+            os.path.join(str(tmp_path), "active_clusters", name, name + ".serial"),
+            SERIAL,
+            DATESTAMP,
+            True,
         ),
     )
     monkeypatch.setattr(pcluster_core, "_setup_iam", lambda *a, **k: None)
@@ -418,19 +447,24 @@ def staged(mp, tmp_path, monkeypatch):
 
     deleted = []
     monkeypatch.setattr(
-        pcluster_core, "_delete_managed_policies",
+        pcluster_core,
+        "_delete_managed_policies",
         lambda *a, **k: deleted.append({"args": a, "kwargs": k}),
     )
-    monkeypatch.setattr(pcluster_core, "_cleanup_iam_on_failure",
-                        lambda *a, **k: deleted.append({"cleanup": True}))
+    monkeypatch.setattr(
+        pcluster_core, "_cleanup_iam_on_failure", lambda *a, **k: deleted.append({"cleanup": True})
+    )
 
     def _abort(timer, line_length, *args, **kwargs):
-        record.setdefault("abort", {
-            "timer": timer,
-            "args": args,
-            "kwargs": kwargs,
-            "cluster_created": bool(pc_lib.create_calls),
-        })
+        record.setdefault(
+            "abort",
+            {
+                "timer": timer,
+                "args": args,
+                "kwargs": kwargs,
+                "cluster_created": bool(pc_lib.create_calls),
+            },
+        )
 
     monkeypatch.setattr(pcluster_aux_data, "ctrlC_Abort", _abort)
 
@@ -438,9 +472,17 @@ def staged(mp, tmp_path, monkeypatch):
     serial_dir.mkdir(parents=True, exist_ok=True)
     (serial_dir / f"{CLUSTER}.serial").write_text(SERIAL + "\n")
 
-    return {"mod": mp, "record": record, "iam": iam, "deleted": deleted,
-            "clients": clients, "root": tmp_path, "src": src, "pc_lib": pc_lib,
-            "s3_client": s3_client}
+    return {
+        "mod": mp,
+        "record": record,
+        "iam": iam,
+        "deleted": deleted,
+        "clients": clients,
+        "root": tmp_path,
+        "src": src,
+        "pc_lib": pc_lib,
+        "s3_client": s3_client,
+    }
 
 
 class _Proc:
@@ -451,11 +493,12 @@ class _Proc:
 
 
 def _argv(*extra):
-    argv = ["make_pcluster.py", "-N", CLUSTER, "-O", OWNER, "-A", AZ,
-            "-E", OWNER + "@example.com"]
-    for flag, value in (("--headnode_instance_type", "c8g.2xlarge"),
-                        ("--compute_instance_type", "c8g.4xlarge"),
-                        ("--base_os", "ubuntu2404arm")):
+    argv = ["make_pcluster.py", "-N", CLUSTER, "-O", OWNER, "-A", AZ, "-E", OWNER + "@example.com"]
+    for flag, value in (
+        ("--headnode_instance_type", "c8g.2xlarge"),
+        ("--compute_instance_type", "c8g.4xlarge"),
+        ("--base_os", "ubuntu2404arm"),
+    ):
         if flag not in extra:
             argv += [flag, value]
     return argv + list(extra)
@@ -482,8 +525,9 @@ def _vars_file_written(staged):
 def _swap_ec2(staged, monkeypatch, ec2):
     """Replace only the ec2 client; every other client stays as staged."""
     clients = dict(staged["clients"], ec2=ec2)
-    monkeypatch.setattr(staged["mod"].boto3, "client",
-                        lambda name, **kw: clients.get(name, object()))
+    monkeypatch.setattr(
+        staged["mod"].boto3, "client", lambda name, **kw: clients.get(name, object())
+    )
 
 
 def _rendered_vars(staged):
@@ -526,22 +570,35 @@ class TestBuildPreflight:
         fires for a family absent from the hardcoded ARM_FAMILIES prefix list,
         which is exactly why describe_instance_types is consulted — so the fake
         reports c6i as arm64, standing in for a future Graviton family."""
+
         class _SurpriseArm(_FakeEc2):
             def describe_instance_types(self, InstanceTypes=None, **kw):
                 return {
                     "InstanceTypes": [
-                        {"InstanceType": t,
-                         "ProcessorInfo": {"SupportedArchitectures": [
-                             "arm64" if t.startswith("c6i") else _arch_for(t)]}}
+                        {
+                            "InstanceType": t,
+                            "ProcessorInfo": {
+                                "SupportedArchitectures": [
+                                    "arm64" if t.startswith("c6i") else _arch_for(t)
+                                ]
+                            },
+                        }
                         for t in (InstanceTypes or [])
                     ]
                 }
 
         _swap_ec2(staged, monkeypatch, _SurpriseArm())
         with pytest.raises(SystemExit):
-            _run_main(staged, monkeypatch, "--base_os", "ubuntu2404",
-                      "--headnode_instance_type", "c5.xlarge",
-                      "--compute_instance_type", "c6i.2xlarge")
+            _run_main(
+                staged,
+                monkeypatch,
+                "--base_os",
+                "ubuntu2404",
+                "--headnode_instance_type",
+                "c5.xlarge",
+                "--compute_instance_type",
+                "c6i.2xlarge",
+            )
         assert "Mixed architectures detected" in capsys.readouterr().out
         assert not _vars_file_written(staged)
 
@@ -549,9 +606,16 @@ class TestBuildPreflight:
         """An x86 base OS on Graviton hardware produces a cluster that cannot
         boot at all."""
         with pytest.raises(SystemExit):
-            _run_main(staged, monkeypatch, "--base_os", "ubuntu2404",
-                      "--headnode_instance_type", "c8g.2xlarge",
-                      "--compute_instance_type", "c8g.4xlarge")
+            _run_main(
+                staged,
+                monkeypatch,
+                "--base_os",
+                "ubuntu2404",
+                "--headnode_instance_type",
+                "c8g.2xlarge",
+                "--compute_instance_type",
+                "c8g.4xlarge",
+            )
         out = capsys.readouterr().out
         assert "is ARM/Graviton but base_os=ubuntu2404 is x86_64" in out
         assert not _vars_file_written(staged)
@@ -560,28 +624,41 @@ class TestBuildPreflight:
         """describe_instance_types is authoritative: a uniformly-arm64 fleet on
         an x86 base OS must be rejected even when no instance family matches the
         ARM_FAMILIES prefixes that base_os_instance_check knows about."""
+
         class _AllArm(_FakeEc2):
             def describe_instance_types(self, InstanceTypes=None, **kw):
                 return {
                     "InstanceTypes": [
-                        {"InstanceType": t,
-                         "ProcessorInfo": {"SupportedArchitectures": ["arm64"]}}
+                        {"InstanceType": t, "ProcessorInfo": {"SupportedArchitectures": ["arm64"]}}
                         for t in (InstanceTypes or [])
                     ]
                 }
 
         _swap_ec2(staged, monkeypatch, _AllArm())
         with pytest.raises(SystemExit):
-            _run_main(staged, monkeypatch, "--base_os", "ubuntu2404",
-                      "--headnode_instance_type", "c5.xlarge",
-                      "--compute_instance_type", "c5.2xlarge")
+            _run_main(
+                staged,
+                monkeypatch,
+                "--base_os",
+                "ubuntu2404",
+                "--headnode_instance_type",
+                "c5.xlarge",
+                "--compute_instance_type",
+                "c5.2xlarge",
+            )
         assert "base_os=ubuntu2404 is x86_64" in capsys.readouterr().out
         assert not _vars_file_written(staged)
 
     def test_loginnode_instance_type_must_exist(self, staged, monkeypatch, capsys):
         with pytest.raises(SystemExit):
-            _run_main(staged, monkeypatch, "--enable_loginnode", "true",
-                      "--loginnode_instance_type", "not-a-real-instance-type")
+            _run_main(
+                staged,
+                monkeypatch,
+                "--enable_loginnode",
+                "true",
+                "--loginnode_instance_type",
+                "not-a-real-instance-type",
+            )
         out = capsys.readouterr().out
         assert "not-a-real-instance-type" in out
         assert not _vars_file_written(staged)
@@ -590,11 +667,20 @@ class TestBuildPreflight:
         """A Graviton login node on an x86 cluster cannot boot; this must fail
         at preflight, not 15+ minutes into a real build."""
         with pytest.raises(SystemExit):
-            _run_main(staged, monkeypatch, "--base_os", "ubuntu2404",
-                      "--headnode_instance_type", "c5.xlarge",
-                      "--compute_instance_type", "c5.2xlarge",
-                      "--enable_loginnode", "true",
-                      "--loginnode_instance_type", "c8g.xlarge")
+            _run_main(
+                staged,
+                monkeypatch,
+                "--base_os",
+                "ubuntu2404",
+                "--headnode_instance_type",
+                "c5.xlarge",
+                "--compute_instance_type",
+                "c5.2xlarge",
+                "--enable_loginnode",
+                "true",
+                "--loginnode_instance_type",
+                "c8g.xlarge",
+            )
         out = capsys.readouterr().out
         assert "is ARM/Graviton but base_os=ubuntu2404 is x86_64" in out
         assert not _vars_file_written(staged)
@@ -607,18 +693,25 @@ class TestBuildPreflight:
         _default_loginnode_instance_type must resolve to c5.xlarge here
         instead, so preflight succeeds."""
         with pytest.raises(SystemExit) as exc:
-            _run_main(staged, monkeypatch, "--base_os", "ubuntu2404",
-                      "--headnode_instance_type", "c5.xlarge",
-                      "--compute_instance_type", "c5.2xlarge",
-                      "--enable_loginnode", "true")
+            _run_main(
+                staged,
+                monkeypatch,
+                "--base_os",
+                "ubuntu2404",
+                "--headnode_instance_type",
+                "c5.xlarge",
+                "--compute_instance_type",
+                "c5.2xlarge",
+                "--enable_loginnode",
+                "true",
+            )
         assert exc.value.code == 0
         v = _rendered_vars(staged)
         assert v["loginnode_instance_type"] == "c5.xlarge"
 
     def test_loginnode_count_cannot_be_negative(self, staged, monkeypatch, capsys):
         with pytest.raises(SystemExit):
-            _run_main(staged, monkeypatch, "--enable_loginnode", "true",
-                      "--loginnode_count", "-1")
+            _run_main(staged, monkeypatch, "--enable_loginnode", "true", "--loginnode_count", "-1")
         assert "loginnode_count must be >= 0" in capsys.readouterr().out
         assert not _vars_file_written(staged)
 
@@ -626,8 +719,7 @@ class TestBuildPreflight:
         """AWS's own LoginNodesPoolSchema.count floors at 0 — a defined-but-empty
         pool is valid, the same shape as a compute queue scaled to zero."""
         with pytest.raises(SystemExit) as exc:
-            _run_main(staged, monkeypatch, "--enable_loginnode", "true",
-                      "--loginnode_count", "0")
+            _run_main(staged, monkeypatch, "--enable_loginnode", "true", "--loginnode_count", "0")
         assert exc.value.code == 0
         v = _rendered_vars(staged)
         assert v["loginnode_count"] == 0
@@ -658,11 +750,13 @@ class TestExistingS3Bucket:
         interrupted after creating the bucket; that build must be resumable."""
         monkeypatch.setitem(staged["clients"], "s3", _FakeS3Client(bucket_exists=True))
         monkeypatch.setattr(
-            pcluster_core, "_load_or_create_serial",
+            pcluster_core,
+            "_load_or_create_serial",
             lambda data_dir, name: (
-                os.path.join(str(staged["root"]), "active_clusters", name,
-                             name + ".serial"),
-                SERIAL, DATESTAMP, False,
+                os.path.join(str(staged["root"]), "active_clusters", name, name + ".serial"),
+                SERIAL,
+                DATESTAMP,
+                False,
             ),
         )
         with pytest.raises(SystemExit) as exc:
@@ -769,7 +863,9 @@ class TestBuildFailureCleansUpIam:
         assert "kill_pcluster.py" in out
         assert f"-N {CLUSTER}" in out
 
-    def test_a_raised_launch_exception_is_treated_as_a_failed_launch(self, staged, monkeypatch, capsys):
+    def test_a_raised_launch_exception_is_treated_as_a_failed_launch(
+        self, staged, monkeypatch, capsys
+    ):
         """pc.create_cluster itself can raise (AccessDenied, ValidationError,
         ...) rather than merely fail to confirm -- that must reach the same
         cleanup path, not propagate as an unhandled traceback."""
@@ -830,8 +926,10 @@ class TestClusterLockDuringBuild:
         build already in progress, and a second invocation (this one) must
         fail fast rather than touch IAM at all."""
         pcluster_core.s3_acquire_cluster_lock(
-            staged["clients"]["s3"], locks_bucketname=self._locks_bucket(),
-            cluster_name=CLUSTER, command="make_pcluster.py -N buildme (other process)",
+            staged["clients"]["s3"],
+            locks_bucketname=self._locks_bucket(),
+            cluster_name=CLUSTER,
+            command="make_pcluster.py -N buildme (other process)",
         )
         with pytest.raises(SystemExit) as exc:
             _run_main(staged, monkeypatch)
@@ -853,9 +951,16 @@ class TestDerivedVariablesReachTheVarsFile:
 
     def test_non_arm_os_is_unchanged(self, staged, monkeypatch):
         with pytest.raises(SystemExit):
-            _run_main(staged, monkeypatch, "--base_os", "ubuntu2404",
-                      "--headnode_instance_type", "c5.xlarge",
-                      "--compute_instance_type", "c5.xlarge")
+            _run_main(
+                staged,
+                monkeypatch,
+                "--base_os",
+                "ubuntu2404",
+                "--headnode_instance_type",
+                "c5.xlarge",
+                "--compute_instance_type",
+                "c5.xlarge",
+            )
         v = _rendered_vars(staged)
         assert v["pcluster_os"] == v["base_os"] == "ubuntu2404"
 
@@ -872,9 +977,16 @@ class TestDerivedVariablesReachTheVarsFile:
         """GdrSupport is rejected at cluster-create time by any instance family
         that does not support it, so this must not be set unconditionally."""
         with pytest.raises(SystemExit):
-            _run_main(staged, monkeypatch, "--enable_efa", "true",
-                      "--headnode_instance_type", "c8g.2xlarge",
-                      "--compute_instance_type", "hpc7g.16xlarge")
+            _run_main(
+                staged,
+                monkeypatch,
+                "--enable_efa",
+                "true",
+                "--headnode_instance_type",
+                "c8g.2xlarge",
+                "--compute_instance_type",
+                "hpc7g.16xlarge",
+            )
         v = _rendered_vars(staged)
         assert v["enable_efa"] == "true"
         assert v["enable_efa_gdr"] == "false"
@@ -886,9 +998,16 @@ class TestDerivedVariablesReachTheVarsFile:
 
     def test_loginnode_instance_type_reaches_the_vars_file(self, staged, monkeypatch):
         with pytest.raises(SystemExit) as exc:
-            _run_main(staged, monkeypatch, "--enable_loginnode", "true",
-                      "--loginnode_instance_type", "c8g.2xlarge",
-                      "--loginnode_count", "2")
+            _run_main(
+                staged,
+                monkeypatch,
+                "--enable_loginnode",
+                "true",
+                "--loginnode_instance_type",
+                "c8g.2xlarge",
+                "--loginnode_count",
+                "2",
+            )
         assert exc.value.code == 0
         v = _rendered_vars(staged)
         assert v["enable_loginnode"] == "true"
@@ -926,8 +1045,7 @@ class _GpuAwareEc2(_FakeEc2):
     def describe_instance_types(self, InstanceTypes=None, **kw):
         out = []
         for t in InstanceTypes or []:
-            entry = {"InstanceType": t,
-                     "ProcessorInfo": {"SupportedArchitectures": [_arch_for(t)]}}
+            entry = {"InstanceType": t, "ProcessorInfo": {"SupportedArchitectures": [_arch_for(t)]}}
             if t in _GPU_COUNTS:
                 mfr, count = _GPU_COUNTS[t]
                 entry["GpuInfo"] = {"Gpus": [{"Manufacturer": mfr, "Count": count}]}
@@ -943,8 +1061,15 @@ class TestGpuRanksPerNodeReachTheVarsFile:
     def _run(self, staged, monkeypatch, *extra):
         _swap_ec2(staged, monkeypatch, _GpuAwareEc2())
         with pytest.raises(SystemExit):
-            _run_main(staged, monkeypatch, "--base_os", "ubuntu2404",
-                      "--headnode_instance_type", "c5.xlarge", *extra)
+            _run_main(
+                staged,
+                monkeypatch,
+                "--base_os",
+                "ubuntu2404",
+                "--headnode_instance_type",
+                "c5.xlarge",
+                *extra,
+            )
         return _rendered_vars(staged)
 
     def test_a_cpu_only_cluster_reports_zero(self, staged, monkeypatch):
@@ -953,28 +1078,52 @@ class TestGpuRanksPerNodeReachTheVarsFile:
         assert v["gpu_ranks_per_node"] == 0
 
     def test_a_single_gpu_instance_reports_one(self, staged, monkeypatch):
-        v = self._run(staged, monkeypatch, "--compute_instance_type", "c5.2xlarge",
-                      "--gpu_instance_type", "p3.2xlarge")
+        v = self._run(
+            staged,
+            monkeypatch,
+            "--compute_instance_type",
+            "c5.2xlarge",
+            "--gpu_instance_type",
+            "p3.2xlarge",
+        )
         assert v["gpu_ranks_per_node"] == 1
 
     def test_a_multi_gpu_instance_reports_every_device(self, staged, monkeypatch):
-        v = self._run(staged, monkeypatch, "--compute_instance_type", "",
-                      "--gpu_instance_type", "p4d.24xlarge")
+        v = self._run(
+            staged,
+            monkeypatch,
+            "--compute_instance_type",
+            "",
+            "--gpu_instance_type",
+            "p4d.24xlarge",
+        )
         assert v["enable_cpu_queue"] == "false"
         assert v["gpu_ranks_per_node"] == 8
 
     def test_a_mixed_gpu_queue_reports_the_minimum(self, staged, monkeypatch):
         """Only the smallest count is satisfiable by every node in the queue;
         the maximum would oversubscribe the g5 nodes 8:1."""
-        v = self._run(staged, monkeypatch, "--compute_instance_type", "",
-                      "--gpu_instance_type", "p4d.24xlarge,g5.xlarge")
+        v = self._run(
+            staged,
+            monkeypatch,
+            "--compute_instance_type",
+            "",
+            "--gpu_instance_type",
+            "p4d.24xlarge,g5.xlarge",
+        )
         assert v["gpu_ranks_per_node"] == 1
 
     def test_an_amd_gpu_queue_reports_zero(self, staged, monkeypatch):
         """g4ad is Radeon, invisible to CUDA and GRES. The job template falls
         back to a CPU-shaped rank count on this value."""
-        v = self._run(staged, monkeypatch, "--compute_instance_type", "",
-                      "--gpu_instance_type", "g4ad.4xlarge")
+        v = self._run(
+            staged,
+            monkeypatch,
+            "--compute_instance_type",
+            "",
+            "--gpu_instance_type",
+            "g4ad.4xlarge",
+        )
         assert v["enable_gpu_queue"] == "true"
         assert v["gpu_ranks_per_node"] == 0
 
@@ -982,6 +1131,7 @@ class TestGpuRanksPerNodeReachTheVarsFile:
         """The count is read out of the describe_instance_types response the
         architecture check already fetches. A second sweep would double the API
         calls on every build."""
+
         class _Counting(_GpuAwareEc2):
             calls = 0
 
@@ -992,10 +1142,18 @@ class TestGpuRanksPerNodeReachTheVarsFile:
         ec2 = _Counting()
         _swap_ec2(staged, monkeypatch, ec2)
         with pytest.raises(SystemExit):
-            _run_main(staged, monkeypatch, "--base_os", "ubuntu2404",
-                      "--headnode_instance_type", "c5.xlarge",
-                      "--compute_instance_type", "c5.2xlarge",
-                      "--gpu_instance_type", "p4d.24xlarge")
+            _run_main(
+                staged,
+                monkeypatch,
+                "--base_os",
+                "ubuntu2404",
+                "--headnode_instance_type",
+                "c5.xlarge",
+                "--compute_instance_type",
+                "c5.2xlarge",
+                "--gpu_instance_type",
+                "p4d.24xlarge",
+            )
         assert _Counting.calls == 1, (
             f"describe_instance_types called {_Counting.calls} times; the GPU count "
             "should come from the architecture check's existing response"
@@ -1014,8 +1172,7 @@ class TestIdleComputeNotice:
         out = capsys.readouterr().out
         assert "Idle compute:" in out
         assert "17 minutes" in out, (
-            "the summary must quote the cluster's real scaledown_idletime, not a "
-            "hardcoded default"
+            "the summary must quote the cluster's real scaledown_idletime, not a hardcoded default"
         )
         assert "scales its compute fleet to zero" in out
 
@@ -1052,58 +1209,41 @@ class TestStorageReachesTheBuildSummary:
             _run_main(staged, monkeypatch, *extra)
         return capsys.readouterr().out
 
-    def test_a_default_cluster_reports_the_shared_ebs_volume(
-        self, staged, monkeypatch, capsys
-    ):
+    def test_a_default_cluster_reports_the_shared_ebs_volume(self, staged, monkeypatch, capsys):
         out = self._out(staged, monkeypatch, capsys)
         assert "Shared storage:" in out
         assert "/shared" in out
         assert "EBS" in out
 
-    def test_an_fsx_cluster_reports_the_lustre_mount_point(
-        self, staged, monkeypatch, capsys
-    ):
+    def test_an_fsx_cluster_reports_the_lustre_mount_point(self, staged, monkeypatch, capsys):
         """The reported bug, end to end through main()."""
-        out = self._out(staged, monkeypatch, capsys, "--enable_fsx", "true",
-                        "--fsx_size", "2400")
-        assert "/fsx" in out, (
-            "the build summary of an FSx cluster still does not mention /fsx"
-        )
+        out = self._out(staged, monkeypatch, capsys, "--enable_fsx", "true", "--fsx_size", "2400")
+        assert "/fsx" in out, "the build summary of an FSx cluster still does not mention /fsx"
         assert "FSx for Lustre (2400 GB)" in out
 
-    def test_a_non_fsx_cluster_does_not_mention_lustre(
-        self, staged, monkeypatch, capsys
-    ):
+    def test_a_non_fsx_cluster_does_not_mention_lustre(self, staged, monkeypatch, capsys):
         out = self._out(staged, monkeypatch, capsys)
         assert "/fsx" not in out
         assert "Lustre" not in out
 
-    def test_an_efs_cluster_reports_the_efs_mount_point(
-        self, staged, monkeypatch, capsys
-    ):
+    def test_an_efs_cluster_reports_the_efs_mount_point(self, staged, monkeypatch, capsys):
         out = self._out(staged, monkeypatch, capsys, "--enable_efs", "true")
         assert "/efs" in out
 
-    def test_the_summary_reports_where_spack_installs(
-        self, staged, monkeypatch, capsys
-    ):
+    def test_the_summary_reports_where_spack_installs(self, staged, monkeypatch, capsys):
         """pkg_dir follows the storage precedence, so it moves when FSx is added.
         An operator told /shared/pkg on an FSx cluster looks in the wrong place."""
         out = self._out(staged, monkeypatch, capsys)
         assert "install under /shared/pkg" in out
 
-    def test_spack_moves_to_lustre_on_an_fsx_cluster(
-        self, staged, monkeypatch, capsys
-    ):
+    def test_spack_moves_to_lustre_on_an_fsx_cluster(self, staged, monkeypatch, capsys):
         """An operator told /shared/pkg on an FSx cluster looks in the wrong
         place. One main() call per test: the vars file it writes blocks a second
         build of the same cluster name."""
         out = self._out(staged, monkeypatch, capsys, "--enable_fsx", "true")
         assert "install under /fsx/pkg" in out
 
-    def test_the_summary_agrees_with_the_rendered_vars_file(
-        self, staged, monkeypatch, capsys
-    ):
+    def test_the_summary_agrees_with_the_rendered_vars_file(self, staged, monkeypatch, capsys):
         """The vars file is what postinstall and config.pcluster.j2 actually
         use. If the summary and the vars file disagree, one of them is lying
         to the operator."""
@@ -1193,16 +1333,14 @@ class TestTheCliRefusesAClusterWithNoQueue:
 
     def test_no_instance_types_aborts(self, staged, monkeypatch):
         with pytest.raises(SystemExit) as exc:
-            _run_main(staged, monkeypatch,
-                      "--compute_instance_type", "", "--gpu_instance_type", "")
+            _run_main(staged, monkeypatch, "--compute_instance_type", "", "--gpu_instance_type", "")
         assert "no compute queue" in str(exc.value.code)
 
     def test_it_aborts_before_any_aws_mutation(self, staged, monkeypatch):
         """The whole point: the vars file is written well after this check,
         and IAM/S3/keypair later still. Nothing may be spent."""
         with pytest.raises(SystemExit):
-            _run_main(staged, monkeypatch,
-                      "--compute_instance_type", "", "--gpu_instance_type", "")
+            _run_main(staged, monkeypatch, "--compute_instance_type", "", "--gpu_instance_type", "")
         assert not _vars_file_written(staged)
         assert not staged["deleted"], "no IAM mutation should have been attempted"
         assert staged["pc_lib"].create_calls == []
@@ -1216,11 +1354,18 @@ class TestTheCliRefusesAClusterWithNoQueue:
         """GPU-only is supported; refusing it is the obvious
         over-correction."""
         with pytest.raises(SystemExit) as exc:
-            _run_main(staged, monkeypatch,
-                      "--compute_instance_type", "",
-                      "--gpu_instance_type", "g5.xlarge",
-                      "--base_os", "ubuntu2404",
-                      "--headnode_instance_type", "c5.xlarge")
+            _run_main(
+                staged,
+                monkeypatch,
+                "--compute_instance_type",
+                "",
+                "--gpu_instance_type",
+                "g5.xlarge",
+                "--base_os",
+                "ubuntu2404",
+                "--headnode_instance_type",
+                "c5.xlarge",
+            )
         assert exc.value.code == 0
 
     def test_the_message_tells_the_operator_what_to_set(self):

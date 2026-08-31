@@ -90,12 +90,14 @@ from mcp_server.confirmation_token import mint, verify
 
 from mcp_server.tiers import TOOL_TIERS
 
-_LOCAL_ONLY = frozenset({
-    "rotate_cluster_key",
-    "manage_grafana_tunnel",
-    "apply_queue_config",
-    "run_readwrite_slurm_command",
-})
+_LOCAL_ONLY = frozenset(
+    {
+        "rotate_cluster_key",
+        "manage_grafana_tunnel",
+        "apply_queue_config",
+        "run_readwrite_slurm_command",
+    }
+)
 
 # Cluster parameters the remote transport will not set, at the operator's
 # direction. These are the only knobs that change *what code runs on the
@@ -205,9 +207,7 @@ def _record_store(region=None):
     if not region:
         return None, None
     try:
-        bucket = _derive_locks_bucket(
-            aws_account_id=_aws_account_id(), region=region
-        )
+        bucket = _derive_locks_bucket(aws_account_id=_aws_account_id(), region=region)
         return boto3.client("s3", region_name=region), bucket
     except Exception:
         return None, None
@@ -228,9 +228,7 @@ def _load_records():
         names += list_cluster_records(s3, locks_bucketname=bucket)
     records = []
     for name in sorted(set(names)):
-        rec = _read_cluster_record(
-            name, _repo_root(), s3=s3, locks_bucketname=bucket
-        )
+        rec = _read_cluster_record(name, _repo_root(), s3=s3, locks_bucketname=bucket)
         if rec is None:
             continue
         records.append(ClusterRecord.from_dict(rec))
@@ -270,8 +268,11 @@ def _cluster_lock(cluster_name, region, command):
     bucket = _derive_locks_bucket(aws_account_id=_aws_account_id(), region=region)
     try:
         _acquire_distributed_cluster_lock(
-            s3, locks_bucketname=bucket, region=region,
-            cluster_name=cluster_name, command=command,
+            s3,
+            locks_bucketname=bucket,
+            region=region,
+            cluster_name=cluster_name,
+            command=command,
         )
     except SystemExit as e:
         # _acquire_distributed_cluster_lock sys.exit()s on a held lock,
@@ -346,9 +347,7 @@ def _require_record(cluster_name):
     if rec is None:
         store_region = _store_region()
         s3, bucket = _record_store()
-        rec = _read_cluster_record(
-            cluster_name, _repo_root(), s3=s3, locks_bucketname=bucket
-        )
+        rec = _read_cluster_record(cluster_name, _repo_root(), s3=s3, locks_bucketname=bucket)
         # A record that came out of the store must name the store's own
         # region: the bucket is per account+region and _publish_cluster_record
         # derives it from the cluster's region, so the two agree by
@@ -360,8 +359,7 @@ def _require_record(cluster_name):
         # region that surfaces as an opaque AccessDenied instead. Scoped to
         # the store branch on purpose -- a *local* vars file may name any
         # region, which is the whole point of reading it first.
-        if rec is not None and rec.get("region") and store_region \
-                and rec["region"] != store_region:
+        if rec is not None and rec.get("region") and store_region and rec["region"] != store_region:
             raise PClusterMakerError(
                 f"Cluster {cluster_name!r} was found in the {store_region} "
                 f"record store but its record says it runs in "
@@ -410,16 +408,17 @@ def _start_async_build(params, region):
         from mcp_server.build import make_build_event
 
         ev = make_build_event(
-            params=dataclasses.asdict(params), region=region,
+            params=dataclasses.asdict(params),
+            region=region,
         )
         boto3.client("lambda", region_name=region).invoke(
             FunctionName=os.environ["AWS_LAMBDA_FUNCTION_NAME"],
-            InvocationType="Event", Payload=json.dumps(ev).encode(),
+            InvocationType="Event",
+            Payload=json.dumps(ev).encode(),
         )
         return True
     except Exception as e:  # noqa: BLE001 - see docstring
-        print(f"could not start the background build: "
-              f"{type(e).__name__}: {e}", flush=True)
+        print(f"could not start the background build: {type(e).__name__}: {e}", flush=True)
         return False
 
 
@@ -447,17 +446,19 @@ def _start_teardown_completion(rec, delete_s3_bucketname):
         from mcp_server.completion import make_completion_event
 
         ev = make_completion_event(
-            cluster_name=rec.cluster_name, cluster_owner=rec.cluster_owner,
-            region=rec.region, delete_s3_bucketname=delete_s3_bucketname,
+            cluster_name=rec.cluster_name,
+            cluster_owner=rec.cluster_owner,
+            region=rec.region,
+            delete_s3_bucketname=delete_s3_bucketname,
         )
         boto3.client("lambda", region_name=rec.region).invoke(
             FunctionName=os.environ["AWS_LAMBDA_FUNCTION_NAME"],
-            InvocationType="Event", Payload=json.dumps(ev).encode(),
+            InvocationType="Event",
+            Payload=json.dumps(ev).encode(),
         )
         return True
     except Exception as e:  # noqa: BLE001 - see docstring
-        print(f"could not start automatic teardown completion: "
-              f"{type(e).__name__}: {e}")
+        print(f"could not start automatic teardown completion: {type(e).__name__}: {e}")
         return False
 
 
@@ -487,16 +488,20 @@ def register_tools(mcp, *, remote, tier=None):
         return fn
 
     @tool
-    def list_clusters(region: str | None = None, owner: str | None = None,
-                      live: bool = False) -> list[dict]:
+    def list_clusters(
+        region: str | None = None, owner: str | None = None, live: bool = False
+    ) -> list[dict]:
         """List the ParallelCluster stacks this checkout tracks.
 
         live=True additionally queries CloudFormation for each cluster's
         current status, which is slower but authoritative.
         """
         entries = core_list_clusters(
-            cluster_records=_load_records(), pcluster_bin=_pcluster_bin(),
-            region_filter=region, owner_filter=owner, live=live,
+            cluster_records=_load_records(),
+            pcluster_bin=_pcluster_bin(),
+            region_filter=region,
+            owner_filter=owner,
+            live=live,
         )
         return [dataclasses.asdict(e) for e in entries]
 
@@ -517,13 +522,10 @@ def register_tools(mcp, *, remote, tier=None):
         unreachable store cannot tell you a build succeeded.
         """
         s3, bucket = _record_store()
-        return core_get_build_status(
-            cluster_name, s3=s3, locks_bucketname=bucket
-        )
+        return core_get_build_status(cluster_name, s3=s3, locks_bucketname=bucket)
 
     @tool
-    def run_readonly_slurm_command(cluster_name: str, command: str,
-                                   switches: str = "") -> dict:
+    def run_readonly_slurm_command(cluster_name: str, command: str, switches: str = "") -> dict:
         """Run sinfo, squeue or scontrol show on a cluster and return the output.
 
         Targets the login node when the cluster has one and the head node
@@ -544,21 +546,31 @@ def register_tools(mcp, *, remote, tier=None):
             # constrained SSM document instead. What bounds the command is
             # the document's own allowedValues/allowedPattern, enforced by
             # SSM before dispatch -- not this process.
-            return _plain(core_run_slurm_command_via_ssm(
-                cluster_record=rec, cluster_name=cluster_name,
-                command=command, switches=switches,
-            ))
-        return _plain(core_run_slurm_command(
-            cluster_data_root=os.path.join(_repo_root(), "active_clusters"),
-            cluster_name=cluster_name, cluster_record=rec,
-            repo_root=_repo_root(), command=command, switches=switches,
-            script=None, allow_writes=False,
-        ))
+            return _plain(
+                core_run_slurm_command_via_ssm(
+                    cluster_record=rec,
+                    cluster_name=cluster_name,
+                    command=command,
+                    switches=switches,
+                )
+            )
+        return _plain(
+            core_run_slurm_command(
+                cluster_data_root=os.path.join(_repo_root(), "active_clusters"),
+                cluster_name=cluster_name,
+                cluster_record=rec,
+                repo_root=_repo_root(),
+                command=command,
+                switches=switches,
+                script=None,
+                allow_writes=False,
+            )
+        )
 
     @tool
-    def run_readwrite_slurm_command(cluster_name: str, command: str,
-                                    switches: str = "",
-                                    script: str = "") -> dict:
+    def run_readwrite_slurm_command(
+        cluster_name: str, command: str, switches: str = "", script: str = ""
+    ) -> dict:
         """Run sbatch, scancel or scontrol on a cluster.
 
         **`script` is arbitrary code.** For `sbatch` it is required and is
@@ -575,12 +587,18 @@ def register_tools(mcp, *, remote, tier=None):
         true the submission state is unknown -- check with squeue rather
         than retrying.
         """
-        return _plain(core_run_slurm_command(
-            cluster_data_root=os.path.join(_repo_root(), "active_clusters"),
-            cluster_name=cluster_name, cluster_record=_require_record(cluster_name),
-            repo_root=_repo_root(), command=command, switches=switches,
-            script=script or None, allow_writes=True,
-        ))
+        return _plain(
+            core_run_slurm_command(
+                cluster_data_root=os.path.join(_repo_root(), "active_clusters"),
+                cluster_name=cluster_name,
+                cluster_record=_require_record(cluster_name),
+                repo_root=_repo_root(),
+                command=command,
+                switches=switches,
+                script=script or None,
+                allow_writes=True,
+            )
+        )
 
     @tool
     def check_cluster_health(cluster_name: str) -> dict:
@@ -601,7 +619,8 @@ def register_tools(mcp, *, remote, tier=None):
         """
         result = core_check_cluster_health(
             cluster_record=_require_record(cluster_name),
-            pcluster_bin=_pcluster_bin(), ssh_available=not remote,
+            pcluster_bin=_pcluster_bin(),
+            ssh_available=not remote,
         )
         return _plain(result)
 
@@ -609,7 +628,9 @@ def register_tools(mcp, *, remote, tier=None):
     def get_cost_report(owner: str | None = None, days: int = 30) -> dict:
         """Cost Explorer spend for tracked clusters over the last N days."""
         result = core_get_cost_report(
-            cluster_records=_load_records(), owner_filter=owner, days=days,
+            cluster_records=_load_records(),
+            owner_filter=owner,
+            days=days,
         )
         return _plain(result)
 
@@ -627,14 +648,17 @@ def register_tools(mcp, *, remote, tier=None):
         rec = _require_record(cluster_name)
         _s3, _bucket = _record_store(rec.region)
         result = core_list_queues(
-            cluster_name=cluster_name, repo_root=_repo_root(),
-            s3=_s3, locks_bucketname=_bucket,
+            cluster_name=cluster_name,
+            repo_root=_repo_root(),
+            s3=_s3,
+            locks_bucketname=_bucket,
         )
         return _plain(result)
 
     @tool
-    def diagnose_cluster(cluster_name: str, hours: int = 24,
-                         include_cloudwatch: bool = True) -> dict:
+    def diagnose_cluster(
+        cluster_name: str, hours: int = 24, include_cloudwatch: bool = True
+    ) -> dict:
         """Collect diagnostics for a cluster: stack status, node states,
         recent job history, and CloudWatch logs.
 
@@ -646,14 +670,17 @@ def register_tools(mcp, *, remote, tier=None):
         """
         result = core_diagnose_cluster(
             cluster_record=_require_record(cluster_name),
-            pcluster_bin=_pcluster_bin(), hours=hours,
-            include_cloudwatch=include_cloudwatch, ssh_available=not remote,
+            pcluster_bin=_pcluster_bin(),
+            hours=hours,
+            include_cloudwatch=include_cloudwatch,
+            ssh_available=not remote,
         )
         return _plain(result)
 
     @tool
-    def resolve_access_info(cluster_name: str, login_node: bool = False,
-                            head_node: bool = False) -> dict:
+    def resolve_access_info(
+        cluster_name: str, login_node: bool = False, head_node: bool = False
+    ) -> dict:
         """Report which node an operator would connect to, and how.
 
         Deliberately does not open a session -- that is access_cluster,
@@ -667,16 +694,24 @@ def register_tools(mcp, *, remote, tier=None):
         # only the store knows about looked untracked.
         rec = dataclasses.asdict(_require_record(cluster_name))
         node_type = core_resolve_access_node_type(
-            rec, cluster_name,
-            login_node_requested=login_node, head_node_requested=head_node,
+            rec,
+            cluster_name,
+            login_node_requested=login_node,
+            head_node_requested=head_node,
         )
         return {"cluster_name": cluster_name, "node_type": _plain(node_type)}
 
     @tool
-    def add_queue(cluster_name: str, queue_type: str, ec2_instance_type: str,
-                  queue_name: str | None = None, capacity_type: str = "spot",
-                  initial_size: int = 2, max_size: int = 8,
-                  maintain_initial_size: bool = False) -> dict:
+    def add_queue(
+        cluster_name: str,
+        queue_type: str,
+        ec2_instance_type: str,
+        queue_name: str | None = None,
+        capacity_type: str = "spot",
+        initial_size: int = 2,
+        max_size: int = 8,
+        maintain_initial_size: bool = False,
+    ) -> dict:
         """Add a Slurm queue to a cluster's config.
 
         Edits local/S3 config only -- it does not apply the change to the
@@ -685,14 +720,21 @@ def register_tools(mcp, *, remote, tier=None):
         """
         rec = _require_record(cluster_name)
         _s3, _bucket = _record_store(rec.region)
-        return _plain(core_add_queue(
-            cluster_name=cluster_name, repo_root=_repo_root(),
-            s3=_s3, locks_bucketname=_bucket,
-            queue_type=queue_type, ec2_instance_type=ec2_instance_type,
-            queue_name=queue_name, capacity_type=capacity_type,
-            initial_size=initial_size, max_size=max_size,
-            maintain_initial_size=maintain_initial_size,
-        ))
+        return _plain(
+            core_add_queue(
+                cluster_name=cluster_name,
+                repo_root=_repo_root(),
+                s3=_s3,
+                locks_bucketname=_bucket,
+                queue_type=queue_type,
+                ec2_instance_type=ec2_instance_type,
+                queue_name=queue_name,
+                capacity_type=capacity_type,
+                initial_size=initial_size,
+                max_size=max_size,
+                maintain_initial_size=maintain_initial_size,
+            )
+        )
 
     @tool
     def remove_queue(cluster_name: str, queue_name: str) -> dict:
@@ -700,10 +742,15 @@ def register_tools(mcp, *, remote, tier=None):
         add_queue -- apply_queue_config is what reaches the cluster."""
         rec = _require_record(cluster_name)
         _s3, _bucket = _record_store(rec.region)
-        return _plain(core_remove_queue(
-            cluster_name=cluster_name, repo_root=_repo_root(),
-            s3=_s3, locks_bucketname=_bucket, queue_name=queue_name,
-        ))
+        return _plain(
+            core_remove_queue(
+                cluster_name=cluster_name,
+                repo_root=_repo_root(),
+                s3=_s3,
+                locks_bucketname=_bucket,
+                queue_name=queue_name,
+            )
+        )
 
     @tool
     def stop_fleet(cluster_name: str, wait: bool = False) -> dict:
@@ -715,24 +762,31 @@ def register_tools(mcp, *, remote, tier=None):
         """
         rec = _require_record(cluster_name)
         with _cluster_lock(cluster_name, rec.region, "mcp stop_fleet"):
-            return _plain(core_stop_fleet(
-                cluster_record=rec, region=rec.region,
-                pcluster_bin=_pcluster_bin(), wait=wait,
-            ))
+            return _plain(
+                core_stop_fleet(
+                    cluster_record=rec,
+                    region=rec.region,
+                    pcluster_bin=_pcluster_bin(),
+                    wait=wait,
+                )
+            )
 
     @tool
     def start_fleet(cluster_name: str, wait: bool = False) -> dict:
         """Start a cluster's compute fleet. See stop_fleet on wait."""
         rec = _require_record(cluster_name)
         with _cluster_lock(cluster_name, rec.region, "mcp start_fleet"):
-            return _plain(core_start_fleet(
-                cluster_record=rec, region=rec.region,
-                pcluster_bin=_pcluster_bin(), wait=wait,
-            ))
+            return _plain(
+                core_start_fleet(
+                    cluster_record=rec,
+                    region=rec.region,
+                    pcluster_bin=_pcluster_bin(),
+                    wait=wait,
+                )
+            )
 
     @tool
-    def apply_cluster_update(cluster_name: str,
-                             config_path: str | None = None) -> dict:
+    def apply_cluster_update(cluster_name: str, config_path: str | None = None) -> dict:
         """Apply an updated configuration to a cluster whose fleet is
         already stopped. Phase 2 of three; see apply_queue_config.
 
@@ -753,11 +807,17 @@ def register_tools(mcp, *, remote, tier=None):
         rec = _require_record(cluster_name)
         s3, bucket = _record_store(rec.region)
         with _cluster_lock(cluster_name, rec.region, "mcp apply_cluster_update"):
-            return _plain(core_apply_cluster_update(
-                cluster_name=cluster_name, config_path=config_path,
-                region=rec.region, pcluster_bin=_pcluster_bin(), wait=False,
-                s3=s3, locks_bucketname=bucket,
-            ))
+            return _plain(
+                core_apply_cluster_update(
+                    cluster_name=cluster_name,
+                    config_path=config_path,
+                    region=rec.region,
+                    pcluster_bin=_pcluster_bin(),
+                    wait=False,
+                    s3=s3,
+                    locks_bucketname=bucket,
+                )
+            )
 
     @tool
     def apply_queue_config(cluster_name: str, config_path: str) -> dict:
@@ -775,10 +835,14 @@ def register_tools(mcp, *, remote, tier=None):
         """
         rec = _require_record(cluster_name)
         with _cluster_lock(cluster_name, rec.region, "mcp apply_queue_config"):
-            return _plain(core_apply_queue_config(
-                cluster_record=rec, config_path=config_path,
-                region=rec.region, pcluster_bin=_pcluster_bin(),
-            ))
+            return _plain(
+                core_apply_queue_config(
+                    cluster_record=rec,
+                    config_path=config_path,
+                    region=rec.region,
+                    pcluster_bin=_pcluster_bin(),
+                )
+            )
 
     def _reject_denied(overrides):
         """Refuse the CLI-only parameters with an actionable message.
@@ -800,9 +864,7 @@ def register_tools(mcp, *, remote, tier=None):
         denied = sorted(set(overrides or {}) & set(_REMOTE_DENIED_PARAMS))
         if not denied:
             return
-        lines = [
-            f"  {k} -- {_REMOTE_DENIED_PARAMS[k]}" for k in denied
-        ]
+        lines = [f"  {k} -- {_REMOTE_DENIED_PARAMS[k]}" for k in denied]
         raise PClusterMakerError(
             "These cluster parameters cannot be set over the remote MCP "
             "transport:\n" + "\n".join(lines) + "\n\n"
@@ -816,8 +878,11 @@ def register_tools(mcp, *, remote, tier=None):
 
     @tool
     def preview_cluster_config(
-        cluster_name: str, cluster_owner: str, cluster_owner_email: str,
-        az: str, headnode_instance_type: str,
+        cluster_name: str,
+        cluster_owner: str,
+        cluster_owner_email: str,
+        az: str,
+        headnode_instance_type: str,
         overrides: dict | None = None,
     ) -> dict:
         """Show the resolved configuration a cluster would be built with,
@@ -839,8 +904,10 @@ def register_tools(mcp, *, remote, tier=None):
         """
         _reject_denied(overrides)
         params = build_make_cluster_params(
-            cluster_name=cluster_name, cluster_owner=cluster_owner,
-            cluster_owner_email=cluster_owner_email, az=az,
+            cluster_name=cluster_name,
+            cluster_owner=cluster_owner,
+            cluster_owner_email=cluster_owner_email,
+            az=az,
             headnode_instance_type=headnode_instance_type,
             overrides=overrides,
         )
@@ -853,13 +920,16 @@ def register_tools(mcp, *, remote, tier=None):
         # non_default_settings, not here.
         _accepted = set(resolved) | set(MAKE_CLUSTER_DEFAULTS)
         _from_file = {
-            k: v for k, v in sorted(_file_defaults.items())
+            k: v
+            for k, v in sorted(_file_defaults.items())
             if k in _accepted and k not in (overrides or {})
         }
         region = resolve_region_from_az(az)
         token_params = {
-            "cluster_name": cluster_name, "cluster_owner": cluster_owner,
-            "cluster_owner_email": cluster_owner_email, "az": az,
+            "cluster_name": cluster_name,
+            "cluster_owner": cluster_owner,
+            "cluster_owner_email": cluster_owner_email,
+            "az": az,
             "headnode_instance_type": headnode_instance_type,
             "overrides": dict(sorted((overrides or {}).items())),
             "defaults": _defaults_fingerprint(cluster_name),
@@ -867,14 +937,9 @@ def register_tools(mcp, *, remote, tier=None):
         return {
             "cluster_name": cluster_name,
             "region": region,
-            "defaults_file": (
-                os.path.basename(_defaults_path)
-                if _defaults_path else None
-            ),
+            "defaults_file": (os.path.basename(_defaults_path) if _defaults_path else None),
             "resolved_config": resolved,
-            "non_default_settings": {
-                k: v for k, v in sorted((overrides or {}).items())
-            },
+            "non_default_settings": {k: v for k, v in sorted((overrides or {}).items())},
             "defaults_file_settings": _from_file,
             # Only what is genuinely still a hardcoded default. Filtering on
             # overrides alone reported base_os as ubuntu2404 while the file
@@ -882,8 +947,13 @@ def register_tools(mcp, *, remote, tier=None):
             # operator approving the build.
             "notable_defaults": {
                 k: MAKE_CLUSTER_DEFAULTS[k]
-                for k in ("ebs_encryption", "efs_encryption", "cluster_type",
-                          "base_os", "scaledown_idletime")
+                for k in (
+                    "ebs_encryption",
+                    "efs_encryption",
+                    "cluster_type",
+                    "base_os",
+                    "scaledown_idletime",
+                )
                 if k in MAKE_CLUSTER_DEFAULTS
                 and k not in (overrides or {})
                 and k not in _file_defaults
@@ -898,8 +968,12 @@ def register_tools(mcp, *, remote, tier=None):
 
     @tool
     def create_cluster(
-        cluster_name: str, cluster_owner: str, cluster_owner_email: str,
-        az: str, headnode_instance_type: str, confirmation_token: str,
+        cluster_name: str,
+        cluster_owner: str,
+        cluster_owner_email: str,
+        az: str,
+        headnode_instance_type: str,
+        confirmation_token: str,
         overrides: dict | None = None,
     ) -> dict:
         """Build a cluster. Requires a token from preview_cluster_config.
@@ -909,8 +983,10 @@ def register_tools(mcp, *, remote, tier=None):
         or check_cluster_health for progress.
         """
         token_params = {
-            "cluster_name": cluster_name, "cluster_owner": cluster_owner,
-            "cluster_owner_email": cluster_owner_email, "az": az,
+            "cluster_name": cluster_name,
+            "cluster_owner": cluster_owner,
+            "cluster_owner_email": cluster_owner_email,
+            "az": az,
             "headnode_instance_type": headnode_instance_type,
             "overrides": dict(sorted((overrides or {}).items())),
             "defaults": _defaults_fingerprint(cluster_name),
@@ -921,8 +997,10 @@ def register_tools(mcp, *, remote, tier=None):
         verify(confirmation_token, "create_cluster", token_params)
         _reject_denied(overrides)
         params = build_make_cluster_params(
-            cluster_name=cluster_name, cluster_owner=cluster_owner,
-            cluster_owner_email=cluster_owner_email, az=az,
+            cluster_name=cluster_name,
+            cluster_owner=cluster_owner,
+            cluster_owner_email=cluster_owner_email,
+            az=az,
             headnode_instance_type=headnode_instance_type,
             overrides=overrides,
         )
@@ -957,11 +1035,16 @@ def register_tools(mcp, *, remote, tier=None):
         # net one of those paths takes the whole server down instead of
         # failing one call. Deliberately narrow: it catches only SystemExit.
         try:
-            return _plain(core_create_cluster(
-                params=params, repo_root=_repo_root(), region=region,
-                cluster_build_command=f"mcp create_cluster {cluster_name}",
-                ansible_version="", wait=False,
-            ))
+            return _plain(
+                core_create_cluster(
+                    params=params,
+                    repo_root=_repo_root(),
+                    region=region,
+                    cluster_build_command=f"mcp create_cluster {cluster_name}",
+                    ansible_version="",
+                    wait=False,
+                )
+            )
         except SystemExit as e:
             raise PClusterMakerError(
                 f"cluster creation for {cluster_name!r} failed during validation "
@@ -969,8 +1052,7 @@ def register_tools(mcp, *, remote, tier=None):
             ) from e
 
     @tool
-    def preview_cluster_delete(cluster_name: str,
-                               delete_s3_bucketname: bool = True) -> dict:
+    def preview_cluster_delete(cluster_name: str, delete_s3_bucketname: bool = True) -> dict:
         """Show what deleting a cluster would destroy, and mint the
         confirmation token delete_cluster requires.
 
@@ -993,8 +1075,10 @@ def register_tools(mcp, *, remote, tier=None):
                 f"IAM role and managed policies for serial {rec.serial}",
                 f"EC2 keypair {rec.ec2_keypair} and its local .pem",
                 f"Secrets Manager secret for {cluster_name}",
-            ] + (
-                [f"S3 bucket {rec.s3_bucketname}"] if delete_s3_bucketname
+            ]
+            + (
+                [f"S3 bucket {rec.s3_bucketname}"]
+                if delete_s3_bucketname
                 else [f"S3 bucket {rec.s3_bucketname} will be RETAINED"]
             ),
             "will_retain": [
@@ -1016,8 +1100,9 @@ def register_tools(mcp, *, remote, tier=None):
         }
 
     @tool
-    def delete_cluster(cluster_name: str, confirmation_token: str,
-                       delete_s3_bucketname: bool = True) -> dict:
+    def delete_cluster(
+        cluster_name: str, confirmation_token: str, delete_s3_bucketname: bool = True
+    ) -> dict:
         """Tear down a cluster. Requires a token from preview_cluster_delete.
 
         The token is verified against these exact arguments, so what runs is
@@ -1056,12 +1141,17 @@ def register_tools(mcp, *, remote, tier=None):
         }
         verify(confirmation_token, "delete_cluster", params)
         rec = _require_record(cluster_name)
-        out = _plain(core_delete_cluster(
-            cluster_name=cluster_name, cluster_owner=rec.cluster_owner,
-            region=rec.region, repo_root=_repo_root(),
-            delete_s3_bucketname="true" if delete_s3_bucketname else "false",
-            debug_mode=False, wait=False,
-        ))
+        out = _plain(
+            core_delete_cluster(
+                cluster_name=cluster_name,
+                cluster_owner=rec.cluster_owner,
+                region=rec.region,
+                repo_root=_repo_root(),
+                delete_s3_bucketname="true" if delete_s3_bucketname else "false",
+                debug_mode=False,
+                wait=False,
+            )
+        )
         # Finish the teardown without the caller having to come back.
         #
         # An agent told to poll for 15-20 minutes correctly says "ping me"
@@ -1125,15 +1215,19 @@ def register_tools(mcp, *, remote, tier=None):
         """
         rec = _require_record(cluster_name)
         s3, bucket = _record_store(rec.region)
-        return _plain(core_finalize_cluster_build(
-            cluster_name=cluster_name, cluster_owner=rec.cluster_owner,
-            region=rec.region, repo_root=_repo_root(),
-            s3=s3, locks_bucketname=bucket,
-        ))
+        return _plain(
+            core_finalize_cluster_build(
+                cluster_name=cluster_name,
+                cluster_owner=rec.cluster_owner,
+                region=rec.region,
+                repo_root=_repo_root(),
+                s3=s3,
+                locks_bucketname=bucket,
+            )
+        )
 
     @tool
-    def finalize_cluster_teardown(cluster_name: str,
-                                  delete_s3_bucketname: bool = True) -> dict:
+    def finalize_cluster_teardown(cluster_name: str, delete_s3_bucketname: bool = True) -> dict:
         """Finish a teardown delete_cluster started. Takes no token.
 
         delete_cluster returns as soon as CloudFormation accepts the delete,
@@ -1169,12 +1263,17 @@ def register_tools(mcp, *, remote, tier=None):
         poll list_clusters until the cluster disappears, then call this.
         """
         rec = _require_record(cluster_name)
-        return _plain(core_delete_cluster(
-            cluster_name=cluster_name, cluster_owner=rec.cluster_owner,
-            region=rec.region, repo_root=_repo_root(),
-            delete_s3_bucketname="true" if delete_s3_bucketname else "false",
-            debug_mode=False, finalize_only=True,
-        ))
+        return _plain(
+            core_delete_cluster(
+                cluster_name=cluster_name,
+                cluster_owner=rec.cluster_owner,
+                region=rec.region,
+                repo_root=_repo_root(),
+                delete_s3_bucketname="true" if delete_s3_bucketname else "false",
+                debug_mode=False,
+                finalize_only=True,
+            )
+        )
 
     @tool
     def rotate_cluster_key(cluster_name: str, dry_run: bool = False) -> dict:
@@ -1186,13 +1285,14 @@ def register_tools(mcp, *, remote, tier=None):
         """
         rec = _require_record(cluster_name)
         result = core_rotate_cluster_key(
-            cluster_record=rec, region=rec.region, dry_run=dry_run,
+            cluster_record=rec,
+            region=rec.region,
+            dry_run=dry_run,
         )
         return _plain(result)
 
     @tool
-    def manage_grafana_tunnel(cluster_name: str, port: int = 8443,
-                              stop: bool = False) -> dict:
+    def manage_grafana_tunnel(cluster_name: str, port: int = 8443, stop: bool = False) -> dict:
         """Open or close the Grafana SSH tunnel. LOCAL TRANSPORT ONLY.
 
         An SSH local port forward is only meaningful on the caller's own
@@ -1200,11 +1300,16 @@ def register_tools(mcp, *, remote, tier=None):
         """
         rec = _require_record(cluster_name)
         script = os.path.join(
-            _repo_root(), "active_clusters", cluster_name,
+            _repo_root(),
+            "active_clusters",
+            cluster_name,
             f"grafana_tunnel.{cluster_name}.sh",
         )
         result = core_manage_grafana_tunnel(
-            cluster_record=rec, tunnel_script_path=script, port=port, stop=stop,
+            cluster_record=rec,
+            tunnel_script_path=script,
+            port=port,
+            stop=stop,
         )
         return _plain(result)
 

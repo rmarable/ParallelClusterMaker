@@ -163,18 +163,16 @@ class TestNoRemoteToolCanOutliveItsLambda:
     def test_the_wait_scan_can_see_a_blocking_wrapper(self):
         """Vacuity guard for the scan above: it must actually reject
         wait=True, not merely find none."""
-        src = (
-            "def create_cluster():\n"
-            "    return core_create_cluster(wait=True)\n"
-        )
+        src = "def create_cluster():\n    return core_create_cluster(wait=True)\n"
         tree = ast.parse(src)
         found = [
-            n.name for n in ast.walk(tree)
+            n.name
+            for n in ast.walk(tree)
             if isinstance(n, ast.FunctionDef) and n.name in TOOL_TIERS
-            for c in ast.walk(n) if isinstance(c, ast.Call)
+            for c in ast.walk(n)
+            if isinstance(c, ast.Call)
             for kw in c.keywords
-            if kw.arg == "wait" and isinstance(kw.value, ast.Constant)
-            and kw.value.value is True
+            if kw.arg == "wait" and isinstance(kw.value, ast.Constant) and kw.value.value is True
         ]
         assert found == ["create_cluster"]
 
@@ -182,7 +180,8 @@ class TestNoRemoteToolCanOutliveItsLambda:
 class TestFunctionSpec:
     def test_a_zip_tier_gets_a_runtime_and_handler(self):
         spec = function_spec(
-            "read-only", aws_account_id=ACCOUNT,
+            "read-only",
+            aws_account_id=ACCOUNT,
             code={"S3Bucket": "b", "S3Key": "k"},
         )
         assert spec["PackageType"] == "Zip"
@@ -193,7 +192,8 @@ class TestFunctionSpec:
         """Lambda rejects Runtime/Handler on a container image -- they come
         from the Dockerfile."""
         spec = function_spec(
-            "stack-mutation-node", aws_account_id=ACCOUNT,
+            "stack-mutation-node",
+            aws_account_id=ACCOUNT,
             code={"ImageUri": "acct.dkr.ecr.us-east-2.amazonaws.com/x:1"},
         )
         assert spec["PackageType"] == "Image"
@@ -201,15 +201,15 @@ class TestFunctionSpec:
 
     def test_a_zip_tier_refuses_an_image_uri(self):
         with pytest.raises(MCPDeploymentError, match="ImageUri"):
-            function_spec("router", aws_account_id=ACCOUNT,
-                          code={"ImageUri": "x:1"})
+            function_spec("router", aws_account_id=ACCOUNT, code={"ImageUri": "x:1"})
 
     def test_the_image_tier_refuses_a_zip_reference(self):
         """The mistake that would otherwise deploy a container function
         pointing at an S3 zip and fail at the first invocation."""
         with pytest.raises(MCPDeploymentError, match="ImageUri"):
-            function_spec("stack-mutation-node", aws_account_id=ACCOUNT,
-                          code={"S3Bucket": "b", "S3Key": "k"})
+            function_spec(
+                "stack-mutation-node", aws_account_id=ACCOUNT, code={"S3Bucket": "b", "S3Key": "k"}
+            )
 
     def test_the_role_arn_matches_what_setup_mcp_infra_creates(self):
         """A role name agreed by two modules that never import each other.
@@ -217,18 +217,28 @@ class TestFunctionSpec:
         import pcluster_core
 
         for tier in TIER_PACKAGES:
-            spec = function_spec(tier, aws_account_id=ACCOUNT, code=(
-                {"ImageUri": "x:1"} if TIER_PACKAGES[tier]["kind"] == "image"
-                else {"S3Bucket": "b", "S3Key": "k"}
-            ))
+            spec = function_spec(
+                tier,
+                aws_account_id=ACCOUNT,
+                code=(
+                    {"ImageUri": "x:1"}
+                    if TIER_PACKAGES[tier]["kind"] == "image"
+                    else {"S3Bucket": "b", "S3Key": "k"}
+                ),
+            )
             assert spec["Role"].endswith("/" + pcluster_core._mcp_role_name(tier))
 
     def test_the_function_name_matches_the_router_policy_list(self):
         for tier in TIER_PACKAGES:
-            spec = function_spec(tier, aws_account_id=ACCOUNT, code=(
-                {"ImageUri": "x:1"} if TIER_PACKAGES[tier]["kind"] == "image"
-                else {"S3Bucket": "b", "S3Key": "k"}
-            ))
+            spec = function_spec(
+                tier,
+                aws_account_id=ACCOUNT,
+                code=(
+                    {"ImageUri": "x:1"}
+                    if TIER_PACKAGES[tier]["kind"] == "image"
+                    else {"S3Bucket": "b", "S3Key": "k"}
+                ),
+            )
             assert spec["FunctionName"] == FUNCTION_NAMES[tier]
 
     def test_an_unknown_tier_names_the_known_ones(self):
@@ -244,8 +254,7 @@ class TestFunctionSpec:
 class TestDeployTier:
     def test_a_new_function_is_created(self):
         lam = _FakeLambda(exists=False)
-        deploy_tier(lam, "router", aws_account_id=ACCOUNT,
-                    code={"S3Bucket": "b", "S3Key": "k"})
+        deploy_tier(lam, "router", aws_account_id=ACCOUNT, code={"S3Bucket": "b", "S3Key": "k"})
         assert lam.names("create_function") == [FUNCTION_NAMES["router"]]
         assert not lam.names("update_function_code")
 
@@ -253,8 +262,7 @@ class TestDeployTier:
         """Idempotent, like _setup_mcp_infra: a partially-completed
         deployment must be re-runnable."""
         lam = _FakeLambda(exists=True)
-        deploy_tier(lam, "router", aws_account_id=ACCOUNT,
-                    code={"S3Bucket": "b", "S3Key": "k"})
+        deploy_tier(lam, "router", aws_account_id=ACCOUNT, code={"S3Bucket": "b", "S3Key": "k"})
         assert lam.names("update_function_code") == [FUNCTION_NAMES["router"]]
         assert lam.names("update_function_configuration")
 
@@ -262,12 +270,9 @@ class TestDeployTier:
         """A configuration pointing at code that was never uploaded is the
         worse of the two intermediate states."""
         lam = _FakeLambda(exists=True)
-        deploy_tier(lam, "router", aws_account_id=ACCOUNT,
-                    code={"S3Bucket": "b", "S3Key": "k"})
+        deploy_tier(lam, "router", aws_account_id=ACCOUNT, code={"S3Bucket": "b", "S3Key": "k"})
         ops = [n for n, _ in lam.calls]
-        assert ops.index("update_function_code") < ops.index(
-            "update_function_configuration"
-        )
+        assert ops.index("update_function_code") < ops.index("update_function_configuration")
 
     def test_a_real_error_is_not_swallowed_as_already_exists(self):
         lam = _FakeLambda()
@@ -279,13 +284,13 @@ class TestDeployTier:
 
         lam.create_function = boom
         with pytest.raises(Exception, match="denied"):
-            deploy_tier(lam, "router", aws_account_id=ACCOUNT,
-                        code={"S3Bucket": "b", "S3Key": "k"})
+            deploy_tier(lam, "router", aws_account_id=ACCOUNT, code={"S3Bucket": "b", "S3Key": "k"})
 
     def test_the_configured_timeout_reaches_the_api(self):
         lam = _FakeLambda()
-        deploy_tier(lam, "stack-mutation", aws_account_id=ACCOUNT,
-                    code={"S3Bucket": "b", "S3Key": "k"})
+        deploy_tier(
+            lam, "stack-mutation", aws_account_id=ACCOUNT, code={"S3Bucket": "b", "S3Key": "k"}
+        )
         _, kw = lam.calls[0]
         assert kw["Timeout"] == TIER_RUNTIME["stack-mutation"]["timeout"]
 
@@ -314,11 +319,14 @@ class TestCreateFunctionWaitsOutIamPropagation:
             state["n"] += 1
             if state["n"] <= times:
                 err = Exception("InvalidParameterValueException")
-                err.response = {"Error": {
-                    "Code": "InvalidParameterValueException",
-                    "Message": ("The role defined for the function cannot be "
-                                "assumed by Lambda."),
-                }}
+                err.response = {
+                    "Error": {
+                        "Code": "InvalidParameterValueException",
+                        "Message": (
+                            "The role defined for the function cannot be assumed by Lambda."
+                        ),
+                    }
+                }
                 raise err
             return {"FunctionArn": f"arn:aws:lambda:::{kw['FunctionName']}"}
 
@@ -330,8 +338,9 @@ class TestCreateFunctionWaitsOutIamPropagation:
         lam = _FakeLambda()
         lam.create_function, state = self._lag(2)
 
-        arn = deploy_tier(lam, "router", aws_account_id=ACCOUNT,
-                          code={"S3Bucket": "b", "S3Key": "k"})
+        arn = deploy_tier(
+            lam, "router", aws_account_id=ACCOUNT, code={"S3Bucket": "b", "S3Key": "k"}
+        )
 
         assert arn.endswith(FUNCTION_NAMES["router"])
         assert state["n"] == 3, "the create was not retried to success"
@@ -351,16 +360,17 @@ class TestCreateFunctionWaitsOutIamPropagation:
 
         def boom(**kw):
             err = Exception("bad runtime")
-            err.response = {"Error": {
-                "Code": "InvalidParameterValueException",
-                "Message": "Value not supported for Runtime",
-            }}
+            err.response = {
+                "Error": {
+                    "Code": "InvalidParameterValueException",
+                    "Message": "Value not supported for Runtime",
+                }
+            }
             raise err
 
         lam.create_function = boom
         with pytest.raises(Exception, match="bad runtime"):
-            deploy_tier(lam, "router", aws_account_id=ACCOUNT,
-                        code={"S3Bucket": "b", "S3Key": "k"})
+            deploy_tier(lam, "router", aws_account_id=ACCOUNT, code={"S3Bucket": "b", "S3Key": "k"})
         assert slept == [], "a non-propagation error was retried"
 
     def test_the_retry_is_bounded_and_reraises(self, monkeypatch):
@@ -373,8 +383,7 @@ class TestCreateFunctionWaitsOutIamPropagation:
         lam.create_function, state = self._lag(10_000)
 
         with pytest.raises(Exception, match="InvalidParameterValueException"):
-            deploy_tier(lam, "router", aws_account_id=ACCOUNT,
-                        code={"S3Bucket": "b", "S3Key": "k"})
+            deploy_tier(lam, "router", aws_account_id=ACCOUNT, code={"S3Bucket": "b", "S3Key": "k"})
         assert state["n"] == ROLE_PROPAGATION_ATTEMPTS
 
     def test_an_existing_function_still_takes_the_update_path(self, monkeypatch):
@@ -384,8 +393,7 @@ class TestCreateFunctionWaitsOutIamPropagation:
         monkeypatch.setattr("mcp_server.deploy.time.sleep", slept.append)
         lam = _FakeLambda(exists=True)
 
-        deploy_tier(lam, "router", aws_account_id=ACCOUNT,
-                    code={"S3Bucket": "b", "S3Key": "k"})
+        deploy_tier(lam, "router", aws_account_id=ACCOUNT, code={"S3Bucket": "b", "S3Key": "k"})
 
         ops = [name for name, _ in lam.calls]
         assert "update_function_configuration" in ops
@@ -418,11 +426,13 @@ class _FakeCognitoClients:
         self.created.append(kw)
         cid = f"generated{len(self.created)}"
         self.clients.append({"ClientName": kw["ClientName"], "ClientId": cid})
-        return {"UserPoolClient": {
-            "ClientId": cid,
-            "ClientName": kw["ClientName"],
-            "CallbackURLs": kw.get("CallbackURLs", []),
-        }}
+        return {
+            "UserPoolClient": {
+                "ClientId": cid,
+                "ClientName": kw["ClientName"],
+                "CallbackURLs": kw.get("CallbackURLs", []),
+            }
+        }
 
 
 class TestTheConnectorAppClientIsCreatedByTheDeploy:
@@ -439,8 +449,7 @@ class TestTheConnectorAppClientIsCreatedByTheDeploy:
     """
 
     def test_it_creates_a_client_when_the_pool_has_none(self):
-        from mcp_server.deploy import (CONNECTOR_CLIENT_NAME,
-                                       ensure_connector_client)
+        from mcp_server.deploy import CONNECTOR_CLIENT_NAME, ensure_connector_client
         from mcp_server.auth.discovery import CLAUDE_REDIRECT_URI
 
         cog = _FakeCognitoClients()
@@ -469,8 +478,7 @@ class TestTheConnectorAppClientIsCreatedByTheDeploy:
         """`--setup-gateway` is idempotent and `--bootstrap` is the update
         path, so a create on every deploy would walk the pool into its
         app-client limit and change the ID the operator already pasted."""
-        from mcp_server.deploy import (CONNECTOR_CLIENT_NAME,
-                                       ensure_connector_client)
+        from mcp_server.deploy import CONNECTOR_CLIENT_NAME, ensure_connector_client
 
         cog = _FakeCognitoClients(existing=[(CONNECTOR_CLIENT_NAME, "old1")])
         cid, created = ensure_connector_client(cog, user_pool_id="p")
@@ -482,12 +490,10 @@ class TestTheConnectorAppClientIsCreatedByTheDeploy:
         """The reuse above is only as good as the pagination under it. With
         a single unpaginated list call, a pool holding more than one page
         looks empty past the first and every deploy mints another client."""
-        from mcp_server.deploy import (CONNECTOR_CLIENT_NAME,
-                                       ensure_connector_client)
+        from mcp_server.deploy import CONNECTOR_CLIENT_NAME, ensure_connector_client
 
         filler = [(f"other{i}", f"id{i}") for i in range(5)]
-        cog = _FakeCognitoClients(
-            existing=filler + [(CONNECTOR_CLIENT_NAME, "buried")], page=2)
+        cog = _FakeCognitoClients(existing=filler + [(CONNECTOR_CLIENT_NAME, "buried")], page=2)
         cid, created = ensure_connector_client(cog, user_pool_id="p")
 
         assert (cid, created) == ("buried", False)
@@ -507,16 +513,24 @@ class TestTheConnectorAppClientIsCreatedByTheDeploy:
 
         path = os.path.join(REPO_ROOT, "mcp_server", "deploy.py")
         tree = ast.parse(io.open(path, encoding="utf-8").read())
-        fn = next(n for n in ast.walk(tree)
-                  if isinstance(n, ast.FunctionDef)
-                  and n.name == "ensure_connector_client")
+        fn = next(
+            n
+            for n in ast.walk(tree)
+            if isinstance(n, ast.FunctionDef) and n.name == "ensure_connector_client"
+        )
 
-        calls = [n.func.id for n in ast.walk(fn)
-                 if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)]
+        calls = [
+            n.func.id
+            for n in ast.walk(fn)
+            if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+        ]
         assert "register" in calls, "does not delegate to register()"
 
-        attrs = [n.func.attr for n in ast.walk(fn)
-                 if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)]
+        attrs = [
+            n.func.attr
+            for n in ast.walk(fn)
+            if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+        ]
         assert "create_user_pool_client" not in attrs, (
             "builds the app client itself; register() is the one definition"
         )
@@ -542,8 +556,8 @@ class TestLambdaCanPullTheContainerImage:
         import json
 
         from mcp_server.deploy import lambda_pull_policy
-        return json.loads(lambda_pull_policy(
-            aws_account_id="123456789012", region="us-east-1"))
+
+        return json.loads(lambda_pull_policy(aws_account_id="123456789012", region="us-east-1"))
 
     def test_the_lambda_service_is_the_principal(self):
         st = self._policy()["Statement"][0]
@@ -554,7 +568,9 @@ class TestLambdaCanPullTheContainerImage:
         """A repository policy is a grant to a service principal, so a wide
         one is wide for everything that principal covers."""
         assert set(self._policy()["Statement"][0]["Action"]) == {
-            "ecr:BatchGetImage", "ecr:GetDownloadUrlForLayer"}
+            "ecr:BatchGetImage",
+            "ecr:GetDownloadUrlForLayer",
+        }
 
     def test_the_source_arn_is_scoped_to_this_toolkits_functions(self):
         """AWS's own documented snippet uses `function:*`, which is every
@@ -563,8 +579,7 @@ class TestLambdaCanPullTheContainerImage:
         cond = self._policy()["Statement"][0]["Condition"]
         arn = cond["StringLike"]["aws:SourceArn"]
         assert arn.endswith(":function:pclustermaker-mcp-*"), arn
-        assert not arn.endswith(":function:*"), (
-            "SourceArn admits every function in the account")
+        assert not arn.endswith(":function:*"), "SourceArn admits every function in the account"
 
     def test_ensure_lambda_can_pull_sets_it_on_the_repository(self):
         from mcp_server.deploy import IMAGE_REPOSITORY, ensure_lambda_can_pull
@@ -576,8 +591,7 @@ class TestLambdaCanPullTheContainerImage:
                 calls.append(kw)
                 return {}
 
-        ensure_lambda_can_pull(_Ecr(), aws_account_id="123456789012",
-                               region="us-east-1")
+        ensure_lambda_can_pull(_Ecr(), aws_account_id="123456789012", region="us-east-1")
         assert len(calls) == 1
         assert calls[0]["repositoryName"] == IMAGE_REPOSITORY
         assert "lambda.amazonaws.com" in calls[0]["policyText"]
@@ -597,19 +611,17 @@ class TestLambdaCanPullTheContainerImage:
             if isinstance(n, ast.Call) and isinstance(n.func, ast.Name):
                 lines.setdefault(n.func.id, []).append(n.lineno)
         assert "ensure_lambda_can_pull" in lines, "the policy is never set"
-        assert min(lines["ensure_lambda_can_pull"]) < min(
-            lines["build_and_push_image"]), (
+        assert min(lines["ensure_lambda_can_pull"]) < min(lines["build_and_push_image"]), (
             "the repository policy is set after the image is pushed; a "
-            "failure there discards the whole upload")
+            "failure there discards the whole upload"
+        )
 
 
 class TestDeleteMcpFunctions:
     def test_it_deletes_every_tier(self):
         lam = _FakeLambda()
         delete_mcp_functions(lam)
-        assert set(lam.names("delete_function")) == {
-            FUNCTION_NAMES[t] for t in TIER_PACKAGES
-        }
+        assert set(lam.names("delete_function")) == {FUNCTION_NAMES[t] for t in TIER_PACKAGES}
 
     def test_one_missing_function_does_not_abandon_the_rest(self):
         lam = _FakeLambda()
@@ -666,8 +678,7 @@ class TestTierMemoryTracksTierWork:
     def test_memory_never_decreases_as_the_tier_does_more(self):
         from mcp_server.deploy import TIER_RUNTIME
 
-        order = ["router", "read-only", "fleet-toggle",
-                 "stack-mutation", "stack-mutation-node"]
+        order = ["router", "read-only", "fleet-toggle", "stack-mutation", "stack-mutation-node"]
         sizes = [TIER_RUNTIME[t]["memory"] for t in order]
         assert sizes == sorted(sizes), (
             f"memory must not invert across tiers doing progressively more "
@@ -681,8 +692,7 @@ class TestTierMemoryTracksTierWork:
         from mcp_server.deploy import TIER_RUNTIME
 
         MEASURED_PEAK_MB = 238
-        for tier in ("read-only", "fleet-toggle", "stack-mutation",
-                     "stack-mutation-node"):
+        for tier in ("read-only", "fleet-toggle", "stack-mutation", "stack-mutation-node"):
             assert TIER_RUNTIME[tier]["memory"] > MEASURED_PEAK_MB, (
                 f"{tier} is sized below the {MEASURED_PEAK_MB} MB peak "
                 f"measured on a real invocation"
@@ -756,15 +766,13 @@ class TestBothSurfacesPinTheSamePclusterVersion:
         """Four tiers named the version as a literal; one edited copy is the
         whole failure mode again."""
         shipping = [
-            t for t, spec in TIER_PACKAGES.items()
+            t
+            for t, spec in TIER_PACKAGES.items()
             if any("parallelcluster" in r for r in spec["requirements"])
         ]
         assert shipping, "no tier ships PCluster -- the sweep has gone vacuous"
         for tier in shipping:
-            named = [
-                r for r in TIER_PACKAGES[tier]["requirements"]
-                if "parallelcluster" in r
-            ]
+            named = [r for r in TIER_PACKAGES[tier]["requirements"] if "parallelcluster" in r]
             assert named == [PCLUSTER_REQUIREMENT], (
                 f"tier {tier!r} names {named} rather than the shared constant"
             )
@@ -803,7 +811,8 @@ class TestTheDeploymentHasAProductionCaller:
         a mention in a docstring cannot satisfy it."""
         tree = ast.parse(self._source())
         called = {
-            n.func.id for n in ast.walk(tree)
+            n.func.id
+            for n in ast.walk(tree)
             if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
         }
         assert "deploy_tier" in called
@@ -883,12 +892,23 @@ class _FakeIam:
         return self.policies[arn]
 
     def seed(self, arn, document, extra_versions=0):
-        vs = [{"VersionId": "v1", "IsDefaultVersion": extra_versions == 0,
-               "CreateDate": _stamp(1), "Document": document}]
+        vs = [
+            {
+                "VersionId": "v1",
+                "IsDefaultVersion": extra_versions == 0,
+                "CreateDate": _stamp(1),
+                "Document": document,
+            }
+        ]
         for i in range(extra_versions):
-            vs.append({"VersionId": "v%d" % (i + 2),
-                       "IsDefaultVersion": i == extra_versions - 1,
-                       "CreateDate": _stamp(i + 2), "Document": document})
+            vs.append(
+                {
+                    "VersionId": "v%d" % (i + 2),
+                    "IsDefaultVersion": i == extra_versions - 1,
+                    "CreateDate": _stamp(i + 2),
+                    "Document": document,
+                }
+            )
         self.policies[arn] = {"versions": vs}
 
     # -- policy API ---------------------------------------------------
@@ -915,10 +935,12 @@ class _FakeIam:
 
     def list_policy_versions(self, PolicyArn):
         p = self._p(PolicyArn, "ListPolicyVersions")
-        return {"Versions": [
-            {k: v[k] for k in ("VersionId", "IsDefaultVersion", "CreateDate")}
-            for v in p["versions"]
-        ]}
+        return {
+            "Versions": [
+                {k: v[k] for k in ("VersionId", "IsDefaultVersion", "CreateDate")}
+                for v in p["versions"]
+            ]
+        }
 
     def create_policy_version(self, PolicyArn, PolicyDocument, SetAsDefault=False):
         p = self._p(PolicyArn, "CreatePolicyVersion")
@@ -929,9 +951,14 @@ class _FakeIam:
         if SetAsDefault:
             for v in p["versions"]:
                 v["IsDefaultVersion"] = False
-        p["versions"].append({"VersionId": vid, "IsDefaultVersion": bool(SetAsDefault),
-                              "CreateDate": _stamp(nxt),
-                              "Document": _json.loads(PolicyDocument)})
+        p["versions"].append(
+            {
+                "VersionId": vid,
+                "IsDefaultVersion": bool(SetAsDefault),
+                "CreateDate": _stamp(nxt),
+                "Document": _json.loads(PolicyDocument),
+            }
+        )
         self.calls.append(("create_policy_version", PolicyArn, vid))
         return {"PolicyVersion": {"VersionId": vid}}
 
@@ -988,8 +1015,9 @@ class TestTheFakeEnforcesTheServiceContract:
     def test_delete_policy_version_refuses_the_default(self):
         iam = _FakeIam()
         iam.seed(self.ARN, {"a": 1}, extra_versions=1)
-        default = next(v["VersionId"] for v in iam.policies[self.ARN]["versions"]
-                       if v["IsDefaultVersion"])
+        default = next(
+            v["VersionId"] for v in iam.policies[self.ARN]["versions"] if v["IsDefaultVersion"]
+        )
         with pytest.raises(_ClientError_t):
             iam.delete_policy_version(PolicyArn=self.ARN, VersionId=default)
 
@@ -998,8 +1026,7 @@ class TestTheFakeEnforcesTheServiceContract:
         iam.seed(self.ARN, {"a": 1}, extra_versions=4)
         assert len(iam.policies[self.ARN]["versions"]) == 5
         with pytest.raises(_ClientError_t) as ei:
-            iam.create_policy_version(PolicyArn=self.ARN,
-                                      PolicyDocument='{"b": 2}')
+            iam.create_policy_version(PolicyArn=self.ARN, PolicyDocument='{"b": 2}')
         assert ei.value.response["Error"]["Code"] == "LimitExceeded"
 
 
@@ -1010,15 +1037,15 @@ class TestAPolicyEditReachesTheAccount:
     be pushed by hand because of it."""
 
     ARN = "arn:aws:iam::123456789012:policy/p"
-    DOC = {"Version": "2012-10-17",
-           "Statement": [{"Effect": "Allow", "Action": "s3:GetObject",
-                          "Resource": "*"}]}
+    DOC = {
+        "Version": "2012-10-17",
+        "Statement": [{"Effect": "Allow", "Action": "s3:GetObject", "Resource": "*"}],
+    }
 
     def test_an_unchanged_document_is_recognized_as_current(self):
         iam = _FakeIam()
         iam.seed(self.ARN, self.DOC)
-        current, vid = _pc._policy_is_current(
-            iam, arn=self.ARN, rendered=_json.dumps(self.DOC))
+        current, vid = _pc._policy_is_current(iam, arn=self.ARN, rendered=_json.dumps(self.DOC))
         assert current is True and vid == "v1"
 
     def test_a_changed_document_is_recognized_as_stale(self):
@@ -1026,8 +1053,7 @@ class TestAPolicyEditReachesTheAccount:
         iam.seed(self.ARN, self.DOC)
         changed = _json.loads(_json.dumps(self.DOC))
         changed["Statement"][0]["Action"] = "s3:PutObject"
-        current, _ = _pc._policy_is_current(
-            iam, arn=self.ARN, rendered=_json.dumps(changed))
+        current, _ = _pc._policy_is_current(iam, arn=self.ARN, rendered=_json.dumps(changed))
         assert current is False
 
     def test_a_url_encoded_document_still_compares(self):
@@ -1037,21 +1063,18 @@ class TestAPolicyEditReachesTheAccount:
 
         iam = _FakeIam()
         iam.seed(self.ARN, urllib.parse.quote(_json.dumps(self.DOC)))
-        current, _ = _pc._policy_is_current(
-            iam, arn=self.ARN, rendered=_json.dumps(self.DOC))
+        current, _ = _pc._policy_is_current(iam, arn=self.ARN, rendered=_json.dumps(self.DOC))
         assert current is True
 
     def test_the_update_becomes_the_new_default(self):
         iam = _FakeIam()
         iam.seed(self.ARN, self.DOC)
         changed = {"Version": "2012-10-17", "Statement": []}
-        vid = _pc._update_policy_document(iam, arn=self.ARN,
-                                     rendered=_json.dumps(changed))
+        vid = _pc._update_policy_document(iam, arn=self.ARN, rendered=_json.dumps(changed))
         versions = iam.policies[self.ARN]["versions"]
         assert vid == "v2"
         assert [v["VersionId"] for v in versions if v["IsDefaultVersion"]] == ["v2"]
-        current, _ = _pc._policy_is_current(
-            iam, arn=self.ARN, rendered=_json.dumps(changed))
+        current, _ = _pc._policy_is_current(iam, arn=self.ARN, rendered=_json.dumps(changed))
         assert current is True
 
     def test_the_five_version_ceiling_is_made_room_for(self):
@@ -1062,8 +1085,8 @@ class TestAPolicyEditReachesTheAccount:
         iam.seed(self.ARN, self.DOC, extra_versions=4)
         assert len(iam.policies[self.ARN]["versions"]) == 5
         vid = _pc._update_policy_document(
-            iam, arn=self.ARN, rendered=_json.dumps({"Version": "2012-10-17",
-                                                     "Statement": []}))
+            iam, arn=self.ARN, rendered=_json.dumps({"Version": "2012-10-17", "Statement": []})
+        )
         versions = iam.policies[self.ARN]["versions"]
         assert len(versions) <= 5
         assert [v["VersionId"] for v in versions if v["IsDefaultVersion"]] == [vid]
@@ -1106,14 +1129,12 @@ class TestTeardownRemovesEveryPolicyVersion:
     def test_the_full_teardown_removes_versioned_policies(self):
         iam = _FakeIam()
         for basename in _pc._mcp_policy_templates():
-            arn = ("arn:aws:iam::123456789012:policy/"
-                   + _pc._mcp_policy_name(basename))
+            arn = "arn:aws:iam::123456789012:policy/" + _pc._mcp_policy_name(basename)
             iam.seed(arn, {"a": 1}, extra_versions=2)
         for tier in _pc._MCP_LAMBDA_TIERS:
             iam.roles[_pc._mcp_role_name(tier)] = []
 
-        result = _pc._delete_mcp_infra(
-            iam, aws_account_id="123456789012", verbose=False)
+        result = _pc._delete_mcp_infra(iam, aws_account_id="123456789012", verbose=False)
 
         assert not result.failed, result.failed
         assert iam.policies == {}, "policies left behind: %s" % list(iam.policies)
@@ -1136,8 +1157,9 @@ class TestAnInfrastructureFlagIsNotADeployment:
         # namespace fails as an AttributeError inside tiers_to_deploy rather
         # than as a statement about behavior, which is how a new flag looks
         # like five broken tests.
-        def __init__(self, tier=None, setup_infra=False, setup_gateway=False,
-                     teardown=False, bootstrap=False):
+        def __init__(
+            self, tier=None, setup_infra=False, setup_gateway=False, teardown=False, bootstrap=False
+        ):
             self.tier = tier
             self.setup_infra = setup_infra
             self.setup_gateway = setup_gateway
@@ -1235,13 +1257,11 @@ class _CognitoWithDomain:
     """
 
     def __init__(self, pool_name, pool_id, domain):
-        self._pools = {pool_id: {"Name": pool_name, "Id": pool_id,
-                                 "Domain": domain}}
+        self._pools = {pool_id: {"Name": pool_name, "Id": pool_id, "Domain": domain}}
         self.calls = []
 
     def list_user_pools(self, MaxResults=60):
-        return {"UserPools": [{"Name": p["Name"], "Id": pid}
-                              for pid, p in self._pools.items()]}
+        return {"UserPools": [{"Name": p["Name"], "Id": pid} for pid, p in self._pools.items()]}
 
     def describe_user_pool(self, UserPoolId):
         self.calls.append(("describe", UserPoolId))
@@ -1259,7 +1279,8 @@ class _CognitoWithDomain:
         if pool.get("Domain"):
             raise RuntimeError(
                 "User pool cannot be deleted. It has a domain configured "
-                "that should be deleted first.")
+                "that should be deleted first."
+            )
         del self._pools[UserPoolId]
         self.calls.append(("delete_pool", UserPoolId))
 
@@ -1282,7 +1303,8 @@ class TestTheCognitoDomainGoesBeforeThePool:
 
         cog = _CognitoWithDomain(self.POOL, self.PID, self.DOMAIN)
         removed = delete_cognito_pool(
-            cog, pool_name_prefix="parallelclustermaker-mcp", suppress=False)
+            cog, pool_name_prefix="parallelclustermaker-mcp", suppress=False
+        )
         assert removed == [self.POOL]
         assert cog._pools == {}, "the pool survived"
         order = [c[0] for c in cog.calls]
@@ -1296,8 +1318,7 @@ class TestTheCognitoDomainGoesBeforeThePool:
         from mcp_server.deploy import delete_cognito_pool
 
         cog = _CognitoWithDomain(self.POOL, self.PID, self.DOMAIN)
-        delete_cognito_pool(cog, pool_name_prefix="parallelclustermaker-mcp",
-                            suppress=False)
+        delete_cognito_pool(cog, pool_name_prefix="parallelclustermaker-mcp", suppress=False)
         assert ("describe", self.PID) in cog.calls
         assert ("delete_domain", self.DOMAIN) in cog.calls
 
@@ -1313,7 +1334,8 @@ class TestTheCognitoDomainGoesBeforeThePool:
 
         cog = _CognitoWithDomain(self.POOL, self.PID, None)
         removed = delete_cognito_pool(
-            cog, pool_name_prefix="parallelclustermaker-mcp", suppress=False)
+            cog, pool_name_prefix="parallelclustermaker-mcp", suppress=False
+        )
         assert removed == [self.POOL]
         assert "delete_domain" not in [c[0] for c in cog.calls]
 
@@ -1322,15 +1344,15 @@ class TestTheCognitoDomainGoesBeforeThePool:
 
         cog = _CognitoWithDomain("someone-elses-pool", self.PID, None)
         removed = delete_cognito_pool(
-            cog, pool_name_prefix="parallelclustermaker-mcp", suppress=False)
+            cog, pool_name_prefix="parallelclustermaker-mcp", suppress=False
+        )
         assert removed == []
         assert cog._pools, "an unrelated user pool was deleted"
 
 
 class _Apigw:
     def __init__(self, names):
-        self._apis = [{"name": n, "id": "id-%d" % i}
-                      for i, n in enumerate(names)]
+        self._apis = [{"name": n, "id": "id-%d" % i} for i, n in enumerate(names)]
         self.deleted = []
 
     def get_rest_apis(self):
@@ -1404,7 +1426,8 @@ class TestTheGatewayTimeoutIsTheRealCeiling:
         tree = ast.parse(io.open(path, encoding="utf-8").read())
 
         calls = [
-            n for n in ast.walk(tree)
+            n
+            for n in ast.walk(tree)
             if isinstance(n, ast.Call)
             and isinstance(n.func, ast.Attribute)
             and n.func.attr == "put_integration"
@@ -1455,7 +1478,8 @@ class _CognitoUsers:
         for required in ("UserPoolId", "Username"):
             if required not in kw:
                 raise self.InvalidParameterException(
-                    f"{required} is a required member of AdminCreateUserRequest")
+                    f"{required} is a required member of AdminCreateUserRequest"
+                )
         self.calls.append(("create", dict(kw)))
         name = kw["Username"]
         if name in self.users:
@@ -1463,8 +1487,9 @@ class _CognitoUsers:
         # Without MessageAction=SUPPRESS, real Cognito mails an invitation
         # and leaves the account in FORCE_CHANGE_PASSWORD.
         self.users[name] = {
-            "status": ("CONFIRMED" if kw.get("MessageAction") == "SUPPRESS"
-                       else "FORCE_CHANGE_PASSWORD"),
+            "status": (
+                "CONFIRMED" if kw.get("MessageAction") == "SUPPRESS" else "FORCE_CHANGE_PASSWORD"
+            ),
             "attrs": {a["Name"]: a["Value"] for a in kw.get("UserAttributes") or []},
             "password": None,
         }
@@ -1473,8 +1498,8 @@ class _CognitoUsers:
         for required in ("UserPoolId", "Username", "Password"):
             if required not in kw:
                 raise self.InvalidParameterException(
-                    f"{required} is a required member of "
-                    f"AdminSetUserPasswordRequest")
+                    f"{required} is a required member of AdminSetUserPasswordRequest"
+                )
         self.calls.append(("set_password", dict(kw)))
         user = self.users[kw["Username"]]
         user["password"] = kw["Password"]
@@ -1499,7 +1524,8 @@ class TestADeployedTransportHasSomeoneToSignInAs:
 
         cog = _CognitoUsers()
         created = ensure_cognito_user(
-            cog, pool_id=self.POOL, username="ops@example.com", password="Aa1!aaaaaa")
+            cog, pool_id=self.POOL, username="ops@example.com", password="Aa1!aaaaaa"
+        )
         assert created is True
         assert cog.users["ops@example.com"]["status"] == "CONFIRMED"
         assert cog.users["ops@example.com"]["password"] == "Aa1!aaaaaa"
@@ -1512,8 +1538,7 @@ class TestADeployedTransportHasSomeoneToSignInAs:
         from mcp_server.deploy import ensure_cognito_user
 
         cog = _CognitoUsers()
-        ensure_cognito_user(cog, pool_id=self.POOL, username="ops",
-                            password="Aa1!aaaaaa")
+        ensure_cognito_user(cog, pool_id=self.POOL, username="ops", password="Aa1!aaaaaa")
         create = dict(cog.calls[0][1])
         assert create["MessageAction"] == "SUPPRESS"
 
@@ -1524,8 +1549,7 @@ class TestADeployedTransportHasSomeoneToSignInAs:
         from mcp_server.deploy import ensure_cognito_user
 
         cog = _CognitoUsers()
-        ensure_cognito_user(cog, pool_id=self.POOL, username="ops",
-                            password="Aa1!aaaaaa")
+        ensure_cognito_user(cog, pool_id=self.POOL, username="ops", password="Aa1!aaaaaa")
         setp = dict(cog.calls[1][1])
         assert setp["Permanent"] is True
 
@@ -1535,8 +1559,7 @@ class TestADeployedTransportHasSomeoneToSignInAs:
         cog = _CognitoUsers()
         cog.admin_create_user(UserPoolId=self.POOL, Username="ops")
         assert cog.users["ops"]["status"] == "FORCE_CHANGE_PASSWORD"
-        cog.admin_set_user_password(UserPoolId=self.POOL, Username="ops",
-                                    Password="Aa1!aaaaaa")
+        cog.admin_set_user_password(UserPoolId=self.POOL, Username="ops", Password="Aa1!aaaaaa")
         assert cog.users["ops"]["status"] == "FORCE_CHANGE_PASSWORD"
 
     def test_rerunning_resets_the_password_rather_than_failing(self):
@@ -1546,10 +1569,8 @@ class TestADeployedTransportHasSomeoneToSignInAs:
         from mcp_server.deploy import ensure_cognito_user
 
         cog = _CognitoUsers()
-        ensure_cognito_user(cog, pool_id=self.POOL, username="ops",
-                            password="Aa1!aaaaaa")
-        created = ensure_cognito_user(cog, pool_id=self.POOL, username="ops",
-                                      password="Bb2@bbbbbb")
+        ensure_cognito_user(cog, pool_id=self.POOL, username="ops", password="Aa1!aaaaaa")
+        created = ensure_cognito_user(cog, pool_id=self.POOL, username="ops", password="Bb2@bbbbbb")
         assert created is False
         assert cog.users["ops"]["password"] == "Bb2@bbbbbb"
 
@@ -1557,8 +1578,9 @@ class TestADeployedTransportHasSomeoneToSignInAs:
         from mcp_server.deploy import ensure_cognito_user
 
         cog = _CognitoUsers()
-        ensure_cognito_user(cog, pool_id=self.POOL, username="ops@example.com",
-                            password="Aa1!aaaaaa")
+        ensure_cognito_user(
+            cog, pool_id=self.POOL, username="ops@example.com", password="Aa1!aaaaaa"
+        )
         attrs = cog.users["ops@example.com"]["attrs"]
         assert attrs == {"email": "ops@example.com", "email_verified": "true"}
 
@@ -1568,8 +1590,7 @@ class TestADeployedTransportHasSomeoneToSignInAs:
         from mcp_server.deploy import ensure_cognito_user
 
         cog = _CognitoUsers()
-        ensure_cognito_user(cog, pool_id=self.POOL, username="ops",
-                            password="Aa1!aaaaaa")
+        ensure_cognito_user(cog, pool_id=self.POOL, username="ops", password="Aa1!aaaaaa")
         assert cog.users["ops"]["attrs"] == {}
 
     def test_an_unrelated_failure_is_not_swallowed(self):
@@ -1583,8 +1604,7 @@ class TestADeployedTransportHasSomeoneToSignInAs:
                 raise RuntimeError("ResourceNotFoundException: no such pool")
 
         with pytest.raises(RuntimeError, match="no such pool"):
-            ensure_cognito_user(_Broken(), pool_id=self.POOL, username="ops",
-                                password="Aa1!aaaaaa")
+            ensure_cognito_user(_Broken(), pool_id=self.POOL, username="ops", password="Aa1!aaaaaa")
 
 
 class TestTheGeneratedPasswordSatisfiesCognito:
@@ -1655,8 +1675,7 @@ class TestBootstrapStandsUpTheWholeTransport:
     def test_bootstrap_deploys_every_zip_tier(self):
         import deploy_mcp
 
-        args = deploy_mcp.normalize_bootstrap(
-            self._Args(bootstrap=True), self._fail)
+        args = deploy_mcp.normalize_bootstrap(self._Args(bootstrap=True), self._fail)
         assert deploy_mcp.tiers_to_deploy(args) == self._zips()
 
     def test_bootstrap_survives_its_own_implied_setup_flags(self):
@@ -1665,8 +1684,7 @@ class TestBootstrapStandsUpTheWholeTransport:
         [] unless `bootstrap` is checked first."""
         import deploy_mcp
 
-        args = deploy_mcp.normalize_bootstrap(
-            self._Args(bootstrap=True), self._fail)
+        args = deploy_mcp.normalize_bootstrap(self._Args(bootstrap=True), self._fail)
         assert args.setup_infra is True and args.setup_gateway is True
         assert deploy_mcp.tiers_to_deploy(args) != []
 
@@ -1685,31 +1703,29 @@ class TestBootstrapStandsUpTheWholeTransport:
         useful without it."""
         import deploy_mcp
 
-        args = deploy_mcp.normalize_bootstrap(
-            self._Args(bootstrap=True), self._fail)
+        args = deploy_mcp.normalize_bootstrap(self._Args(bootstrap=True), self._fail)
         assert "stack-mutation-node" not in deploy_mcp.tiers_to_deploy(args)
 
     def test_an_explicit_tier_still_wins(self):
         import deploy_mcp
 
         args = deploy_mcp.normalize_bootstrap(
-            self._Args(bootstrap=True, tier=["read-only"]), self._fail)
+            self._Args(bootstrap=True, tier=["read-only"]), self._fail
+        )
         assert deploy_mcp.tiers_to_deploy(args) == ["read-only"]
 
     def test_bootstrap_and_teardown_are_refused(self):
         import deploy_mcp
 
         with pytest.raises(AssertionError, match="opposites"):
-            deploy_mcp.normalize_bootstrap(
-                self._Args(bootstrap=True, teardown=True), self._fail)
+            deploy_mcp.normalize_bootstrap(self._Args(bootstrap=True, teardown=True), self._fail)
 
     def test_create_user_and_teardown_are_refused(self):
         """Creating a user in the pool the same run deletes."""
         import deploy_mcp
 
         with pytest.raises(AssertionError, match="deletes"):
-            deploy_mcp.normalize_bootstrap(
-                self._Args(create_user="ops", teardown=True), self._fail)
+            deploy_mcp.normalize_bootstrap(self._Args(create_user="ops", teardown=True), self._fail)
 
     def test_a_plain_run_is_not_rejected(self):
         """Vacuity guard for the two refusals: `fail` must not fire on
@@ -1746,8 +1762,10 @@ class _SimulatingIam:
         self.source_arns.append(kw["PolicySourceArn"])
         results = []
         for a in kw["ActionNames"]:
-            r = {"EvalActionName": a,
-                 "EvalDecision": "allowed" if a in self.allowed else "implicitDeny"}
+            r = {
+                "EvalActionName": a,
+                "EvalDecision": "allowed" if a in self.allowed else "implicitDeny",
+            }
             if a in self.missing_context:
                 r["MissingContextValues"] = ["iam:PermissionsBoundary"]
             results.append(r)
@@ -1777,8 +1795,10 @@ class TestTheDeploySaysWhatPermissionItIsMissing:
         from mcp_server.deploy import preflight_deploy_permissions
 
         return preflight_deploy_permissions(
-            iam, caller_arn=arn or f"arn:aws:iam::{self.ACCT}:user/deployer",
-            aws_account_id=self.ACCT, region="us-east-1",
+            iam,
+            caller_arn=arn or f"arn:aws:iam::{self.ACCT}:user/deployer",
+            aws_account_id=self.ACCT,
+            region="us-east-1",
         )
 
     def test_a_fully_permitted_identity_reports_nothing_missing(self):
@@ -1916,8 +1936,9 @@ class _Ecr:
         missing = [n for n in names if n not in self.repos]
         if missing:
             raise self.RepositoryNotFoundException(str(missing))
-        return {"repositories": [{"repositoryName": n, "repositoryUri": self.repos[n]}
-                                 for n in names]}
+        return {
+            "repositories": [{"repositoryName": n, "repositoryUri": self.repos[n]} for n in names]
+        }
 
     def delete_repository(self, repositoryName, force=False, **kw):
         if repositoryName not in self.repos:
@@ -1929,9 +1950,13 @@ class _Ecr:
 
     def get_authorization_token(self, **kw):
         import base64
+
         tok = base64.b64encode(b"AWS:sekrit").decode()
-        return {"authorizationData": [
-            {"authorizationToken": tok, "proxyEndpoint": f"https://{self.HOST}"}]}
+        return {
+            "authorizationData": [
+                {"authorizationToken": tok, "proxyEndpoint": f"https://{self.HOST}"}
+            ]
+        }
 
 
 class _Runner:
@@ -1947,6 +1972,7 @@ class _Runner:
 
         class R:
             pass
+
         r = R()
         r.returncode = 1 if (self.fail_on and argv[1] == self.fail_on) else 0
         r.stdout = ""
@@ -2025,8 +2051,9 @@ class TestTheDeployBuildsItsOwnImage:
         from mcp_server.deploy import IMAGE_PLATFORM, build_and_push_image
 
         run = _Runner()
-        build_and_push_image("finch", image_uri="u:latest", repo_root="/r",
-                             dockerfile="/r/Dockerfile", run=run)
+        build_and_push_image(
+            "finch", image_uri="u:latest", repo_root="/r", dockerfile="/r/Dockerfile", run=run
+        )
         argv = run.calls[0][0]
         assert argv[:2] == ["finch", "build"]
         assert argv[argv.index("--platform") + 1] == IMAGE_PLATFORM
@@ -2035,8 +2062,9 @@ class TestTheDeployBuildsItsOwnImage:
         from mcp_server.deploy import build_and_push_image
 
         run = _Runner()
-        build_and_push_image("finch", image_uri="u:latest", repo_root="/r",
-                             dockerfile="/r/Dockerfile", run=run)
+        build_and_push_image(
+            "finch", image_uri="u:latest", repo_root="/r", dockerfile="/r/Dockerfile", run=run
+        )
         assert run.calls[1][0] == ["finch", "push", "u:latest"]
 
     def test_a_failed_build_does_not_push(self):
@@ -2044,8 +2072,9 @@ class TestTheDeployBuildsItsOwnImage:
 
         run = _Runner(fail_on="build", stderr="compile error")
         with pytest.raises(ImageBuildError, match="build failed"):
-            build_and_push_image("finch", image_uri="u:latest", repo_root="/r",
-                                 dockerfile="/r/Dockerfile", run=run)
+            build_and_push_image(
+                "finch", image_uri="u:latest", repo_root="/r", dockerfile="/r/Dockerfile", run=run
+            )
         assert [c[0][1] for c in run.calls] == ["build"], "pushed after a failed build"
 
     def test_the_finch_credential_failure_names_the_remedy(self):
@@ -2057,16 +2086,18 @@ class TestTheDeployBuildsItsOwnImage:
 
         run = _Runner(fail_on="push", stderr="failed: no basic auth credentials")
         with pytest.raises(ImageBuildError, match="INSTALL.md"):
-            build_and_push_image("finch", image_uri="u:latest", repo_root="/r",
-                                 dockerfile="/r/Dockerfile", run=run)
+            build_and_push_image(
+                "finch", image_uri="u:latest", repo_root="/r", dockerfile="/r/Dockerfile", run=run
+            )
 
     def test_an_unrelated_push_failure_is_not_dressed_up_as_that_one(self):
         from mcp_server.deploy import ImageBuildError, build_and_push_image
 
         run = _Runner(fail_on="push", stderr="network unreachable")
         with pytest.raises(ImageBuildError) as e:
-            build_and_push_image("finch", image_uri="u:latest", repo_root="/r",
-                                 dockerfile="/r/Dockerfile", run=run)
+            build_and_push_image(
+                "finch", image_uri="u:latest", repo_root="/r", dockerfile="/r/Dockerfile", run=run
+            )
         assert "network unreachable" in str(e.value)
         assert "INSTALL.md" not in str(e.value)
 

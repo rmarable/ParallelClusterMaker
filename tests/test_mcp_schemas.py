@@ -161,14 +161,15 @@ class TestTheSshDependentChecksDegradeOnlyOnTheRemoteTransport:
         )
         return seen
 
-    @pytest.mark.parametrize("tool_name,core_name", [
-        ("check_cluster_health", "core_check_cluster_health"),
-        ("diagnose_cluster", "core_diagnose_cluster"),
-    ])
+    @pytest.mark.parametrize(
+        "tool_name,core_name",
+        [
+            ("check_cluster_health", "core_check_cluster_health"),
+            ("diagnose_cluster", "core_diagnose_cluster"),
+        ],
+    )
     @pytest.mark.asyncio
-    async def test_the_local_server_attempts_ssh(
-        self, monkeypatch, tool_name, core_name
-    ):
+    async def test_the_local_server_attempts_ssh(self, monkeypatch, tool_name, core_name):
         """The key is on disk here. If SSH turns out to be unreachable the
         core function takes its own 'SSH unreachable' branch -- that is a
         different SKIP, with a different reason string, and it is the
@@ -177,14 +178,15 @@ class TestTheSshDependentChecksDegradeOnlyOnTheRemoteTransport:
         await build_local().call_tool(tool_name, {"cluster_name": "osiris"})
         assert seen["ssh_available"] is True
 
-    @pytest.mark.parametrize("tool_name,core_name", [
-        ("check_cluster_health", "core_check_cluster_health"),
-        ("diagnose_cluster", "core_diagnose_cluster"),
-    ])
+    @pytest.mark.parametrize(
+        "tool_name,core_name",
+        [
+            ("check_cluster_health", "core_check_cluster_health"),
+            ("diagnose_cluster", "core_diagnose_cluster"),
+        ],
+    )
     @pytest.mark.asyncio
-    async def test_the_remote_server_does_not(
-        self, monkeypatch, tool_name, core_name
-    ):
+    async def test_the_remote_server_does_not(self, monkeypatch, tool_name, core_name):
         """Key material never reaches the remote transport, so attempting
         SSH there is not a degraded check -- it is a guaranteed failure
         reported as a cluster problem."""
@@ -246,8 +248,9 @@ class TestEveryWrapperAgreesWithTheCoreFunctionItWraps:
                 target = getattr(tools_mod, call.func.id, None)
                 if target is None or not callable(target):
                     continue
-                if not (call.func.id.startswith("core_")
-                        or call.func.id == "build_make_cluster_params"):
+                if not (
+                    call.func.id.startswith("core_") or call.func.id == "build_make_cluster_params"
+                ):
                     continue
                 yield node.name, call.func.id, target, call
 
@@ -265,7 +268,8 @@ class TestEveryWrapperAgreesWithTheCoreFunctionItWraps:
         arguments become invisible to static inspection, so drift stops
         being detectable exactly where it starts being likely."""
         offenders = [
-            f"{w} -> {fn}" for w, fn, _, call in self._call_sites()
+            f"{w} -> {fn}"
+            for w, fn, _, call in self._call_sites()
             if any(k.arg is None for k in call.keywords)
         ]
         assert offenders == [], offenders

@@ -15,9 +15,7 @@ def illegal_az_msg(az):
     import sys
 
     print("*** ERROR ***")
-    print(
-        '"' + az + '"' + " is not a valid Availability Zone in the selected AWS Region!"
-    )
+    print('"' + az + '"' + " is not a valid Availability Zone in the selected AWS Region!")
     print("Aborting...")
     sys.exit(1)
 
@@ -59,9 +57,7 @@ def ctrlC_Abort(
     import sys
     import time
 
-    center_string = (
-        "   Please type CTRL-C within " + str(sleep_time) + " seconds to abort   "
-    )
+    center_string = "   Please type CTRL-C within " + str(sleep_time) + " seconds to abort   "
     print("")
     print("".center(line_length, "#"))
     print(center_string.center(line_length, "#"))
@@ -196,9 +192,7 @@ def refer_to_docs_and_quit(error_msg):
     print(error_msg)
     print("")
     print("Please refer to the AWS ParallelCluster documentation for more information:")
-    print(
-        "https://docs.aws.amazon.com/parallelcluster/latest/ug/what-is-aws-parallelcluster.html"
-    )
+    print("https://docs.aws.amazon.com/parallelcluster/latest/ug/what-is-aws-parallelcluster.html")
     print("")
     print("Aborting...")
     sys.exit(1)
@@ -797,11 +791,15 @@ base_os_efa = [
 # Trainium (trn1) and Inferentia (inf1/inf2) are not included: they use
 # custom neuron runtimes, not CUDA, and have no NVMe instance store.
 _GPU_PREFIXES = (
-    "g4dn.", "g4ad.",
-    "g5.", "g5g.",
+    "g4dn.",
+    "g4ad.",
+    "g5.",
+    "g5g.",
     "g6.",
-    "p3.", "p3dn.",
-    "p4d.", "p4de.",
+    "p3.",
+    "p3dn.",
+    "p4d.",
+    "p4de.",
     "p5.",
 )
 

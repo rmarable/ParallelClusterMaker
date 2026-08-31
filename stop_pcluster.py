@@ -41,10 +41,12 @@ def main():
         description="Stop the compute fleet of a ParallelCluster stack."
     )
     parser.add_argument("-N", "--cluster_name", required=True, help="Cluster name")
-    parser.add_argument("-R", "--region", default=None,
-                        help="AWS region (default: from cluster record)")
-    parser.add_argument("-W", "--wait", action="store_true",
-                        help="Wait for fleet to reach STOPPED before exiting")
+    parser.add_argument(
+        "-R", "--region", default=None, help="AWS region (default: from cluster record)"
+    )
+    parser.add_argument(
+        "-W", "--wait", action="store_true", help="Wait for fleet to reach STOPPED before exiting"
+    )
     args = parser.parse_args()
 
     cluster_name = args.cluster_name
@@ -91,7 +93,9 @@ def main():
     cluster_record = ClusterRecord.from_dict(rec)
     try:
         core_stop_fleet(
-            cluster_record=cluster_record, region=region, pcluster_bin=_PCLUSTER_BIN,
+            cluster_record=cluster_record,
+            region=region,
+            pcluster_bin=_PCLUSTER_BIN,
             wait=args.wait,
         )
     except PClusterMakerError as e:

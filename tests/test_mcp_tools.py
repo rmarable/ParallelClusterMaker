@@ -50,6 +50,7 @@ def _stub_az(monkeypatch, zones=({"RegionName": "us-east-2"},), seen=None):
     suite passes locally against live AWS and fails in CI, which is exactly
     how it behaved before the stub was added.
     """
+
     class _Client:
         def describe_availability_zones(self, ZoneNames=None, **kw):
             if seen is not None:
@@ -105,7 +106,8 @@ class TestToolCallsReturnStructuredResults:
 
         monkeypatch.setattr(tools_mod, "_load_records", lambda: [])
         monkeypatch.setattr(
-            tools_mod, "core_list_clusters",
+            tools_mod,
+            "core_list_clusters",
             lambda **kw: [_Entry("osiris", "us-east-2")],
         )
         async with Client(build_local()) as client:
@@ -117,7 +119,8 @@ class TestToolCallsReturnStructuredResults:
         seen = {}
         monkeypatch.setattr(tools_mod, "_load_records", lambda: [])
         monkeypatch.setattr(
-            tools_mod, "core_list_clusters",
+            tools_mod,
+            "core_list_clusters",
             lambda **kw: seen.update(kw) or [],
         )
         async with Client(build_local()) as client:
@@ -140,9 +143,7 @@ class TestToolCallsReturnStructuredResults:
         assert json.loads(_text(result)) == {"total": 12.5}
 
     @pytest.mark.asyncio
-    async def test_check_cluster_health_never_claims_ssh_is_available_remotely(
-        self, monkeypatch
-    ):
+    async def test_check_cluster_health_never_claims_ssh_is_available_remotely(self, monkeypatch):
         """Key material never reaches the *remote* transport, so there the
         SSH-dependent sub-checks must take core_check_cluster_health's
         existing SKIP branch rather than being attempted and failing.
@@ -157,7 +158,8 @@ class TestToolCallsReturnStructuredResults:
         seen = {}
         monkeypatch.setattr(tools_mod, "_require_record", lambda name: object())
         monkeypatch.setattr(
-            tools_mod, "core_check_cluster_health",
+            tools_mod,
+            "core_check_cluster_health",
             lambda **kw: seen.update(kw) or {"ok": True},
         )
         async with Client(build_remote()) as client:
@@ -169,7 +171,8 @@ class TestToolCallsReturnStructuredResults:
         seen = {}
         monkeypatch.setattr(tools_mod, "_require_record", lambda name: object())
         monkeypatch.setattr(
-            tools_mod, "core_diagnose_cluster",
+            tools_mod,
+            "core_diagnose_cluster",
             lambda **kw: seen.update(kw) or {"ok": True},
         )
         async with Client(build_remote()) as client:
@@ -187,21 +190,20 @@ class TestToolCallsReturnStructuredResults:
         tested; here it is only noise.
         """
         monkeypatch.setattr(tools_mod, "_aws_account_id", lambda: "123456789012")
-        monkeypatch.setattr(
-            tools_mod, "_acquire_distributed_cluster_lock", lambda *a, **kw: "lock"
-        )
+        monkeypatch.setattr(tools_mod, "_acquire_distributed_cluster_lock", lambda *a, **kw: "lock")
         monkeypatch.setattr(tools_mod, "s3_release_cluster_lock", lambda *a, **kw: None)
-        for tool, core in (("stop_fleet", "core_stop_fleet"),
-                           ("start_fleet", "core_start_fleet")):
+        for tool, core in (("stop_fleet", "core_stop_fleet"), ("start_fleet", "core_start_fleet")):
             seen = {}
             monkeypatch.setattr(
-                tools_mod, "_require_record",
+                tools_mod,
+                "_require_record",
                 lambda name: type("R", (), {"region": "us-east-2"})(),
             )
             # noqa B023: `seen` is rebound each iteration and this lambda is
             # consumed inside the same iteration, so late binding cannot bite.
             monkeypatch.setattr(  # noqa: B023
-                tools_mod, core,
+                tools_mod,
+                core,
                 lambda **kw: seen.update(kw) or {"ok": True},  # noqa: B023
             )
             async with Client(build_local()) as client:
@@ -273,10 +275,17 @@ class TestErrorsReachTheClientShaped:
 class TestTheDeleteGateThroughAClient:
     @pytest.mark.asyncio
     async def test_preview_returns_a_token_and_mutates_nothing(self, monkeypatch):
-        rec = type("R", (), {
-            "region": "us-east-2", "cluster_owner": "testuser", "serial": "osiris-1",
-            "ec2_keypair": "kp", "s3_bucketname": "bucket",
-        })()
+        rec = type(
+            "R",
+            (),
+            {
+                "region": "us-east-2",
+                "cluster_owner": "testuser",
+                "serial": "osiris-1",
+                "ec2_keypair": "kp",
+                "s3_bucketname": "bucket",
+            },
+        )()
         monkeypatch.setattr(tools_mod, "_require_record", lambda name: rec)
         called = []
         monkeypatch.setattr(tools_mod, "core_delete_cluster", lambda **kw: called.append(kw))
@@ -288,45 +297,67 @@ class TestTheDeleteGateThroughAClient:
 
     @pytest.mark.asyncio
     async def test_the_previewed_token_lets_the_delete_through(self, monkeypatch):
-        rec = type("R", (), {
-            "region": "us-east-2", "cluster_owner": "testuser", "serial": "osiris-1",
-            "ec2_keypair": "kp", "s3_bucketname": "bucket",
-        })()
+        rec = type(
+            "R",
+            (),
+            {
+                "region": "us-east-2",
+                "cluster_owner": "testuser",
+                "serial": "osiris-1",
+                "ec2_keypair": "kp",
+                "s3_bucketname": "bucket",
+            },
+        )()
         monkeypatch.setattr(tools_mod, "_require_record", lambda name: rec)
         called = []
         monkeypatch.setattr(
-            tools_mod, "core_delete_cluster",
+            tools_mod,
+            "core_delete_cluster",
             lambda **kw: called.append(kw) or {"success": True},
         )
         async with Client(build_local()) as client:
-            preview = json.loads(_text(
-                await client.call_tool("preview_cluster_delete", {"cluster_name": "osiris"})
-            ))
-            await client.call_tool("delete_cluster", {
-                "cluster_name": "osiris",
-                "confirmation_token": preview["confirmation_token"],
-            })
+            preview = json.loads(
+                _text(await client.call_tool("preview_cluster_delete", {"cluster_name": "osiris"}))
+            )
+            await client.call_tool(
+                "delete_cluster",
+                {
+                    "cluster_name": "osiris",
+                    "confirmation_token": preview["confirmation_token"],
+                },
+            )
         assert len(called) == 1
         assert called[0]["wait"] is False
 
     @pytest.mark.asyncio
     async def test_a_token_from_a_different_cluster_is_refused(self, monkeypatch):
         """End-to-end version of the property the gate exists for."""
-        rec = type("R", (), {
-            "region": "us-east-2", "cluster_owner": "testuser", "serial": "s",
-            "ec2_keypair": "kp", "s3_bucketname": "bucket",
-        })()
+        rec = type(
+            "R",
+            (),
+            {
+                "region": "us-east-2",
+                "cluster_owner": "testuser",
+                "serial": "s",
+                "ec2_keypair": "kp",
+                "s3_bucketname": "bucket",
+            },
+        )()
         monkeypatch.setattr(tools_mod, "_require_record", lambda name: rec)
         called = []
         monkeypatch.setattr(tools_mod, "core_delete_cluster", lambda **kw: called.append(kw))
         async with Client(build_local()) as client:
-            preview = json.loads(_text(
-                await client.call_tool("preview_cluster_delete", {"cluster_name": "osiris"})
-            ))
-            result = await client.call_tool("delete_cluster", {
-                "cluster_name": "production",
-                "confirmation_token": preview["confirmation_token"],
-            }, raise_on_error=False)
+            preview = json.loads(
+                _text(await client.call_tool("preview_cluster_delete", {"cluster_name": "osiris"}))
+            )
+            result = await client.call_tool(
+                "delete_cluster",
+                {
+                    "cluster_name": "production",
+                    "confirmation_token": preview["confirmation_token"],
+                },
+                raise_on_error=False,
+            )
         assert result.is_error
         assert called == [], "a mismatched token must not reach the core function"
 
@@ -349,8 +380,10 @@ class TestCreateClusterOverrides:
         _stub_az(monkeypatch)
 
     _REQ = dict(
-        cluster_name="osiris", cluster_owner="testuser",
-        cluster_owner_email="testuser@example.com", az="us-east-2a",
+        cluster_name="osiris",
+        cluster_owner="testuser",
+        cluster_owner_email="testuser@example.com",
+        az="us-east-2a",
         headnode_instance_type="c5.xlarge",
     )
     # A compute queue is required -- both instance-type defaults are ""
@@ -366,9 +399,7 @@ class TestCreateClusterOverrides:
         args.update(kw)
         args["overrides"] = overrides
         async with Client(build_local()) as client:
-            return await client.call_tool(
-                "preview_cluster_config", args, raise_on_error=False
-            )
+            return await client.call_tool("preview_cluster_config", args, raise_on_error=False)
 
     @pytest.mark.asyncio
     async def test_a_plain_preview_resolves_the_whole_config(self):
@@ -382,8 +413,12 @@ class TestCreateClusterOverrides:
         """The point of option B -- parity with the CLI, not a curated
         subset."""
         result = await self._preview(
-            overrides={"enable_fsx": "true", "fsx_size": 2400,
-                       "ebs_encryption": "true", "placement_group": "cluster"}
+            overrides={
+                "enable_fsx": "true",
+                "fsx_size": 2400,
+                "ebs_encryption": "true",
+                "placement_group": "cluster",
+            }
         )
         cfg = json.loads(_text(result))["resolved_config"]
         # Coerced to a real bool before it reaches MakeClusterParams --
@@ -428,9 +463,7 @@ class TestCreateClusterOverrides:
 
     @pytest.mark.asyncio
     async def test_an_overridden_default_drops_out_of_notable_defaults(self):
-        payload = json.loads(_text(
-            await self._preview(overrides={"ebs_encryption": "true"})
-        ))
+        payload = json.loads(_text(await self._preview(overrides={"ebs_encryption": "true"})))
         assert "ebs_encryption" not in payload["notable_defaults"]
         assert payload["non_default_settings"]["ebs_encryption"] == "true"
 
@@ -442,8 +475,10 @@ class TestTheCliOnlyParameters:
     refuse."""
 
     _REQ = dict(
-        cluster_name="osiris", cluster_owner="testuser",
-        cluster_owner_email="testuser@example.com", az="us-east-2a",
+        cluster_name="osiris",
+        cluster_owner="testuser",
+        cluster_owner_email="testuser@example.com",
+        az="us-east-2a",
         headnode_instance_type="c5.xlarge",
     )
 
@@ -452,13 +487,9 @@ class TestTheCliOnlyParameters:
         merged.update(overrides)
         args = dict(self._REQ, overrides=merged)
         async with Client(build_local()) as client:
-            return await client.call_tool(
-                "preview_cluster_config", args, raise_on_error=False
-            )
+            return await client.call_tool("preview_cluster_config", args, raise_on_error=False)
 
-    @pytest.mark.parametrize(
-        "param", ["pre_install_script", "post_install_script", "custom_ami"]
-    )
+    @pytest.mark.parametrize("param", ["pre_install_script", "post_install_script", "custom_ami"])
     @pytest.mark.asyncio
     async def test_each_denied_parameter_is_refused(self, param):
         result = await self._preview({param: "something"})
@@ -491,7 +522,9 @@ class TestTheCliOnlyParameters:
         from mcp_server.tools import _REMOTE_DENIED_PARAMS
 
         assert set(_REMOTE_DENIED_PARAMS) == {
-            "pre_install_script", "post_install_script", "custom_ami"
+            "pre_install_script",
+            "post_install_script",
+            "custom_ami",
         }
 
     @pytest.mark.asyncio
@@ -501,11 +534,12 @@ class TestTheCliOnlyParameters:
         from mcp_server.confirmation_token import mint
 
         params = dict(self._REQ)
-        token_params = dict(
-            params, overrides={"custom_ami": "ami-0abc"}, defaults=None
+        token_params = dict(params, overrides={"custom_ami": "ami-0abc"}, defaults=None)
+        args = dict(
+            params,
+            confirmation_token=mint("create_cluster", token_params),
+            overrides={"custom_ami": "ami-0abc"},
         )
-        args = dict(params, confirmation_token=mint("create_cluster", token_params),
-                    overrides={"custom_ami": "ami-0abc"})
         async with Client(build_local()) as client:
             result = await client.call_tool("create_cluster", args, raise_on_error=False)
         assert result.is_error
@@ -523,8 +557,10 @@ class TestTheNoQueueClusterIsRefusedRemotely:
         _stub_az(monkeypatch)
 
     _REQ = dict(
-        cluster_name="osiris", cluster_owner="testuser",
-        cluster_owner_email="testuser@example.com", az="us-east-2a",
+        cluster_name="osiris",
+        cluster_owner="testuser",
+        cluster_owner_email="testuser@example.com",
+        az="us-east-2a",
         headnode_instance_type="c5.xlarge",
     )
 
@@ -553,9 +589,7 @@ class TestTheNoQueueClusterIsRefusedRemotely:
         would be the obvious over-correction here."""
         args = dict(self._REQ, overrides={"gpu_instance_type": "g5.xlarge"})
         async with Client(build_local()) as client:
-            result = await client.call_tool(
-                "preview_cluster_config", args, raise_on_error=False
-            )
+            result = await client.call_tool("preview_cluster_config", args, raise_on_error=False)
         assert not result.is_error
 
 
@@ -576,8 +610,10 @@ class TestCreateClusterResolvesTheRegionItBuildsIn:
     """
 
     _REQ = dict(
-        cluster_name="osiris", cluster_owner="testuser",
-        cluster_owner_email="testuser@example.com", az="us-east-2a",
+        cluster_name="osiris",
+        cluster_owner="testuser",
+        cluster_owner_email="testuser@example.com",
+        az="us-east-2a",
         headnode_instance_type="c5.xlarge",
     )
     _QUEUE = {"compute_instance_type": "c5.2xlarge"}
@@ -600,11 +636,10 @@ class TestCreateClusterResolvesTheRegionItBuildsIn:
         # <cluster>_defaults.yml has to be covered, or a file edited inside
         # the 15-minute window builds something else. None here because the
         # conftest isolation fixture guarantees no such file.
-        token_params = dict(
-            self._REQ, overrides=dict(sorted(overrides.items())), defaults=None
-        )
+        token_params = dict(self._REQ, overrides=dict(sorted(overrides.items())), defaults=None)
         return dict(
-            self._REQ, overrides=overrides,
+            self._REQ,
+            overrides=overrides,
             confirmation_token=mint("create_cluster", token_params),
         )
 
@@ -616,9 +651,7 @@ class TestCreateClusterResolvesTheRegionItBuildsIn:
         self._stub_core(monkeypatch, calls)
 
         async with Client(build_local()) as client:
-            result = await client.call_tool(
-                "create_cluster", self._args(), raise_on_error=False
-            )
+            result = await client.call_tool("create_cluster", self._args(), raise_on_error=False)
 
         assert not result.is_error, _text(result)
         assert len(calls) == 1
@@ -626,9 +659,7 @@ class TestCreateClusterResolvesTheRegionItBuildsIn:
         assert seen == [["us-east-2a"]], "the AZ actually asked about"
 
     @pytest.mark.asyncio
-    async def test_the_region_comes_from_ec2_not_from_trimming_the_az(
-        self, monkeypatch
-    ):
+    async def test_the_region_comes_from_ec2_not_from_trimming_the_az(self, monkeypatch):
         """az[:-1] is right for every AZ _validate_az_input accepts, so a
         string trim passes the test above and still skips the call that
         proves the AZ exists. Only a divergent answer separates them."""
@@ -637,9 +668,7 @@ class TestCreateClusterResolvesTheRegionItBuildsIn:
         self._stub_core(monkeypatch, calls)
 
         async with Client(build_local()) as client:
-            result = await client.call_tool(
-                "create_cluster", self._args(), raise_on_error=False
-            )
+            result = await client.call_tool("create_cluster", self._args(), raise_on_error=False)
 
         assert not result.is_error, _text(result)
         assert calls[0]["region"] == "eu-west-1" != "us-east-2"
@@ -654,9 +683,7 @@ class TestCreateClusterResolvesTheRegionItBuildsIn:
         self._stub_core(monkeypatch, calls)
 
         async with Client(build_local()) as client:
-            result = await client.call_tool(
-                "create_cluster", self._args(), raise_on_error=False
-            )
+            result = await client.call_tool("create_cluster", self._args(), raise_on_error=False)
 
         assert result.is_error
         assert "us-east-2a" in _text(result)
@@ -691,8 +718,10 @@ class TestThePreviewVerifiesTheAzBeforeMintingAToken:
     """
 
     _REQ = dict(
-        cluster_name="osiris", cluster_owner="testuser",
-        cluster_owner_email="testuser@example.com", az="us-east-2a",
+        cluster_name="osiris",
+        cluster_owner="testuser",
+        cluster_owner_email="testuser@example.com",
+        az="us-east-2a",
         headnode_instance_type="c5.xlarge",
     )
     _QUEUE = {"compute_instance_type": "c5.2xlarge"}
@@ -704,14 +733,10 @@ class TestThePreviewVerifiesTheAzBeforeMintingAToken:
             overrides = self._QUEUE
         args = dict(self._REQ, overrides=dict(overrides))
         async with Client(build_local()) as client:
-            return await client.call_tool(
-                "preview_cluster_config", args, raise_on_error=False
-            )
+            return await client.call_tool("preview_cluster_config", args, raise_on_error=False)
 
     @pytest.mark.asyncio
-    async def test_the_preview_reports_the_region_it_verified(
-        self, monkeypatch
-    ):
+    async def test_the_preview_reports_the_region_it_verified(self, monkeypatch):
         """The key shipped as `resolved.get("region", "")` against a
         dataclass with no region field, so it was always the empty string.
         A caller cannot tell an unknown region from a missing one."""
@@ -762,8 +787,10 @@ class TestTheDefaultsFileReachesTheMcpSurface:
     """
 
     _REQ = dict(
-        cluster_name="osiris", cluster_owner="testuser",
-        cluster_owner_email="testuser@example.com", az="us-east-2a",
+        cluster_name="osiris",
+        cluster_owner="testuser",
+        cluster_owner_email="testuser@example.com",
+        az="us-east-2a",
         headnode_instance_type="c5.xlarge",
     )
 
@@ -775,9 +802,7 @@ class TestTheDefaultsFileReachesTheMcpSurface:
         import yaml as _yaml
 
         (tmp_path / "osiris_defaults.yml").write_text(_yaml.safe_dump(contents))
-        monkeypatch.setattr(
-            "pcluster_core._default_repo_root", lambda: str(tmp_path)
-        )
+        monkeypatch.setattr("pcluster_core._default_repo_root", lambda: str(tmp_path))
 
     async def _preview(self):
         async with Client(build_local()) as client:
@@ -788,20 +813,21 @@ class TestTheDefaultsFileReachesTheMcpSurface:
     async def _create(self, token):
         args = dict(self._REQ, confirmation_token=token)
         async with Client(build_local()) as client:
-            return await client.call_tool(
-                "create_cluster", args, raise_on_error=False
-            )
+            return await client.call_tool("create_cluster", args, raise_on_error=False)
 
     @pytest.mark.asyncio
-    async def test_the_preview_applies_the_file_and_names_it(
-        self, tmp_path, monkeypatch
-    ):
+    async def test_the_preview_applies_the_file_and_names_it(self, tmp_path, monkeypatch):
         """No overrides are passed at all here -- the compute queue comes
         from the file. Before this, the same call was refused for having no
         queue, with the operator's own file sitting unread beside it."""
-        self._write(tmp_path, monkeypatch, {
-            "compute_instance_type": "c6g.8xlarge", "cluster_type": "spot",
-        })
+        self._write(
+            tmp_path,
+            monkeypatch,
+            {
+                "compute_instance_type": "c6g.8xlarge",
+                "cluster_type": "spot",
+            },
+        )
 
         payload = json.loads(_text(await self._preview()))
 
@@ -818,7 +844,8 @@ class TestTheDefaultsFileReachesTheMcpSurface:
         token still verified."""
         calls = []
         monkeypatch.setattr(
-            tools_mod, "core_create_cluster",
+            tools_mod,
+            "core_create_cluster",
             lambda **kw: calls.append(kw) or {"status": "kicked off"},
         )
         self._write(tmp_path, monkeypatch, {"compute_instance_type": "c6g.8xlarge"})
@@ -831,14 +858,13 @@ class TestTheDefaultsFileReachesTheMcpSurface:
         assert calls == [], "a build must not start on a stale preview"
 
     @pytest.mark.asyncio
-    async def test_an_untouched_file_still_authorizes_the_build(
-        self, tmp_path, monkeypatch
-    ):
+    async def test_an_untouched_file_still_authorizes_the_build(self, tmp_path, monkeypatch):
         """Vacuity guard. A binding that rejected every token would satisfy
         the test above and break the tool."""
         calls = []
         monkeypatch.setattr(
-            tools_mod, "core_create_cluster",
+            tools_mod,
+            "core_create_cluster",
             lambda **kw: calls.append(kw) or {"status": "kicked off"},
         )
         self._write(tmp_path, monkeypatch, {"compute_instance_type": "c6g.8xlarge"})
@@ -850,9 +876,7 @@ class TestTheDefaultsFileReachesTheMcpSurface:
         assert calls[0]["params"].compute_instance_type == "c6g.8xlarge"
 
     @pytest.mark.asyncio
-    async def test_the_preview_does_not_call_a_file_value_a_default(
-        self, tmp_path, monkeypatch
-    ):
+    async def test_the_preview_does_not_call_a_file_value_a_default(self, tmp_path, monkeypatch):
         """notable_defaults filtered on `overrides` alone, so a file that
         set base_os=ubuntu2404arm still had the preview reporting
         base_os=ubuntu2404 -- the wrong OS, stated to the operator who is
@@ -860,9 +884,14 @@ class TestTheDefaultsFileReachesTheMcpSurface:
         from pcluster_core import MAKE_CLUSTER_DEFAULTS
 
         assert MAKE_CLUSTER_DEFAULTS["base_os"] != "ubuntu2404arm"
-        self._write(tmp_path, monkeypatch, {
-            "compute_instance_type": "c6g.8xlarge", "base_os": "ubuntu2404arm",
-        })
+        self._write(
+            tmp_path,
+            monkeypatch,
+            {
+                "compute_instance_type": "c6g.8xlarge",
+                "base_os": "ubuntu2404arm",
+            },
+        )
 
         payload = json.loads(_text(await self._preview()))
 
@@ -871,9 +900,7 @@ class TestTheDefaultsFileReachesTheMcpSurface:
         assert payload["defaults_file_settings"]["base_os"] == "ubuntu2404arm"
 
     @pytest.mark.asyncio
-    async def test_a_default_the_file_leaves_alone_is_still_reported(
-        self, tmp_path, monkeypatch
-    ):
+    async def test_a_default_the_file_leaves_alone_is_still_reported(self, tmp_path, monkeypatch):
         """Vacuity guard: emptying notable_defaults would satisfy the test
         above and destroy the block's purpose."""
         self._write(tmp_path, monkeypatch, {"compute_instance_type": "c6g.8xlarge"})
@@ -884,15 +911,18 @@ class TestTheDefaultsFileReachesTheMcpSurface:
         assert "compute_instance_type" not in payload["notable_defaults"]
 
     @pytest.mark.asyncio
-    async def test_a_non_build_key_is_not_reported_as_a_setting(
-        self, tmp_path, monkeypatch
-    ):
+    async def test_a_non_build_key_is_not_reported_as_a_setting(self, tmp_path, monkeypatch):
         """delete_s3_bucketname is in the file for kill_pcluster.py. The
         build ignores it, so reporting it as something this cluster was
         configured with would be a third wrong claim in the same block."""
-        self._write(tmp_path, monkeypatch, {
-            "compute_instance_type": "c6g.8xlarge", "delete_s3_bucketname": "true",
-        })
+        self._write(
+            tmp_path,
+            monkeypatch,
+            {
+                "compute_instance_type": "c6g.8xlarge",
+                "delete_s3_bucketname": "true",
+            },
+        )
 
         payload = json.loads(_text(await self._preview()))
 
@@ -900,9 +930,7 @@ class TestTheDefaultsFileReachesTheMcpSurface:
         assert payload["defaults_file_settings"]["compute_instance_type"] == "c6g.8xlarge"
 
     @pytest.mark.asyncio
-    async def test_a_defaults_file_may_set_what_an_override_may_not(
-        self, tmp_path, monkeypatch
-    ):
+    async def test_a_defaults_file_may_set_what_an_override_may_not(self, tmp_path, monkeypatch):
         """A decision, not an oversight, so it is pinned rather than left
         to be rediscovered as a bug.
 
@@ -914,24 +942,27 @@ class TestTheDefaultsFileReachesTheMcpSurface:
         real operator's file: `pcluster_defaults.yml` itself sets
         pre_install_script and post_install_script.
         """
-        self._write(tmp_path, monkeypatch, {
-            "compute_instance_type": "c6g.8xlarge",
-            "post_install_script": "scripts/post-deployment.sh",
-        })
-
-        payload = json.loads(_text(await self._preview()))
-        assert payload["resolved_config"]["post_install_script"] == (
-            "scripts/post-deployment.sh"
+        self._write(
+            tmp_path,
+            monkeypatch,
+            {
+                "compute_instance_type": "c6g.8xlarge",
+                "post_install_script": "scripts/post-deployment.sh",
+            },
         )
 
-        args = dict(self._REQ, overrides={
-            "compute_instance_type": "c6g.8xlarge",
-            "post_install_script": "scripts/post-deployment.sh",
-        })
+        payload = json.loads(_text(await self._preview()))
+        assert payload["resolved_config"]["post_install_script"] == ("scripts/post-deployment.sh")
+
+        args = dict(
+            self._REQ,
+            overrides={
+                "compute_instance_type": "c6g.8xlarge",
+                "post_install_script": "scripts/post-deployment.sh",
+            },
+        )
         async with Client(build_local()) as client:
-            refused = await client.call_tool(
-                "preview_cluster_config", args, raise_on_error=False
-            )
+            refused = await client.call_tool("preview_cluster_config", args, raise_on_error=False)
         assert refused.is_error, "the same value as an override is still refused"
         assert "post_install_script" in _text(refused)
 
@@ -955,7 +986,9 @@ class TestTheStoreIsAddressedInTheClustersRegion:
         seen = {"clients": [], "buckets": []}
         monkeypatch.setattr(t, "_aws_account_id", lambda: "123456789012")
         monkeypatch.setattr(
-            t, "_store_region", lambda: "us-east-1"  # the ambient region
+            t,
+            "_store_region",
+            lambda: "us-east-1",  # the ambient region
         )
 
         real_client = boto3.client
@@ -973,18 +1006,14 @@ class TestTheStoreIsAddressedInTheClustersRegion:
     def test_a_cluster_region_wins_over_the_ambient_one(self, monkeypatch):
         seen = self._seen_regions(monkeypatch, "us-west-2")
         assert seen["clients"] == ["us-west-2"]
-        assert seen["buckets"] == [
-            "parallelclustermaker-locks-123456789012-us-west-2"
-        ]
+        assert seen["buckets"] == ["parallelclustermaker-locks-123456789012-us-west-2"]
 
     def test_the_ambient_region_is_the_fallback(self, monkeypatch):
         """Only for the two cases with no cluster to ask: enumerating the
         store, and a cluster this machine has no local record for."""
         seen = self._seen_regions(monkeypatch, None)
         assert seen["clients"] == ["us-east-1"]
-        assert seen["buckets"] == [
-            "parallelclustermaker-locks-123456789012-us-east-1"
-        ]
+        assert seen["buckets"] == ["parallelclustermaker-locks-123456789012-us-east-1"]
 
     def test_every_tool_with_a_record_passes_its_region(self):
         """Asserted over the source: a call site that drops the argument
@@ -999,9 +1028,11 @@ class TestTheStoreIsAddressedInTheClustersRegion:
         tree = ast.parse(src)
         bare, passed = [], []
         for node in ast.walk(tree):
-            if (isinstance(node, ast.Call)
-                    and isinstance(node.func, ast.Name)
-                    and node.func.id == "_record_store"):
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id == "_record_store"
+            ):
                 (passed if node.args else bare).append(node.lineno)
 
         assert passed, "no call site passes a region"
@@ -1083,17 +1114,14 @@ class TestAnInvalidClusterNameDoesNotKillTheServer:
         error result while the transport is already unwinding."""
         async with Client(build_local()) as client:
             first = await client.call_tool(
-                "check_cluster_health", {"cluster_name": name},
+                "check_cluster_health",
+                {"cluster_name": name},
                 raise_on_error=False,
             )
             assert first.is_error
 
-            survived = await client.call_tool(
-                "list_clusters", {}, raise_on_error=False
-            )
-            assert not survived.is_error, (
-                f"the server did not survive cluster_name={name!r}"
-            )
+            survived = await client.call_tool("list_clusters", {}, raise_on_error=False)
+            assert not survived.is_error, f"the server did not survive cluster_name={name!r}"
 
     @pytest.mark.asyncio
     async def test_the_error_still_says_what_is_wrong(self):
@@ -1101,7 +1129,8 @@ class TestAnInvalidClusterNameDoesNotKillTheServer:
         tracked' would satisfy the test above and lose the naming rule."""
         async with Client(build_local()) as client:
             result = await client.call_tool(
-                "check_cluster_health", {"cluster_name": "Bad_Name"},
+                "check_cluster_health",
+                {"cluster_name": "Bad_Name"},
                 raise_on_error=False,
             )
         text = _text(result)
@@ -1126,7 +1155,8 @@ class TestAnInvalidClusterNameDoesNotKillTheServer:
             if "cluster_name" not in args:
                 continue
             calls = {
-                n.func.id for n in ast.walk(node)
+                n.func.id
+                for n in ast.walk(node)
                 if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
             }
             if "_require_record" in calls:
@@ -1153,23 +1183,31 @@ class TestListQueuesReturnsWhatItsAnnotationPromises:
         import types
 
         monkeypatch.setattr(
-            tools_mod, "_require_record",
+            tools_mod,
+            "_require_record",
             lambda name: types.SimpleNamespace(region="us-east-1"),
         )
-        monkeypatch.setattr(
-            tools_mod, "core_list_queues", lambda **kw: queues
-        )
+        monkeypatch.setattr(tools_mod, "core_list_queues", lambda **kw: queues)
 
     @pytest.mark.asyncio
     async def test_a_queue_listing_survives_the_transport(self, monkeypatch):
-        self._stub(monkeypatch, [
-            {"name": "compute", "queue_type": "compute",
-             "capacity_type": "SPOT", "min_count": 0, "max_count": 8,
-             "instance_types": ["c8g.xlarge"]},
-        ])
+        self._stub(
+            monkeypatch,
+            [
+                {
+                    "name": "compute",
+                    "queue_type": "compute",
+                    "capacity_type": "SPOT",
+                    "min_count": 0,
+                    "max_count": 8,
+                    "instance_types": ["c8g.xlarge"],
+                },
+            ],
+        )
         async with Client(build_local()) as client:
             result = await client.call_tool(
-                "list_queues", {"cluster_name": "osiris"},
+                "list_queues",
+                {"cluster_name": "osiris"},
                 raise_on_error=False,
             )
         assert not result.is_error, _text(result)
@@ -1182,7 +1220,8 @@ class TestListQueuesReturnsWhatItsAnnotationPromises:
         self._stub(monkeypatch, [])
         async with Client(build_local()) as client:
             result = await client.call_tool(
-                "list_queues", {"cluster_name": "osiris"},
+                "list_queues",
+                {"cluster_name": "osiris"},
                 raise_on_error=False,
             )
         assert not result.is_error, _text(result)
@@ -1195,8 +1234,7 @@ class TestListQueuesReturnsWhatItsAnnotationPromises:
 
         tree = ast.parse(open(tools_mod.__file__).read())
         fn = next(
-            n for n in ast.walk(tree)
-            if isinstance(n, ast.FunctionDef) and n.name == "list_queues"
+            n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == "list_queues"
         )
         assert ast.unparse(fn.returns) == "list[dict]", ast.unparse(fn.returns)
 
@@ -1209,10 +1247,17 @@ class TestFinalizeCompletesWhatDeleteStarted:
     """
 
     def _rec(self):
-        return type("R", (), {
-            "region": "us-east-2", "cluster_owner": "testuser", "serial": "osiris-1",
-            "ec2_keypair": "kp", "s3_bucketname": "bucket",
-        })()
+        return type(
+            "R",
+            (),
+            {
+                "region": "us-east-2",
+                "cluster_owner": "testuser",
+                "serial": "osiris-1",
+                "ec2_keypair": "kp",
+                "s3_bucketname": "bucket",
+            },
+        )()
 
     @pytest.mark.asyncio
     async def test_it_finalizes_without_a_token(self, monkeypatch):
@@ -1223,12 +1268,12 @@ class TestFinalizeCompletesWhatDeleteStarted:
         monkeypatch.setattr(tools_mod, "_require_record", lambda name: self._rec())
         called = []
         monkeypatch.setattr(
-            tools_mod, "core_delete_cluster",
+            tools_mod,
+            "core_delete_cluster",
             lambda **kw: called.append(kw) or {"success": True},
         )
         async with Client(build_local()) as client:
-            await client.call_tool("finalize_cluster_teardown",
-                                   {"cluster_name": "osiris"})
+            await client.call_tool("finalize_cluster_teardown", {"cluster_name": "osiris"})
         assert len(called) == 1
         assert called[0]["finalize_only"] is True
 
@@ -1239,17 +1284,16 @@ class TestFinalizeCompletesWhatDeleteStarted:
         monkeypatch.setattr(tools_mod, "_require_record", lambda name: self._rec())
         called = []
         monkeypatch.setattr(
-            tools_mod, "core_delete_cluster",
+            tools_mod,
+            "core_delete_cluster",
             lambda **kw: called.append(kw) or {"success": True},
         )
         async with Client(build_local()) as client:
-            await client.call_tool("finalize_cluster_teardown",
-                                   {"cluster_name": "osiris"})
+            await client.call_tool("finalize_cluster_teardown", {"cluster_name": "osiris"})
         assert "wait" not in called[0]
 
     @pytest.mark.asyncio
-    async def test_a_token_minted_for_another_action_does_not_authorize_a_delete(
-            self, monkeypatch):
+    async def test_a_token_minted_for_another_action_does_not_authorize_a_delete(self, monkeypatch):
         """A token binds an action as well as parameters. delete_cluster is
         the only tool left that takes one, so the interchangeability that
         used to be tested between the delete and finalize tokens is now
@@ -1261,10 +1305,14 @@ class TestFinalizeCompletesWhatDeleteStarted:
         monkeypatch.setattr(tools_mod, "core_delete_cluster", lambda **kw: called.append(kw))
         params = {"cluster_name": "osiris", "delete_s3_bucketname": True}
         async with Client(build_local()) as client:
-            result = await client.call_tool("delete_cluster", {
-                "cluster_name": "osiris",
-                "confirmation_token": mint("finalize_cluster_teardown", params),
-            }, raise_on_error=False)
+            result = await client.call_tool(
+                "delete_cluster",
+                {
+                    "cluster_name": "osiris",
+                    "confirmation_token": mint("finalize_cluster_teardown", params),
+                },
+                raise_on_error=False,
+            )
         assert result.is_error
         assert called == []
 
@@ -1274,19 +1322,22 @@ class TestFinalizeCompletesWhatDeleteStarted:
         called = []
         monkeypatch.setattr(tools_mod, "core_delete_cluster", lambda **kw: called.append(kw))
         async with Client(build_local()) as client:
-            preview = json.loads(_text(
-                await client.call_tool("preview_cluster_delete", {"cluster_name": "osiris"})
-            ))
-            result = await client.call_tool("delete_cluster", {
-                "cluster_name": "production",
-                "confirmation_token": preview["confirmation_token"],
-            }, raise_on_error=False)
+            preview = json.loads(
+                _text(await client.call_tool("preview_cluster_delete", {"cluster_name": "osiris"}))
+            )
+            result = await client.call_tool(
+                "delete_cluster",
+                {
+                    "cluster_name": "production",
+                    "confirmation_token": preview["confirmation_token"],
+                },
+                raise_on_error=False,
+            )
         assert result.is_error
         assert called == []
 
     @pytest.mark.asyncio
-    async def test_the_preview_mints_no_token_for_a_call_that_takes_none(
-            self, monkeypatch):
+    async def test_the_preview_mints_no_token_for_a_call_that_takes_none(self, monkeypatch):
         """It minted a `finalization_token` and its next_step told the
         caller to pass it to finalize_cluster_teardown, which stopped
         accepting a token when auto-finalize landed -- so an agent that
@@ -1295,9 +1346,9 @@ class TestFinalizeCompletesWhatDeleteStarted:
         no instructions."""
         monkeypatch.setattr(tools_mod, "_require_record", lambda name: self._rec())
         async with Client(build_local()) as client:
-            preview = json.loads(_text(
-                await client.call_tool("preview_cluster_delete", {"cluster_name": "osiris"})
-            ))
+            preview = json.loads(
+                _text(await client.call_tool("preview_cluster_delete", {"cluster_name": "osiris"}))
+            )
         assert "finalization_token" not in preview
         assert "finalization_token" not in preview["next_step"]
 
@@ -1307,8 +1358,7 @@ class TestFinalizeCompletesWhatDeleteStarted:
         token here could not be satisfied on its intended path, because a
         teardown outlives the 900s TTL of the token minted before it."""
         monkeypatch.setattr(tools_mod, "_require_record", lambda name: self._rec())
-        monkeypatch.setattr(tools_mod, "core_delete_cluster",
-                            lambda **kw: {"success": True})
+        monkeypatch.setattr(tools_mod, "core_delete_cluster", lambda **kw: {"success": True})
         async with Client(build_local()) as client:
             tool = {t.name: t for t in await client.list_tools()}["finalize_cluster_teardown"]
             assert "confirmation_token" not in tool.inputSchema.get("properties", {})
@@ -1362,17 +1412,28 @@ class TestOneServerManagesOneRegion:
         """A full ClusterRecord projection -- from_dict wants all 22 fields,
         and a thin dict would fail for a reason unrelated to the guard."""
         return {
-            "cluster_name": "osiris", "cluster_owner": "rmarable",
-            "serial": "osiris-1", "region": region,
-            "headnode_instance_type": "c8g.large", "enable_loginnode": "false",
-            "loginnode_instance_type": "", "loginnode_count": 0,
-            "cpu_instance_types": ["c8g.xlarge"], "gpu_instance_types": [],
-            "enable_cpu_queue": "true", "enable_gpu_queue": "false",
-            "initial_cpu_queue_size": 0, "max_cpu_queue_size": 8,
-            "initial_gpu_queue_size": 0, "max_gpu_queue_size": 0,
-            "cluster_type": "spot", "deployment_date": "2026-08-24",
-            "ssh_keypair": "/dev/null/x.pem", "ec2_keypair": "kp",
-            "ec2_user": "ubuntu", "s3_bucketname": "bucket",
+            "cluster_name": "osiris",
+            "cluster_owner": "rmarable",
+            "serial": "osiris-1",
+            "region": region,
+            "headnode_instance_type": "c8g.large",
+            "enable_loginnode": "false",
+            "loginnode_instance_type": "",
+            "loginnode_count": 0,
+            "cpu_instance_types": ["c8g.xlarge"],
+            "gpu_instance_types": [],
+            "enable_cpu_queue": "true",
+            "enable_gpu_queue": "false",
+            "initial_cpu_queue_size": 0,
+            "max_cpu_queue_size": 8,
+            "initial_gpu_queue_size": 0,
+            "max_gpu_queue_size": 0,
+            "cluster_type": "spot",
+            "deployment_date": "2026-08-24",
+            "ssh_keypair": "/dev/null/x.pem",
+            "ec2_keypair": "kp",
+            "ec2_user": "ubuntu",
+            "s3_bucketname": "bucket",
             "enable_monitoring": "false",
         }
 
@@ -1385,8 +1446,7 @@ class TestOneServerManagesOneRegion:
         opaque AccessDenied rather than anything diagnosable."""
         from pcluster_core import PClusterMakerError
 
-        t = self._stub(monkeypatch, stored=self._rec("us-west-2"),
-                       store_region="us-east-1")
+        t = self._stub(monkeypatch, stored=self._rec("us-west-2"), store_region="us-east-1")
         with pytest.raises(PClusterMakerError) as exc:
             t._require_record("osiris")
         msg = str(exc.value)
@@ -1401,15 +1461,13 @@ class TestOneServerManagesOneRegion:
         the store branch: an operator's own checkout legitimately holds a
         vars file for a cluster in any region, and reading it first is what
         lets that cluster's region address its own bucket afterward."""
-        t = self._stub(monkeypatch, local=self._rec("us-west-2"),
-                       store_region="us-east-1")
+        t = self._stub(monkeypatch, local=self._rec("us-west-2"), store_region="us-east-1")
         rec = t._require_record("osiris")
         assert rec.region == "us-west-2"
 
     def test_a_store_record_in_its_own_region_passes(self, monkeypatch):
         """Vacuity guard: refusing everything would satisfy the test above."""
-        t = self._stub(monkeypatch, stored=self._rec("us-east-1"),
-                       store_region="us-east-1")
+        t = self._stub(monkeypatch, stored=self._rec("us-east-1"), store_region="us-east-1")
         assert t._require_record("osiris").region == "us-east-1"
 
     def test_an_unresolvable_store_region_does_not_false_refuse(self, monkeypatch):
@@ -1447,7 +1505,6 @@ class TestOneServerManagesOneRegion:
         assert "us-east-1" in msg
         assert "one region" in msg
         assert "endpoint" in msg, "the message must name the remedy, not just the fact"
-
 
 
 class TestTheSanitizerIsWhatGuaranteesTheRecordShape:
@@ -1488,7 +1545,9 @@ class TestTheSanitizerIsWhatGuaranteesTheRecordShape:
         assert rec.cluster_name == "osiris"
 
     def test_a_truncated_store_object_still_yields_a_whole_record(
-        self, monkeypatch, tmp_path,
+        self,
+        monkeypatch,
+        tmp_path,
     ):
         """The real `_read_cluster_record`, not a stub of it.
 
@@ -1501,11 +1560,15 @@ class TestTheSanitizerIsWhatGuaranteesTheRecordShape:
         import pcluster_core
 
         monkeypatch.setattr(
-            pcluster_core, "get_cluster_record",
+            pcluster_core,
+            "get_cluster_record",
             lambda s3, **kw: {"cluster_name": "probe", "region": "us-east-1"},
         )
         rec = pcluster_core._read_cluster_record(
-            "probe", str(tmp_path), s3=object(), locks_bucketname="bucket",
+            "probe",
+            str(tmp_path),
+            s3=object(),
+            locks_bucketname="bucket",
         )
         assert rec is not None
         built = pcluster_core.ClusterRecord.from_dict(rec)
@@ -1539,20 +1602,25 @@ class TestCreateClusterCannotKillTheServer:
         about what create_cluster returns, not about region resolution.
         """
         monkeypatch.setattr(
-            tools_mod, "resolve_region_from_az", lambda az, **kw: "us-east-1",
+            tools_mod,
+            "resolve_region_from_az",
+            lambda az, **kw: "us-east-1",
         )
 
     # conftest points defaults-file discovery at an empty directory, so a
     # compute type has to be supplied explicitly or the preview is refused
     # for having no queue (checklist 0.6) before it can mint a token.
-    _ARGS = dict(cluster_name="osiris", cluster_owner="rmarable",
-                 cluster_owner_email="rmarable@gmail.com", az="us-east-1a",
-                 headnode_instance_type="c8g.large",
-                 overrides={"compute_instance_type": "c7g.large"})
+    _ARGS = dict(
+        cluster_name="osiris",
+        cluster_owner="rmarable",
+        cluster_owner_email="rmarable@gmail.com",
+        az="us-east-1a",
+        headnode_instance_type="c8g.large",
+        overrides={"compute_instance_type": "c7g.large"},
+    )
 
     async def _token(self, c):
-        r = await c.call_tool("preview_cluster_config", dict(self._ARGS),
-                              raise_on_error=False)
+        r = await c.call_tool("preview_cluster_config", dict(self._ARGS), raise_on_error=False)
         return json.loads(r.content[0].text)["confirmation_token"]
 
     @pytest.mark.asyncio
@@ -1560,16 +1628,17 @@ class TestCreateClusterCannotKillTheServer:
         from pcluster_core import CreateClusterResult
 
         monkeypatch.setattr(
-            tools_mod, "core_create_cluster",
+            tools_mod,
+            "core_create_cluster",
             lambda **kw: CreateClusterResult(
-                cluster_name="osiris", success=True, exit_code=0,
-                kicked_off=True, message="started"),
+                cluster_name="osiris", success=True, exit_code=0, kicked_off=True, message="started"
+            ),
         )
         async with Client(build_local()) as c:
             tok = await self._token(c)
-            r = await c.call_tool("create_cluster",
-                                  {**self._ARGS, "confirmation_token": tok},
-                                  raise_on_error=False)
+            r = await c.call_tool(
+                "create_cluster", {**self._ARGS, "confirmation_token": tok}, raise_on_error=False
+            )
         assert not r.is_error, r.content[0].text if r.content else ""
         payload = json.loads(r.content[0].text)
         assert payload["kicked_off"] is True
@@ -1581,15 +1650,16 @@ class TestCreateClusterCannotKillTheServer:
         still sys.exit(1) with the message already printed. Those are not
         converted, so the wrapper's narrow SystemExit net is what keeps one
         bad input from taking the whole server down."""
+
         def _boom(**kw):
             raise SystemExit(1)
 
         monkeypatch.setattr(tools_mod, "core_create_cluster", _boom)
         async with Client(build_local()) as c:
             tok = await self._token(c)
-            r = await c.call_tool("create_cluster",
-                                  {**self._ARGS, "confirmation_token": tok},
-                                  raise_on_error=False)
+            r = await c.call_tool(
+                "create_cluster", {**self._ARGS, "confirmation_token": tok}, raise_on_error=False
+            )
             assert r.is_error
             # The session must still be usable -- that is the whole point.
             alive = await c.call_tool("list_clusters", {}, raise_on_error=False)
@@ -1600,16 +1670,17 @@ class TestCreateClusterCannotKillTheServer:
         from pcluster_core import CreateClusterResult
 
         monkeypatch.setattr(
-            tools_mod, "core_create_cluster",
+            tools_mod,
+            "core_create_cluster",
             lambda **kw: CreateClusterResult(
-                cluster_name="osiris", success=False, exit_code=1,
-                message="build failed"),
+                cluster_name="osiris", success=False, exit_code=1, message="build failed"
+            ),
         )
         async with Client(build_local()) as c:
             tok = await self._token(c)
-            r = await c.call_tool("create_cluster",
-                                  {**self._ARGS, "confirmation_token": tok},
-                                  raise_on_error=False)
+            r = await c.call_tool(
+                "create_cluster", {**self._ARGS, "confirmation_token": tok}, raise_on_error=False
+            )
         payload = json.loads(r.content[0].text)
         assert payload["success"] is False and payload["exit_code"] == 1
 
@@ -1633,8 +1704,7 @@ class TestFinalizeClusterBuildIsReachableRemotely:
         for build in (build_local, build_remote):
             async with Client(build()) as c:
                 names = {t.name for t in await c.list_tools()}
-            assert "finalize_cluster_build" in names, (
-                f"missing from {build.__name__}")
+            assert "finalize_cluster_build" in names, f"missing from {build.__name__}"
 
     def test_it_is_no_longer_declared_local_only(self):
         """The split is data in _LOCAL_ONLY, never a second registration
@@ -1671,10 +1741,14 @@ class TestFinalizeClusterBuildIsReachableRemotely:
         absent, being mostly boto3 with an SSH tail where a partial answer
         is still useful.
         """
-        assert tools_mod._LOCAL_ONLY == frozenset({
-            "rotate_cluster_key", "manage_grafana_tunnel", "apply_queue_config",
-            "run_readwrite_slurm_command",
-        })
+        assert tools_mod._LOCAL_ONLY == frozenset(
+            {
+                "rotate_cluster_key",
+                "manage_grafana_tunnel",
+                "apply_queue_config",
+                "run_readwrite_slurm_command",
+            }
+        )
 
     @pytest.mark.asyncio
     async def test_it_takes_no_confirmation_token(self, monkeypatch):
@@ -1686,22 +1760,31 @@ class TestFinalizeClusterBuildIsReachableRemotely:
         # that wrongly used _store_region() would look correct: the test
         # environment sets AWS_REGION=us-east-2, so a fixture using that
         # cannot tell the two apart.
-        rec = type("R", (), {"region": "us-west-2", "cluster_owner": "testuser",
-                             "serial": "s", "ec2_keypair": "kp",
-                             "s3_bucketname": "b"})()
+        rec = type(
+            "R",
+            (),
+            {
+                "region": "us-west-2",
+                "cluster_owner": "testuser",
+                "serial": "s",
+                "ec2_keypair": "kp",
+                "s3_bucketname": "b",
+            },
+        )()
         monkeypatch.setattr(tools_mod, "_require_record", lambda name: rec)
         monkeypatch.setattr(tools_mod, "_store_region", lambda: "us-east-2")
         called = []
         monkeypatch.setattr(
-            tools_mod, "core_finalize_cluster_build",
+            tools_mod,
+            "core_finalize_cluster_build",
             lambda **kw: called.append(kw) or {"success": True},
         )
         async with Client(build_local()) as c:
-            tool = next(t for t in await c.list_tools()
-                        if t.name == "finalize_cluster_build")
+            tool = next(t for t in await c.list_tools() if t.name == "finalize_cluster_build")
             assert tool.inputSchema.get("required") == ["cluster_name"]
-            r = await c.call_tool("finalize_cluster_build",
-                                  {"cluster_name": "certify"}, raise_on_error=False)
+            r = await c.call_tool(
+                "finalize_cluster_build", {"cluster_name": "certify"}, raise_on_error=False
+            )
         assert not r.is_error, r.content[0].text if r.content else ""
         assert len(called) == 1
         assert called[0]["region"] == "us-west-2", "the cluster's region must be used"
@@ -1737,9 +1820,7 @@ class TestABuildCanWriteOnAReadOnlyDeployment:
     @pytest.mark.skipif(os.geteuid() == 0, reason="root ignores the mode bits")
     def test_a_read_only_root_yields_a_writable_overlay(self, tmp_path):
         root = self._read_only_tree(tmp_path)
-        overlay = resolve_writable_repo_root(
-            str(root), overlay_root=str(tmp_path / "overlay")
-        )
+        overlay = resolve_writable_repo_root(str(root), overlay_root=str(tmp_path / "overlay"))
         assert overlay != str(root)
 
         # the two written paths are real directories, and really writable
@@ -1754,13 +1835,10 @@ class TestABuildCanWriteOnAReadOnlyDeployment:
     @pytest.mark.skipif(os.geteuid() == 0, reason="root ignores the mode bits")
     def test_the_source_tree_is_still_readable_through_the_overlay(self, tmp_path):
         root = self._read_only_tree(tmp_path)
-        overlay = resolve_writable_repo_root(
-            str(root), overlay_root=str(tmp_path / "overlay")
-        )
+        overlay = resolve_writable_repo_root(str(root), overlay_root=str(tmp_path / "overlay"))
         # a template the build renders, and a module under src/, both reachable
         assert (
-            open(os.path.join(overlay, "templates", "vars_file.j2")).read()
-            == "{{ cluster_name }}"
+            open(os.path.join(overlay, "templates", "vars_file.j2")).read() == "{{ cluster_name }}"
         )
         assert open(os.path.join(overlay, "src", "pcluster_core.py")).read() == "# module"
 
@@ -1768,12 +1846,8 @@ class TestABuildCanWriteOnAReadOnlyDeployment:
     def test_resolving_twice_is_not_an_error(self, tmp_path):
         """A warm container calls this again; the overlay already exists."""
         root = self._read_only_tree(tmp_path)
-        first = resolve_writable_repo_root(
-            str(root), overlay_root=str(tmp_path / "overlay")
-        )
-        second = resolve_writable_repo_root(
-            str(root), overlay_root=str(tmp_path / "overlay")
-        )
+        first = resolve_writable_repo_root(str(root), overlay_root=str(tmp_path / "overlay"))
+        second = resolve_writable_repo_root(str(root), overlay_root=str(tmp_path / "overlay"))
         assert first == second
 
     @pytest.mark.skipif(os.geteuid() == 0, reason="root ignores the mode bits")
@@ -1815,9 +1889,10 @@ class TestDeleteClusterSendsTheCallerToFinalize:
         import mcp_server.tools as t
 
         import inspect
+
         src = inspect.getsource(t)
         start = src.index("def delete_cluster(")
-        return src[start:src.index("@tool", start + 10)]
+        return src[start : src.index("@tool", start + 10)]
 
     def test_it_names_the_tool_that_finishes_the_job(self):
         assert "finalize_cluster_teardown" in self._doc(), (
@@ -1828,7 +1903,7 @@ class TestDeleteClusterSendsTheCallerToFinalize:
         """The wording that shipped. Banned by shape, not by that exact
         phrase: any instruction to repeat this call is the unsafe path."""
         doc = self._doc()
-        head = doc[:doc.index('"""', doc.index('"""') + 3)]
+        head = doc[: doc.index('"""', doc.index('"""') + 3)]
         assert "re-run" not in head.lower(), (
             "the docstring still tells the caller to re-run delete_cluster"
         )
@@ -1874,8 +1949,8 @@ class TestFinalizeTeardownNeedsNoTokenItCouldNeverHold:
 
         src = inspect.getsource(t)
         start = src.index("def finalize_cluster_teardown(")
-        sig = src[start:src.index(")", start)]
-        assert_source_is_real(sig, 'test_it_takes_no_confirmation_token')
+        sig = src[start : src.index(")", start)]
+        assert_source_is_real(sig, "test_it_takes_no_confirmation_token")
         assert "confirmation_token" not in sig, (
             "finalize_cluster_teardown still takes a token it cannot be "
             "given: the TTL is shorter than the teardown it follows"
@@ -1890,7 +1965,7 @@ class TestFinalizeTeardownNeedsNoTokenItCouldNeverHold:
 
         src = inspect.getsource(t)
         start = src.index("def delete_cluster(")
-        sig = src[start:src.index(")", start)]
+        sig = src[start : src.index(")", start)]
         assert "confirmation_token" in sig
 
     def test_the_reason_is_recorded_so_it_is_not_added_back(self):
@@ -1900,7 +1975,7 @@ class TestFinalizeTeardownNeedsNoTokenItCouldNeverHold:
 
         src = inspect.getsource(t)
         start = src.index("def finalize_cluster_teardown(")
-        doc = src[start:src.index("rec = _require_record", start)]
+        doc = src[start : src.index("rec = _require_record", start)]
         assert "TTL" in doc and "900" in doc, (
             "the docstring does not say why the token was removed, so the "
             "next reader will restore it"
@@ -1944,8 +2019,7 @@ class TestADeletedClusterIsNotReportedAsAnError:
     def test_a_confirmed_absence_reads_as_deleted(self):
         from pcluster_core import PClusterMakerError, _describe_says_cluster_is_absent
 
-        for msg in ("ClusterNotFound: no such cluster",
-                    "Cluster 'osiris' does not exist"):
+        for msg in ("ClusterNotFound: no such cluster", "Cluster 'osiris' does not exist"):
             assert _describe_says_cluster_is_absent(PClusterMakerError(msg)), msg
 
     def test_any_other_failure_is_still_an_error(self):
@@ -1955,10 +2029,12 @@ class TestADeletedClusterIsNotReportedAsAnError:
         every cluster as DELETED the moment a token expired."""
         from pcluster_core import PClusterMakerError, _describe_says_cluster_is_absent
 
-        for msg in ("ExpiredToken: credentials expired",
-                    "Throttling: rate exceeded",
-                    "EndpointConnectionError: could not connect",
-                    "AccessDenied: not authorized"):
+        for msg in (
+            "ExpiredToken: credentials expired",
+            "Throttling: rate exceeded",
+            "EndpointConnectionError: could not connect",
+            "AccessDenied: not authorized",
+        ):
             assert not _describe_says_cluster_is_absent(PClusterMakerError(msg)), msg
 
     def test_live_status_returns_deleted_for_an_absent_cluster(self, monkeypatch):

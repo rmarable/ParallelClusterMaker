@@ -126,6 +126,7 @@ class TestValidateQueueName:
         %Y%m%d-%H%M stamp "compute-20260725-1430" (21 chars) yielded a 30-char
         resource name and every auto-named queue failed at update time."""
         from datetime import datetime
+
         ts = datetime(2026, 7, 25, 14, 30).strftime("%m%d%H%M")
         for queue_type in ("compute", "gpu"):
             name = f"{queue_type}-{ts}"
@@ -236,14 +237,40 @@ class TestValidateInstanceTypes:
         # validate — this is the exact class of real input an earlier,
         # narrower injection-hardening regex rejected.
         metal_types = [
-            "c5.metal", "c5n.metal", "c6a.metal", "c6g.metal", "c6i.metal",
-            "c7a.metal-48xl", "c7g.metal", "c7i.metal-24xl", "c7i.metal-48xl",
-            "c8g.metal-24xl", "c8g.metal-48xl", "i3.metal", "i3en.metal",
-            "i4i.metal", "m5.metal", "m5dn.metal", "m5zn.metal", "m6a.metal",
-            "m6g.metal", "m6i.metal", "m7a.metal-48xl", "m7g.metal",
-            "m7i.metal-24xl", "m7i.metal-48xl", "r5.metal", "r5dn.metal",
-            "r6a.metal", "r6g.metal", "r6i.metal", "r7a.metal-48xl", "r7g.metal",
-            "r7i.metal-24xl", "r7i.metal-48xl", "z1d.metal",
+            "c5.metal",
+            "c5n.metal",
+            "c6a.metal",
+            "c6g.metal",
+            "c6i.metal",
+            "c7a.metal-48xl",
+            "c7g.metal",
+            "c7i.metal-24xl",
+            "c7i.metal-48xl",
+            "c8g.metal-24xl",
+            "c8g.metal-48xl",
+            "i3.metal",
+            "i3en.metal",
+            "i4i.metal",
+            "m5.metal",
+            "m5dn.metal",
+            "m5zn.metal",
+            "m6a.metal",
+            "m6g.metal",
+            "m6i.metal",
+            "m7a.metal-48xl",
+            "m7g.metal",
+            "m7i.metal-24xl",
+            "m7i.metal-48xl",
+            "r5.metal",
+            "r5dn.metal",
+            "r6a.metal",
+            "r6g.metal",
+            "r6i.metal",
+            "r7a.metal-48xl",
+            "r7g.metal",
+            "r7i.metal-24xl",
+            "r7i.metal-48xl",
+            "z1d.metal",
         ]
         for itype in metal_types:
             result = _validate_instance_types(itype, require_gpu=False)
@@ -254,8 +281,11 @@ class TestValidateInstanceTypes:
         # (u-6tb1.56xlarge) — the mirror-image case of metal-*'s hyphenated
         # size. A regex that only special-cased one side rejected the other.
         high_memory_types = [
-            "u-6tb1.56xlarge", "u-9tb1.112xlarge", "u-12tb1.112xlarge",
-            "u-18tb1.112xlarge", "u-24tb1.112xlarge",
+            "u-6tb1.56xlarge",
+            "u-9tb1.112xlarge",
+            "u-12tb1.112xlarge",
+            "u-18tb1.112xlarge",
+            "u-24tb1.112xlarge",
         ]
         for itype in high_memory_types:
             result = _validate_instance_types(itype, require_gpu=False)
@@ -268,6 +298,7 @@ class TestValidateInstanceTypes:
         # (metal-*, u-*tb1, or whatever AWS ships next) is the wrong strategy
         # and has already produced two rounds of asymmetric regressions.
         import pcluster_aux_data
+
         for itype in pcluster_aux_data.ec2_instances_full_list:
             require_gpu = pcluster_aux_data.is_gpu_instance(itype)
             result = _validate_instance_types(itype, require_gpu=require_gpu)
@@ -418,17 +449,21 @@ class TestGetCustomActions:
 
 class TestGetRootVolumeEncrypted:
     def test_inherits_true_from_existing_queue(self):
-        queues = [{
-            "Name": "compute",
-            "ComputeSettings": {"LocalStorage": {"RootVolume": {"Encrypted": True}}},
-        }]
+        queues = [
+            {
+                "Name": "compute",
+                "ComputeSettings": {"LocalStorage": {"RootVolume": {"Encrypted": True}}},
+            }
+        ]
         assert _get_root_volume_encrypted(queues) is True
 
     def test_inherits_false_from_existing_queue(self):
-        queues = [{
-            "Name": "compute",
-            "ComputeSettings": {"LocalStorage": {"RootVolume": {"Encrypted": False}}},
-        }]
+        queues = [
+            {
+                "Name": "compute",
+                "ComputeSettings": {"LocalStorage": {"RootVolume": {"Encrypted": False}}},
+            }
+        ]
         assert _get_root_volume_encrypted(queues) is False
 
     def test_defaults_to_false_when_absent(self):
@@ -441,7 +476,10 @@ class TestGetRootVolumeEncrypted:
     def test_checks_multiple_queues_for_first_explicit_value(self):
         queues = [
             {"Name": "no-root-volume-info", "ComputeSettings": {}},
-            {"Name": "compute", "ComputeSettings": {"LocalStorage": {"RootVolume": {"Encrypted": True}}}},
+            {
+                "Name": "compute",
+                "ComputeSettings": {"LocalStorage": {"RootVolume": {"Encrypted": True}}},
+            },
         ]
         assert _get_root_volume_encrypted(queues) is True
 
@@ -455,9 +493,7 @@ class TestLoadClusterConfig:
         config_file.write_text(SAMPLE_CONFIG)
 
         with patch("pcluster_core._queue_config_path", return_value=str(config_file)):
-            config, path, etag = _load_cluster_config(
-                cluster_name, str(tmp_path)
-            )
+            config, path, etag = _load_cluster_config(cluster_name, str(tmp_path))
 
         assert config["Region"] == "us-east-2"
         assert path.endswith(f"config.{cluster_name}")
@@ -616,11 +652,13 @@ class TestQueueAddCallsTheArchGuard:
         -- it now delegates to core_add_queue in pcluster_core.py, which is
         where the ordering guarantee actually lives now."""
         fn = next(
-            n for n in ast.walk(ast.parse(_core_source()))
+            n
+            for n in ast.walk(ast.parse(_core_source()))
             if isinstance(n, ast.FunctionDef) and n.name == "core_add_queue"
         )
         called = [
-            n.func.id for n in ast.walk(fn)
+            n.func.id
+            for n in ast.walk(fn)
             if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
         ]
         assert "_check_queue_arch_matches_cluster" in called, (
@@ -648,16 +686,17 @@ class TestQueueCliFlagNames:
             if not isinstance(node, ast.Call):
                 continue
             func = node.func
-            is_error = (
-                isinstance(func, ast.Attribute) and func.attr in ("exit", "error")
-            ) or (isinstance(func, ast.Name) and func.id == "SystemExit")
+            is_error = (isinstance(func, ast.Attribute) and func.attr in ("exit", "error")) or (
+                isinstance(func, ast.Name) and func.id == "SystemExit"
+            )
             if not is_error:
                 continue
             # Join each message's segments first: an f-string splits into
             # Constants around every {placeholder}, so filtering per-segment
             # would strip the "pcluster " context off a trailing " --region ".
             text = " ".join(
-                arg.value for arg in ast.walk(node)
+                arg.value
+                for arg in ast.walk(node)
                 if isinstance(arg, ast.Constant) and isinstance(arg.value, str)
             )
             # Some messages embed a `pcluster ...` command to run; those flags
@@ -681,12 +720,10 @@ class TestQueueCliFlagNames:
         tree = ast.parse(source)
 
         remove_fn = next(
-            n for n in ast.walk(tree)
-            if isinstance(n, ast.FunctionDef) and n.name == "_do_remove"
+            n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == "_do_remove"
         )
         reads_type = any(
-            isinstance(n, ast.Attribute) and n.attr == "queue_type"
-            for n in ast.walk(remove_fn)
+            isinstance(n, ast.Attribute) and n.attr == "queue_type" for n in ast.walk(remove_fn)
         )
         assert not reads_type, (
             "_do_remove now reads queue_type; if that is intentional, main() must "

@@ -90,11 +90,13 @@ class _Cognito:
 
     def create_user_pool_client(self, **kw):
         self.calls.append(kw)
-        return {"UserPoolClient": {
-            "ClientId": "newclient123",
-            "ClientName": kw["ClientName"],
-            "CallbackURLs": kw.get("CallbackURLs", []),
-        }}
+        return {
+            "UserPoolClient": {
+                "ClientId": "newclient123",
+                "ClientName": kw["ClientName"],
+                "CallbackURLs": kw.get("CallbackURLs", []),
+            }
+        }
 
 
 class TestTheAudienceCheckMatchesHowCognitoActuallyWorks:
@@ -102,11 +104,16 @@ class TestTheAudienceCheckMatchesHowCognitoActuallyWorks:
 
     def test_a_valid_access_token_is_accepted(self, keypair):
         priv, pub = keypair
-        event = {"authorizationToken": "Bearer " + _token(priv),
-                 "methodArn": "arn:aws:execute-api:r:a:api/prod/POST/mcp"}
+        event = {
+            "authorizationToken": "Bearer " + _token(priv),
+            "methodArn": "arn:aws:execute-api:r:a:api/prod/POST/mcp",
+        }
         policy = authz.authorize(
-            event, region=REGION, user_pool_id=POOL,
-            cognito=_Cognito(), jwks_client=_StubJWKS(pub),
+            event,
+            region=REGION,
+            user_pool_id=POOL,
+            cognito=_Cognito(),
+            jwks_client=_StubJWKS(pub),
         )
         assert policy["policyDocument"]["Statement"][0]["Effect"] == "Allow"
         assert policy["principalId"] == "abc123client"
@@ -118,15 +125,13 @@ class TestTheAudienceCheckMatchesHowCognitoActuallyWorks:
         priv, pub = keypair
         token = _token(priv, token_use="id", aud="abc123client", client_id=None)
         with pytest.raises(authz.Unauthorized, match="token_use"):
-            authz.verify_claims(token, region=REGION, user_pool_id=POOL,
-                                jwks_client=_StubJWKS(pub))
+            authz.verify_claims(token, region=REGION, user_pool_id=POOL, jwks_client=_StubJWKS(pub))
 
     def test_a_token_without_client_id_is_refused(self, keypair):
         priv, pub = keypair
         token = _token(priv, client_id=None)
         with pytest.raises(authz.Unauthorized, match="client_id"):
-            authz.verify_claims(token, region=REGION, user_pool_id=POOL,
-                                jwks_client=_StubJWKS(pub))
+            authz.verify_claims(token, region=REGION, user_pool_id=POOL, jwks_client=_StubJWKS(pub))
 
     def test_audience_verification_stays_disabled(self, keypair):
         """Vacuity guard on the exemption itself: `verify_aud` is off
@@ -134,8 +139,9 @@ class TestTheAudienceCheckMatchesHowCognitoActuallyWorks:
         it, every valid token starts failing -- so a token with no `aud`
         must keep working."""
         priv, pub = keypair
-        claims = authz.verify_claims(_token(priv), region=REGION,
-                                     user_pool_id=POOL, jwks_client=_StubJWKS(pub))
+        claims = authz.verify_claims(
+            _token(priv), region=REGION, user_pool_id=POOL, jwks_client=_StubJWKS(pub)
+        )
         assert "aud" not in claims
 
     def test_a_token_signed_by_another_key_is_refused(self, keypair):
@@ -143,14 +149,16 @@ class TestTheAudienceCheckMatchesHowCognitoActuallyWorks:
         _, pub = keypair
         other = rsa.generate_private_key(public_exponent=65537, key_size=2048)
         with pytest.raises(authz.Unauthorized, match="rejected"):
-            authz.verify_claims(_token(other), region=REGION,
-                                user_pool_id=POOL, jwks_client=_StubJWKS(pub))
+            authz.verify_claims(
+                _token(other), region=REGION, user_pool_id=POOL, jwks_client=_StubJWKS(pub)
+            )
 
     def test_an_expired_token_is_refused(self, keypair):
         priv, pub = keypair
         with pytest.raises(authz.Unauthorized, match="rejected"):
-            authz.verify_claims(_token(priv, exp=1), region=REGION,
-                                user_pool_id=POOL, jwks_client=_StubJWKS(pub))
+            authz.verify_claims(
+                _token(priv, exp=1), region=REGION, user_pool_id=POOL, jwks_client=_StubJWKS(pub)
+            )
 
     def test_a_token_from_another_pool_is_refused(self, keypair):
         """Issuer binds the token to this pool. Without it, any Cognito
@@ -158,8 +166,7 @@ class TestTheAudienceCheckMatchesHowCognitoActuallyWorks:
         priv, pub = keypair
         token = _token(priv, iss="https://cognito-idp.us-east-2.amazonaws.com/us-east-2_Other")
         with pytest.raises(authz.Unauthorized, match="rejected"):
-            authz.verify_claims(token, region=REGION, user_pool_id=POOL,
-                                jwks_client=_StubJWKS(pub))
+            authz.verify_claims(token, region=REGION, user_pool_id=POOL, jwks_client=_StubJWKS(pub))
 
 
 class TestTheClientMustStillExistInThePool:
@@ -169,16 +176,24 @@ class TestTheClientMustStillExistInThePool:
         priv, pub = keypair
         event = {"authorizationToken": "Bearer " + _token(priv), "methodArn": "a/b/c"}
         with pytest.raises(authz.Unauthorized, match="does not exist"):
-            authz.authorize(event, region=REGION, user_pool_id=POOL,
-                            cognito=_Cognito(known=()), jwks_client=_StubJWKS(pub))
+            authz.authorize(
+                event,
+                region=REGION,
+                user_pool_id=POOL,
+                cognito=_Cognito(known=()),
+                jwks_client=_StubJWKS(pub),
+            )
 
     def test_the_check_is_scoped_to_this_pool(self, keypair):
         priv, pub = keypair
         cog = _Cognito()
-        authz.authorize({"authorizationToken": "Bearer " + _token(priv),
-                         "methodArn": "a/b/c"},
-                        region=REGION, user_pool_id=POOL,
-                        cognito=cog, jwks_client=_StubJWKS(pub))
+        authz.authorize(
+            {"authorizationToken": "Bearer " + _token(priv), "methodArn": "a/b/c"},
+            region=REGION,
+            user_pool_id=POOL,
+            cognito=cog,
+            jwks_client=_StubJWKS(pub),
+        )
         assert cog.calls == [(POOL, "abc123client")]
 
     def test_an_api_failure_is_not_reported_as_an_unknown_client(self, keypair):
@@ -187,9 +202,13 @@ class TestTheClientMustStillExistInThePool:
         priv, pub = keypair
         event = {"authorizationToken": "Bearer " + _token(priv), "methodArn": "a/b/c"}
         with pytest.raises(authz.Unauthorized, match="could not verify"):
-            authz.authorize(event, region=REGION, user_pool_id=POOL,
-                            cognito=_Cognito(raise_name="TooManyRequestsException"),
-                            jwks_client=_StubJWKS(pub))
+            authz.authorize(
+                event,
+                region=REGION,
+                user_pool_id=POOL,
+                cognito=_Cognito(raise_name="TooManyRequestsException"),
+                jwks_client=_StubJWKS(pub),
+            )
 
 
 class TestEveryFailureRaisesRatherThanDenying:
@@ -203,17 +222,13 @@ class TestEveryFailureRaisesRatherThanDenying:
 
     def test_a_non_bearer_header_raises(self):
         with pytest.raises(authz.Unauthorized, match="Bearer"):
-            authz.authorize({"authorizationToken": "Basic abc"},
-                            region=REGION, user_pool_id=POOL)
+            authz.authorize({"authorizationToken": "Basic abc"}, region=REGION, user_pool_id=POOL)
 
     def test_the_module_never_builds_a_deny_policy(self):
         """Source-level, because a Deny is exactly what a well-meaning
         refactor would add -- it reads as the "proper" authorizer shape."""
-        with open(os.path.join(REPO_ROOT, "mcp_server", "auth",
-                               "authorizer_lambda.py")) as fh:
-            body = "\n".join(
-                l for l in fh if not l.lstrip().startswith("#")
-            )
+        with open(os.path.join(REPO_ROOT, "mcp_server", "auth", "authorizer_lambda.py")) as fh:
+            body = "\n".join(l for l in fh if not l.lstrip().startswith("#"))
         assert '"Deny"' not in body and "'Deny'" not in body
 
     def test_a_misconfigured_authorizer_fails_closed(self, monkeypatch):
@@ -239,8 +254,7 @@ class TestEveryFailureRaisesRatherThanDenying:
         with pytest.raises(Exception) as exc:
             authz.lambda_handler({"authorizationToken": "Bearer x"}, None)
         assert str(exc.value) == "Unauthorized", (
-            f"API Gateway maps only the exact string; {str(exc.value)!r} "
-            f"would surface as a 500"
+            f"API Gateway maps only the exact string; {str(exc.value)!r} would surface as a 500"
         )
 
     def test_the_reason_still_reaches_the_log(self, monkeypatch, capsys):
@@ -279,17 +293,19 @@ class TestTheAllowPolicyIsNotScopedToOnePath:
         scoped to whichever path was called first would be replayed for
         every other path and deny it."""
         arn = "arn:aws:execute-api:us-east-2:1:api1/prod/POST/mcp"
-        assert authz._api_wildcard(arn) == (
-            "arn:aws:execute-api:us-east-2:1:api1/prod/*"
-        )
+        assert authz._api_wildcard(arn) == ("arn:aws:execute-api:us-east-2:1:api1/prod/*")
 
     def test_a_second_path_is_covered_by_the_first_response(self, keypair):
         priv, pub = keypair
         policy = authz.authorize(
-            {"authorizationToken": "Bearer " + _token(priv),
-             "methodArn": "arn:aws:execute-api:r:a:api1/prod/POST/mcp"},
-            region=REGION, user_pool_id=POOL,
-            cognito=_Cognito(), jwks_client=_StubJWKS(pub),
+            {
+                "authorizationToken": "Bearer " + _token(priv),
+                "methodArn": "arn:aws:execute-api:r:a:api1/prod/POST/mcp",
+            },
+            region=REGION,
+            user_pool_id=POOL,
+            cognito=_Cognito(),
+            jwks_client=_StubJWKS(pub),
         )
         resource = policy["policyDocument"]["Statement"][0]["Resource"]
         assert resource.endswith("/prod/*")
@@ -357,8 +373,9 @@ class TestRegistrationValidatesRedirectUris:
         """An app client without it can never complete the handshake, and
         Cognito's own later error names nothing actionable."""
         with pytest.raises(reg.RegistrationError, match="claude.ai"):
-            reg.register({"redirect_uris": ["https://example.com/cb"]},
-                         user_pool_id=POOL, cognito=_Cognito())
+            reg.register(
+                {"redirect_uris": ["https://example.com/cb"]}, user_pool_id=POOL, cognito=_Cognito()
+            )
 
     def test_an_http_callback_is_refused(self):
         """It would carry the authorization code in clear text.
@@ -370,9 +387,12 @@ class TestRegistrationValidatesRedirectUris:
         message quotes `https://claude.ai/...`, a `match="https"` matched
         it and the test passed with the https check deleted.
         """
-        payload = {"redirect_uris": [
-            discovery.CLAUDE_REDIRECT_URI, "http://evil.example.com/cb",
-        ]}
+        payload = {
+            "redirect_uris": [
+                discovery.CLAUDE_REDIRECT_URI,
+                "http://evil.example.com/cb",
+            ]
+        }
         with pytest.raises(reg.RegistrationError, match="every redirect_uri"):
             reg.register(payload, user_pool_id=POOL, cognito=_Cognito())
 
@@ -430,7 +450,8 @@ class TestTheRegisterHandlerShape:
 class TestTheDiscoveryDocument:
     def _meta(self):
         return discovery.authorization_server_metadata(
-            region=REGION, user_pool_id=POOL,
+            region=REGION,
+            user_pool_id=POOL,
             cognito_domain="https://mcp-auth.auth.us-east-2.amazoncognito.com",
             api_base_url=API,
         )
@@ -457,13 +478,13 @@ class TestTheDiscoveryDocument:
     def test_the_issuer_matches_what_the_authorizer_verifies(self):
         """Two spellings of one issuer that never import each other would
         drift, and the failure is every token being rejected."""
-        assert self._meta()["issuer"] == discovery.cognito_issuer(
-            region=REGION, user_pool_id=POOL
-        )
+        assert self._meta()["issuer"] == discovery.cognito_issuer(region=REGION, user_pool_id=POOL)
 
     def test_the_protected_resource_document_names_the_authorization_server(self):
         prm = discovery.protected_resource_metadata(
-            region=REGION, user_pool_id=POOL, api_base_url=API,
+            region=REGION,
+            user_pool_id=POOL,
+            api_base_url=API,
         )
         assert prm["resource"] == API
         assert prm["authorization_servers"] == [
@@ -479,8 +500,13 @@ class TestTheDiscoveryDocument:
 
     def test_both_documents_are_json_serializable(self):
         json.loads(json.dumps(self._meta()))
-        json.loads(json.dumps(discovery.protected_resource_metadata(
-            region=REGION, user_pool_id=POOL, api_base_url=API)))
+        json.loads(
+            json.dumps(
+                discovery.protected_resource_metadata(
+                    region=REGION, user_pool_id=POOL, api_base_url=API
+                )
+            )
+        )
 
 
 class TestTheAuthTiersStayLean:
@@ -508,7 +534,8 @@ class TestTheAuthTiersStayLean:
         with open(os.path.join(REPO_ROOT, "requirements.txt")) as fh:
             names = {
                 l.strip().split(">=")[0].split("==")[0]
-                for l in fh if l.strip() and not l.startswith("#")
+                for l in fh
+                if l.strip() and not l.startswith("#")
             }
         assert "PyJWT" in names
 
@@ -524,8 +551,9 @@ class TestTheAuthTiersStayLean:
             "if m in sys.modules]\n"
             "print(','.join(sorted(bad)))\n"
         )
-        out = subprocess.run([sys.executable, "-c", script],
-                             capture_output=True, text=True, timeout=60)
+        out = subprocess.run(
+            [sys.executable, "-c", script], capture_output=True, text=True, timeout=60
+        )
         assert out.returncode == 0, out.stderr
         # boto3 and jwt are imported lazily inside the functions that need
         # them, so a cold start that rejects a malformed request pays for
@@ -609,13 +637,8 @@ class TestTheWwwAuthenticateHeaderHasOneSource:
         body = io.open(path, encoding="utf-8").read()
         # The helper owns the scheme token and the parameter name; a second
         # copy in this file necessarily repeats them together.
-        offenders = [
-            line for line in body.splitlines()
-            if "Bearer resource_metadata" in line
-        ]
-        assert not offenders, (
-            f"deploy.py still builds the header itself: {offenders}"
-        )
+        offenders = [line for line in body.splitlines() if "Bearer resource_metadata" in line]
+        assert not offenders, f"deploy.py still builds the header itself: {offenders}"
 
     def test_a_trailing_slash_does_not_double(self):
         """The divergence that existed. The helper is the only place this is
@@ -623,7 +646,7 @@ class TestTheWwwAuthenticateHeaderHasOneSource:
         from mcp_server.auth import discovery
 
         header = discovery.www_authenticate_header(
-            api_base_url="https://example.execute-api.amazonaws.com/prod/")
+            api_base_url="https://example.execute-api.amazonaws.com/prod/"
+        )
         assert "//.well-known" not in header
-        assert header.endswith(
-            '/.well-known/oauth-protected-resource"')
+        assert header.endswith('/.well-known/oauth-protected-resource"')

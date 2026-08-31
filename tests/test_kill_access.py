@@ -96,9 +96,7 @@ class TestExtractRebuildCommand:
             "/home/rodney/ParallelClusterMaker/make_pcluster.py -N mycluster\n"
         )
         result = _extract_rebuild_command(str(f))
-        assert (
-            result == "/home/rodney/ParallelClusterMaker/make_pcluster.py -N mycluster"
-        )
+        assert result == "/home/rodney/ParallelClusterMaker/make_pcluster.py -N mycluster"
 
     def test_strips_trailing_whitespace(self, tmp_path):
         f = tmp_path / "cluster.serial"
@@ -207,18 +205,18 @@ def _stage_access_cluster(tmp_path, monkeypatch, cluster_name, record):
     mod = _load_access_cluster()
     script_dir = tmp_path / "active_clusters" / cluster_name
     script_dir.mkdir(parents=True)
-    (script_dir / f"access_cluster.{cluster_name}.sh").write_text(
-        "#!/bin/bash\nexit 0\n"
-    )
+    (script_dir / f"access_cluster.{cluster_name}.sh").write_text("#!/bin/bash\nexit 0\n")
     monkeypatch.setattr(mod, "_repo_root", str(tmp_path))
     monkeypatch.setattr(mod, "__file__", str(tmp_path / "access_cluster.py"))
     monkeypatch.setattr(mod, "_read_cluster_record", lambda n, r: record)
 
     calls = []
     monkeypatch.setattr(
-        mod.subprocess, "run",
-        lambda cmd, env=None, **k: calls.append({"cmd": cmd, "env": env})
-        or types.SimpleNamespace(returncode=0),
+        mod.subprocess,
+        "run",
+        lambda cmd, env=None, **k: (
+            calls.append({"cmd": cmd, "env": env}) or types.SimpleNamespace(returncode=0)
+        ),
     )
     return mod, calls
 
@@ -233,7 +231,9 @@ class TestAccessClusterNodeTypeResolution:
 
     def test_login_node_flag_selects_login_node(self, tmp_path, monkeypatch):
         mod, calls = _stage_access_cluster(
-            tmp_path, monkeypatch, "mycluster",
+            tmp_path,
+            monkeypatch,
+            "mycluster",
             {"enable_loginnode": "true", "loginnode_count": 1},
         )
         monkeypatch.setattr(sys, "argv", ["access_cluster.py", "-N", "mycluster", "-L"])
@@ -246,7 +246,9 @@ class TestAccessClusterNodeTypeResolution:
         self, tmp_path, monkeypatch
     ):
         mod, calls = _stage_access_cluster(
-            tmp_path, monkeypatch, "mycluster",
+            tmp_path,
+            monkeypatch,
+            "mycluster",
             {"enable_loginnode": "true", "loginnode_count": 1},
         )
         monkeypatch.setattr(sys, "argv", ["access_cluster.py", "-N", "mycluster", "-H"])
@@ -256,7 +258,9 @@ class TestAccessClusterNodeTypeResolution:
 
     def test_default_is_login_node_when_enabled(self, tmp_path, monkeypatch):
         mod, calls = _stage_access_cluster(
-            tmp_path, monkeypatch, "mycluster",
+            tmp_path,
+            monkeypatch,
+            "mycluster",
             {"enable_loginnode": "true", "loginnode_count": 1},
         )
         monkeypatch.setattr(sys, "argv", ["access_cluster.py", "-N", "mycluster"])
@@ -269,7 +273,9 @@ class TestAccessClusterNodeTypeResolution:
         'defined but empty pool' state -- zero login-node instances actually
         run, so the plain, unflagged command must not route there."""
         mod, calls = _stage_access_cluster(
-            tmp_path, monkeypatch, "mycluster",
+            tmp_path,
+            monkeypatch,
+            "mycluster",
             {"enable_loginnode": "true", "loginnode_count": 0},
         )
         monkeypatch.setattr(sys, "argv", ["access_cluster.py", "-N", "mycluster"])
@@ -279,7 +285,9 @@ class TestAccessClusterNodeTypeResolution:
 
     def test_login_node_flag_errors_out_when_count_is_zero(self, tmp_path, monkeypatch):
         mod, calls = _stage_access_cluster(
-            tmp_path, monkeypatch, "mycluster",
+            tmp_path,
+            monkeypatch,
+            "mycluster",
             {"enable_loginnode": "true", "loginnode_count": 0},
         )
         monkeypatch.setattr(sys, "argv", ["access_cluster.py", "-N", "mycluster", "-L"])
@@ -291,7 +299,9 @@ class TestAccessClusterNodeTypeResolution:
 
     def test_head_node_flag_still_works_when_count_is_zero(self, tmp_path, monkeypatch):
         mod, calls = _stage_access_cluster(
-            tmp_path, monkeypatch, "mycluster",
+            tmp_path,
+            monkeypatch,
+            "mycluster",
             {"enable_loginnode": "true", "loginnode_count": 0},
         )
         monkeypatch.setattr(sys, "argv", ["access_cluster.py", "-N", "mycluster", "-H"])
@@ -308,9 +318,7 @@ class TestAccessClusterNodeTypeResolution:
             mod.main()
         assert calls[0]["env"]["ACCESS_NODE_TYPE"] == "HeadNode"
 
-    def test_default_is_head_node_on_a_pre_feature_cluster_record(
-        self, tmp_path, monkeypatch
-    ):
+    def test_default_is_head_node_on_a_pre_feature_cluster_record(self, tmp_path, monkeypatch):
         """A cluster built before this feature existed has a vars file with no
         enable_loginnode key at all -- .get() returning None must fall through
         to "not enabled", not raise and not silently enable login-node access."""
@@ -341,16 +349,14 @@ class TestAccessClusterNodeTypeResolution:
         assert "no login node is configured" in str(exc.value.code)
         assert not calls
 
-    def test_login_node_and_head_node_flags_are_mutually_exclusive(
-        self, tmp_path, monkeypatch
-    ):
+    def test_login_node_and_head_node_flags_are_mutually_exclusive(self, tmp_path, monkeypatch):
         mod, _ = _stage_access_cluster(
-            tmp_path, monkeypatch, "mycluster",
+            tmp_path,
+            monkeypatch,
+            "mycluster",
             {"enable_loginnode": "true", "loginnode_count": 1},
         )
-        monkeypatch.setattr(
-            sys, "argv", ["access_cluster.py", "-N", "mycluster", "-L", "-H"]
-        )
+        monkeypatch.setattr(sys, "argv", ["access_cluster.py", "-N", "mycluster", "-L", "-H"])
         with pytest.raises(SystemExit) as exc:
             mod.main()
         assert exc.value.code == 2, "argparse's own mutually-exclusive-group exit code"
@@ -499,7 +505,9 @@ class TestCoreResolveAccessNodeType:
     def test_error_from_resolve_access_node_type_becomes_pcluster_maker_error(self):
         with pytest.raises(PClusterMakerError, match="no login node is configured"):
             core_resolve_access_node_type(
-                {"enable_loginnode": "false"}, "mycluster", login_node_requested=True,
+                {"enable_loginnode": "false"},
+                "mycluster",
+                login_node_requested=True,
             )
 
     def test_both_flags_set_raises_even_though_argparse_would_normally_prevent_it(self):

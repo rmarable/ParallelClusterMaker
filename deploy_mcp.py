@@ -74,8 +74,15 @@ _S3_PREFIX = "lambda"
 # pip must resolve wheels for Lambda's platform, not the operator's. Without
 # these an arm64 laptop stages arm64 wheels into an x86_64 function and the
 # failure is an ImportError at the first invocation, not at build time.
-_PIP_PLATFORM = ["--platform", "manylinux2014_x86_64", "--implementation", "cp",
-                 "--python-version", "3.12", "--only-binary=:all:"]
+_PIP_PLATFORM = [
+    "--platform",
+    "manylinux2014_x86_64",
+    "--implementation",
+    "cp",
+    "--python-version",
+    "3.12",
+    "--only-binary=:all:",
+]
 
 
 def _run(cmd, **kw):
@@ -89,16 +96,28 @@ def _build_zip(tier, build_dir, zip_path):
         fh.write(render_requirements_file(tier))
 
     print(f"  installing dependencies for {tier}...")
-    _run([os.path.join(_repo_root, ".venv", "bin", "pip"), "install", "--quiet",
-          "--target", build_dir, *_PIP_PLATFORM, "--upgrade", "-r", req],
-         stdout=subprocess.DEVNULL)
+    _run(
+        [
+            os.path.join(_repo_root, ".venv", "bin", "pip"),
+            "install",
+            "--quiet",
+            "--target",
+            build_dir,
+            *_PIP_PLATFORM,
+            "--upgrade",
+            "-r",
+            req,
+        ],
+        stdout=subprocess.DEVNULL,
+    )
 
     for entry in sources_for(tier):
         src = os.path.join(_repo_root, entry)
         dst = os.path.join(build_dir, entry)
         if os.path.isdir(src):
-            shutil.copytree(src, dst, dirs_exist_ok=True,
-                            ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+            shutil.copytree(
+                src, dst, dirs_exist_ok=True, ignore=shutil.ignore_patterns("__pycache__", "*.pyc")
+            )
         else:
             os.makedirs(os.path.dirname(dst), exist_ok=True)
             shutil.copy2(src, dst)
@@ -129,8 +148,6 @@ def _upload(s3, bucket, key, path):
     return {"S3Bucket": bucket, "S3Key": key}
 
 
-
-
 def _ensure_cognito_client(cog, pool_id, base_url, region):
     """A Cognito domain and an app client, both required by the OAuth flow.
 
@@ -145,8 +162,7 @@ def _ensure_cognito_client(cog, pool_id, base_url, region):
         cog.create_user_pool_domain(Domain=domain, UserPoolId=pool_id)
         print(f"  cognito domain {domain}")
     except Exception as e:
-        if type(e).__name__ not in ("InvalidParameterException",
-                                    "ResourceConflictException"):
+        if type(e).__name__ not in ("InvalidParameterException", "ResourceConflictException"):
             raise
         print(f"  cognito domain {domain} (exists)")
     return domain
@@ -229,58 +245,87 @@ def main():
     p = argparse.ArgumentParser(
         description="Build and deploy the MCP remote transport's Lambda tiers.",
     )
-    p.add_argument("--tier", "-T", action="append", choices=sorted(TIER_PACKAGES),
-                   help="tier to deploy (repeatable; default: every zip tier)")
+    p.add_argument(
+        "--tier",
+        "-T",
+        action="append",
+        choices=sorted(TIER_PACKAGES),
+        help="tier to deploy (repeatable; default: every zip tier)",
+    )
     p.add_argument("--region", "-R", default=os.environ.get("AWS_REGION", "us-east-1"))
-    p.add_argument("--image-uri",
-                   help="use an already-built image for the container tier "
-                        "instead of building one. Without it, deploying "
-                        "stack-mutation-node creates the ECR repository, "
-                        "builds the image and pushes it")
-    p.add_argument("--runtime", choices=CONTAINER_RUNTIMES,
-                   help="container runtime to build with (default: the "
-                        "first of %s found on PATH)" % ", ".join(CONTAINER_RUNTIMES))
-    p.add_argument("--dry-run", action="store_true",
-                   help="build and report sizes; upload and deploy nothing")
-    p.add_argument("--setup-gateway", action="store_true",
-                   help="create the REST API, its Lambda authorizer and its "
-                        "routes, and the Cognito app client and domain the "
-                        "OAuth flow needs; idempotent. This is what makes "
-                        "the transport reachable from a browser.")
-    p.add_argument("--setup-infra", action="store_true",
-                   help="create the IAM roles and policies (and the Cognito "
-                        "user pool if absent) before deploying; idempotent. "
-                        "Reports any policy whose deployed document no longer "
-                        "matches templates/, but does not change it")
-    p.add_argument("--teardown", action="store_true",
-                   help="remove the deployed transport: REST API, the seven "
-                        "Lambda functions, then the IAM roles and policies, "
-                        "then the Cognito user pool. Combine with --dry-run "
-                        "to list what would go without removing it. The "
-                        "permissions boundary is deliberately left behind")
-    p.add_argument("--bootstrap", action="store_true",
-                   help="stand the whole transport up in one run: the IAM "
-                        "and Cognito pool, every zip tier, then the REST "
-                        "API and its OAuth front end. Equivalent to "
-                        "--setup-infra --setup-gateway with every zip tier "
-                        "named explicitly, in that order. Idempotent, so it "
-                        "is also the update path. The container tier is not "
-                        "included -- it needs --image-uri and a runtime; "
-                        "without it the transport still serves every tool "
-                        "except those the container tier owns")
-    p.add_argument("--create-user", metavar="USERNAME",
-                   help="create a Cognito user to sign in as at the Hosted "
-                        "UI, with a permanent password; idempotent. Takes "
-                        "the password from MCP_USER_PASSWORD if set, "
-                        "otherwise generates one and prints it once. "
-                        "Nothing else creates a user, so without this a "
-                        "freshly deployed transport has nobody to "
-                        "authenticate")
-    p.add_argument("--update-policies", action="store_true",
-                   help="with --setup-infra, push a changed policy document as "
-                        "a new default version instead of only reporting it. "
-                        "Needs iam:CreatePolicyVersion and "
-                        "iam:DeletePolicyVersion")
+    p.add_argument(
+        "--image-uri",
+        help="use an already-built image for the container tier "
+        "instead of building one. Without it, deploying "
+        "stack-mutation-node creates the ECR repository, "
+        "builds the image and pushes it",
+    )
+    p.add_argument(
+        "--runtime",
+        choices=CONTAINER_RUNTIMES,
+        help="container runtime to build with (default: the "
+        "first of %s found on PATH)" % ", ".join(CONTAINER_RUNTIMES),
+    )
+    p.add_argument(
+        "--dry-run", action="store_true", help="build and report sizes; upload and deploy nothing"
+    )
+    p.add_argument(
+        "--setup-gateway",
+        action="store_true",
+        help="create the REST API, its Lambda authorizer and its "
+        "routes, and the Cognito app client and domain the "
+        "OAuth flow needs; idempotent. This is what makes "
+        "the transport reachable from a browser.",
+    )
+    p.add_argument(
+        "--setup-infra",
+        action="store_true",
+        help="create the IAM roles and policies (and the Cognito "
+        "user pool if absent) before deploying; idempotent. "
+        "Reports any policy whose deployed document no longer "
+        "matches templates/, but does not change it",
+    )
+    p.add_argument(
+        "--teardown",
+        action="store_true",
+        help="remove the deployed transport: REST API, the seven "
+        "Lambda functions, then the IAM roles and policies, "
+        "then the Cognito user pool. Combine with --dry-run "
+        "to list what would go without removing it. The "
+        "permissions boundary is deliberately left behind",
+    )
+    p.add_argument(
+        "--bootstrap",
+        action="store_true",
+        help="stand the whole transport up in one run: the IAM "
+        "and Cognito pool, every zip tier, then the REST "
+        "API and its OAuth front end. Equivalent to "
+        "--setup-infra --setup-gateway with every zip tier "
+        "named explicitly, in that order. Idempotent, so it "
+        "is also the update path. The container tier is not "
+        "included -- it needs --image-uri and a runtime; "
+        "without it the transport still serves every tool "
+        "except those the container tier owns",
+    )
+    p.add_argument(
+        "--create-user",
+        metavar="USERNAME",
+        help="create a Cognito user to sign in as at the Hosted "
+        "UI, with a permanent password; idempotent. Takes "
+        "the password from MCP_USER_PASSWORD if set, "
+        "otherwise generates one and prints it once. "
+        "Nothing else creates a user, so without this a "
+        "freshly deployed transport has nobody to "
+        "authenticate",
+    )
+    p.add_argument(
+        "--update-policies",
+        action="store_true",
+        help="with --setup-infra, push a changed policy document as "
+        "a new default version instead of only reporting it. "
+        "Needs iam:CreatePolicyVersion and "
+        "iam:DeletePolicyVersion",
+    )
     args = p.parse_args()
 
     normalize_bootstrap(args, p.error)
@@ -311,8 +356,7 @@ def main():
         cog = boto3.client("cognito-idp", region_name=args.region)
         lam = boto3.client("lambda", region_name=args.region)
         iam = boto3.client("iam")
-        pool_prefix = _derive_mcp_user_pool_name(
-            aws_account_id=account, region=args.region)
+        pool_prefix = _derive_mcp_user_pool_name(aws_account_id=account, region=args.region)
 
         if args.dry_run:
             print("would remove (dry run -- nothing deleted):")
@@ -330,7 +374,8 @@ def main():
                     print(f"  user pool  {pool['Name']} ({pool['Id']})")
             try:
                 boto3.client("ecr", region_name=args.region).describe_repositories(
-                    repositoryNames=[IMAGE_REPOSITORY])
+                    repositoryNames=[IMAGE_REPOSITORY]
+                )
                 print(f"  ECR repo   {IMAGE_REPOSITORY}")
             except Exception:
                 pass
@@ -346,8 +391,7 @@ def main():
         # always holds an image, so this needs force=True.
         if delete_ecr_repository(boto3.client("ecr", region_name=args.region)):
             print(f"  Deleted ECR repository: {IMAGE_REPOSITORY}")
-        delete_slurm_document(
-            boto3.client("ssm", region_name=args.region))
+        delete_slurm_document(boto3.client("ssm", region_name=args.region))
         result = _delete_mcp_infra(iam, aws_account_id=account, verbose=True)
         delete_cognito_pool(cog, pool_name_prefix=pool_prefix)
 
@@ -355,9 +399,11 @@ def main():
         # deployer who can remove their own boundary does not have one. Say
         # so rather than attempting it and reporting the denial as a
         # teardown failure.
-        print(f"\nleft in place: {_mcp_boundary_name()} (permissions boundary, "
-              f"durable by design -- remove by hand if the account should be "
-              f"empty)")
+        print(
+            f"\nleft in place: {_mcp_boundary_name()} (permissions boundary, "
+            f"durable by design -- remove by hand if the account should be "
+            f"empty)"
+        )
         if result.failed:
             print(f"\n*** {len(result.failed)} IAM step(s) FAILED ***")
             return 1
@@ -369,8 +415,10 @@ def main():
     # what the AccessDenied appears to be about.
     if not args.dry_run and (args.setup_infra or args.setup_gateway or tiers):
         missing = preflight_deploy_permissions(
-            boto3.client("iam"), caller_arn=sts.get_caller_identity()["Arn"],
-            aws_account_id=account, region=args.region,
+            boto3.client("iam"),
+            caller_arn=sts.get_caller_identity()["Arn"],
+            aws_account_id=account,
+            region=args.region,
         )
         if missing:
             sys.exit(
@@ -396,8 +444,7 @@ def main():
         cog = boto3.client("cognito-idp", region_name=args.region)
         want = _derive_mcp_user_pool_name(aws_account_id=account, region=args.region)
         pool_id = next(
-            (p["Id"] for p in cog.list_user_pools(MaxResults=60)["UserPools"]
-             if p["Name"] == want),
+            (p["Id"] for p in cog.list_user_pools(MaxResults=60)["UserPools"] if p["Name"] == want),
             None,
         )
         if pool_id is None:
@@ -406,8 +453,11 @@ def main():
         else:
             print(f"reusing Cognito user pool {want} ({pool_id})")
         _setup_mcp_infra(
-            boto3.client("iam"), aws_account_id=account, region=args.region,
-            mcp_user_pool_id=pool_id, update_policies=args.update_policies,
+            boto3.client("iam"),
+            aws_account_id=account,
+            region=args.region,
+            mcp_user_pool_id=pool_id,
+            update_policies=args.update_policies,
         )
         # The document is the read-only Slurm tool's security boundary:
         # SSM enforces its allowedValues/allowedPattern before dispatch,
@@ -433,7 +483,7 @@ def main():
                         f"container runtime\n"
                         f"  was found on PATH (looked for: "
                         f"{', '.join(CONTAINER_RUNTIMES)}).\n\n"
-                        f"  Install one (see \"Adding cluster creation\" in "
+                        f'  Install one (see "Adding cluster creation" in '
                         f"INSTALL.md), or pass\n"
                         f"  --image-uri for an image built elsewhere.\n\n"
                         f"  Without this tier the transport still serves every "
@@ -446,19 +496,21 @@ def main():
                 # Before the push, not after: the push is the slow part, and
                 # failing this afterwards means a 300 MB upload is thrown away
                 # on a permission the deploy could have checked in a second.
-                ensure_lambda_can_pull(
-                    ecr, aws_account_id=account, region=args.region)
+                ensure_lambda_can_pull(ecr, aws_account_id=account, region=args.region)
                 print("  repository policy: lambda.amazonaws.com may pull")
                 registry = ecr_login(ecr, runtime)
                 print(f"  {runtime} logged in to {registry}")
                 image_uri = f"{uri}:latest"
-                print(f"  building with {runtime} (--platform "
-                      f"{IMAGE_PLATFORM}); this takes a few minutes...")
+                print(
+                    f"  building with {runtime} (--platform "
+                    f"{IMAGE_PLATFORM}); this takes a few minutes..."
+                )
                 try:
                     build_and_push_image(
-                        runtime, image_uri=image_uri, repo_root=_repo_root,
-                        dockerfile=os.path.join(
-                            _repo_root, "mcp_server", f"Dockerfile.{tier}"),
+                        runtime,
+                        image_uri=image_uri,
+                        repo_root=_repo_root,
+                        dockerfile=os.path.join(_repo_root, "mcp_server", f"Dockerfile.{tier}"),
                     )
                 except ImageBuildError as e:
                     sys.exit(f"ERROR: {e}")
@@ -470,8 +522,10 @@ def main():
                 size = _build_zip(tier, build_dir, zip_path)
                 print(f"  zip: {size / 1e6:.0f} MB", end="")
                 if size > _DIRECT_UPLOAD_LIMIT:
-                    print(f" (over the {_DIRECT_UPLOAD_LIMIT / 1e6:.0f} MB "
-                          f"direct-upload limit, so via S3)")
+                    print(
+                        f" (over the {_DIRECT_UPLOAD_LIMIT / 1e6:.0f} MB "
+                        f"direct-upload limit, so via S3)"
+                    )
                 else:
                     print()
                 if args.dry_run:
@@ -492,8 +546,7 @@ def main():
         cog = boto3.client("cognito-idp", region_name=args.region)
         want = _derive_mcp_user_pool_name(aws_account_id=account, region=args.region)
         pool_id = next(
-            (p["Id"] for p in cog.list_user_pools(MaxResults=60)["UserPools"]
-             if p["Name"] == want),
+            (p["Id"] for p in cog.list_user_pools(MaxResults=60)["UserPools"] if p["Name"] == want),
             None,
         )
         if pool_id is None:
@@ -505,12 +558,13 @@ def main():
         print(f"\nGateway (pool {pool_id}):")
         domain = _ensure_cognito_client(cog, pool_id, None, args.region)
         info = setup_gateway(
-            account=account, region=args.region, user_pool_id=pool_id,
+            account=account,
+            region=args.region,
+            user_pool_id=pool_id,
             cognito_domain=domain,
         )
         print(f"\n  MCP endpoint: {info['base_url']}/mcp")
-        print(f"  Discovery:    {info['base_url']}"
-              f"/.well-known/oauth-protected-resource")
+        print(f"  Discovery:    {info['base_url']}/.well-known/oauth-protected-resource")
         endpoint = f"{info['base_url']}/mcp"
         connector_client_id = info.get("connector_client_id")
         if connector_client_id:
@@ -520,8 +574,7 @@ def main():
         cog = boto3.client("cognito-idp", region_name=args.region)
         want = _derive_mcp_user_pool_name(aws_account_id=account, region=args.region)
         pool_id = next(
-            (p["Id"] for p in cog.list_user_pools(MaxResults=60)["UserPools"]
-             if p["Name"] == want),
+            (p["Id"] for p in cog.list_user_pools(MaxResults=60)["UserPools"] if p["Name"] == want),
             None,
         )
         if pool_id is None:
@@ -537,7 +590,8 @@ def main():
         supplied = os.environ.get("MCP_USER_PASSWORD")
         password = supplied or generate_user_password()
         created = ensure_cognito_user(
-            cog, pool_id=pool_id, username=args.create_user, password=password)
+            cog, pool_id=pool_id, username=args.create_user, password=password
+        )
         verb = "created" if created else "already existed; password reset"
         print(f"\n  Cognito user: {args.create_user} ({verb})")
         if supplied:
@@ -570,15 +624,18 @@ def main():
             _missing = _container_tier_tools()
             print(f"\n{len(_missing)} tools are NOT in this deployment:")
             print("  " + ", ".join(_missing))
-            print("  -- i.e. you can inspect and operate clusters from the "
-                  "browser, but not")
-            print("  create or modify them. They live in the "
-                  "stack-mutation-node tier, which")
+            print("  -- i.e. you can inspect and operate clusters from the browser, but not")
+            print("  create or modify them. They live in the stack-mutation-node tier, which")
             print("  ships as a container image. To add it:")
             print("    ./deploy_mcp.py --tier stack-mutation-node")
             found = detect_container_runtime()
-            print(f"  ({'using ' + found if found else 'needs a container '
-                  'runtime on PATH -- see INSTALL.md'})")
+            print(
+                f"  ({
+                    'using ' + found
+                    if found
+                    else 'needs a container runtime on PATH -- see INSTALL.md'
+                })"
+            )
 
     print("Done.")
 

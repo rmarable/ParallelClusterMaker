@@ -142,9 +142,7 @@ class TestRenderTemplate:
 
     def test_renders_a_template_with_the_given_context(self, tmp_path):
         (tmp_path / "greeting.j2").write_text("Hello, {{ name }}!\n")
-        out = self._pcluster_core().render_template(
-            str(tmp_path), "greeting.j2", name="world"
-        )
+        out = self._pcluster_core().render_template(str(tmp_path), "greeting.j2", name="world")
         assert out == "Hello, world!\n"
 
     def test_strict_undefined_raises_on_a_missing_variable(self, tmp_path):
@@ -158,9 +156,7 @@ class TestRenderTemplate:
         """The exact whitespace bug Phase 0 exists to fix: without
         trim_blocks=True, the newline after a block tag survives into the
         rendered file, which Ansible's own template: module never emits."""
-        (tmp_path / "cond.j2").write_text(
-            "before\n{% if true %}\nmiddle\n{% endif %}\nafter\n"
-        )
+        (tmp_path / "cond.j2").write_text("before\n{% if true %}\nmiddle\n{% endif %}\nafter\n")
         out = self._pcluster_core().render_template(str(tmp_path), "cond.j2")
         assert out == "before\nmiddle\nafter\n"
 
@@ -203,9 +199,7 @@ def test_template_renders_custom_ami_variant(tdir, fname, cluster_params_custom_
     template = env.get_template(fname)
     rendered = template.render(**cluster_params_custom_ami)
     assert isinstance(rendered, str)
-    assert (
-        len(rendered) > 0
-    ), f"{fname} rendered to an empty string (custom_ami variant)"
+    assert len(rendered) > 0, f"{fname} rendered to an empty string (custom_ami variant)"
     if fname == "config.pcluster.j2":
         assert "ami-0abc1234567890def" in rendered, "custom_ami value not in config"
         assert "PlacementGroup:" in rendered, "PlacementGroup block absent from config"
@@ -224,9 +218,7 @@ def test_template_renders_monitoring_enabled_variant(
     template = env.get_template(fname)
     rendered = template.render(**cluster_params_monitoring_enabled)
     assert isinstance(rendered, str)
-    assert (
-        len(rendered) > 0
-    ), f"{fname} rendered to an empty string (monitoring_enabled variant)"
+    assert len(rendered) > 0, f"{fname} rendered to an empty string (monitoring_enabled variant)"
     if fname == "vars_file.j2":
         assert 'enable_monitoring: "true"' in rendered
         assert "monitoring_version:" in rendered
@@ -249,7 +241,9 @@ def test_template_renders_hpc_benchmarks_enabled(tdir, fname, cluster_params):
 
 
 @pytest.mark.parametrize("tdir,fname", _collect_templates())
-def test_template_renders_hpc_benchmarks_disabled(tdir, fname, cluster_params_hpc_benchmarks_disabled):
+def test_template_renders_hpc_benchmarks_disabled(
+    tdir, fname, cluster_params_hpc_benchmarks_disabled
+):
     """postinstall must NOT contain the benchmark block when enable_hpc_benchmarks=false."""
     env = _make_env(tdir)
     rendered = env.get_template(fname).render(**cluster_params_hpc_benchmarks_disabled)
@@ -266,12 +260,10 @@ def test_template_renders_hpc_benchmarks_disabled(tdir, fname, cluster_params_hp
         for ln in syncs:
             for gated in ("/hpc-benchmark/", "/performance/"):
                 assert gated not in ln, (
-                    f"benchmark S3 sync present when "
-                    f"enable_hpc_benchmarks=false: {ln.strip()}"
+                    f"benchmark S3 sync present when enable_hpc_benchmarks=false: {ln.strip()}"
                 )
         assert any("/staging/" in ln for ln in syncs), (
-            "the staging tree pull is not gated on benchmarks and must "
-            "still be here"
+            "the staging tree pull is not gated on benchmarks and must still be here"
         )
 
 
@@ -292,8 +284,7 @@ def test_template_renders_efs_enabled(tdir, fname, cluster_params):
     rendered = env.get_template(fname).render(**cluster_params)
     assert isinstance(rendered, str)
     if fname == "config.pcluster.j2":
-        assert "StorageType: Efs" in rendered, \
-            "EFS SharedStorage block absent when enable_efs=true"
+        assert "StorageType: Efs" in rendered, "EFS SharedStorage block absent when enable_efs=true"
 
 
 @pytest.mark.parametrize("tdir,fname", _collect_templates())
@@ -303,8 +294,9 @@ def test_template_renders_fsx_enabled(tdir, fname, cluster_params):
     rendered = env.get_template(fname).render(**cluster_params)
     assert isinstance(rendered, str)
     if fname == "config.pcluster.j2":
-        assert "FsxLustre" in rendered or "LustreFileSystemId" in rendered, \
+        assert "FsxLustre" in rendered or "LustreFileSystemId" in rendered, (
             "FSx SharedStorage block absent when enable_fsx=true"
+        )
 
 
 @pytest.mark.parametrize("tdir,fname", _collect_templates())
@@ -425,9 +417,7 @@ def test_template_dirs_all_exist():
     """Every directory in TEMPLATE_DIRS must exist and contain at least one template."""
     for tdir in TEMPLATE_DIRS:
         assert os.path.isdir(tdir), f"Template directory missing: {tdir}"
-        templates = [
-            f for f in os.listdir(tdir) if f.endswith((".j2", ".jinja2", ".jinja"))
-        ]
+        templates = [f for f in os.listdir(tdir) if f.endswith((".j2", ".jinja2", ".jinja"))]
         assert len(templates) > 0, f"No templates found in {tdir}"
 
 
@@ -558,9 +548,7 @@ def _arn_matches(pattern, arn):
     """
     import re
 
-    regex = "".join(
-        ".*" if c == "*" else "." if c == "?" else re.escape(c) for c in pattern
-    )
+    regex = "".join(".*" if c == "*" else "." if c == "?" else re.escape(c) for c in pattern)
     return re.fullmatch(regex, arn) is not None
 
 
@@ -580,16 +568,25 @@ def test_iam_policy_under_size_limit(fname):
     data = _load_policy(fname)
     minified = json.dumps(data, separators=(",", ":"))
     size = len(minified.encode("utf-8"))
-    assert (
-        size <= _IAM_POLICY_LIMIT
-    ), f"{fname}: minified size {size} bytes exceeds IAM limit of {_IAM_POLICY_LIMIT}"
+    assert size <= _IAM_POLICY_LIMIT, (
+        f"{fname}: minified size {size} bytes exceeds IAM limit of {_IAM_POLICY_LIMIT}"
+    )
 
 
 @pytest.mark.parametrize("fname", _CLUSTER_STRUCTURAL_POLICY_FILES + ["OperatorPolicy.json_src"])
 def test_iam_policy_statement_keys_are_valid(fname):
     """Only real IAM statement keys are allowed. A stray key (e.g. "Comment")
     makes AWS reject the whole policy at CreatePolicy time."""
-    _VALID = {"Sid", "Effect", "Action", "NotAction", "Resource", "NotResource", "Condition", "Principal"}
+    _VALID = {
+        "Sid",
+        "Effect",
+        "Action",
+        "NotAction",
+        "Resource",
+        "NotResource",
+        "Condition",
+        "Principal",
+    }
     for stmt in _load_policy(fname)["Statement"]:
         bad = set(stmt) - _VALID
         assert not bad, f"{fname}: statement {stmt.get('Sid')} has invalid keys: {sorted(bad)}"
@@ -648,11 +645,13 @@ def test_operator_policy_omits_policy_version_management():
         a
         for stmt in data["Statement"]
         if stmt["Effect"] == "Allow"
-        for a in (stmt["Action"] if isinstance(stmt["Action"], list)
-                  else [stmt["Action"]])
+        for a in (stmt["Action"] if isinstance(stmt["Action"], list) else [stmt["Action"]])
     }
-    for banned in ("iam:CreatePolicyVersion", "iam:DeletePolicyVersion",
-                   "iam:SetDefaultPolicyVersion"):
+    for banned in (
+        "iam:CreatePolicyVersion",
+        "iam:DeletePolicyVersion",
+        "iam:SetDefaultPolicyVersion",
+    ):
         assert banned not in actions, (
             f"OperatorPolicy grants {banned}; it can now rewrite any "
             f"cluster's head-node policy in place"
@@ -712,14 +711,11 @@ class TestNoInstancePolicyCanDeleteALogGroup:
         for stmt in policy["Statement"]:
             if stmt["Effect"] != "Deny":
                 continue
-            actions = (
-                stmt["Action"] if isinstance(stmt["Action"], list) else [stmt["Action"]]
-            )
+            actions = stmt["Action"] if isinstance(stmt["Action"], list) else [stmt["Action"]]
             if not any(fnmatch.fnmatch(banned, a) for a in actions):
                 continue
             resources = (
-                stmt["Resource"] if isinstance(stmt["Resource"], list)
-                else [stmt["Resource"]]
+                stmt["Resource"] if isinstance(stmt["Resource"], list) else [stmt["Resource"]]
             )
             if "*" in resources:
                 return True
@@ -748,9 +744,7 @@ class TestNoInstancePolicyCanDeleteALogGroup:
         for stmt in policy["Statement"]:
             if stmt["Effect"] != "Allow":
                 continue
-            actions = (
-                stmt["Action"] if isinstance(stmt["Action"], list) else [stmt["Action"]]
-            )
+            actions = stmt["Action"] if isinstance(stmt["Action"], list) else [stmt["Action"]]
             # fnmatch, not equality: "logs:*" and "logs:Delete*" both grant the
             # action while an exact-string ban reads clean.
             matched = [a for a in actions if fnmatch.fnmatch(self._BANNED, a)]
@@ -765,34 +759,42 @@ class TestNoInstancePolicyCanDeleteALogGroup:
         "a plain Allow with no Deny anywhere": {
             "Version": "2012-10-17",
             "Statement": [
-                {"Sid": "Grant", "Action": ["logs:DeleteLogGroup"],
-                 "Effect": "Allow", "Resource": "*"},
+                {
+                    "Sid": "Grant",
+                    "Action": ["logs:DeleteLogGroup"],
+                    "Effect": "Allow",
+                    "Resource": "*",
+                },
             ],
         },
         "an Allow reached only through a wildcard": {
             "Version": "2012-10-17",
             "Statement": [
-                {"Sid": "Grant", "Action": ["logs:*"],
-                 "Effect": "Allow", "Resource": "*"},
+                {"Sid": "Grant", "Action": ["logs:*"], "Effect": "Allow", "Resource": "*"},
             ],
         },
         "a Deny scoped to one log group, so the wildcard Allow stands elsewhere": {
             "Version": "2012-10-17",
             "Statement": [
-                {"Sid": "Grant", "Action": ["logs:*"],
-                 "Effect": "Allow", "Resource": "*"},
-                {"Sid": "NarrowDeny", "Action": ["logs:DeleteLogGroup"],
-                 "Effect": "Deny",
-                 "Resource": ["arn:aws:logs:*:123456789012:log-group:/x:*"]},
+                {"Sid": "Grant", "Action": ["logs:*"], "Effect": "Allow", "Resource": "*"},
+                {
+                    "Sid": "NarrowDeny",
+                    "Action": ["logs:DeleteLogGroup"],
+                    "Effect": "Deny",
+                    "Resource": ["arn:aws:logs:*:123456789012:log-group:/x:*"],
+                },
             ],
         },
         "a Deny of a neighboring action only": {
             "Version": "2012-10-17",
             "Statement": [
-                {"Sid": "Grant", "Action": ["logs:*"],
-                 "Effect": "Allow", "Resource": "*"},
-                {"Sid": "WrongDeny", "Action": ["logs:DeleteLogStream"],
-                 "Effect": "Deny", "Resource": "*"},
+                {"Sid": "Grant", "Action": ["logs:*"], "Effect": "Allow", "Resource": "*"},
+                {
+                    "Sid": "WrongDeny",
+                    "Action": ["logs:DeleteLogStream"],
+                    "Effect": "Deny",
+                    "Resource": "*",
+                },
             ],
         },
     }
@@ -811,7 +813,8 @@ class TestNoInstancePolicyCanDeleteALogGroup:
         _load_policy monkeypatched to hand it the document instead.
         """
         monkeypatch.setattr(
-            sys.modules[__name__], "_load_policy",
+            sys.modules[__name__],
+            "_load_policy",
             lambda _fname: self._MUST_STILL_FAIL[case],
         )
         with pytest.raises(AssertionError):
@@ -826,10 +829,13 @@ class TestNoInstancePolicyCanDeleteALogGroup:
             {
                 "Version": "2012-10-17",
                 "Statement": [
-                    {"Sid": "Ceiling", "Action": ["logs:*"],
-                     "Effect": "Allow", "Resource": "*"},
-                    {"Sid": "Deny", "Action": ["logs:DeleteLogGroup"],
-                     "Effect": "Deny", "Resource": "*"},
+                    {"Sid": "Ceiling", "Action": ["logs:*"], "Effect": "Allow", "Resource": "*"},
+                    {
+                        "Sid": "Deny",
+                        "Action": ["logs:DeleteLogGroup"],
+                        "Effect": "Deny",
+                        "Resource": "*",
+                    },
                 ],
             },
             self._BANNED,
@@ -841,10 +847,8 @@ class TestNoInstancePolicyCanDeleteALogGroup:
             {
                 "Version": "2012-10-17",
                 "Statement": [
-                    {"Sid": "Ceiling", "Action": ["logs:*"],
-                     "Effect": "Allow", "Resource": "*"},
-                    {"Sid": "Deny", "Action": ["logs:Delete*"],
-                     "Effect": "Deny", "Resource": "*"},
+                    {"Sid": "Ceiling", "Action": ["logs:*"], "Effect": "Allow", "Resource": "*"},
+                    {"Sid": "Deny", "Action": ["logs:Delete*"], "Effect": "Deny", "Resource": "*"},
                 ],
             },
             self._BANNED,
@@ -870,10 +874,7 @@ class TestNoInstancePolicyCanDeleteALogGroup:
             if stmt["Effect"] == "Allow"
             and any(
                 fnmatch.fnmatch(self._BANNED, a)
-                for a in (
-                    stmt["Action"] if isinstance(stmt["Action"], list)
-                    else [stmt["Action"]]
-                )
+                for a in (stmt["Action"] if isinstance(stmt["Action"], list) else [stmt["Action"]])
             )
         ]
         assert ceiling, (
@@ -894,8 +895,7 @@ class TestNoInstancePolicyCanDeleteALogGroup:
         what the retained-log-group bullet in CLAUDE.md expects of it.
         """
         on_disk = {
-            f for f in os.listdir(os.path.join(REPO_ROOT, "templates"))
-            if f.endswith(".json_src")
+            f for f in os.listdir(os.path.join(REPO_ROOT, "templates")) if f.endswith(".json_src")
         }
         classified = (
             set(_INSTANCE_REACHABLE_POLICY_FILES)
@@ -914,9 +914,7 @@ class TestNoInstancePolicyCanDeleteALogGroup:
         actions = {
             a
             for stmt in _load_policy("ComputeNode-Base.json_src")["Statement"]
-            for a in (
-                stmt["Action"] if isinstance(stmt["Action"], list) else [stmt["Action"]]
-            )
+            for a in (stmt["Action"] if isinstance(stmt["Action"], list) else [stmt["Action"]])
         }
         for needed in (
             "logs:CreateLogGroup",
@@ -1003,16 +1001,13 @@ class TestAttachRolePolicyCannotReachTheOperatorPolicy:
         policy for a cluster named `operator`; _validate_cluster_name allows that
         name. The condition must not be scoped on the cluster name."""
         for pattern in self._patterns():
-            assert "parallelcluster-operator" not in pattern.replace(
-                "<CLUSTER_NAME>", "operator"
-            )
+            assert "parallelcluster-operator" not in pattern.replace("<CLUSTER_NAME>", "operator")
 
     def test_the_condition_is_not_an_unscoped_wildcard(self):
         """Guards the exact string that shipped, and any equivalent widening."""
         for pattern in self._patterns():
             assert self._SERIAL in pattern, (
-                f"{self._SID} iam:PolicyARN must be scoped to the cluster serial; "
-                f"got {pattern!r}"
+                f"{self._SID} iam:PolicyARN must be scoped to the cluster serial; got {pattern!r}"
             )
 
 
@@ -1342,8 +1337,7 @@ def test_postinstall_writes_completion_marker(cluster_params):
     # re-touch the head node's marker and turn it into "some node finished".
     gate = rendered.rsplit(f"touch {marker}", 1)[0].rsplit("\n\n", 1)[-1]
     assert 'NODE_TYPE" == "HeadNode"' in gate, (
-        "the marker write must be gated to the head node; postinstall now runs on "
-        "compute nodes too"
+        "the marker write must be gated to the head node; postinstall now runs on compute nodes too"
     )
 
 
@@ -1362,7 +1356,9 @@ def _postinstall_queue_hooks(rendered_config):
         scripts = (
             [s["Script"] for s in action["Sequence"]]
             if "Sequence" in action
-            else [action["Script"]] if "Script" in action else []
+            else [action["Script"]]
+            if "Script" in action
+            else []
         )
         hooks[queue["Name"]] = [s.rsplit("/", 1)[-1] for s in scripts]
     return hooks
@@ -1480,15 +1476,11 @@ class TestPostinstallTemplateIsActuallyRendered:
 
         def _names_a_literal_call(call_node):
             return any(
-                isinstance(arg, ast.Constant) and arg.value == template
-                for arg in call_node.args
+                isinstance(arg, ast.Constant) and arg.value == template for arg in call_node.args
             )
 
         def _contains_the_template_name(node):
-            return any(
-                isinstance(n, ast.Constant) and n.value == template
-                for n in ast.walk(node)
-            )
+            return any(isinstance(n, ast.Constant) and n.value == template for n in ast.walk(node))
 
         found = False
         for node in ast.walk(tree):
@@ -1541,9 +1533,7 @@ class TestPostinstallTemplateIsActuallyRendered:
         import pcluster_core
 
         tree = ast.parse(
-            inspect.getsource(
-                pcluster_core.render_and_upload_cluster_config_and_scripts
-            ).lstrip()
+            inspect.getsource(pcluster_core.render_and_upload_cluster_config_and_scripts).lstrip()
         )
         pairs = []
         for node in ast.walk(tree):
@@ -1552,17 +1542,12 @@ class TestPostinstallTemplateIsActuallyRendered:
             keys = [
                 n.slice.value
                 for n in node.elts
-                if isinstance(n, ast.Subscript)
-                and isinstance(n.slice, ast.Constant)
+                if isinstance(n, ast.Subscript) and isinstance(n.slice, ast.Constant)
             ]
             if len(keys) == 2:
                 pairs.append(tuple(keys))
-        uploaded = [
-            source for source, dest in pairs if dest == f"{stage}_s3_dest"
-        ]
-        assert uploaded, (
-            f"nothing uploads {stage}_s3_dest to S3: {pairs}"
-        )
+        uploaded = [source for source, dest in pairs if dest == f"{stage}_s3_dest"]
+        assert uploaded, f"nothing uploads {stage}_s3_dest to S3: {pairs}"
         assert uploaded == [f"{stage}_rendered"], (
             f"{stage}_s3_dest is uploaded from {uploaded}, not from the rendered "
             f"template -- the nodes would run the operator's hook instead"
@@ -1575,9 +1560,7 @@ class TestPostinstallTemplateIsActuallyRendered:
         the two indistinguishable."""
         with open(os.path.join(REPO_ROOT, "templates", "vars_file.j2")) as fh:
             body = fh.read()
-        line = next(
-            l for l in body.splitlines() if l.startswith(f"{stage}_s3_dest:")
-        )
+        line = next(l for l in body.splitlines() if l.startswith(f"{stage}_s3_dest:"))
         assert "install_script" not in line, (
             f"{stage}_s3_dest is derived from the operator's hook flag: {line}"
         )
@@ -1602,12 +1585,12 @@ class TestPostinstallTemplateIsActuallyRendered:
                 if "Script" in action
                 else [s["Script"] for s in action["Sequence"]]
             )
-            assert any(
-                s.endswith(params["postinstall_s3_dest"]) for s in scripts
-            ), f"{name} does not run the toolkit postinstall: {scripts}"
-            assert any(
-                s.endswith(params["user_postinstall_s3_dest"]) for s in scripts
-            ), f"{name} does not run the operator hook: {scripts}"
+            assert any(s.endswith(params["postinstall_s3_dest"]) for s in scripts), (
+                f"{name} does not run the toolkit postinstall: {scripts}"
+            )
+            assert any(s.endswith(params["user_postinstall_s3_dest"]) for s in scripts), (
+                f"{name} does not run the operator hook: {scripts}"
+            )
 
 
 _INSTANCE_STORE_MODEL = "Amazon EC2 NVMe Instance Storage"
@@ -1682,8 +1665,7 @@ def _run_postinstall(
         # also the only place either hazard is visible.
         guard_restore = f"source {profile_path}\nset -euo pipefail\n"
         assert guard_restore in rendered, (
-            "the profile guard no longer restores the options on the line after "
-            "the source"
+            "the profile guard no longer restores the options on the line after the source"
         )
         rendered = rendered.replace(guard_restore, f"source {profile_path}\nset -u\n", 1)
 
@@ -1702,7 +1684,7 @@ def _run_postinstall(
                 with open(os.path.join(holders, "dm-0"), "w"):
                     pass
         find_stub = (
-            f'find() {{ for _d in {" ".join(nvme_devices) or "\'\'"}; do '
+            f"find() {{ for _d in {' '.join(nvme_devices) or "''"}; do "
             f'[[ -n "$_d" ]] && echo "{block}/$_d"; done; return 0; }}'
         )
         # The real node type arrives in /etc/parallelcluster/cfnconfig, not in the
@@ -1727,10 +1709,7 @@ def _run_postinstall(
         # and puts every instance-store device into an LVM volume, so blkid
         # reports a signature on it. Anything not in that list is genuinely free.
         blkid_claimed = (
-            " ".join(
-                f"/dev/{d}" for d in list(claimed_devices) + list(formatted_devices)
-            )
-            or "''"
+            " ".join(f"/dev/{d}" for d in list(claimed_devices) + list(formatted_devices)) or "''"
         )
         # This harness deliberately does NOT restore the rendered script's own
         # `set -euo pipefail` (line 2, discarded by the split below) the way
@@ -1860,9 +1839,7 @@ class TestPostinstallNodeTypeGating:
         )
         assert "custom_action_done" in trace, "a manual run must default to HeadNode"
 
-    def test_the_node_type_is_read_from_cfnconfig_not_the_environment(
-        self, cluster_params
-    ):
+    def test_the_node_type_is_read_from_cfnconfig_not_the_environment(self, cluster_params):
         """The bug this pins cost a whole build. There is no
         PARALLELCLUSTER_NODE_TYPE on any ParallelCluster node: the node type is
         published as cfn_node_type in /etc/parallelcluster/cfnconfig.  While the
@@ -1938,9 +1915,7 @@ class TestPostinstallNodeTypeGating:
         assert "/local_scratch" in trace, f"instance store not mounted: {trace}"
         assert "mdadm" not in trace, "a single device must not be assembled into RAID0"
 
-    def test_a_login_node_never_claims_the_instance_store(
-        self, cluster_params_gpu_queue_enabled
-    ):
+    def test_a_login_node_never_claims_the_instance_store(self, cluster_params_gpu_queue_enabled):
         """A login node's local NVMe storage has nothing to do with the GPU
         queue -- this block must not claim it just because enable_gpu is true
         cluster-wide. Same fixture and device as the ComputeFleet-formats-it
@@ -1949,14 +1924,10 @@ class TestPostinstallNodeTypeGating:
             cluster_params_gpu_queue_enabled, "LoginNode", nvme_devices=["nvme1n1"]
         )
         assert r.returncode == 0, r.stderr.decode()
-        assert "mkfs" not in trace, (
-            f"a login node's instance store was formatted: {trace}"
-        )
+        assert "mkfs" not in trace, f"a login node's instance store was formatted: {trace}"
         assert "mdadm" not in trace, trace
 
-    def test_multiple_instance_store_devices_are_striped(
-        self, cluster_params_gpu_queue_enabled
-    ):
+    def test_multiple_instance_store_devices_are_striped(self, cluster_params_gpu_queue_enabled):
         """p4d/p5 expose several devices; the whole point of the block is to give
         the job one large scratch filesystem rather than N small ones."""
         r, trace, _ = _run_postinstall(
@@ -1968,9 +1939,7 @@ class TestPostinstallNodeTypeGating:
         assert "--level=0 --raid-devices=2" in trace, f"devices not striped: {trace}"
         assert "mkfs.xfs -f /dev/md0" in trace, f"RAID array not formatted: {trace}"
 
-    def test_a_node_with_no_instance_store_is_left_alone(
-        self, cluster_params_gpu_queue_enabled
-    ):
+    def test_a_node_with_no_instance_store_is_left_alone(self, cluster_params_gpu_queue_enabled):
         """The sticky-bit /local_scratch directory created earlier is the fallback.
         Formatting anything here would destroy the EBS root volume."""
         r, trace, _ = _run_postinstall(
@@ -1980,9 +1949,7 @@ class TestPostinstallNodeTypeGating:
         assert "mkfs" not in trace, f"a node with no instance store was formatted: {trace}"
         assert "mdadm" not in trace, trace
 
-    def test_an_ebs_backed_nvme_volume_is_never_formatted(
-        self, cluster_params_gpu_queue_enabled
-    ):
+    def test_an_ebs_backed_nvme_volume_is_never_formatted(self, cluster_params_gpu_queue_enabled):
         """EBS volumes also appear as /dev/nvme*. The model-string filter is the
         only thing standing between this block and mkfs on the root volume."""
         r, trace, _ = _run_postinstall(
@@ -2050,9 +2017,7 @@ class TestPostinstallNodeTypeGating:
             f"reformatted; only the holders check sees this: {trace}"
         )
 
-    def test_a_formatted_but_unmounted_device_is_skipped(
-        self, cluster_params_gpu_queue_enabled
-    ):
+    def test_a_formatted_but_unmounted_device_is_skipped(self, cluster_params_gpu_queue_enabled):
         """The blkid half, in isolation. A device carrying a filesystem nobody has
         mounted has an empty holders/ directory, so the holders test passes it
         through -- but it holds data, and this block would silently destroy it.
@@ -2104,9 +2069,7 @@ class TestPostinstallNodeTypeGating:
         refreshes nothing in time. Asserted on the execution trace by index,
         because both commands are `sudo apt-get` and a source-level grep cannot
         tell which one ran first on which node type."""
-        _, trace, _ = _run_postinstall(
-            cluster_params_gpu_queue_enabled, "ComputeFleet"
-        )
+        _, trace, _ = _run_postinstall(cluster_params_gpu_queue_enabled, "ComputeFleet")
         lines = trace.splitlines()
         updates = [i for i, ln in enumerate(lines) if "apt-get -y update" in ln]
         installs = [i for i, ln in enumerate(lines) if "install" in ln and "htop" in ln]
@@ -2116,15 +2079,11 @@ class TestPostinstallNodeTypeGating:
             f"the apt index is refreshed after the install it exists for: {trace}"
         )
 
-    def test_nvtop_is_never_installed_on_a_compute_node(
-        self, cluster_params_gpu_queue_enabled
-    ):
+    def test_nvtop_is_never_installed_on_a_compute_node(self, cluster_params_gpu_queue_enabled):
         """nvtop is in multiverse and the operator logs into the head node, not a
         compute node. Keeping it off the compute path removes the only
         non-main package from a node that must never fail to bootstrap."""
-        _, trace, _ = _run_postinstall(
-            cluster_params_gpu_queue_enabled, "ComputeFleet"
-        )
+        _, trace, _ = _run_postinstall(cluster_params_gpu_queue_enabled, "ComputeFleet")
         assert "nvtop" not in trace, (
             f"nvtop is back on the compute node, where multiverse may be absent: {trace}"
         )
@@ -2138,21 +2097,15 @@ class TestPostinstallNodeTypeGating:
         is pure bootstrap latency. nvtop belongs here and nowhere else."""
         _, trace, _ = _run_postinstall(cluster_params_gpu_queue_enabled, "HeadNode")
         lines = trace.splitlines()
-        gpu_install = [
-            i for i, ln in enumerate(lines) if "install" in ln and "nvtop" in ln
-        ]
+        gpu_install = [i for i, ln in enumerate(lines) if "install" in ln and "nvtop" in ln]
         assert gpu_install, f"the head node lost nvtop: {trace}"
         assert "htop" in lines[gpu_install[0]], (
             f"htop must install alongside nvtop on the head node: {trace}"
         )
         updates_before = [
-            i
-            for i, ln in enumerate(lines[: gpu_install[0]])
-            if "apt-get -y update" in ln
+            i for i, ln in enumerate(lines[: gpu_install[0]]) if "apt-get -y update" in ln
         ]
-        assert not updates_before, (
-            f"the head node refreshes the apt index a third time: {trace}"
-        )
+        assert not updates_before, f"the head node refreshes the apt index a third time: {trace}"
 
 
 class TestMonitoringToolsCannotFailTheNode:
@@ -2224,13 +2177,9 @@ class TestMonitoringToolsCannotFailTheNode:
                     # The package manager fails the way an unreachable mirror or a
                     # missing package does: non-zero, with the message on stderr.
                     f'{manager}() {{ _log "{manager} $*"; echo "E: failed" >&2; return 100; }}\n'
-                    'sudo() { _log "sudo $*"; "$@"; }\n'
-                    + block
-                    + "\n"
+                    'sudo() { _log "sudo $*"; "$@"; }\n' + block + "\n"
                 )
-            result = subprocess.run(
-                ["bash", script], capture_output=True, text=True, timeout=60
-            )
+            result = subprocess.run(["bash", script], capture_output=True, text=True, timeout=60)
             with open(trace) as fh:
                 return result, fh.read()
 
@@ -2248,8 +2197,7 @@ class TestMonitoringToolsCannotFailTheNode:
         )
         assert refresh in trace, f"[{arm}] the refresh never ran: {trace}"
         assert "htop" in trace, (
-            f"[{arm}] the install was skipped rather than "
-            f"attempted-and-tolerated: {trace}"
+            f"[{arm}] the install was skipped rather than attempted-and-tolerated: {trace}"
         )
 
     @pytest.mark.parametrize("arm", sorted(_ARMS))
@@ -2262,9 +2210,7 @@ class TestMonitoringToolsCannotFailTheNode:
         )
         assert "htop" in trace, f"[{arm}] the head node install never ran: {trace}"
 
-    def test_the_rhel_head_node_survives_a_failed_epel_install(
-        self, cluster_params_rhel_gpu_queue
-    ):
+    def test_the_rhel_head_node_survives_a_failed_epel_install(self, cluster_params_rhel_gpu_queue):
         """RHEL's arm has a command the other two do not: EPEL by URL, because
         nvtop is not in RHEL's own repositories. It is the first command in the
         block, so an unguarded failure there takes the node down before either
@@ -2274,9 +2220,7 @@ class TestMonitoringToolsCannotFailTheNode:
         assert "epel-release-latest-9.noarch.rpm" in block, (
             f"the EPEL install is gone from the RHEL arm:\n{block}"
         )
-        result, trace = self._run(
-            cluster_params_rhel_gpu_queue, "HeadNode", manager, refresh
-        )
+        result, trace = self._run(cluster_params_rhel_gpu_queue, "HeadNode", manager, refresh)
         assert result.returncode == 0, (
             f"a failed EPEL install took the RHEL head node down: "
             f"rc={result.returncode} stderr={result.stderr} trace={trace}"
@@ -2303,9 +2247,7 @@ class TestMonitoringToolsCannotFailTheNode:
         params, manager, refresh = self._params(request, arm)
         result, trace = self._run(params, "HeadNode", manager, refresh)
         installs = [
-            ln
-            for ln in trace.splitlines()
-            if ln.startswith(manager) and " install " in f"{ln} "
+            ln for ln in trace.splitlines() if ln.startswith(manager) and " install " in f"{ln} "
         ]
         assert installs, f"[{arm}] the head node installed nothing: {trace}"
         with_nvtop = [ln for ln in installs if "nvtop" in ln.split()]
@@ -2326,8 +2268,7 @@ class TestMonitoringToolsCannotFailTheNode:
         )
         result, trace = self._run(params, "ComputeFleet", manager, refresh)
         assert "E: failed" in result.stderr, (
-            f"[{arm}] the {manager} stub did not fail, so the guards were never "
-            "exercised"
+            f"[{arm}] the {manager} stub did not fail, so the guards were never exercised"
         )
         assert manager in trace, (
             f"[{arm}] the harness stubbed {manager} but the block never called "
@@ -2372,13 +2313,9 @@ class TestTheProfileGuardSuspendsEveryOption:
             stripped = lines[i].strip()
             return bool(stripped) and not stripped.startswith("#")
 
-        src = next(
-            (i for i, l in enumerate(lines) if l.strip() == "source /etc/profile"), None
-        )
+        src = next((i for i, l in enumerate(lines) if l.strip() == "source /etc/profile"), None)
         assert src is not None, f"{template} no longer sources /etc/profile"
-        restore = next(
-            (i for i in range(src + 1, len(lines)) if executable(i)), None
-        )
+        restore = next((i for i in range(src + 1, len(lines)) if executable(i)), None)
         assert restore is not None, (
             f"{template} sources /etc/profile and never runs anything else; the "
             f"option restore is gone"
@@ -2458,9 +2395,7 @@ class TestTheProfileGuardSuspendsEveryOption:
         )
 
     @pytest.mark.parametrize("template", _TEMPLATES)
-    def test_every_option_is_restored_after_the_profile_is_sourced(
-        self, template, cluster_params
-    ):
+    def test_every_option_is_restored_after_the_profile_is_sourced(self, template, cluster_params):
         """A guard that suspends three options and restores one silently disables
         the other two for the entire rest of the script -- which on these two
         files is the whole node bootstrap."""
@@ -2479,9 +2414,7 @@ class TestTheProfileGuardSuspendsEveryOption:
         )
 
     @pytest.mark.parametrize("template", _TEMPLATES)
-    def test_the_harness_fails_a_guard_that_only_suspends_set_u(
-        self, template, cluster_params
-    ):
+    def test_the_harness_fails_a_guard_that_only_suspends_set_u(self, template, cluster_params):
         """Vacuity guard.  If the hostile profile did not actually fail under
         pipefail, every test above would pass against the broken guard.
 
@@ -2522,9 +2455,7 @@ class TestNvmeDetectionSurvivesSetE:
 
     def _loop(self, cluster_params_gpu_queue_enabled):
         env = _make_env(os.path.join(REPO_ROOT, "templates"))
-        rendered = env.get_template("postinstall.j2").render(
-            **cluster_params_gpu_queue_enabled
-        )
+        rendered = env.get_template("postinstall.j2").render(**cluster_params_gpu_queue_enabled)
         start = rendered.index("mapfile -t _NVME_DEVS")
         end = rendered.index("_NVME_COUNT=")
         loop = rendered[start:end]
@@ -2584,9 +2515,7 @@ class TestNvmeDetectionSurvivesSetE:
                 fh.write(script)
             r = subprocess.run(["bash", path], capture_output=True, text=True)
         lines = [l for l in r.stdout.split("\n") if l]
-        status = next(
-            (int(l.split()[1]) for l in lines if l.startswith("STATUS ")), None
-        )
+        status = next((int(l.split()[1]) for l in lines if l.startswith("STATUS ")), None)
         assert status is not None, f"harness lost the inner status: {r.stdout!r}"
         return r, [l for l in lines if not l.startswith("STATUS ")], status
 
@@ -2604,8 +2533,7 @@ class TestNvmeDetectionSurvivesSetE:
             f"that status is real.\nstderr: {r.stderr}"
         )
         assert devs == ["nvme1n1"], (
-            f"wrong devices survived -- got {devs}, expected only the free one."
-            f"\nstderr: {r.stderr}"
+            f"wrong devices survived -- got {devs}, expected only the free one.\nstderr: {r.stderr}"
         )
 
     def test_a_claimed_device_first_does_not_lose_the_free_devices_behind_it(
@@ -2614,14 +2542,11 @@ class TestNvmeDetectionSurvivesSetE:
         """The complementary position: two free devices behind a claimed one, which
         must both survive and take the RAID0 path downstream."""
         loop = self._loop(cluster_params_gpu_queue_enabled)
-        r, devs, status = self._run(
-            loop, ["nvme1n1", "nvme2n1", "nvme3n1"], ["nvme1n1"]
-        )
+        r, devs, status = self._run(loop, ["nvme1n1", "nvme2n1", "nvme3n1"], ["nvme1n1"])
         assert r.returncode == 0, f"the detection loop aborts: {r.stderr}"
         assert status == 0, f"the detection loop exits {status}: {r.stderr}"
         assert devs == ["nvme2n1", "nvme3n1"], (
-            f"free devices behind a claimed one were lost -- got {devs}."
-            f"\nstderr: {r.stderr}"
+            f"free devices behind a claimed one were lost -- got {devs}.\nstderr: {r.stderr}"
         )
 
     def test_an_ebs_device_last_in_the_list_does_not_fail_the_loop(
@@ -2631,9 +2556,7 @@ class TestNvmeDetectionSurvivesSetE:
         trips it in practice -- every instance has one. Placed last, it is the
         device whose false test would end the loop body."""
         loop = self._loop(cluster_params_gpu_queue_enabled)
-        r, devs, status = self._run(
-            loop, ["nvme1n1", "nvme2n1"], [], ebs_devices=["nvme2n1"]
-        )
+        r, devs, status = self._run(loop, ["nvme1n1", "nvme2n1"], [], ebs_devices=["nvme2n1"])
         assert r.returncode == 0, f"the detection loop aborts: {r.stderr}"
         assert status == 0, (
             f"the detection loop exits {status} when the last device is an EBS "
@@ -2686,9 +2609,7 @@ class TestLmodConfigureGetsEveryToolItHardQuitsOn:
     ):
         params = request.getfixturevalue(fixture)
         _, trace, _ = _run_postinstall(params, "HeadNode")
-        installed = TestPackageManagersMatchTheRenderedOs._installed_packages(
-            trace, manager
-        )
+        installed = TestPackageManagersMatchTheRenderedOs._installed_packages(trace, manager)
         for tool in self._CONFIGURE_REQUIRES:
             assert tool in installed, (
                 f"{manager} never installs {tool!r}, which Lmod's ./configure "
@@ -2706,9 +2627,7 @@ class TestLmodConfigureGetsEveryToolItHardQuitsOn:
             ("cluster_params_al2023", "dnf"),
         ],
     )
-    def test_the_prerequisites_land_before_configure_runs(
-        self, request, fixture, manager
-    ):
+    def test_the_prerequisites_land_before_configure_runs(self, request, fixture, manager):
         """Installing bc after ./configure would be useless, so the order matters.
 
         This one is asserted on the rendered source, not the trace: ./configure is
@@ -2717,18 +2636,14 @@ class TestLmodConfigureGetsEveryToolItHardQuitsOn:
         is exactly how the first version of this test passed with bc moved to the
         line below `sudo -E make install`."""
         env = _make_env(os.path.join(REPO_ROOT, "templates"))
-        rendered = env.get_template("postinstall.j2").render(
-            **request.getfixturevalue(fixture)
-        )
+        rendered = env.get_template("postinstall.j2").render(**request.getfixturevalue(fixture))
         # Comments are stripped: the block explaining *why* bc is on the package
         # line names ./configure itself, and matching that comment put the
         # "configure" anchor 80 lines above the command it describes.
-        lines = [
-            "" if ln.lstrip().startswith("#") else ln
-            for ln in rendered.splitlines()
-        ]
+        lines = ["" if ln.lstrip().startswith("#") else ln for ln in rendered.splitlines()]
         installs = [
-            i for i, ln in enumerate(lines)
+            i
+            for i, ln in enumerate(lines)
             if manager in ln and " install" in ln and re.search(r"\bbc\b", ln)
         ]
         configures = [i for i, ln in enumerate(lines) if "./configure" in ln]
@@ -2766,15 +2681,14 @@ class TestLuarocksGetsTheLuaHeadersItCompilesAgainst:
             pkgs.update(w for w in tail.split() if not w.startswith("-"))
         return pkgs
 
-    def test_the_lua_dev_headers_are_installed_before_any_rock_is_built(
-        self, cluster_params
-    ):
+    def test_the_lua_dev_headers_are_installed_before_any_rock_is_built(self, cluster_params):
         _, trace, _ = _run_postinstall(cluster_params, "HeadNode")
 
         # The sudo stub logs "sudo luarocks ...", so anchor on the word, not the
         # start of the line.
         rock_lines = [
-            i for i, ln in enumerate(trace.splitlines())
+            i
+            for i, ln in enumerate(trace.splitlines())
             if re.search(r"\bluarocks\b", ln) and " install" in ln
         ]
         assert rock_lines, f"postinstall no longer installs any luarocks rock: {trace}"
@@ -2788,7 +2702,8 @@ class TestLuarocksGetsTheLuaHeadersItCompilesAgainst:
         )
 
         header_line = min(
-            i for i, ln in enumerate(trace.splitlines())
+            i
+            for i, ln in enumerate(trace.splitlines())
             if "apt-get" in ln and "liblua5.1-0-dev" in ln
         )
         # <= because the headers ship on the same apt-get line as luarocks itself;
@@ -2799,9 +2714,7 @@ class TestLuarocksGetsTheLuaHeadersItCompilesAgainst:
             f"that rock still has no lua.h to compile against.\ntrace:\n{trace}"
         )
 
-    def test_the_rocks_and_the_headers_target_the_same_lua_version(
-        self, cluster_params
-    ):
+    def test_the_rocks_and_the_headers_target_the_same_lua_version(self, cluster_params):
         """The block reads LUA_VER off the `lua` interpreter and builds LUA_CPATH
         from it, so headers, rocks, and Lmod's module path must be one version.
         Installing 5.1 headers while pinning the rocks to 5.3 compiles them into
@@ -2809,21 +2722,16 @@ class TestLuarocksGetsTheLuaHeadersItCompilesAgainst:
         the build looks clean."""
         env = _make_env(os.path.join(REPO_ROOT, "templates"))
         rendered = env.get_template("postinstall.j2").render(**cluster_params)
-        body = "\n".join(
-            ln for ln in rendered.splitlines() if not ln.lstrip().startswith("#")
-        )
+        body = "\n".join(ln for ln in rendered.splitlines() if not ln.lstrip().startswith("#"))
 
         # Scoped to the luarocks install line. The general dev-package line above
         # installs lua5.4/liblua5.4-dev for the user environment, which is
         # unrelated to what the rocks compile against and must not be dragged in.
         luarocks_line = [
-            ln for ln in body.splitlines()
-            if re.search(r"\bluarocks\b", ln) and "apt-get" in ln
+            ln for ln in body.splitlines() if re.search(r"\bluarocks\b", ln) and "apt-get" in ln
         ]
         assert luarocks_line, "postinstall no longer apt-installs luarocks"
-        dev_versions = set(
-            re.findall(r"liblua(\d\.\d)-\d*-?dev", " ".join(luarocks_line))
-        )
+        dev_versions = set(re.findall(r"liblua(\d\.\d)-\d*-?dev", " ".join(luarocks_line)))
         assert dev_versions == {"5.1"}, (
             f"the luarocks apt line installs Lua dev headers for "
             f"{dev_versions or 'nothing'}; the luarocks/Lmod block is 5.1 throughout"
@@ -2875,16 +2783,14 @@ class TestAmazonLinux2023InstallsOnlyWhatItPackages:
             if " install" not in stripped:
                 continue
             tail = stripped.split(" install", 1)[1]
-            names.update(w.strip('"\'') for w in tail.split() if not w.startswith("-"))
+            names.update(w.strip("\"'") for w in tail.split() if not w.startswith("-"))
         return names
 
     @pytest.mark.parametrize("template", ("preinstall.j2", "postinstall.j2"))
     @pytest.mark.parametrize(
         "fixture", ("cluster_params_al2023", "cluster_params_al2023_gpu_queue")
     )
-    def test_no_package_absent_from_the_al2023_repo_is_installed(
-        self, request, fixture, template
-    ):
+    def test_no_package_absent_from_the_al2023_repo_is_installed(self, request, fixture, template):
         """Asserted on the rendered text of both fixtures: the GPU variant is
         required because the nvtop/htop install sits inside
         `{% if enable_gpu == 'true' %}`, which the plain fixture leaves false."""
@@ -2916,9 +2822,7 @@ class TestAmazonLinux2023InstallsOnlyWhatItPackages:
                 )
 
     @pytest.mark.parametrize("node_type", ("HeadNode", "ComputeFleet"))
-    def test_luarocks_is_never_invoked_on_this_arm(
-        self, cluster_params_al2023, node_type
-    ):
+    def test_luarocks_is_never_invoked_on_this_arm(self, cluster_params_al2023, node_type):
         """The three `sudo luarocks install` lines sat below the whole
         `{% if 'ubuntu' in base_os %}` chain, so an arm that skips luarocks still
         reached them -- `luarocks: command not found` under `set -euo pipefail` is
@@ -2933,9 +2837,7 @@ class TestAmazonLinux2023InstallsOnlyWhatItPackages:
             f"does not exist: rc=127 fails the node.\ntrace:\n{trace}"
         )
 
-    @pytest.mark.parametrize(
-        "fixture", ("cluster_params", "cluster_params_rhel")
-    )
+    @pytest.mark.parametrize("fixture", ("cluster_params", "cluster_params_rhel"))
     def test_the_other_two_arms_still_build_the_rocks(self, request, fixture):
         """Guards the test above against being satisfied by deleting the rocks
         everywhere. Ubuntu and RHEL have no RPM for luaposix or luafilesystem, so
@@ -2945,8 +2847,7 @@ class TestAmazonLinux2023InstallsOnlyWhatItPackages:
         _, trace, _ = _run_postinstall(params, "HeadNode")
         for rock in ("luaposix", "luafilesystem", "lua-term"):
             assert rock in trace, (
-                f"postinstall no longer builds {rock} on "
-                f"base_os={params['base_os']}: {trace}"
+                f"postinstall no longer builds {rock} on base_os={params['base_os']}: {trace}"
             )
 
 
@@ -2954,6 +2855,7 @@ class TestAmazonLinux2023InstallsOnlyWhatItPackages:
 def test_iam_policy_no_unsubstituted_placeholders(fname):
     """No <PLACEHOLDER> tokens must remain after substitution — catches missing entries in _PLACEHOLDER_SUB."""
     import re
+
     path = os.path.join(REPO_ROOT, "templates", fname)
     with open(path) as f:
         raw = f.read()
@@ -2978,7 +2880,7 @@ def test_no_operator_side_scheduled_teardown_is_reintroduced():
         with open(os.path.join(REPO_ROOT, relpath)) as fh:
             body = fh.read()
         for token in ("at_job_id", "atrm", "atq", "cluster_lifetime"):
-            assert_source_is_real(body, 'test_no_operator_side_scheduled_teardown_is_reintroduced')
+            assert_source_is_real(body, "test_no_operator_side_scheduled_teardown_is_reintroduced")
             assert token not in body, (
                 f"{relpath} references {token!r} — an operator-side scheduled "
                 f"teardown appears to have been reintroduced"
@@ -2992,6 +2894,7 @@ def test_no_operator_side_scheduled_teardown_is_reintroduced():
 def _policy_suffixes_in_core():
     """Every policy-name suffix pcluster_core.py knows about, per literal list."""
     import ast
+
     path = os.path.join(REPO_ROOT, "src", "pcluster_core.py")
     with open(path) as f:
         tree = ast.parse(f.read())
@@ -3010,8 +2913,7 @@ def _policy_suffixes_in_core():
         # rather than failing -- and the three lists cross-assert each other,
         # so dropping them all leaves nothing to disagree.
         if items and all(
-            s.startswith(("-HeadNode-", "-ComputeNode-", "-ClusterNode-"))
-            for s in items
+            s.startswith(("-HeadNode-", "-ComputeNode-", "-ClusterNode-")) for s in items
         ):
             lists.append(set(items))
     return lists
@@ -3024,8 +2926,12 @@ def test_every_policy_template_is_created_and_deleted():
     which blocks a same-name rebuild and silently accumulates in the account."""
     expected = {"-" + f[: -len(".json_src")] for f in _POLICY_FILES}
     assert expected == {
-        "-HeadNode-Compute", "-HeadNode-Storage", "-HeadNode-IAM",
-        "-ComputeNode-Base", "-ClusterNode-Deny", "-HeadNode-Monitoring",
+        "-HeadNode-Compute",
+        "-HeadNode-Storage",
+        "-HeadNode-IAM",
+        "-ComputeNode-Base",
+        "-ClusterNode-Deny",
+        "-HeadNode-Monitoring",
     }, f"policy template set changed: {sorted(expected)}"
 
     # Every suffix list in pcluster_core.py must be a subset of the template set:
@@ -3064,8 +2970,9 @@ class TestTeardownFailuresReachTheOperator:
     topic sees instead of the terminal.
     """
 
-    def test_the_sns_report_carries_the_orphan_list(self, cluster_params,
-                                                   cluster_params_orphaned_teardown):
+    def test_the_sns_report_carries_the_orphan_list(
+        self, cluster_params, cluster_params_orphaned_teardown
+    ):
         """The operator who ran the teardown sees the terminal; whoever is on the
         SNS topic sees only the report. Both need the list."""
         env = _make_env(os.path.join(REPO_ROOT, "templates"))
@@ -3201,17 +3108,16 @@ class TestARetainedResourceIsReportedWithoutBeingCalledAnOrphan:
         """The reported bug: the bucket survives and nothing says so."""
         retained = self._retained(delete_s3_bucketname=False)
         assert any("parallelclustermaker-osiris-00001220260720" in r for r in retained), (
-            "a retained per-build bucket is not named anywhere in the teardown "
-            f"output: {retained}"
+            f"a retained per-build bucket is not named anywhere in the teardown output: {retained}"
         )
 
     def test_a_deleted_bucket_is_not_reported_as_retained(self):
         """Vacuity guard on the test above: on the default path the bucket really
         is gone, and reporting it as retained sends the operator hunting."""
         retained = self._retained(delete_s3_bucketname=True)
-        assert not any(
-            "parallelclustermaker-osiris-00001220260720" in r for r in retained
-        ), f"the per-build bucket is reported as retained after being deleted: {retained}"
+        assert not any("parallelclustermaker-osiris-00001220260720" in r for r in retained), (
+            f"the per-build bucket is reported as retained after being deleted: {retained}"
+        )
 
     def test_the_results_bucket_is_reported_only_when_it_exists(self):
         """It is created under enable_hpc_benchmarks and deleted by nothing, so
@@ -3253,7 +3159,7 @@ class TestARetainedResourceIsReportedWithoutBeingCalledAnOrphan:
         )
         source = inspect.getsource(core._collect_orphaned_resources)
         for token in ("delete_s3_bucketname", "results_bucketname"):
-            assert_source_is_real(source, 'test_nothing_retained_is_also_counted_as_an_orphan')
+            assert_source_is_real(source, "test_nothing_retained_is_also_counted_as_an_orphan")
             assert token not in source, (
                 f"the orphan list reads {token}, so a deliberately retained "
                 f"resource would fail the teardown"
@@ -3269,15 +3175,10 @@ class TestARetainedResourceIsReportedWithoutBeingCalledAnOrphan:
         for node in ast.walk(tree):
             if not isinstance(node, ast.If):
                 continue
-            names = {
-                n.id for n in ast.walk(node.test) if isinstance(n, ast.Name)
-            }
+            names = {n.id for n in ast.walk(node.test) if isinstance(n, ast.Name)}
             if "_retained_resources" not in names:
                 continue
-            returns = [
-                n for n in ast.walk(node)
-                if isinstance(n, ast.Return)
-            ]
+            returns = [n for n in ast.walk(node) if isinstance(n, ast.Return)]
             assert not returns, (
                 "a deliberate retention decides core_delete_cluster's return "
                 "value; retention is not a failure"
@@ -3290,14 +3191,18 @@ class TestARetainedResourceIsReportedWithoutBeingCalledAnOrphan:
         core = _pcluster_core()
         retained = ["S3 bucket parallelclustermaker-osiris-00001220260720 (kept)"]
         for orphans in ([], ["Delete the SNS topic -- AccessDenied"]):
-            text = "\n".join(core._format_destruction_summary(
-                cluster_name="osiris", start_ts="t0", stop_ts="t1",
-                delete_headline="Cluster osiris has been deleted.",
-                orphaned_resources=orphans, retained_resources=retained,
-            ))
+            text = "\n".join(
+                core._format_destruction_summary(
+                    cluster_name="osiris",
+                    start_ts="t0",
+                    stop_ts="t1",
+                    delete_headline="Cluster osiris has been deleted.",
+                    orphaned_resources=orphans,
+                    retained_resources=retained,
+                )
+            )
             assert retained[0] in text, (
-                f"the summary with orphans={orphans!r} does not report retained "
-                f"resources"
+                f"the summary with orphans={orphans!r} does not report retained resources"
             )
 
     def test_it_is_collected_before_the_sns_report_is_templated(self):
@@ -3317,19 +3222,13 @@ class TestARetainedResourceIsReportedWithoutBeingCalledAnOrphan:
             **cluster_params_retained_teardown
         )
         for resource in cluster_params_retained_teardown["_retained_resources"]:
-            assert resource in text, (
-                f"the SNS destruction report does not name {resource!r}"
-            )
+            assert resource in text, f"the SNS destruction report does not name {resource!r}"
 
-    def test_the_sns_report_omits_the_section_when_nothing_was_retained(
-        self, cluster_params
-    ):
+    def test_the_sns_report_omits_the_section_when_nothing_was_retained(self, cluster_params):
         """Vacuity guard on the render test: an unconditional section would
         satisfy it while telling every operator something was left behind."""
         env = _make_env(os.path.join(REPO_ROOT, "templates"))
-        text = env.get_template("sns_destruction_summary_report.j2").render(
-            **cluster_params
-        )
+        text = env.get_template("sns_destruction_summary_report.j2").render(**cluster_params)
         assert "Retained in the account" not in text, text
 
     def test_a_retention_is_never_worded_as_a_failure(self):
@@ -3337,7 +3236,9 @@ class TestARetainedResourceIsReportedWithoutBeingCalledAnOrphan:
         only thing telling the operator which one needs action."""
         core = _pcluster_core()
         lines = core._format_destruction_summary(
-            cluster_name="osiris", start_ts="t0", stop_ts="t1",
+            cluster_name="osiris",
+            start_ts="t0",
+            stop_ts="t1",
             delete_headline="Cluster osiris has been deleted.",
             orphaned_resources=["Delete the SNS topic -- AccessDenied"],
             retained_resources=["S3 bucket parallelclustermaker-osiris (kept)"],
@@ -3394,9 +3295,7 @@ class TestTheResultsSyncSurvivesAnOlderVarsFile:
         per-build bucket."""
         import inspect
 
-        params = set(
-            inspect.signature(_pcluster_core()._derive_results_bucket).parameters
-        )
+        params = set(inspect.signature(_pcluster_core()._derive_results_bucket).parameters)
         assert params == {"aws_account_id", "region"}, params
 
     def test_it_is_derived_before_the_sync_interpolates_it(self):
@@ -3413,7 +3312,6 @@ class TestTheResultsSyncSurvivesAnOlderVarsFile:
         ), "the results sync is not gated on enable_hpc_benchmarks"
 
 
-
 # A class asserting that a failed describe is not a failed cluster lived
 # here. It evaluated
 # create_pcluster.yml's three abort tasks (a failed describe, a stack that never
@@ -3423,7 +3321,6 @@ class TestTheResultsSyncSurvivesAnOlderVarsFile:
 # src/pcluster_core.py, driven outcome by outcome in
 # tests/test_create_pcluster_migration.py (TestWaitForClusterCreate,
 # TestClassifyClusterCreateOutcome, TestRunClusterCreateAndClassify).
-
 
 
 def test_head_node_cannot_manage_hosted_zone_lifecycle():
@@ -3438,8 +3335,12 @@ def test_head_node_cannot_manage_hosted_zone_lifecycle():
         "route53:DeleteHostedZone",
         "route53:AssociateVPCWithHostedZone",
     }
-    for fname in ("HeadNode-Storage.json_src", "HeadNode-Compute.json_src",
-                  "HeadNode-IAM.json_src", "ComputeNode-Base.json_src"):
+    for fname in (
+        "HeadNode-Storage.json_src",
+        "HeadNode-Compute.json_src",
+        "HeadNode-IAM.json_src",
+        "ComputeNode-Base.json_src",
+    ):
         granted = _actions(fname) & forbidden
         assert not granted, f"{fname} grants hosted-zone lifecycle: {sorted(granted)}"
 
@@ -3448,8 +3349,11 @@ def test_operator_policy_covers_hosted_zone_lifecycle():
     """The permissions removed from the head node have to live somewhere —
     cluster creation fails at the Route53HostedZone resource without them."""
     actions = _actions("OperatorPolicy.json_src")
-    for action in ("route53:CreateHostedZone", "route53:DeleteHostedZone",
-                   "route53:AssociateVPCWithHostedZone"):
+    for action in (
+        "route53:CreateHostedZone",
+        "route53:DeleteHostedZone",
+        "route53:AssociateVPCWithHostedZone",
+    ):
         assert action in actions, f"OperatorPolicy is missing {action}"
 
 
@@ -3496,8 +3400,19 @@ _WILDCARD_MUTATION_ALLOWLIST = {
 }
 
 _READ_ONLY_VERBS = (
-    "Describe", "List", "Get", "Head", "Check", "Lookup", "Query", "Scan",
-    "BatchGet", "Filter", "Search", "Estimate", "Simulate",
+    "Describe",
+    "List",
+    "Get",
+    "Head",
+    "Check",
+    "Lookup",
+    "Query",
+    "Scan",
+    "BatchGet",
+    "Filter",
+    "Search",
+    "Estimate",
+    "Simulate",
 )
 
 
@@ -3533,7 +3448,7 @@ def test_no_new_unconditioned_wildcard_mutation_grants(fname):
         if mutating:
             offenders.append((sid, sorted(mutating)))
     assert not offenders, (
-        f"{fname}: unconditioned Resource \"*\" grants for mutating actions: {offenders}\n"
+        f'{fname}: unconditioned Resource "*" grants for mutating actions: {offenders}\n'
         f"  Scope them to an ARN, add a Condition, or add (file, Sid) to "
         f"_WILDCARD_MUTATION_ALLOWLIST with a comment explaining why neither works."
     )
@@ -3558,10 +3473,7 @@ def test_compute_node_policy_grants_no_iam_or_privilege_escalation_actions():
     forbidden_prefixes = ("iam:",)
     forbidden_exact = {"sts:AssumeRole", "sts:AssumeRoleWithWebIdentity"}
     granted = _actions("ComputeNode-Base.json_src")
-    bad = sorted(
-        a for a in granted
-        if a.startswith(forbidden_prefixes) or a in forbidden_exact
-    )
+    bad = sorted(a for a in granted if a.startswith(forbidden_prefixes) or a in forbidden_exact)
     assert not bad, f"ComputeNode-Base grants privilege-escalation actions: {bad}"
 
 
@@ -3624,9 +3536,7 @@ def test_conftest_supplies_every_variable_make_pcluster_threads_to_templates():
         if isinstance(node, ast.FunctionDef) and node.name == "cluster_params":
             for sub in ast.walk(node):
                 if isinstance(sub, ast.Dict):
-                    fixture_keys |= {
-                        k.value for k in sub.keys if isinstance(k, ast.Constant)
-                    }
+                    fixture_keys |= {k.value for k in sub.keys if isinstance(k, ast.Constant)}
     assert fixture_keys, "cluster_params fixture dict not found in conftest.py"
 
     # Only variables that a template actually dereferences matter; inert
@@ -3648,9 +3558,11 @@ def test_conftest_supplies_every_variable_make_pcluster_threads_to_templates():
 
 def _render_benchmark_job(params):
     """Render job_hpc-benchmark.sh.j2 as the head node receives it."""
-    return _make_env(os.path.join(REPO_ROOT, "hpc-benchmark")).get_template(
-        "job_hpc-benchmark.sh.j2"
-    ).render(**params)
+    return (
+        _make_env(os.path.join(REPO_ROOT, "hpc-benchmark"))
+        .get_template("job_hpc-benchmark.sh.j2")
+        .render(**params)
+    )
 
 
 def _sbatch_directives(rendered_job):
@@ -3756,14 +3668,10 @@ class TestBenchmarkJobScriptRankCountMatchesGpuCount:
 
     def test_a_multi_gpu_instance_gets_all_of_its_gpus(self, cluster_params_gpu_gdr_enabled):
         """p4d.24xlarge carries 8 A100s; a hardcoded 4 would leave half idle."""
-        directives = _sbatch_directives(
-            _render_benchmark_job(cluster_params_gpu_gdr_enabled)
-        )
+        directives = _sbatch_directives(_render_benchmark_job(cluster_params_gpu_gdr_enabled))
         assert directives["ntasks-per-node"] == "8"
 
-    def test_zero_gpus_falls_back_to_a_cpu_shaped_rank_count(
-        self, cluster_params_gpu_no_nvidia
-    ):
+    def test_zero_gpus_falls_back_to_a_cpu_shaped_rank_count(self, cluster_params_gpu_no_nvidia):
         """g4ad is AMD, so nvidia_gpu_count() is 0. --ntasks-per-node=0 is
         rejected by sbatch, which would make the job unsubmittable."""
         directives = _sbatch_directives(_render_benchmark_job(cluster_params_gpu_no_nvidia))
@@ -3819,9 +3727,11 @@ class TestBenchmarkJobScriptRankCountMatchesGpuCount:
 
 def _render_sbatch_default(params):
     """Render scripts/sbatch_default_submission_script.sh as the head node gets it."""
-    return _make_env(os.path.join(REPO_ROOT, "scripts")).get_template(
-        "sbatch_default_submission_script.sh"
-    ).render(**params)
+    return (
+        _make_env(os.path.join(REPO_ROOT, "scripts"))
+        .get_template("sbatch_default_submission_script.sh")
+        .render(**params)
+    )
 
 
 def test_collect_templates_covers_every_template_the_toolkit_renders(cluster_params):
@@ -3849,7 +3759,8 @@ def test_collect_templates_covers_every_template_the_toolkit_renders(cluster_par
     named = {
         node.value
         for node in ast.walk(tree)
-        if isinstance(node, ast.Constant) and isinstance(node.value, str)
+        if isinstance(node, ast.Constant)
+        and isinstance(node.value, str)
         and (node.value.endswith(".j2") or node.value in extra)
     }
     assert named, "no template names found in pcluster_core.py -- sweep is blind"
@@ -3912,9 +3823,7 @@ class TestTheDefaultSbatchScriptIsShapedByTheCluster:
                 f"script targets {partition!r} but the config defines {defined}"
             )
 
-    def test_a_gpu_only_cluster_gets_a_core_count_not_a_gpu_count(
-        self, cluster_params_gpu_enabled
-    ):
+    def test_a_gpu_only_cluster_gets_a_core_count_not_a_gpu_count(self, cluster_params_gpu_enabled):
         """This is a general-purpose job script, not the GPU benchmark driver.
         p3.2xlarge has 1 GPU and 8 vCPUs; using gpu_ranks_per_node here would
         request one task on an 8-core machine."""
@@ -3942,9 +3851,7 @@ class TestTheDefaultSbatchScriptIsShapedByTheCluster:
             "cluster_params_efa_enabled",
         ],
     )
-    def test_every_configuration_emits_exactly_one_positive_ntasks(
-        self, fixture_name, request
-    ):
+    def test_every_configuration_emits_exactly_one_positive_ntasks(self, fixture_name, request):
         """The bug was an absent directive, not a wrong one, so the property is
         that --ntasks is present, positive, and singular on every path."""
         params = request.getfixturevalue(fixture_name)
@@ -3961,9 +3868,7 @@ class TestTheDefaultSbatchScriptIsShapedByTheCluster:
     def test_no_instance_size_suffix_is_hardcoded(self):
         """The ladders are the defect. A new one for a size the old ones missed
         would reintroduce it one suffix at a time."""
-        with open(
-            os.path.join(REPO_ROOT, "scripts", "sbatch_default_submission_script.sh")
-        ) as fh:
+        with open(os.path.join(REPO_ROOT, "scripts", "sbatch_default_submission_script.sh")) as fh:
             source = fh.read()
         assert "split('.')" not in source and 'split(".")' not in source, (
             "the script derives a core count from the instance-type suffix again"
@@ -4115,23 +4020,29 @@ def _vars_for(overrides, cluster_params):
         params[key] = overrides.get(key, "false")
     if params["enable_fsx"] != "true":
         params["enable_fsx_hydration"] = "false"
-    rendered = _make_env(os.path.join(REPO_ROOT, "templates")).get_template(
-        "vars_file.j2"
-    ).render(**params)
+    rendered = (
+        _make_env(os.path.join(REPO_ROOT, "templates"))
+        .get_template("vars_file.j2")
+        .render(**params)
+    )
     return yaml.safe_load(rendered)
 
 
 def _rendered_sns(overrides, cluster_params):
-    variables = {**cluster_params, **_vars_for(overrides, cluster_params),
-                 **_RUNTIME_FACTS}
+    variables = {**cluster_params, **_vars_for(overrides, cluster_params), **_RUNTIME_FACTS}
     # The timers are Ansible-registered objects in this template's context.
     variables.update(
-        {k: type("R", (), {"stdout": v["stdout"]})()
-         for k, v in _RUNTIME_FACTS.items() if isinstance(v, dict)}
+        {
+            k: type("R", (), {"stdout": v["stdout"]})()
+            for k, v in _RUNTIME_FACTS.items()
+            if isinstance(v, dict)
+        }
     )
-    return _make_env(os.path.join(REPO_ROOT, "templates")).get_template(
-        "sns_build_summary_report.j2"
-    ).render(**variables)
+    return (
+        _make_env(os.path.join(REPO_ROOT, "templates"))
+        .get_template("sns_build_summary_report.j2")
+        .render(**variables)
+    )
 
 
 # The mount point alone is not enough to prove the filesystem was reported: on an
@@ -4152,9 +4063,7 @@ def _assert_storage(text, overrides, present, absent):
     for mount in present:
         assert _MOUNT_LINES[mount] in text, f"{label}: {mount} not reported"
     for mount in absent:
-        assert mount not in text, (
-            f"{label}: {mount} named on a cluster that has no such filesystem"
-        )
+        assert mount not in text, f"{label}: {mount} named on a cluster that has no such filesystem"
 
 
 # A class covering the playbook's own build-summary storage block lived here.
@@ -4168,7 +4077,6 @@ def _assert_storage(text, overrides, present, absent):
 # TestStorageSummaryLinesTakesKeywordsOnly).
 
 
-
 class TestSnsBuildSummaryStorage:
     """The emailed report is the copy that outlives the terminal scrollback, so it
     carries the same storage topology as the printed summary."""
@@ -4177,9 +4085,7 @@ class TestSnsBuildSummaryStorage:
     def test_the_report_names_every_filesystem_and_only_those(
         self, overrides, present, absent, cluster_params
     ):
-        _assert_storage(
-            _rendered_sns(overrides, cluster_params), overrides, present, absent
-        )
+        _assert_storage(_rendered_sns(overrides, cluster_params), overrides, present, absent)
 
     @pytest.mark.parametrize("overrides,present,absent", _STORAGE_COMBOS)
     def test_the_report_reports_the_vars_file_pkg_dir(
@@ -4191,13 +4097,9 @@ class TestSnsBuildSummaryStorage:
     def test_the_report_gives_lustre_its_size(self, cluster_params):
         overrides = {"enable_fsx": "true"}
         fsx_size = _vars_for(overrides, cluster_params)["fsx_size"]
-        assert f"FSx for Lustre ({fsx_size} GB)" in _rendered_sns(
-            overrides, cluster_params
-        )
+        assert f"FSx for Lustre ({fsx_size} GB)" in _rendered_sns(overrides, cluster_params)
 
-    def test_the_report_names_the_hydration_buckets_only_when_hydrating(
-        self, cluster_params
-    ):
+    def test_the_report_names_the_hydration_buckets_only_when_hydrating(self, cluster_params):
         """The import/export S3 paths are the operator's only record of what the
         filesystem was seeded from; naming buckets on a cluster that never
         configured any would be worse than saying nothing."""
@@ -4213,12 +4115,12 @@ class TestSnsBuildSummaryStorage:
 def _config_mount_dirs(overrides, cluster_params):
     """MountDir values out of the rendered cluster config's SharedStorage block."""
     variables = {**cluster_params, **_vars_for(overrides, cluster_params)}
-    rendered = _make_env(os.path.join(REPO_ROOT, "templates")).get_template(
-        "config.pcluster.j2"
-    ).render(**variables)
-    return [
-        entry["MountDir"] for entry in yaml.safe_load(rendered)["SharedStorage"]
-    ]
+    rendered = (
+        _make_env(os.path.join(REPO_ROOT, "templates"))
+        .get_template("config.pcluster.j2")
+        .render(**variables)
+    )
+    return [entry["MountDir"] for entry in yaml.safe_load(rendered)["SharedStorage"]]
 
 
 class TestSummaryMountPointsMatchTheClusterConfig:
@@ -4291,9 +4193,7 @@ class TestReportingSurfacesNameTheLoginNode:
         text = _rendered_sns({}, cluster_params_loginnode_pool)
         assert "(x3)" in text
 
-    def test_the_sns_report_header_fields_share_one_column(
-        self, cluster_params_loginnode_enabled
-    ):
+    def test_the_sns_report_header_fields_share_one_column(self, cluster_params_loginnode_enabled):
         """Login Node Instance Type: is one character longer than every other
         label in this block (Head Node Instance Type: included) -- a hardcoded
         per-line space count, the exact defect class CLAUDE.md documents as
@@ -4302,15 +4202,18 @@ class TestReportingSurfacesNameTheLoginNode:
         column width must now be derived from the longest active label."""
         text = _rendered_sns({}, cluster_params_loginnode_enabled)
         lines = [
-            ln for ln in text.splitlines()
-            if ln.startswith((
-                "Cluster Stack Name:",
-                "AWS Availability Zone:",
-                "HPC Scheduler Type:",
-                "Head Node Instance Type:",
-                "Login Node Instance Type:",
-                "Compute Instance Type:",
-            ))
+            ln
+            for ln in text.splitlines()
+            if ln.startswith(
+                (
+                    "Cluster Stack Name:",
+                    "AWS Availability Zone:",
+                    "HPC Scheduler Type:",
+                    "Head Node Instance Type:",
+                    "Login Node Instance Type:",
+                    "Compute Instance Type:",
+                )
+            )
         ]
         assert len(lines) == 6, f"expected all six header lines, got: {lines}"
 
@@ -4320,9 +4223,7 @@ class TestReportingSurfacesNameTheLoginNode:
             return len(label) + 1 + padding
 
         value_columns = {_value_column(ln) for ln in lines}
-        assert len(value_columns) == 1, (
-            f"header fields do not share one column: {lines}"
-        )
+        assert len(value_columns) == 1, f"header fields do not share one column: {lines}"
 
     def test_the_sns_report_access_instructions_reflect_the_login_node_default(
         self, cluster_params, cluster_params_loginnode_enabled
@@ -4382,8 +4283,12 @@ class TestOnNodeConfiguredIsAMacroNotFourCopies:
         parsed = yaml.safe_load(rendered)
         head = parsed["HeadNode"]["CustomActions"]["OnNodeConfigured"]["Sequence"]
         login = parsed["LoginNodes"]["Pools"][0]["CustomActions"]["OnNodeConfigured"]["Sequence"]
-        compute = parsed["Scheduling"]["SlurmQueues"][0]["CustomActions"]["OnNodeConfigured"]["Sequence"]
-        gpu = parsed["Scheduling"]["SlurmQueues"][1]["CustomActions"]["OnNodeConfigured"]["Sequence"]
+        compute = parsed["Scheduling"]["SlurmQueues"][0]["CustomActions"]["OnNodeConfigured"][
+            "Sequence"
+        ]
+        gpu = parsed["Scheduling"]["SlurmQueues"][1]["CustomActions"]["OnNodeConfigured"][
+            "Sequence"
+        ]
         assert head == login == compute == gpu
 
 
@@ -4424,12 +4329,12 @@ class TestLoginNodesConfigBlock:
         assert pool["Networking"]["SubnetIds"] == [params["loginnode_subnet_id"]]
 
         policies = pool["Iam"]["AdditionalIamPolicies"]
-        assert any(
-            p["Policy"].endswith("-ComputeNode-Base") for p in policies
-        ), f"login node does not get ComputeNode-Base: {policies}"
-        assert not any(
-            "InstanceRole" in str(p) for p in policies
-        ), "login node must not carry head-node-level IAM"
+        assert any(p["Policy"].endswith("-ComputeNode-Base") for p in policies), (
+            f"login node does not get ComputeNode-Base: {policies}"
+        )
+        assert not any("InstanceRole" in str(p) for p in policies), (
+            "login node must not carry head-node-level IAM"
+        )
 
         assert "OnNodeStart" not in pool["CustomActions"], (
             "login nodes must not run preinstall.j2 -- that's HeadNode-only, "
@@ -4437,9 +4342,7 @@ class TestLoginNodesConfigBlock:
         )
         head_configured = parsed["HeadNode"]["CustomActions"]["OnNodeConfigured"]["Sequence"]
         login_configured = pool["CustomActions"]["OnNodeConfigured"]["Sequence"]
-        assert [s["Script"] for s in login_configured] == [
-            s["Script"] for s in head_configured
-        ]
+        assert [s["Script"] for s in login_configured] == [s["Script"] for s in head_configured]
 
     def test_pool_count_actually_threads_through_not_just_defaults_to_one(
         self, cluster_params_loginnode_pool
@@ -4503,9 +4406,7 @@ class TestHeadNodeBootstrapTimeoutReachesTheClusterConfig:
         env = _make_env(os.path.join(REPO_ROOT, "templates"))
         return env.get_template("config.pcluster.j2").render(**params)
 
-    def test_the_config_nests_the_timeout_where_pcluster_reads_it(
-        self, cluster_params
-    ):
+    def test_the_config_nests_the_timeout_where_pcluster_reads_it(self, cluster_params):
         parsed = yaml.safe_load(self._config(cluster_params))
         assert "DevSettings" in parsed, "config renders no DevSettings section"
         timeouts = parsed["DevSettings"]["Timeouts"]
@@ -4513,17 +4414,13 @@ class TestHeadNodeBootstrapTimeoutReachesTheClusterConfig:
             cluster_params["head_node_bootstrap_timeout"]
         )
 
-    def test_the_rendered_value_is_an_integer_not_a_quoted_string(
-        self, cluster_params
-    ):
+    def test_the_rendered_value_is_an_integer_not_a_quoted_string(self, cluster_params):
         """The schema field is fields.Int; a quoted value is a load-time failure."""
         parsed = yaml.safe_load(self._config(cluster_params))
         value = parsed["DevSettings"]["Timeouts"]["HeadNodeBootstrapTimeout"]
         assert isinstance(value, int), f"rendered as {type(value).__name__}"
 
-    def test_pcluster_own_schema_accepts_the_rendered_block(
-        self, cluster_params, monkeypatch
-    ):
+    def test_pcluster_own_schema_accepts_the_rendered_block(self, cluster_params, monkeypatch):
         """The authoritative check: load the rendered config through PCluster's own
         ClusterSchema and read the timeout back off the config object. This is what
         catches a wrong key casing -- BaseSchema.on_bind_field derives the YAML key
@@ -4555,9 +4452,7 @@ class TestHeadNodeBootstrapTimeoutReachesTheClusterConfig:
             cluster_params["head_node_bootstrap_timeout"]
         )
 
-    def test_the_vars_file_carries_the_timeout_for_the_playbook(
-        self, cluster_params
-    ):
+    def test_the_vars_file_carries_the_timeout_for_the_playbook(self, cluster_params):
         env = _make_env(os.path.join(REPO_ROOT, "templates"))
         rendered = env.get_template("vars_file.j2").render(**cluster_params)
         parsed = yaml.safe_load(rendered)
@@ -4597,9 +4492,7 @@ class TestTheLogGroupExpiresOnOurScheduleNotPClusters:
 
     def _cloudwatch_logs(self, params):
         env = _make_env(os.path.join(REPO_ROOT, "templates"))
-        parsed = yaml.safe_load(
-            env.get_template("config.pcluster.j2").render(**params)
-        )
+        parsed = yaml.safe_load(env.get_template("config.pcluster.j2").render(**params))
         return parsed["Monitoring"]["Logs"]["CloudWatch"]
 
     def test_the_rendered_config_sets_a_thirty_day_retention(self, cluster_params):
@@ -4608,9 +4501,7 @@ class TestTheLogGroupExpiresOnOurScheduleNotPClusters:
             f"Monitoring/Logs/CloudWatch renders {block!r}"
         )
 
-    def test_the_key_is_present_so_pclusters_default_cannot_apply(
-        self, cluster_params
-    ):
+    def test_the_key_is_present_so_pclusters_default_cannot_apply(self, cluster_params):
         """Vacuity guard on the test above. A retention that silently reverts is
         not a wrong number in the config -- it is no key at all, and the rendered
         file then looks exactly as it did before this was a decision."""
@@ -4627,16 +4518,12 @@ class TestTheLogGroupExpiresOnOurScheduleNotPClusters:
             "this block exists to override"
         )
 
-    def test_the_rendered_value_is_an_integer_not_a_quoted_string(
-        self, cluster_params
-    ):
+    def test_the_rendered_value_is_an_integer_not_a_quoted_string(self, cluster_params):
         """The schema field is fields.Int; a quoted value is a load-time failure."""
         value = self._cloudwatch_logs(cluster_params)["RetentionInDays"]
         assert isinstance(value, int), f"rendered as {type(value).__name__}"
 
-    def test_the_deletion_policy_is_left_at_pclusters_retain_default(
-        self, cluster_params
-    ):
+    def test_the_deletion_policy_is_left_at_pclusters_retain_default(self, cluster_params):
         """Shortening the lifetime must not turn into deleting the group. The
         toolkit sets no DeletionPolicy, so CloudWatchLogs.__init__'s "Retain"
         applies -- read back off PCluster rather than restated here."""
@@ -4657,12 +4544,9 @@ class TestTheLogGroupExpiresOnOurScheduleNotPClusters:
         from pcluster.schemas.cluster_schema import CloudWatchLogsSchema
 
         field = CloudWatchLogsSchema._declared_fields["retention_in_days"]
-        choices = [
-            v.choices for v in field.validators if isinstance(v, validate.OneOf)
-        ]
+        choices = [v.choices for v in field.validators if isinstance(v, validate.OneOf)]
         assert len(choices) == 1, (
-            f"retention_in_days no longer carries exactly one OneOf: "
-            f"{field.validators}"
+            f"retention_in_days no longer carries exactly one OneOf: {field.validators}"
         )
         assert self._OURS in list(choices[0]), (
             f"PCluster no longer accepts RetentionInDays: {self._OURS} -- "
@@ -4678,17 +4562,10 @@ class TestTheLogGroupExpiresOnOurScheduleNotPClusters:
         from pcluster.schemas.cluster_schema import CloudWatchLogsSchema
 
         fields = CloudWatchLogsSchema._declared_fields
-        assert (
-            fields["retention_in_days"].metadata["update_policy"]
-            is UpdatePolicy.SUPPORTED
-        )
-        assert (
-            fields["enabled"].metadata["update_policy"] is UpdatePolicy.UNSUPPORTED
-        )
+        assert fields["retention_in_days"].metadata["update_policy"] is UpdatePolicy.SUPPORTED
+        assert fields["enabled"].metadata["update_policy"] is UpdatePolicy.UNSUPPORTED
 
-    def test_pcluster_own_schema_reads_the_retention_back(
-        self, cluster_params, monkeypatch
-    ):
+    def test_pcluster_own_schema_reads_the_retention_back(self, cluster_params, monkeypatch):
         """The authoritative check: load the rendered config through PCluster's own
         ClusterSchema. BaseSchema.on_bind_field derives the YAML key with
         to_pascal_case(), so a casing typo is silently ignored by marshmallow and
@@ -4707,15 +4584,19 @@ class TestTheLogGroupExpiresOnOurScheduleNotPClusters:
         params["gpu_subnet_ids"] = ["subnet-0abc1234"]
         params["external_nfs_sg"] = {"group_id": "sg-0abc1234"}
         env = _make_env(os.path.join(REPO_ROOT, "templates"))
-        parsed = yaml.safe_load(
-            env.get_template("config.pcluster.j2").render(**params)
-        )
+        parsed = yaml.safe_load(env.get_template("config.pcluster.j2").render(**params))
         config = ClusterSchema(cluster_name="test-cluster").load(parsed)
         assert config.monitoring.logs.cloud_watch.retention_in_days == self._OURS
 
 
-def _run_preinstall(cluster_params, base_os, kernel_pkgs=("linux-image-6.8.0-1021-aws",),
-                    dpkg_rc=0, phantom_pkgs=(), phantom_dnf_pkgs=()):
+def _run_preinstall(
+    cluster_params,
+    base_os,
+    kernel_pkgs=("linux-image-6.8.0-1021-aws",),
+    dpkg_rc=0,
+    phantom_pkgs=(),
+    phantom_dnf_pkgs=(),
+):
     """Execute the rendered preinstall with every external command stubbed.
 
     Whether the kernel is actually held back is a runtime property of shell
@@ -4752,17 +4633,15 @@ def _run_preinstall(cluster_params, base_os, kernel_pkgs=("linux-image-6.8.0-102
         # a package name against "installed" and emits nothing -- apt-mark is
         # handed an empty list. A stub that prints the status column unconditionally
         # cannot tell that mutation from the fix.
-        with_status = "".join(
-            f'echo "installed {p}"\n' for p in kernel_pkgs
-        ) + "".join(f'echo "not-installed {p}"\n' for p in phantom_pkgs)
-        names_only = "".join(
-            f'echo "{p}"\n' for p in tuple(kernel_pkgs) + tuple(phantom_pkgs)
+        with_status = "".join(f'echo "installed {p}"\n' for p in kernel_pkgs) + "".join(
+            f'echo "not-installed {p}"\n' for p in phantom_pkgs
         )
+        names_only = "".join(f'echo "{p}"\n' for p in tuple(kernel_pkgs) + tuple(phantom_pkgs))
         listing = (
             f'case "$*" in\n'
-            f'    *db:Status-Status*) {with_status or ":"} ;;\n'
-            f'    *) {names_only or ":"} ;;\n'
-            f'esac\n'
+            f"    *db:Status-Status*) {with_status or ':'} ;;\n"
+            f"    *) {names_only or ':'} ;;\n"
+            f"esac\n"
         )
         # The rendered script's own `set -euo pipefail` is on line 2, which the
         # split below discards along with the shebang. It has to be restored
@@ -4783,7 +4662,7 @@ def _run_preinstall(cluster_params, base_os, kernel_pkgs=("linux-image-6.8.0-102
         # Faithful to dnf: exit 1 with the package named when it cannot be found.
         # A stub that always returned 0 would make an rhel9 render look healthy no
         # matter what it asked for, and every RHEL assertion here vacuous.
-        _DNF_PHANTOMS="{' '.join(phantom_dnf_pkgs)}"
+        _DNF_PHANTOMS="{" ".join(phantom_dnf_pkgs)}"
         dnf() {{
             _log "dnf $*"
             local _a _p
@@ -4802,7 +4681,7 @@ def _run_preinstall(cluster_params, base_os, kernel_pkgs=("linux-image-6.8.0-102
         done
         # Faithful to the real apt-mark: exit 100 if any name is not installed.
         # A stub that always returns 0 cannot see the bug this models.
-        _PHANTOMS="{' '.join(phantom_pkgs)}"
+        _PHANTOMS="{" ".join(phantom_pkgs)}"
         apt-mark() {{
             _log "apt-mark $*"
             local _a _p
@@ -4871,16 +4750,16 @@ class TestPreinstallNeverReplacesTheKernel:
             f"packages did not arrive as separate arguments: {hold[0]!r}"
         )
 
-    def test_a_partial_dpkg_query_match_still_holds_what_it_found(
-        self, cluster_params
-    ):
+    def test_a_partial_dpkg_query_match_still_holds_what_it_found(self, cluster_params):
         """dpkg-query exits non-zero when ANY pattern matches nothing -- the normal
         case, since no AMI carries all four -- but still prints the real matches.
         Without `|| true` the script aborts under `set -e` and the node fails
         bootstrap; without the -n guard it would hand apt-mark an empty list."""
         r, trace = _run_preinstall(
-            cluster_params, self._UBUNTU,
-            kernel_pkgs=("linux-image-6.8.0-1021-aws",), dpkg_rc=1,
+            cluster_params,
+            self._UBUNTU,
+            kernel_pkgs=("linux-image-6.8.0-1021-aws",),
+            dpkg_rc=1,
         )
         assert r.returncode == 0, (
             "preinstall aborts when dpkg-query exits non-zero on a partial match; "
@@ -4894,9 +4773,7 @@ class TestPreinstallNeverReplacesTheKernel:
     def test_no_kernel_packages_found_is_not_an_error(self, cluster_params):
         """A minimal or container-built image may list none. apt-mark with an empty
         argument list is a usage error, so the -n guard has to skip it."""
-        r, trace = _run_preinstall(
-            cluster_params, self._UBUNTU, kernel_pkgs=(), dpkg_rc=1
-        )
+        r, trace = _run_preinstall(cluster_params, self._UBUNTU, kernel_pkgs=(), dpkg_rc=1)
         assert r.returncode == 0, (
             f"preinstall aborts when no kernel packages exist: {r.stderr.decode()}"
         )
@@ -4932,9 +4809,7 @@ class TestPreinstallNeverReplacesTheKernel:
         "linux-modules-extra-aws",
     )
 
-    def test_uninstalled_kernel_packages_are_never_handed_to_apt_mark(
-        self, cluster_params
-    ):
+    def test_uninstalled_kernel_packages_are_never_handed_to_apt_mark(self, cluster_params):
         """`dpkg-query -W` reports names dpkg merely knows about, and `apt-mark
         hold` exits 100 on any of them ("E: Can't select installed nor candidate
         version"). The `|| true` guard covers dpkg-query, not apt-mark, so that 100
@@ -4965,9 +4840,7 @@ class TestPreinstallNeverReplacesTheKernel:
             f"the installed kernel packages were not held verbatim: {argv}"
         )
 
-    def test_the_harness_apt_mark_stub_actually_rejects_a_phantom(
-        self, cluster_params
-    ):
+    def test_the_harness_apt_mark_stub_actually_rejects_a_phantom(self, cluster_params):
         """Guards the test above from passing vacuously. If the stub returned 0
         regardless, removing the status filter would still look green -- so prove
         the stub fails when a phantom does reach it."""
@@ -4978,27 +4851,24 @@ class TestPreinstallNeverReplacesTheKernel:
             script = os.path.join(tmp, "s.sh")
             with open(script, "w") as fh:
                 fh.write(
-                    'set -euo pipefail\n'
+                    "set -euo pipefail\n"
                     'TRACE=%s/t\n: > "$TRACE"\n'
                     '_log() { echo "$*" >> "$TRACE"; }\n'
                     '_PHANTOMS="linux-headers-3.0"\n'
-                    'apt-mark() {\n'
+                    "apt-mark() {\n"
                     '    _log "apt-mark $*"\n'
-                    '    local _a _p\n'
+                    "    local _a _p\n"
                     '    for _a in "$@"; do\n'
-                    '        for _p in $_PHANTOMS; do\n'
+                    "        for _p in $_PHANTOMS; do\n"
                     '            if [ "$_a" = "$_p" ]; then return 100; fi\n'
-                    '        done\n'
-                    '    done\n'
-                    '    return 0\n'
-                    '}\n'
-                    'apt-mark hold linux-image-real linux-headers-3.0\n'
-                    % tmp
+                    "        done\n"
+                    "    done\n"
+                    "    return 0\n"
+                    "}\n"
+                    "apt-mark hold linux-image-real linux-headers-3.0\n" % tmp
                 )
             r = subprocess.run(["bash", script], capture_output=True, cwd=tmp)
-        assert r.returncode == 100, (
-            f"the apt-mark stub does not model exit 100; got {r.returncode}"
-        )
+        assert r.returncode == 100, f"the apt-mark stub does not model exit 100; got {r.returncode}"
 
     def test_pip_is_never_upgraded_over_the_distro_pip(self, cluster_params):
         """Debian's python3-pip ships a dist-info with no RECORD file, so pip cannot
@@ -5009,12 +4879,8 @@ class TestPreinstallNeverReplacesTheKernel:
         checked against the source. `--ignore-installed` is the supported way to
         install over a dpkg-owned distribution."""
         with open(os.path.join(REPO_ROOT, "templates", "preinstall.j2")) as fh:
-            body = "\n".join(
-                ln for ln in fh.read().splitlines() if not ln.lstrip().startswith("#")
-            )
-        pip_lines = [
-            ln for ln in body.splitlines() if re.search(r"\bpip3?\s+install\b", ln)
-        ]
+            body = "\n".join(ln for ln in fh.read().splitlines() if not ln.lstrip().startswith("#"))
+        pip_lines = [ln for ln in body.splitlines() if re.search(r"\bpip3?\s+install\b", ln)]
         assert pip_lines, "preinstall.j2 no longer installs anything with pip"
         for line in pip_lines:
             if not re.search(r"(^|\s)pip(\s|$|')", line.split("install", 1)[1]):
@@ -5052,14 +4918,16 @@ class TestPreinstallNeverReplacesTheKernel:
     # kmod-lustre* in its repo at all, so a single-spelling list is inert on one of
     # the two -- a flag that is present and protects nothing, which is exactly the
     # failure mode this class exists to prevent.
-    _DNF_EXCLUDES = ("--exclude='kernel*'", "--exclude='kmod-lustre*'",
-                     "--exclude='lustre-client*'", "--exclude='efa*'")
+    _DNF_EXCLUDES = (
+        "--exclude='kernel*'",
+        "--exclude='kmod-lustre*'",
+        "--exclude='lustre-client*'",
+        "--exclude='efa*'",
+    )
 
     @pytest.mark.parametrize("fixture", ["cluster_params_rhel", "cluster_params_al2023"])
     @pytest.mark.parametrize("template", ["preinstall.j2", "postinstall.j2"])
-    def test_dnf_arms_exclude_the_kernel_from_every_update(
-        self, request, fixture, template
-    ):
+    def test_dnf_arms_exclude_the_kernel_from_every_update(self, request, fixture, template):
         """The dnf arms carry the same hazard as the apt arm and the same measured
         failure behind it: a full `dnf update` on the RHEL 9 PCluster AMI crossed
         5.14.0-611.55.1.el9_7 -> 5.14.0-687.30.1.el9_8 and the dracut rebuild was
@@ -5080,9 +4948,9 @@ class TestPreinstallNeverReplacesTheKernel:
         splits, so an exclude dropped from the AL2023 half alone is invisible to a
         RHEL-only run."""
         params = request.getfixturevalue(fixture)
-        rendered = _make_env(
-            os.path.join(REPO_ROOT, "templates")
-        ).get_template(template).render(**params)
+        rendered = (
+            _make_env(os.path.join(REPO_ROOT, "templates")).get_template(template).render(**params)
+        )
         updates = [
             ln.strip()
             for ln in rendered.splitlines()
@@ -5146,8 +5014,7 @@ class TestNoPipInstallEverUninstallsADistroPackage:
         return [
             ln.strip()
             for ln in rendered.splitlines()
-            if not ln.lstrip().startswith("#")
-            and re.search(r"\bpip3?\s+install\b", ln)
+            if not ln.lstrip().startswith("#") and re.search(r"\bpip3?\s+install\b", ln)
         ]
 
     def test_every_rendered_pip_install_ignores_installed(self, cluster_params):
@@ -5280,9 +5147,7 @@ class TestPackageManagersMatchTheRenderedOs:
     )
 
     def _rendered(self, name, params):
-        return _make_env(os.path.join(REPO_ROOT, "templates")).get_template(
-            name
-        ).render(**params)
+        return _make_env(os.path.join(REPO_ROOT, "templates")).get_template(name).render(**params)
 
     def test_no_unbranched_surface_invokes_either_package_manager(self):
         """monitoring-post-install-wrapper.j2 and the two playbooks have no
@@ -5420,8 +5285,7 @@ class TestPackageManagersMatchTheRenderedOs:
                     words = line.replace("sudo ", "", 1).split()
                     hit = forbidden.match(words[0]) if words else None
                     assert not hit, (
-                        f"{name} on base_os={params['base_os']} executed "
-                        f"{hit.group(1)!r}: {line!r}"
+                        f"{name} on base_os={params['base_os']} executed {hit.group(1)!r}: {line!r}"
                     )
             # Per template, not aggregated across both, and per *package*, not per
             # command name. An aggregate `any` is satisfied by postinstall alone, so
@@ -5435,8 +5299,7 @@ class TestPackageManagersMatchTheRenderedOs:
             for trace in group:
                 installed |= self._installed_packages(trace, expected)
             missing = [
-                pkg for pkg in self._SENTINEL_PACKAGES[expected][name]
-                if pkg not in installed
+                pkg for pkg in self._SENTINEL_PACKAGES[expected][name] if pkg not in installed
             ]
             assert not missing, (
                 f"no node installed {missing} via {expected!r} from {name} on "
@@ -5445,9 +5308,7 @@ class TestPackageManagersMatchTheRenderedOs:
                 f"negative checks above are vacuous"
             )
 
-    def test_no_arm_installs_ansible(
-        self, cluster_params, cluster_params_rhel
-    ):
+    def test_no_arm_installs_ansible(self, cluster_params, cluster_params_rhel):
         """`pip3 install 'ansible>=9,<10'` is what failed the RHEL 9 node: every
         non-prerelease 9.x needs ansible-core 2.16, whose requires_python is
         >= 3.10, while that AMI ships Python 3.9, and `set -euo pipefail` turned an
@@ -5477,8 +5338,7 @@ class TestPackageManagersMatchTheRenderedOs:
         assert m, "could not find the --base_os choices list in make_pcluster.py"
         listed = set(re.findall(r"""['"]([^'"]+)['"]""", m.group(1)))
         assert listed == self._SUPPORTED_OSES, (
-            f"--base_os choices are {sorted(listed)}, expected "
-            f"{sorted(self._SUPPORTED_OSES)}"
+            f"--base_os choices are {sorted(listed)}, expected {sorted(self._SUPPORTED_OSES)}"
         )
 
     def test_the_arch_and_efa_tables_list_only_supported_oses(self):
@@ -5486,19 +5346,19 @@ class TestPackageManagersMatchTheRenderedOs:
         # test module having imported it first makes this pass only in full-suite
         # order.
         import sys
+
         src = os.path.join(REPO_ROOT, "src")
         if src not in sys.path:
             sys.path.insert(0, src)
         from pcluster_aux_data import ARM_OSES, X86_OSES, base_os_efa
+
         for table, label in (
             (ARM_OSES, "ARM_OSES"),
             (X86_OSES, "X86_OSES"),
             (base_os_efa, "base_os_efa"),
         ):
             extra = set(table) - self._SUPPORTED_OSES
-            assert not extra, (
-                f"{label} lists {sorted(extra)}, which --base_os does not accept"
-            )
+            assert not extra, f"{label} lists {sorted(extra)}, which --base_os does not accept"
         assert set(ARM_OSES) | set(X86_OSES) == self._SUPPORTED_OSES, (
             "ARM_OSES + X86_OSES must cover every supported base_os or "
             "base_os_instance_check silently skips the arch mismatch check"
@@ -5520,6 +5380,7 @@ class TestPackageManagersMatchTheRenderedOs:
         rhel9, and a mismatch here means every ssh and every chown targets a user
         that does not exist on the node."""
         import sys
+
         src = os.path.join(REPO_ROOT, "src")
         if src not in sys.path:
             sys.path.insert(0, src)
@@ -5539,6 +5400,7 @@ class TestPackageManagersMatchTheRenderedOs:
         file under tests/integration/ is included: it is tracked, operators copy
         it verbatim, and the repo-root glob did not reach it."""
         import glob
+
         paths = glob.glob(os.path.join(REPO_ROOT, "*_defaults.yml")) + glob.glob(
             os.path.join(REPO_ROOT, "tests", "integration", "*_defaults.yml*")
         )
@@ -5562,6 +5424,7 @@ class TestPackageManagersMatchTheRenderedOs:
         test_defaults_files_document_the_real_gpu_families already closes for
         GPU families."""
         import glob
+
         checked = 0
         paths = glob.glob(os.path.join(REPO_ROOT, "*_defaults.yml")) + glob.glob(
             os.path.join(REPO_ROOT, "tests", "integration", "*_defaults.yml*")
@@ -5575,9 +5438,7 @@ class TestPackageManagersMatchTheRenderedOs:
                     if not line.startswith("base_os:") or "#" not in line:
                         continue
                     listed = {
-                        tok.strip()
-                        for tok in line.split("#", 1)[1].split("|")
-                        if tok.strip()
+                        tok.strip() for tok in line.split("#", 1)[1].split("|") if tok.strip()
                     }
                     checked += 1
                     assert listed == self._SUPPORTED_OSES, (
@@ -5606,7 +5467,6 @@ class TestPackageManagersMatchTheRenderedOs:
     # pcluster_os is checked as well as base_os) and the position
     # (TestAssertRunsBeforeAnythingElse, which asserts on the AST that the call
     # is core_create_cluster's first statement, before anything is spent).
-
 
 
 class TestOnlyTheDriverIsStagedToS3:
@@ -5647,21 +5507,18 @@ class TestOnlyTheDriverIsStagedToS3:
         import inspect
 
         core = _pcluster_core()
-        tree = ast.parse(
-            inspect.getsource(core.stage_and_upload_hpc_benchmark_driver).lstrip()
-        )
+        tree = ast.parse(inspect.getsource(core.stage_and_upload_hpc_benchmark_driver).lstrip())
         for node in ast.walk(tree):
             if not isinstance(node, ast.List):
                 continue
             literals = [
-                e.value for e in node.elts
+                e.value
+                for e in node.elts
                 if isinstance(e, ast.Constant) and isinstance(e.value, str)
             ]
             if literals[:3] == ["aws", "s3", "sync"]:
                 return literals
-        raise AssertionError(
-            "stage_and_upload_hpc_benchmark_driver no longer runs an aws s3 sync"
-        )
+        raise AssertionError("stage_and_upload_hpc_benchmark_driver no longer runs an aws s3 sync")
 
     @classmethod
     def _upload_includes(cls):
@@ -5673,8 +5530,7 @@ class TestOnlyTheDriverIsStagedToS3:
         """The rendered sync's own logical command, continuations joined."""
         lines = rendered.splitlines()
         start = next(
-            i for i, line in enumerate(lines)
-            if "aws s3 sync" in line and "/hpc-benchmark/" in line
+            i for i, line in enumerate(lines) if "aws s3 sync" in line and "/hpc-benchmark/" in line
         )
         body = []
         for line in lines[start:]:
@@ -5690,12 +5546,14 @@ class TestOnlyTheDriverIsStagedToS3:
             'the upload is not an allowlist -- without --exclude "*" every file '
             "added to hpc-benchmark/ ships to the operator's home directory"
         )
-        assert "hpc-benchmark.sh" in self._upload_includes(), \
+        assert "hpc-benchmark.sh" in self._upload_includes(), (
             "the upload excludes everything and includes nothing; self-repair is dead"
+        )
 
     def test_the_upload_allowlists_nothing_but_the_driver(self):
-        assert self._upload_includes() == ["hpc-benchmark.sh"], \
+        assert self._upload_includes() == ["hpc-benchmark.sh"], (
             "only the driver is needed for self-repair"
+        )
 
     def test_the_upload_is_still_gated_on_benchmarks(self):
         """An ungated upload creates the S3 prefix on every cluster, and the pull
@@ -5723,38 +5581,39 @@ class TestOnlyTheDriverIsStagedToS3:
                 for n in ast.walk(node)
             )
 
-        assert calls_the_stager(tree), (
-            "core_create_cluster never stages the benchmark driver"
-        )
+        assert calls_the_stager(tree), "core_create_cluster never stages the benchmark driver"
         gated = [
-            node for node in ast.walk(tree)
+            node
+            for node in ast.walk(tree)
             if isinstance(node, ast.If)
-            and "enable_hpc_benchmarks" in {
-                n.id for n in ast.walk(node.test) if isinstance(n, ast.Name)
-            }
+            and "enable_hpc_benchmarks"
+            in {n.id for n in ast.walk(node.test) if isinstance(n, ast.Name)}
             and calls_the_stager(node)
         ]
-        assert gated, (
-            "the benchmark driver upload is not inside an `if enable_hpc_benchmarks`"
-        )
+        assert gated, "the benchmark driver upload is not inside an `if enable_hpc_benchmarks`"
 
     @pytest.mark.parametrize("fixture", ["cluster_params", "cluster_params_rhel"])
     def test_the_pull_is_the_same_allowlist(self, fixture, request):
         params = request.getfixturevalue(fixture)
-        rendered = _make_env(os.path.join(REPO_ROOT, "templates")).get_template(
-            "postinstall.j2"
-        ).render(**params)
+        rendered = (
+            _make_env(os.path.join(REPO_ROOT, "templates"))
+            .get_template("postinstall.j2")
+            .render(**params)
+        )
         cmd = self._pull_command(rendered)
         assert '--exclude "*"' in cmd, "the pull is not an allowlist"
-        assert re.findall(r'--include\s+"([^"]+)"', cmd) == ["hpc-benchmark.sh"], \
+        assert re.findall(r'--include\s+"([^"]+)"', cmd) == ["hpc-benchmark.sh"], (
             "the pull and the upload must allowlist the same one file"
+        )
 
     @pytest.mark.parametrize("name", _NOT_FOR_THE_OPERATOR)
     def test_no_internal_file_is_named_on_either_end(self, name, cluster_params):
         """A --include naming any of these would defeat the allowlist by hand."""
-        rendered = _make_env(os.path.join(REPO_ROOT, "templates")).get_template(
-            "postinstall.j2"
-        ).render(**cluster_params)
+        rendered = (
+            _make_env(os.path.join(REPO_ROOT, "templates"))
+            .get_template("postinstall.j2")
+            .render(**cluster_params)
+        )
         pull = self._pull_command(rendered)
         for where, included in (
             ("upload", self._upload_includes()),
@@ -5770,8 +5629,9 @@ class TestOnlyTheDriverIsStagedToS3:
         """
         for name in self._NOT_FOR_THE_OPERATOR:
             path = os.path.join(REPO_ROOT, "hpc-benchmark", name)
-            assert os.path.exists(path), \
+            assert os.path.exists(path), (
                 f"{name} is gone from hpc-benchmark/; this guard is now vacuous"
+            )
 
     def test_the_chmod_names_only_a_file_the_sync_delivers(self, cluster_params):
         """The chmod carried a second target, ~/hpc-benchmark/job_hpc-benchmark.sh,
@@ -5780,12 +5640,15 @@ class TestOnlyTheDriverIsStagedToS3:
         A chmod that cannot fail needs no guard, and a guard on a chmod hides the
         driver failing to arrive.
         """
-        rendered = _make_env(os.path.join(REPO_ROOT, "templates")).get_template(
-            "postinstall.j2"
-        ).render(**cluster_params)
+        rendered = (
+            _make_env(os.path.join(REPO_ROOT, "templates"))
+            .get_template("postinstall.j2")
+            .render(**cluster_params)
+        )
         home = cluster_params["ec2_user_home"]
         chmods = [
-            line.strip() for line in rendered.splitlines()
+            line.strip()
+            for line in rendered.splitlines()
             if line.strip().startswith("chmod +x") and "/hpc-benchmark/" in line
         ]
         assert len(chmods) == 1, f"expected one hpc-benchmark chmod, got {chmods}"
@@ -5808,7 +5671,6 @@ class TestOnlyTheDriverIsStagedToS3:
 # tests/test_create_pcluster_migration.py (TestStoreSshSecret,
 # TestSavePrivateKeyLocally, TestAbortIfKeypairOrphaned,
 # TestProvisionS3KeypairAndSecret).
-
 
 
 class TestTheKnownHostsPathIsExpanded:
@@ -5841,9 +5703,11 @@ class TestTheKnownHostsPathIsExpanded:
     def test_make_pcluster_supplies_an_absolute_path(self, cluster_params):
         """Derived with expanduser in Python, since vars_file.j2 is rendered by
         plain Jinja2 -- Ansible's lookup('env', 'HOME') is not available there."""
-        rendered = _make_env(os.path.join(REPO_ROOT, "templates")).get_template(
-            "vars_file.j2"
-        ).render(**cluster_params)
+        rendered = (
+            _make_env(os.path.join(REPO_ROOT, "templates"))
+            .get_template("vars_file.j2")
+            .render(**cluster_params)
+        )
         value = yaml.safe_load(rendered)["ssh_known_hosts"]
         assert os.path.isabs(value), f"ssh_known_hosts is not absolute: {value!r}"
 
@@ -5866,8 +5730,7 @@ class TestTheKnownHostsPathIsExpanded:
 
         found = False
         for node in ast.walk(tree):
-            if not (isinstance(node, ast.Call)
-                    and getattr(node.func, "id", "") == "BuildContext"):
+            if not (isinstance(node, ast.Call) and getattr(node.func, "id", "") == "BuildContext"):
                 continue
             for kw in node.keywords:
                 if kw.arg == "ssh_known_hosts":
@@ -5893,7 +5756,9 @@ class TestTheKnownHostsPathIsExpanded:
         with tempfile.TemporaryDirectory() as td:
             rc = subprocess.run(
                 ['echo test >> "~/.ssh/known_hosts"'],
-                shell=True, cwd=td, capture_output=True,
+                shell=True,
+                cwd=td,
+                capture_output=True,
             )
             assert rc.returncode != 0, (
                 "a quoted tilde was expanded by this shell; the premise of this "
@@ -5910,6 +5775,7 @@ class TestTheKnownHostsPathIsExpanded:
     # tests/test_create_pcluster_migration.py. What stays here is the property
     # the class is named for: ssh_known_hosts must be an absolute path, because
     # every consumer of it quotes it.
+
 
 class TestBenchmarkResultsOutliveTheCluster:
     """Teardown synced the head node's benchmark results to s3_bucketname and then,
@@ -5940,15 +5806,11 @@ class TestBenchmarkResultsOutliveTheCluster:
         import inspect
 
         core = _pcluster_core()
-        tree = ast.parse(
-            inspect.getsource(core._sync_performance_results_to_s3).lstrip()
-        )
+        tree = ast.parse(inspect.getsource(core._sync_performance_results_to_s3).lstrip())
         for node in ast.walk(tree):
             if not isinstance(node, ast.List):
                 continue
-            if any(
-                isinstance(e, ast.Constant) and e.value == "ssh" for e in node.elts
-            ):
+            if any(isinstance(e, ast.Constant) and e.value == "ssh" for e in node.elts):
                 return node
         raise AssertionError(
             "no results sync command in _sync_performance_results_to_s3; if it "
@@ -5963,9 +5825,7 @@ class TestBenchmarkResultsOutliveTheCluster:
 
     def test_the_results_sync_does_not_target_the_bucket_teardown_deletes(self):
         cmd = self._sync_text()
-        assert self._RESULTS_VAR in cmd, (
-            f"results sync does not name {self._RESULTS_VAR}: {cmd}"
-        )
+        assert self._RESULTS_VAR in cmd, f"results sync does not name {self._RESULTS_VAR}: {cmd}"
         # The per-build bucket is deleted later in the same teardown, by default.
         assert f"s3://{{{self._PER_BUILD_VAR}}}" not in cmd, (
             f"results are synced to {self._PER_BUILD_VAR}, which teardown deletes "
@@ -5976,9 +5836,7 @@ class TestBenchmarkResultsOutliveTheCluster:
         """One bucket for every build means the prefix is the only thing keeping two
         clusters' results apart, so it carries both the name and the serial."""
         cmd = self._sync_text()
-        assert (
-            "hpc-benchmark-results/{cluster_name}/{cluster_serial_number}/" in cmd
-        ), cmd
+        assert "hpc-benchmark-results/{cluster_name}/{cluster_serial_number}/" in cmd, cmd
 
     def test_no_surface_ever_deletes_the_results_bucket(self):
         """The whole point of the bucket. The build side is included because its
@@ -5996,10 +5854,9 @@ class TestBenchmarkResultsOutliveTheCluster:
             attr = getattr(node.func, "attr", "")
             if attr not in ("delete_bucket", "delete_objects", "delete_object"):
                 continue
-            names = {
-                n.id for n in ast.walk(node) if isinstance(n, ast.Name)
-            } | {
-                n.value for n in ast.walk(node)
+            names = {n.id for n in ast.walk(node) if isinstance(n, ast.Name)} | {
+                n.value
+                for n in ast.walk(node)
                 if isinstance(n, ast.Constant) and isinstance(n.value, str)
             }
             if any(self._RESULTS_VAR in str(n) for n in names):
@@ -6017,9 +5874,7 @@ class TestBenchmarkResultsOutliveTheCluster:
         import inspect
 
         source = inspect.getsource(_pcluster_core()._delete_s3_bucket_step)
-        assert "delete_bucket" in source, (
-            "teardown no longer deletes the per-build bucket"
-        )
+        assert "delete_bucket" in source, "teardown no longer deletes the per-build bucket"
 
     def test_the_results_bucket_is_created_before_it_is_synced_to(self):
         """Teardown's sync is the first write on a first-ever build, and `aws s3 sync`
@@ -6041,26 +5896,25 @@ class TestBenchmarkResultsOutliveTheCluster:
         # Parsed across the build path: the staging call sits in
         # _provision_pre_launch_resources since core_create_cluster was split,
         # and the `if enable_hpc_benchmarks` gate went with it.
-        tree = ast.parse("\n".join(
-            _core_function_source(n).lstrip()
-            for n in ("core_create_cluster", "_provision_pre_launch_resources")
-        ))
+        tree = ast.parse(
+            "\n".join(
+                _core_function_source(n).lstrip()
+                for n in ("core_create_cluster", "_provision_pre_launch_resources")
+            )
+        )
         gated = [
-            node for node in ast.walk(tree)
+            node
+            for node in ast.walk(tree)
             if isinstance(node, ast.If)
-            and "enable_hpc_benchmarks" in {
-                n.id for n in ast.walk(node.test) if isinstance(n, ast.Name)
-            }
+            and "enable_hpc_benchmarks"
+            in {n.id for n in ast.walk(node.test) if isinstance(n, ast.Name)}
             and any(
                 isinstance(n, ast.Call)
-                and getattr(n.func, "id", None)
-                == "stage_and_upload_hpc_benchmark_driver"
+                and getattr(n.func, "id", None) == "stage_and_upload_hpc_benchmark_driver"
                 for n in ast.walk(node)
             )
         ]
-        assert gated, (
-            "the results bucket is created on clusters that run no benchmarks"
-        )
+        assert gated, "the results bucket is created on clusters that run no benchmarks"
 
     def test_the_results_bucket_blocks_public_access(self):
         """It is the one bucket that outlives every cluster, so it is also the one
@@ -6078,7 +5932,6 @@ class TestBenchmarkResultsOutliveTheCluster:
             "RestrictPublicBuckets",
         ):
             assert f'"{key}": True' in source, f"{key} is not true"
-
 
     def test_the_rendered_vars_file_actually_defines_the_bucket(self, cluster_params):
         """The teardown sync interpolates results_bucketname out of
@@ -6120,9 +5973,7 @@ class TestBenchmarkResultsOutliveTheCluster:
             r
             for stmt in _load_policy("HeadNode-Storage.json_src")["Statement"]
             for r in (
-                stmt["Resource"]
-                if isinstance(stmt["Resource"], list)
-                else [stmt["Resource"]]
+                stmt["Resource"] if isinstance(stmt["Resource"], list) else [stmt["Resource"]]
             )
             if "hpc-benchmark-results" in r or r.endswith(derived)
         ]
@@ -6142,15 +5993,14 @@ class TestBenchmarkResultsOutliveTheCluster:
         not get DeleteObject or DeleteBucket: anyone with a shell on the head node
         (including via Slurm job submission) could otherwise erase every past build's
         results, and the bucket is the only copy once the cluster is gone."""
+
         def _listify(value):
             return value if isinstance(value, list) else [value]
 
         results_statements = [
             stmt
             for stmt in _load_policy("HeadNode-Storage.json_src")["Statement"]
-            if any(
-                "parallelclustermaker-results" in r for r in _listify(stmt["Resource"])
-            )
+            if any("parallelclustermaker-results" in r for r in _listify(stmt["Resource"]))
         ]
         assert results_statements, (
             "HeadNode-Storage grants nothing on the results bucket; the teardown "
@@ -6171,9 +6021,7 @@ class TestBenchmarkResultsOutliveTheCluster:
         # cluster in the account and region. Widening the object Resource to
         # <bucket>/* passed every assertion above.
         for stmt in results_statements:
-            objectish = {
-                a for a in _listify(stmt["Action"]) if a != "s3:ListBucket"
-            }
+            objectish = {a for a in _listify(stmt["Action"]) if a != "s3:ListBucket"}
             if not objectish:
                 continue
             for resource in _listify(stmt["Resource"]):
@@ -6241,9 +6089,7 @@ class TestPreinstallPostinstallByteForByteParity:
         cluster_parameters-only names (Deployed_On, debug_mode) are lost."""
         pcluster_core = cls._pcluster_core()
         templates_dir = os.path.join(REPO_ROOT, "templates")
-        rendered_vars_file = pcluster_core.render_template(
-            templates_dir, "vars_file.j2", **params
-        )
+        rendered_vars_file = pcluster_core.render_template(templates_dir, "vars_file.j2", **params)
         return {**params, **yaml.safe_load(rendered_vars_file)}
 
     @pytest.mark.parametrize("fixture", _FIXTURES)
@@ -6252,9 +6098,7 @@ class TestPreinstallPostinstallByteForByteParity:
         templates_dir = os.path.join(REPO_ROOT, "templates")
         expected = _make_env(templates_dir).get_template("preinstall.j2").render(**params)
         context = self._pipeline_context(params)
-        actual = self._pcluster_core().render_template(
-            templates_dir, "preinstall.j2", **context
-        )
+        actual = self._pcluster_core().render_template(templates_dir, "preinstall.j2", **context)
         assert actual == expected, (
             f"preinstall.j2 diverges from the established render for {fixture}"
         )
@@ -6265,13 +6109,10 @@ class TestPreinstallPostinstallByteForByteParity:
         templates_dir = os.path.join(REPO_ROOT, "templates")
         expected = _make_env(templates_dir).get_template("postinstall.j2").render(**params)
         context = self._pipeline_context(params)
-        actual = self._pcluster_core().render_template(
-            templates_dir, "postinstall.j2", **context
-        )
+        actual = self._pcluster_core().render_template(templates_dir, "postinstall.j2", **context)
         assert actual == expected, (
             f"postinstall.j2 diverges from the established render for {fixture}"
         )
-
 
 
 class TestMcpLambdaPolicies:
@@ -6293,7 +6134,8 @@ class TestMcpLambdaPolicies:
         directory-equality check passes) yet never validated by anything
         in this class."""
         on_disk = {
-            f for f in os.listdir(os.path.join(REPO_ROOT, "templates"))
+            f
+            for f in os.listdir(os.path.join(REPO_ROOT, "templates"))
             if f.startswith("MCP") and f.endswith(".json_src")
         }
         assert on_disk == set(_MCP_ALL_POLICY_FILES)
@@ -6315,8 +6157,14 @@ class TestMcpLambdaPolicies:
     @pytest.mark.parametrize("fname", _MCP_ALL_POLICY_FILES)
     def test_statement_keys_are_valid(self, fname):
         valid = {
-            "Sid", "Effect", "Action", "NotAction",
-            "Resource", "NotResource", "Condition", "Principal",
+            "Sid",
+            "Effect",
+            "Action",
+            "NotAction",
+            "Resource",
+            "NotResource",
+            "Condition",
+            "Principal",
         }
         for stmt in _load_policy(fname)["Statement"]:
             unknown = set(stmt) - valid
@@ -6355,7 +6203,8 @@ class TestMcpLambdaPolicies:
         # deleted -- verified: that mutation survived the first version of
         # this test.
         source = "\n".join(
-            line for line in inspect.getsource(pcluster_core._render_policy).splitlines()
+            line
+            for line in inspect.getsource(pcluster_core._render_policy).splitlines()
             if not line.lstrip().startswith("#")
         )
         used = set()
@@ -6398,8 +6247,7 @@ class TestEachTierCanActuallyDoItsJob:
         return out
 
     def _grants(self, fname, action):
-        return any(fnmatch.fnmatch(action, granted)
-                   for granted in self._actions(fname))
+        return any(fnmatch.fnmatch(action, granted) for granted in self._actions(fname))
 
     def test_fleet_toggle_can_read_the_cluster_configuration(self):
         for action in ("s3:GetObject", "s3:ListBucket"):
@@ -6423,8 +6271,7 @@ class TestEachTierCanActuallyDoItsJob:
         ability to rewrite any cluster's configuration."""
         for action in ("s3:PutObject", "s3:DeleteObject", "s3:DeleteBucket"):
             assert not self._grants("MCPFleetToggleLambda.json_src", action), (
-                f"fleet-toggle grants {action}; it needs only to read the "
-                f"cluster config"
+                f"fleet-toggle grants {action}; it needs only to read the cluster config"
             )
 
     # Every tier serving a tool that calls describe_cluster. A login-node
@@ -6447,10 +6294,12 @@ class TestEachTierCanActuallyDoItsJob:
         All four calls pcluster's elb.py makes are required; granting only
         DescribeLoadBalancers moves the failure to the next one.
         """
-        for action in ("elasticloadbalancing:DescribeLoadBalancers",
-                       "elasticloadbalancing:DescribeTags",
-                       "elasticloadbalancing:DescribeTargetGroups",
-                       "elasticloadbalancing:DescribeTargetHealth"):
+        for action in (
+            "elasticloadbalancing:DescribeLoadBalancers",
+            "elasticloadbalancing:DescribeTags",
+            "elasticloadbalancing:DescribeTargetGroups",
+            "elasticloadbalancing:DescribeTargetHealth",
+        ):
             assert self._grants(fname, action), (
                 f"{fname} cannot {action}; describe-cluster fails on any "
                 f"cluster built with --enable_loginnode true"
@@ -6461,13 +6310,14 @@ class TestEachTierCanActuallyDoItsJob:
         """Describe actions take no resource-level permission, so this one
         is necessarily `Resource: "*"` -- which makes keeping it read-only
         the only bound left on it."""
-        for action in ("elasticloadbalancing:CreateLoadBalancer",
-                       "elasticloadbalancing:DeleteLoadBalancer",
-                       "elasticloadbalancing:ModifyTargetGroup",
-                       "elasticloadbalancing:RegisterTargets"):
+        for action in (
+            "elasticloadbalancing:CreateLoadBalancer",
+            "elasticloadbalancing:DeleteLoadBalancer",
+            "elasticloadbalancing:ModifyTargetGroup",
+            "elasticloadbalancing:RegisterTargets",
+        ):
             assert not self._grants(fname, action), (
-                f"{fname} grants {action}; the tiers only ever read the "
-                f"login-node load balancer"
+                f"{fname} grants {action}; the tiers only ever read the login-node load balancer"
             )
 
     def test_the_dynamodb_grant_is_scoped_to_pclusters_own_tables(self):
@@ -6478,11 +6328,10 @@ class TestEachTierCanActuallyDoItsJob:
             if not any(a.startswith("dynamodb:") for a in acts):
                 continue
             res = st["Resource"]
-            for r in (res if isinstance(res, list) else [res]):
+            for r in res if isinstance(res, list) else [res]:
                 assert r != "*", "the DynamoDB grant is account-wide"
                 assert "table/parallelcluster-" in r, (
-                    f"DynamoDB grant on {r!r} reaches tables PCluster does "
-                    f"not own"
+                    f"DynamoDB grant on {r!r} reaches tables PCluster does not own"
                 )
 
 
@@ -6538,15 +6387,16 @@ class TestTheClusterBuildTierCanActuallyBuild:
         none -- both durable boundaries had been removed by hand once
         nothing was bound by them -- which is why the log named CreatePolicy
         rather than GetPolicy."""
-        st = self._stmts("MCPClusterBuild.json_src")[
-            "IAMClusterBoundaryBootstrapReadAndCreate"]
+        st = self._stmts("MCPClusterBuild.json_src")["IAMClusterBoundaryBootstrapReadAndCreate"]
         assert "iam:CreatePolicy" in self._actions(st)
 
     def test_it_can_manage_the_ssh_key_secret_not_only_tag_it(self):
-        acts = self._actions(
-            self._stmts("MCPClusterBuild.json_src")["TheSshKeySecret"])
-        for a in ("secretsmanager:CreateSecret", "secretsmanager:PutSecretValue",
-                  "secretsmanager:DeleteSecret"):
+        acts = self._actions(self._stmts("MCPClusterBuild.json_src")["TheSshKeySecret"])
+        for a in (
+            "secretsmanager:CreateSecret",
+            "secretsmanager:PutSecretValue",
+            "secretsmanager:DeleteSecret",
+        ):
             assert a in acts, f"the build creates the SSH key secret; {a} missing"
 
     def test_role_creation_stays_bounded(self):
@@ -6559,7 +6409,8 @@ class TestTheClusterBuildTierCanActuallyBuild:
         for sid in ("IAMRoleLifecycle", "IAMAttachDetachClusterPolicies"):
             for r in self._stmts("MCPClusterBuild.json_src")[sid]["Resource"]:
                 assert "role/pclustermaker-role-" in r, (
-                    f"{sid} reaches roles outside this toolkit's own: {r}")
+                    f"{sid} reaches roles outside this toolkit's own: {r}"
+                )
 
     def test_the_mcp_boundary_permits_exactly_the_one_rebind(self):
         """A grant the boundary denies is a grant that does nothing.
@@ -6573,13 +6424,13 @@ class TestTheClusterBuildTierCanActuallyBuild:
         """
         st = self._stmts("MCPRoleBoundary.json_src")
         assert "iam:PutRolePermissionsBoundary" not in self._actions(
-            st["BoundaryDenyBoundaryTampering"]), (
-            "the blanket deny is back; the grant on the tier is inert")
+            st["BoundaryDenyBoundaryTampering"]
+        ), "the blanket deny is back; the grant on the tier is inert"
         gate = st["BoundaryOnlyEverAttachTheClusterBoundary"]
         assert gate["Effect"] == "Deny" and gate["Resource"] == "*"
-        assert gate["Condition"]["StringNotEquals"][
-            "iam:PermissionsBoundary"].endswith(
-            "policy/pclustermaker-cluster-boundary")
+        assert gate["Condition"]["StringNotEquals"]["iam:PermissionsBoundary"].endswith(
+            "policy/pclustermaker-cluster-boundary"
+        )
         mcp = st["BoundaryNeverRebindAnMcpRole"]
         assert mcp["Effect"] == "Deny"
         assert any("role/pclustermaker-mcp-" in r for r in mcp["Resource"])
@@ -6587,10 +6438,13 @@ class TestTheClusterBuildTierCanActuallyBuild:
     def test_the_user_boundary_denials_are_untouched(self):
         """Vacuity guard: the fix narrows one action, not the statement."""
         acts = self._actions(
-            self._stmts("MCPRoleBoundary.json_src")["BoundaryDenyBoundaryTampering"])
-        for a in ("iam:DeleteRolePermissionsBoundary",
-                  "iam:PutUserPermissionsBoundary",
-                  "iam:DeleteUserPermissionsBoundary"):
+            self._stmts("MCPRoleBoundary.json_src")["BoundaryDenyBoundaryTampering"]
+        )
+        for a in (
+            "iam:DeleteRolePermissionsBoundary",
+            "iam:PutUserPermissionsBoundary",
+            "iam:DeleteUserPermissionsBoundary",
+        ):
             assert a in acts
 
 
@@ -6670,7 +6524,8 @@ class TestTheDeployPolicyCanActuallyDeploy:
     def test_every_action_the_deploy_calls_is_granted(self):
         granted = self._granted()
         missing = sorted(
-            a for a in self._called_actions()
+            a
+            for a in self._called_actions()
             if a not in self._DELIBERATELY_UNGRANTED
             and not any(fnmatch.fnmatch(a, g) for g in granted)
         )
@@ -6688,8 +6543,7 @@ class TestTheDeployPolicyCanActuallyDeploy:
         on, so they are named as well as derived.
         """
         granted = self._granted()
-        for action in ("cognito-idp:AdminCreateUser",
-                       "cognito-idp:AdminSetUserPassword"):
+        for action in ("cognito-idp:AdminCreateUser", "cognito-idp:AdminSetUserPassword"):
             assert any(fnmatch.fnmatch(action, g) for g in granted), (
                 f"MCPDeployPolicy does not grant {action}; --create-user "
                 f"fails after the whole transport is already deployed"
@@ -6711,9 +6565,11 @@ class TestTheDeployPolicyCanActuallyDeploy:
         is not known until it is created), so the action list is the only
         bound left.
         """
-        for action in ("cognito-idp:AdminDeleteUser",
-                       "cognito-idp:AdminAddUserToGroup",
-                       "cognito-idp:AdminUpdateUserAttributes"):
+        for action in (
+            "cognito-idp:AdminDeleteUser",
+            "cognito-idp:AdminAddUserToGroup",
+            "cognito-idp:AdminUpdateUserAttributes",
+        ):
             assert not any(fnmatch.fnmatch(action, g) for g in self._granted()), (
                 f"MCPDeployPolicy grants {action}; the deploy only ever "
                 f"creates a user and sets its password"
@@ -6821,7 +6677,8 @@ class TestTheNodeLinesReadAsOneGroup:
         else:
             raise AssertionError("no function prints the cluster build summary")
         printed = [
-            line.strip() for line in source.splitlines()
+            line.strip()
+            for line in source.splitlines()
             if line.strip().startswith(("print(", 'print(f"'))
         ]
 
@@ -6835,7 +6692,7 @@ class TestTheNodeLinesReadAsOneGroup:
         login = _index("Login Node:")
         assert login == head + 1, (
             "the node lines must be adjacent, head first, in the build summary "
-            "too:\n" + "\n".join(printed[head - 1:login + 2])
+            "too:\n" + "\n".join(printed[head - 1 : login + 2])
         )
         assert _index("Availability Zone:") < head
         assert _index("CPU Queue:") > login
@@ -6858,16 +6715,21 @@ class TestTheNodeLinesReadAsOneGroup:
         import pcluster_core
 
         ctx = {
-            "cluster_name": "osiris", "cluster_serial_datestamp": "202608212212",
+            "cluster_name": "osiris",
+            "cluster_serial_datestamp": "202608212212",
             "region": "us-east-1",
-            "base_os": "ubuntu2404arm", "scheduler": "slurm",
+            "base_os": "ubuntu2404arm",
+            "scheduler": "slurm",
             "headnode_instance_type": "c8g.large",
-            "vpc_name": "vpc_default", "az": "us-east-1a",
-            "enable_loginnode": "true", "loginnode_instance_type": "c8g.large",
+            "vpc_name": "vpc_default",
+            "az": "us-east-1a",
+            "enable_loginnode": "true",
+            "loginnode_instance_type": "c8g.large",
             "loginnode_count": 1,
             "enable_cpu_queue": "true",
             "cpu_instance_types": ["c8g.xlarge"],
-            "initial_cpu_queue_size": 1, "max_cpu_queue_size": 8,
+            "initial_cpu_queue_size": 1,
+            "max_cpu_queue_size": 8,
         }
         pcluster_core.print_cluster_launch_summary(ctx, launch_timestamp="now")
         text = capsys.readouterr().out
@@ -6935,18 +6797,20 @@ class TestTheSummariesReportThePClusterVersion:
         import pcluster_core
 
         ctx = {
-            "cluster_name": "osiris", "cluster_serial_datestamp": "202608212212",
-            "region": "us-east-1", "base_os": "ubuntu2404arm", "scheduler": "slurm",
+            "cluster_name": "osiris",
+            "cluster_serial_datestamp": "202608212212",
+            "region": "us-east-1",
+            "base_os": "ubuntu2404arm",
+            "scheduler": "slurm",
             "pcluster_version": "3.15.1",
-            "headnode_instance_type": "c8g.large", "vpc_name": "vpc_default",
+            "headnode_instance_type": "c8g.large",
+            "vpc_name": "vpc_default",
             "az": "us-east-1a",
         }
         pcluster_core.print_cluster_launch_summary(ctx, launch_timestamp="now")
         text = capsys.readouterr().out
         assert "PCluster Version:  3.15.1" in text
-        assert self._index(text, "PCluster Version:") == (
-            self._index(text, "HPC Scheduler:") + 1
-        )
+        assert self._index(text, "PCluster Version:") == (self._index(text, "HPC Scheduler:") + 1)
 
     def test_the_vars_file_carries_it(self, cluster_params):
         """vars_file.j2 renders under StrictUndefined, so a template
@@ -6982,9 +6846,7 @@ class TestTheWaitProgressLineSpacing:
             # them turns "  [ " + <elapsed> + " ] " into "  [  ] ", which
             # cannot be told apart from two literal spaces.
             parts = [p.value for p in node.values if isinstance(p, ast.Constant)]
-            if any(p.endswith("[ ") for p in parts) and any(
-                p.startswith(" ] ") for p in parts
-            ):
+            if any(p.endswith("[ ") for p in parts) and any(p.startswith(" ] ") for p in parts):
                 found.append(parts)
         return found
 
@@ -7009,9 +6871,9 @@ class TestTheWaitProgressLineSpacing:
         _elapsed_str's zero-filled fields, not in the bracket format."""
         with open(os.path.join(REPO_ROOT, "src", "pcluster_core.py")) as fh:
             body = fh.read()
-        assert_source_is_real(body, 'test_no_printer_pads_the_number_inside_the_brackets')
+        assert_source_is_real(body, "test_no_printer_pads_the_number_inside_the_brackets")
         assert ":>3d}m]" not in body
-        assert_source_is_real(body, 'test_no_printer_pads_the_number_inside_the_brackets')
+        assert_source_is_real(body, "test_no_printer_pads_the_number_inside_the_brackets")
         assert ":>3d}m ]" not in body
 
     def test_minutes_are_not_zero_padded(self):
@@ -7053,14 +6915,13 @@ class TestTheWaitProgressLineSpacing:
             body = fh.read()
 
         unconditional = 'f" (CloudFormation: {cfn_status})" if cfn_status else ""'
-        assert_source_is_real(body, 'test_the_cloudformation_status_is_shown_only_when_it_differs')
+        assert_source_is_real(body, "test_the_cloudformation_status_is_shown_only_when_it_differs")
         assert unconditional not in body, (
             "a printer appends the CloudFormation status without comparing it"
         )
         guarded = body.count("if cfn_status and cfn_status != status else")
         assert guarded == 2, (
-            f"expected both the create and delete printers to compare, "
-            f"found {guarded}"
+            f"expected both the create and delete printers to compare, found {guarded}"
         )
 
     def test_a_whole_minute_drops_its_seconds(self):
@@ -7090,8 +6951,7 @@ class TestTheWaitProgressLineSpacing:
         # The minutes column does not move for any run either wait can
         # reach, which is what the space padding buys.
         minute_fields = {
-            pcluster_core._elapsed_str(t).split("m")[0]
-            for t in (60, 540, 600, 780, 3540)
+            pcluster_core._elapsed_str(t).split("m")[0] for t in (60, 540, 600, 780, 3540)
         }
         assert {len(f) for f in minute_fields} == {2}, minute_fields
 
@@ -7159,10 +7019,18 @@ class TestTheStagingDirectoryIsValidOnBothMachines:
         with open(os.path.join(REPO_ROOT, "src", "pcluster_core.py")) as fh:
             body = fh.read()
         assert_absent_ignoring_formatting(
-            'tempfile.gettempdir(), "_ParallelClusterMaker_stage"', body,
+            'tempfile.gettempdir(), "_ParallelClusterMaker_stage"',
+            body,
             "stage_dir must be the literal /tmp, not the platform temp dir",
         )
-        assert 'os.path.join(\n            "/tmp", "_ParallelClusterMaker_stage"' in body
+        # Layout removed before matching: the literal used to carry its own
+        # newline and indentation, so a formatter moving the call broke a
+        # test about *which directory* stage_dir uses.
+        import re
+
+        assert 'os.path.join("/tmp","_ParallelClusterMaker_stage"' in re.sub(r"\s+", "", body), (
+            "stage_dir must be built from the literal /tmp"
+        )
 
     def test_the_rendered_value_is_an_absolute_posix_path(self, cluster_params):
         stage = _vars_for({}, cluster_params)["stage_dir"]
@@ -7207,8 +7075,7 @@ class TestTheAccessScriptsPreferSSM:
     with the wrong $HOME, PATH and Slurm environment.
     """
 
-    _CTX = dict(cluster_name="osiris", region="us-east-1",
-                ssh_keypair="/k.pem", ec2_user="ubuntu")
+    _CTX = dict(cluster_name="osiris", region="us-east-1", ssh_keypair="/k.pem", ec2_user="ubuntu")
 
     def _render(self, name):
         src = os.path.join(REPO_ROOT, "src")
@@ -7220,27 +7087,39 @@ class TestTheAccessScriptsPreferSSM:
             os.path.join(REPO_ROOT, "templates"), name, **self._CTX
         )
 
-    @pytest.mark.parametrize("template", [
-        "access_cluster.j2", "grafana_tunnel.j2",
-    ])
+    @pytest.mark.parametrize(
+        "template",
+        [
+            "access_cluster.j2",
+            "grafana_tunnel.j2",
+        ],
+    )
     def test_it_resolves_an_instance_id(self, template):
         """SSM addresses an instance, ssh an address. Without this lookup
         there is nothing to target."""
         body = self._render(template)
         assert "InstanceId" in body, template
 
-    @pytest.mark.parametrize("template", [
-        "access_cluster.j2", "grafana_tunnel.j2",
-    ])
+    @pytest.mark.parametrize(
+        "template",
+        [
+            "access_cluster.j2",
+            "grafana_tunnel.j2",
+        ],
+    )
     def test_it_uses_the_ssm_proxycommand(self, template):
         body = self._render(template)
         assert "AWS-StartSSHSession" in body, template
         assert "ProxyCommand" in body, template
         assert "portNumber=%p" in body, template
 
-    @pytest.mark.parametrize("template", [
-        "access_cluster.j2", "grafana_tunnel.j2",
-    ])
+    @pytest.mark.parametrize(
+        "template",
+        [
+            "access_cluster.j2",
+            "grafana_tunnel.j2",
+        ],
+    )
     def test_it_falls_back_rather_than_failing(self, template):
         """An operator without the plugin still gets a shell, and is told
         why. Chosen over hard-failing so the scripts keep working for
@@ -7255,9 +7134,7 @@ class TestTheAccessScriptsPreferSSM:
         been captured and `stop` would have silently done nothing -- the
         script would report success and leave the tunnel running."""
         body = self._render("grafana_tunnel.j2")
-        pgrep_line = next(
-            l for l in body.splitlines() if "pgrep" in l and "SSH_PID" in l
-        )
+        pgrep_line = next(l for l in body.splitlines() if "pgrep" in l and "SSH_PID" in l)
         assert "SSH_TARGET" in pgrep_line, pgrep_line
         assert "HEAD_NODE_IP" not in pgrep_line, (
             "pgrep still matches the address, which is wrong over SSM"
@@ -7270,9 +7147,13 @@ class TestTheAccessScriptsPreferSSM:
         body = self._render("grafana_tunnel.j2")
         assert 'PROXY_ARGS[@]+"${PROXY_ARGS[@]}"' in body
 
-    @pytest.mark.parametrize("template", [
-        "access_cluster.j2", "grafana_tunnel.j2",
-    ])
+    @pytest.mark.parametrize(
+        "template",
+        [
+            "access_cluster.j2",
+            "grafana_tunnel.j2",
+        ],
+    )
     def test_the_direct_path_still_exists(self, template):
         """Vacuity guard: removing the fallback entirely would satisfy the
         SSM assertions and strand anyone without the plugin."""
@@ -7304,7 +7185,8 @@ class TestNoAptFetchOnTheHeadNodeIsUnbounded:
 
     def _apt_lines(self, rendered):
         return [
-            ln.strip() for ln in rendered.splitlines()
+            ln.strip()
+            for ln in rendered.splitlines()
             if "apt-get" in ln and not ln.strip().startswith("#")
         ]
 
@@ -7319,10 +7201,7 @@ class TestNoAptFetchOnTheHeadNodeIsUnbounded:
         """A variable that expands to nothing would satisfy the test above
         while changing no behavior."""
         rendered = self._render_preinstall(cluster_params)
-        assign = [
-            ln for ln in rendered.splitlines()
-            if ln.strip().startswith("APT_TIMEOUTS=")
-        ]
+        assign = [ln for ln in rendered.splitlines() if ln.strip().startswith("APT_TIMEOUTS=")]
         assert len(assign) == 1, f"expected one assignment, got {assign}"
         body = assign[0]
         assert "Acquire::http::Timeout" in body
@@ -7334,8 +7213,7 @@ class TestNoAptFetchOnTheHeadNodeIsUnbounded:
         never returns, which is the exact failure. The timeout is the
         load-bearing half."""
         rendered = self._render_preinstall(cluster_params)
-        assign = [ln for ln in rendered.splitlines()
-                  if ln.strip().startswith("APT_TIMEOUTS=")][0]
+        assign = [ln for ln in rendered.splitlines() if ln.strip().startswith("APT_TIMEOUTS=")][0]
         timeouts = [t for t in assign.split() if "Timeout=" in t]
         assert timeouts, "retries are set but nothing bounds a single attempt"
 
@@ -7407,9 +7285,7 @@ class TestATransientMirrorCannotFailTheCluster:
         for needle in (" update", "dist-upgrade"):
             ln = self._line_for(rendered, needle)
             assert "WARNING" in ln, f"failure is swallowed silently: {ln}"
-            assert ">&2" not in ln, (
-                f"the warning goes to stderr, which cfn-init discards: {ln}"
-            )
+            assert ">&2" not in ln, f"the warning goes to stderr, which cfn-init discards: {ln}"
 
 
 class TestPostinstallsRequiredInstallsRetry:
@@ -7437,7 +7313,7 @@ class TestPostinstallsRequiredInstallsRetry:
             st = ln.strip()
             if st.startswith("#") or "apt-get" not in st or " install" not in st:
                 continue
-            if "||" in st:          # the guarded, opportunistic ones
+            if "||" in st:  # the guarded, opportunistic ones
                 continue
             out.append(st)
         return out
@@ -7455,17 +7331,18 @@ class TestPostinstallsRequiredInstallsRetry:
         inside a node-type gate that its uses are outside of."""
         rendered = self._render_postinstall(cluster_params)
         lines = rendered.splitlines()
-        assign = next(i for i, ln in enumerate(lines)
-                      if ln.strip().startswith("APT_TIMEOUTS="))
-        uses = [i for i, ln in enumerate(lines)
-                if "$APT_TIMEOUTS" in ln and not ln.strip().startswith("#")]
+        assign = next(i for i, ln in enumerate(lines) if ln.strip().startswith("APT_TIMEOUTS="))
+        uses = [
+            i
+            for i, ln in enumerate(lines)
+            if "$APT_TIMEOUTS" in ln and not ln.strip().startswith("#")
+        ]
         assert uses, "the variable is assigned but never used"
         assert min(uses) > assign, "used before assignment"
 
     def test_the_budget_actually_bounds_and_retries(self, cluster_params):
         rendered = self._render_postinstall(cluster_params)
-        assign = [ln for ln in rendered.splitlines()
-                  if ln.strip().startswith("APT_TIMEOUTS=")]
+        assign = [ln for ln in rendered.splitlines() if ln.strip().startswith("APT_TIMEOUTS=")]
         assert len(assign) == 1, f"expected one assignment, got {len(assign)}"
         body = assign[0]
         assert "Acquire::Retries" in body
@@ -7477,8 +7354,11 @@ class TestPostinstallsRequiredInstallsRetry:
         non-fatal. Making everything retry-and-fail would cost a compute
         node its bootstrap over a missing diagnostic."""
         rendered = self._render_postinstall(cluster_params_gpu_queue_enabled)
-        guarded = [ln.strip() for ln in rendered.splitlines()
-                   if "htop" in ln and "install" in ln and not ln.strip().startswith("#")]
+        guarded = [
+            ln.strip()
+            for ln in rendered.splitlines()
+            if "htop" in ln and "install" in ln and not ln.strip().startswith("#")
+        ]
         assert guarded, "the GPU diagnostics block did not render"
         for ln in guarded:
             assert "||" in ln, f"a diagnostic install became fatal: {ln}"
@@ -7565,7 +7445,7 @@ class TestEveryPackageManagerCallIsWallClockBounded:
                 if " install " not in ln:
                     continue
                 if any(p in ln for p in ("nvtop", "htop")):
-                    continue        # diagnostics, deliberately non-fatal
+                    continue  # diagnostics, deliberately non-fatal
                 assert "||" not in ln, f"{template}: required install is guarded: {ln}"
 
 
@@ -7593,7 +7473,8 @@ class TestTheLogThatSaysWhyABootstrapFailedIsShipped:
         r = self._rendered(cluster_params)
         assert "/var/log/cfn-init-cmd.log" in r
         assert "amazon-cloudwatch-agent.d" in r, (
-            "the agent config path is gone; nothing ships the file")
+            "the agent config path is gone; nothing ships the file"
+        )
 
     def _code(self, cluster_params):
         """The block with comment lines stripped.
@@ -7603,10 +7484,9 @@ class TestTheLogThatSaysWhyABootstrapFailedIsShipped:
         exactly what a mutation run showed before this existed.
         """
         r = self._rendered(cluster_params)
-        block = r[r.index("PCM_CW_AGENT_CFG="):]
-        block = block[:block.index("# Set values for some important")]
-        return "\n".join(
-            ln for ln in block.splitlines() if not ln.lstrip().startswith("#"))
+        block = r[r.index("PCM_CW_AGENT_CFG=") :]
+        block = block[: block.index("# Set values for some important")]
+        return "\n".join(ln for ln in block.splitlines() if not ln.lstrip().startswith("#"))
 
     def test_it_adds_no_key_the_agent_does_not_already_accept(self, cluster_params):
         """The entry is a copy of one the agent already validates, with two
@@ -7621,12 +7501,13 @@ class TestTheLogThatSaysWhyABootstrapFailedIsShipped:
         """
         code = self._code(cluster_params)
         assert "from_beginning" not in code, (
-            "from_beginning is not in the agent's schema; it fails "
-            "validation for the whole config"
+            "from_beginning is not in the agent's schema; it fails validation for the whole config"
         )
-        assigned = [ln.split("]")[0].split("[")[-1].strip().strip('"\'')
-                    for ln in code.splitlines()
-                    if ln.strip().startswith("entry[")]
+        assigned = [
+            ln.split("]")[0].split("[")[-1].strip().strip("\"'")
+            for ln in code.splitlines()
+            if ln.strip().startswith("entry[")
+        ]
         assert set(assigned) == {"file_path", "log_stream_name"}, (
             f"the copied entry sets {sorted(assigned)}; only file_path and "
             f"log_stream_name may differ from the entry it was modelled on"
@@ -7637,20 +7518,22 @@ class TestTheLogThatSaysWhyABootstrapFailedIsShipped:
         release ships, silently, on every node."""
         code = self._code(cluster_params)
         assert "cl.append(entry)" in code, "no append; the config is being rebuilt"
-        assert 'entry = dict(cl[0])' in code, (
+        assert "entry = dict(cl[0])" in code, (
             "the new entry is not modelled on an existing one, so it may "
-            "omit fields the agent requires")
+            "omit fields the agent requires"
+        )
 
     def test_nothing_here_can_fail_the_node(self, cluster_params):
         """The whole point is to preserve evidence of a failure. Becoming a
         *cause* of one inverts that -- and on a compute node a non-zero exit
         feeds clustermgtd's relaunch loop toward protected mode."""
         r = self._rendered(cluster_params)
-        block = r[r.index("PCM_CW_AGENT_CFG="):]
-        block = block[:block.index("# Set values for some important")]
+        block = r[r.index("PCM_CW_AGENT_CFG=") :]
+        block = block[: block.index("# Set values for some important")]
         assert "|| echo" in block, "the python edit is not guarded"
         assert block.count("|| echo") >= 2, (
-            "both the config edit and the agent restart must be non-fatal")
+            "both the config edit and the agent restart must be non-fatal"
+        )
         assert "2>/dev/null" in block
         # Skipped whole when the agent is not where it was, rather than
         # assuming the path.
@@ -7664,4 +7547,5 @@ class TestTheLogThatSaysWhyABootstrapFailedIsShipped:
         blk = r.index("PCM_CW_AGENT_CFG=")
         between = r[head:blk]
         assert '== "HeadNode"' not in between.split("PCM_CW_AGENT_CFG")[0][-400:], (
-            "the block sits inside a head-node gate")
+            "the block sits inside a head-node gate"
+        )

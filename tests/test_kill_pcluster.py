@@ -39,6 +39,7 @@ def _client_error(code, op, status=None):
         response["ResponseMetadata"] = {"HTTPStatusCode": status}
     return ClientError(response, op)
 
+
 AZ = "us-east-1a"
 CLUSTER = "killme"
 OWNER = "testuser"
@@ -79,9 +80,7 @@ class _FakePcLib(types.ModuleType):
 
     def __init__(self, describe_sequence=None, delete_raises=None):
         super().__init__("pcluster.lib")
-        self._describe_sequence = list(
-            describe_sequence or [{"clusterStatus": "DELETE_COMPLETE"}]
-        )
+        self._describe_sequence = list(describe_sequence or [{"clusterStatus": "DELETE_COMPLETE"}])
         self.delete_raises = delete_raises
         self.describe_calls = []
         self.delete_calls = []
@@ -146,20 +145,30 @@ class _FakeAwsClient:
         if IfMatch is not None and (existing is None or existing["etag"] != IfMatch):
             raise _client_error("PreconditionFailed", "PutObject", status=412)
         etag = self._new_etag()
-        self._objects[Key] = {"body": Body, "etag": etag, "last_modified": DateTime.now(timezone.utc)}
+        self._objects[Key] = {
+            "body": Body,
+            "etag": etag,
+            "last_modified": DateTime.now(timezone.utc),
+        }
         return {"ETag": etag}
 
     def get_object(self, Bucket, Key):
         obj = self._objects[Key]
-        return {"ETag": obj["etag"], "LastModified": obj["last_modified"], "Body": io.BytesIO(obj["body"])}
+        return {
+            "ETag": obj["etag"],
+            "LastModified": obj["last_modified"],
+            "Body": io.BytesIO(obj["body"]),
+        }
 
     def delete_object(self, Bucket, Key):
         self._objects.pop(Key, None)
 
     def __getattr__(self, name):
         if name == self._fail:
+
             def _boom(*a, **k):
                 raise RuntimeError(f"{name} failed")
+
             return _boom
         if name in self._SHAPED:
             shape = self._SHAPED[name]
@@ -216,7 +225,8 @@ def staged(kp, tmp_path, monkeypatch):
     monkeypatch.setattr(kp, "ctrlC_Abort", lambda *a, **k: None)
 
     monkeypatch.setattr(
-        sys, "argv",
+        sys,
+        "argv",
         ["kill_pcluster.py", "-A", AZ, "-N", CLUSTER, "-O", OWNER],
     )
     return {
@@ -278,7 +288,9 @@ class TestTeardownFailureLeavesStateForRetry:
         out = capsys.readouterr().out
         assert "DELETE_FAILED" in out
 
-    def test_unconfirmed_delete_preserves_state_and_exits_nonzero(self, staged, monkeypatch, capsys):
+    def test_unconfirmed_delete_preserves_state_and_exits_nonzero(
+        self, staged, monkeypatch, capsys
+    ):
         """Every describe-cluster call answers DELETE_IN_PROGRESS forever --
         the wait loop exhausts its retries without a terminal state, exactly
         the wait-timeout case CLAUDE.md documents. Runs in well under a
@@ -301,7 +313,8 @@ class TestTeardownFailureLeavesStateForRetry:
         file does not, since it was inside the directory the credential
         steps already removed by the time the orphan is detected."""
         monkeypatch.setattr(
-            staged["mod"].boto3, "client",
+            staged["mod"].boto3,
+            "client",
             lambda *a, **k: _FakeAwsClient(fail="delete_role"),
         )
         with pytest.raises(SystemExit) as exc:
@@ -338,7 +351,8 @@ class TestTeardownPreflight:
         (vars_dir / f"{evil}.yml").write_text("cluster_name: evil\n")
 
         monkeypatch.setattr(
-            sys, "argv",
+            sys,
+            "argv",
             ["kill_pcluster.py", "-A", AZ, "-N", evil, "-O", OWNER],
         )
         with pytest.raises(SystemExit) as exc:
@@ -348,7 +362,8 @@ class TestTeardownPreflight:
 
     def test_invalid_cluster_owner_aborts_before_any_aws_call(self, staged, monkeypatch):
         monkeypatch.setattr(
-            sys, "argv",
+            sys,
+            "argv",
             ["kill_pcluster.py", "-A", AZ, "-N", CLUSTER, "-O", "Bad Owner!"],
         )
         with pytest.raises(SystemExit) as exc:
@@ -358,7 +373,8 @@ class TestTeardownPreflight:
 
     def test_unknown_az_aborts_before_any_aws_call(self, staged, monkeypatch):
         monkeypatch.setattr(
-            staged["mod"].boto3, "client",
+            staged["mod"].boto3,
+            "client",
             lambda *a, **k: types.SimpleNamespace(
                 describe_availability_zones=lambda ZoneNames: {"AvailabilityZones": []}
             ),
@@ -386,11 +402,13 @@ class TestTeardownAbortWindow:
     def test_debug_mode_lengthens_the_abort_window(self, staged, monkeypatch):
         seen = {}
         monkeypatch.setattr(
-            staged["mod"], "ctrlC_Abort",
+            staged["mod"],
+            "ctrlC_Abort",
             lambda sleep_time, *a, **k: seen.setdefault("sleep_time", sleep_time),
         )
         monkeypatch.setattr(
-            sys, "argv",
+            sys,
+            "argv",
             ["kill_pcluster.py", "-A", AZ, "-N", CLUSTER, "-O", OWNER, "-D", "true"],
         )
         with pytest.raises(SystemExit):
@@ -400,7 +418,8 @@ class TestTeardownAbortWindow:
     def test_abort_window_is_passed_no_cleanup_targets(self, staged, monkeypatch):
         seen = {}
         monkeypatch.setattr(
-            staged["mod"], "ctrlC_Abort",
+            staged["mod"],
+            "ctrlC_Abort",
             lambda *args, **kwargs: seen.setdefault("args", args),
         )
         with pytest.raises(SystemExit):
@@ -442,14 +461,18 @@ class TestClusterLockDuringTeardown:
     def test_a_lock_already_held_by_a_build_aborts_before_any_aws_call(self, staged):
         s3 = staged["mod"].boto3.client("s3", region_name="us-east-1")
         pcluster_core.s3_acquire_cluster_lock(
-            s3, locks_bucketname=self._locks_bucket(), cluster_name=CLUSTER,
+            s3,
+            locks_bucketname=self._locks_bucket(),
+            cluster_name=CLUSTER,
             command="make_pcluster.py -N killme (other process)",
         )
         with pytest.raises(SystemExit) as exc:
             staged["mod"].main()
         assert "already running" in str(exc.value.code)
         assert staged["pc_lib"].delete_calls == []
-        assert staged["serial_file"].exists(), "must not delete state while another process holds the lock"
+        assert staged["serial_file"].exists(), (
+            "must not delete state while another process holds the lock"
+        )
         assert staged["vars_file"].exists()
 
 
@@ -462,9 +485,13 @@ class TestTeardownWaitFalse:
 
     def _run(self, staged):
         return pcluster_core.core_delete_cluster(
-            cluster_name=CLUSTER, cluster_owner=OWNER, region="us-east-1",
-            repo_root=str(staged["root"]), delete_s3_bucketname="true",
-            debug_mode=False, wait=False,
+            cluster_name=CLUSTER,
+            cluster_owner=OWNER,
+            region="us-east-1",
+            repo_root=str(staged["root"]),
+            delete_s3_bucketname="true",
+            debug_mode=False,
+            wait=False,
         )
 
     def test_delete_is_still_initiated(self, staged):
@@ -539,7 +566,8 @@ class TestTheDeleteWaitDropsOneKnownBenignUpstreamError:
             with pcluster_core.quiet_missing_config_version_noise():
                 self._logger().error(
                     "Encountered error when performing boto3 call in %s: %s",
-                    "get_object", self._NOISE + ".",
+                    "get_object",
+                    self._NOISE + ".",
                 )
 
         assert self._records(caplog, emit) == []
@@ -553,7 +581,8 @@ class TestTheDeleteWaitDropsOneKnownBenignUpstreamError:
             with pcluster_core.quiet_missing_config_version_noise():
                 self._logger().error(
                     "Encountered error when performing boto3 call in %s: %s",
-                    "delete_stack", "AccessDenied",
+                    "delete_stack",
+                    "AccessDenied",
                 )
 
         assert any("AccessDenied" in m for m in self._records(caplog, emit))
@@ -566,7 +595,8 @@ class TestTheDeleteWaitDropsOneKnownBenignUpstreamError:
                 pass
             self._logger().error(
                 "Encountered error when performing boto3 call in %s: %s",
-                "get_object", self._NOISE + ".",
+                "get_object",
+                self._NOISE + ".",
             )
 
         assert any(self._NOISE in m for m in self._records(caplog, emit))
@@ -614,8 +644,7 @@ class TestTheDeleteWaitDropsOneKnownBenignUpstreamError:
             if "run_cluster_delete_and_classify" in ast.dump(node):
                 wrapped = True
         assert wrapped, (
-            "run_cluster_delete_and_classify must run inside "
-            "quiet_missing_config_version_noise()"
+            "run_cluster_delete_and_classify must run inside quiet_missing_config_version_noise()"
         )
 
     def test_the_live_listing_is_covered_too(self):
@@ -638,9 +667,7 @@ class TestTheDeleteWaitDropsOneKnownBenignUpstreamError:
                 continue
             if "_describe_cluster_json" in ast.dump(node):
                 wrapped = True
-        assert wrapped, (
-            "_live_status must describe inside quiet_missing_config_version_noise()"
-        )
+        assert wrapped, "_live_status must describe inside quiet_missing_config_version_noise()"
 
 
 class TestTeardownFinalizeOnly:
@@ -657,9 +684,14 @@ class TestTeardownFinalizeOnly:
 
     def _finalize(self, staged, **kw):
         return pcluster_core.core_delete_cluster(
-            cluster_name=CLUSTER, cluster_owner=OWNER, region="us-east-1",
-            repo_root=str(staged["root"]), delete_s3_bucketname="true",
-            debug_mode=False, finalize_only=True, **kw
+            cluster_name=CLUSTER,
+            cluster_owner=OWNER,
+            region="us-east-1",
+            repo_root=str(staged["root"]),
+            delete_s3_bucketname="true",
+            debug_mode=False,
+            finalize_only=True,
+            **kw,
         )
 
     def test_it_never_initiates_a_delete(self, staged):
@@ -699,7 +731,8 @@ class TestTeardownFinalizeOnly:
     @pytest.mark.parametrize("status", ["DELETE_IN_PROGRESS", "DELETE_FAILED", "CREATE_COMPLETE"])
     def test_it_refuses_unless_the_stack_is_confirmed_gone(self, staged, monkeypatch, status):
         monkeypatch.setitem(
-            sys.modules, "pcluster.lib",
+            sys.modules,
+            "pcluster.lib",
             _FakePcLib(describe_sequence=[{"clusterStatus": status}]),
         )
         result = self._finalize(staged)
@@ -713,7 +746,8 @@ class TestTeardownFinalizeOnly:
         the same reasoning the wait=False path already documents -- and the
         local files are what a later finalize needs to try again."""
         monkeypatch.setitem(
-            sys.modules, "pcluster.lib",
+            sys.modules,
+            "pcluster.lib",
             _FakePcLib(describe_sequence=[{"clusterStatus": status}]),
         )
         self._finalize(staged)
@@ -721,7 +755,10 @@ class TestTeardownFinalizeOnly:
         assert staged["vars_file"].exists()
 
     def test_the_refusal_explains_the_state_rather_than_naming_a_constant(
-        self, staged, monkeypatch, capsys,
+        self,
+        staged,
+        monkeypatch,
+        capsys,
     ):
         """The gate reuses the wait loop, so a stack that merely still
         exists comes back as `TIMED_OUT` — accurate inside that loop, and
@@ -730,7 +767,8 @@ class TestTeardownFinalizeOnly:
         that through the first time.
         """
         monkeypatch.setitem(
-            sys.modules, "pcluster.lib",
+            sys.modules,
+            "pcluster.lib",
             _FakePcLib(describe_sequence=[{"clusterStatus": "DELETE_IN_PROGRESS"}]),
         )
         self._finalize(staged)
@@ -744,7 +782,8 @@ class TestTeardownFinalizeOnly:
         operator greps the CloudFormation console for, so it is passed
         through rather than translated."""
         monkeypatch.setitem(
-            sys.modules, "pcluster.lib",
+            sys.modules,
+            "pcluster.lib",
             _FakePcLib(describe_sequence=[{"clusterStatus": "DELETE_FAILED"}]),
         )
         self._finalize(staged)
@@ -753,14 +792,18 @@ class TestTeardownFinalizeOnly:
         assert "re-run the delete" in out
 
     def test_no_banner_claims_the_stack_is_gone_before_the_gate_looks(
-        self, staged, monkeypatch, capsys,
+        self,
+        staged,
+        monkeypatch,
+        capsys,
     ):
         """The banner printed "The stack is already gone" ahead of the only
         call that could know, and against a live DELETE_IN_PROGRESS that
         was simply false — the operator saw it asserted and then denied
         four lines later."""
         monkeypatch.setitem(
-            sys.modules, "pcluster.lib",
+            sys.modules,
+            "pcluster.lib",
             _FakePcLib(describe_sequence=[{"clusterStatus": "DELETE_IN_PROGRESS"}]),
         )
         self._finalize(staged)
@@ -783,7 +826,8 @@ class TestTeardownFinalizeOnly:
         re-raises here; so must this one."""
         boom = RuntimeError("ExpiredToken")
         monkeypatch.setitem(
-            sys.modules, "pcluster.lib",
+            sys.modules,
+            "pcluster.lib",
             _FakePcLib(describe_sequence=[boom]),
         )
         with pytest.raises(RuntimeError):
@@ -794,7 +838,8 @@ class TestTeardownFinalizeOnly:
         """NotFoundException is the ordinary case -- the stack is gone, which
         is exactly the precondition -- not an error."""
         monkeypatch.setitem(
-            sys.modules, "pcluster.lib",
+            sys.modules,
+            "pcluster.lib",
             _FakePcLib(describe_sequence=[NotFoundException("gone")]),
         )
         result = self._finalize(staged)
@@ -809,7 +854,8 @@ class TestTeardownFinalizeOnly:
         staged["vars_file"].write_text(_vars_yaml(enable_hpc_benchmarks="true"))
         called = []
         monkeypatch.setattr(
-            pcluster_core, "_sync_performance_results_to_s3",
+            pcluster_core,
+            "_sync_performance_results_to_s3",
             lambda **kw: called.append(kw) or (True, ""),
         )
         self._finalize(staged)
@@ -821,13 +867,18 @@ class TestTeardownFinalizeOnly:
         staged["vars_file"].write_text(_vars_yaml(enable_hpc_benchmarks="true"))
         called = []
         monkeypatch.setattr(
-            pcluster_core, "_sync_performance_results_to_s3",
+            pcluster_core,
+            "_sync_performance_results_to_s3",
             lambda **kw: called.append(kw) or (True, ""),
         )
         pcluster_core.core_delete_cluster(
-            cluster_name=CLUSTER, cluster_owner=OWNER, region="us-east-1",
-            repo_root=str(staged["root"]), delete_s3_bucketname="true",
-            debug_mode=False, wait=False,
+            cluster_name=CLUSTER,
+            cluster_owner=OWNER,
+            region="us-east-1",
+            repo_root=str(staged["root"]),
+            delete_s3_bucketname="true",
+            debug_mode=False,
+            wait=False,
         )
         assert len(called) == 1
 
@@ -884,13 +935,15 @@ class TestTeardownFinalizeOnly:
         resources it still depends on.
         """
         monkeypatch.setitem(
-            sys.modules, "pcluster.lib",
+            sys.modules,
+            "pcluster.lib",
             _FakePcLib(describe_sequence=[{"clusterStatus": status}]),
         )
         ran = []
         for step in ("run_credential_teardown_steps", "run_resource_teardown_steps"):
             monkeypatch.setattr(
-                pcluster_core, step,
+                pcluster_core,
+                step,
                 lambda _s=step, **kw: ran.append(_s) or [],
             )
         self._finalize(staged)
@@ -915,43 +968,41 @@ class TestTheStoreSuppliesWhatOnlyTheBuilderHad:
         record = {"serial": SERIAL, "aws_account_id": "1234", "az": "us-east-1a"}
         monkeypatch.setattr(pcluster_core, "get_cluster_record", lambda s3, **kw: record)
         monkeypatch.setattr(pcluster_core.boto3, "client", lambda *a, **k: _StsOnly())
-        assert pcluster_core._cluster_record_from_store(
-            CLUSTER, region="us-east-1"
-        ) == record
+        assert pcluster_core._cluster_record_from_store(CLUSTER, region="us-east-1") == record
 
     def test_an_absent_record_is_none_not_an_exception(self, monkeypatch):
         monkeypatch.setattr(pcluster_core, "get_cluster_record", lambda s3, **kw: None)
         monkeypatch.setattr(pcluster_core.boto3, "client", lambda *a, **k: _StsOnly())
-        assert pcluster_core._cluster_record_from_store(
-            "nope", region="us-east-1"
-        ) is None
+        assert pcluster_core._cluster_record_from_store("nope", region="us-east-1") is None
 
     def test_an_unreachable_store_is_none_not_a_traceback(self, monkeypatch):
         """Teardown's own error path says what is missing; a store that
         cannot be reached must not surface as a traceback in front of it."""
+
         def _boom(*a, **k):
             raise RuntimeError("no credentials")
 
         monkeypatch.setattr(pcluster_core.boto3, "client", _boom)
-        assert pcluster_core._cluster_record_from_store(
-            "x", region="us-east-1"
-        ) is None
+        assert pcluster_core._cluster_record_from_store("x", region="us-east-1") is None
 
     def test_it_does_not_consult_local_state(self, monkeypatch):
         """Store-only by design: the caller reaches this exactly when the
         local files are absent, so re-reading local state here would only
         re-answer a question already asked."""
+
         def _should_not_run(*a, **k):
             raise AssertionError("_read_local_vars_file must not be consulted here")
 
         monkeypatch.setattr(pcluster_core, "_read_local_vars_file", _should_not_run)
         monkeypatch.setattr(
-            pcluster_core, "get_cluster_record", lambda s3, **kw: {"serial": "s-1"},
+            pcluster_core,
+            "get_cluster_record",
+            lambda s3, **kw: {"serial": "s-1"},
         )
         monkeypatch.setattr(pcluster_core.boto3, "client", lambda *a, **k: _StsOnly())
-        assert pcluster_core._cluster_record_from_store(
-            "x", region="us-east-1"
-        ) == {"serial": "s-1"}
+        assert pcluster_core._cluster_record_from_store("x", region="us-east-1") == {
+            "serial": "s-1"
+        }
 
 
 class TestTeardownRunsOffTheStoreAlone:
@@ -963,27 +1014,43 @@ class TestTeardownRunsOffTheStoreAlone:
 
     def _record(self):
         return {
-            "serial": SERIAL, "cluster_name": CLUSTER, "cluster_owner": OWNER,
-            "region": "us-east-1", "aws_account_id": "183295445014",
-            "az": "us-east-1a", "ec2_iam_policy": "pclustermaker-policy-x",
-            "ec2_iam_role": "pclustermaker-role-x", "ec2_keypair": "kp",
-            "ec2_user": "ubuntu", "ec2_user_home": "/home/ubuntu",
-            "ssh_keypair": "kp.pem", "ssh_secret_name": "parallelcluster/x",
+            "serial": SERIAL,
+            "cluster_name": CLUSTER,
+            "cluster_owner": OWNER,
+            "region": "us-east-1",
+            "aws_account_id": "183295445014",
+            "az": "us-east-1a",
+            "ec2_iam_policy": "pclustermaker-policy-x",
+            "ec2_iam_role": "pclustermaker-role-x",
+            "ec2_keypair": "kp",
+            "ec2_user": "ubuntu",
+            "ec2_user_home": "/home/ubuntu",
+            "ssh_keypair": "kp.pem",
+            "ssh_secret_name": "parallelcluster/x",
             "s3_bucketname": "parallelclustermaker-x",
-            "fsx_hydration_iam_policy": "", "results_bucketname": "",
-            "enable_monitoring": "false", "enable_external_nfs": "false",
-            "enable_fsx_hydration": "false", "enable_hpc_benchmarks": "false",
+            "fsx_hydration_iam_policy": "",
+            "results_bucketname": "",
+            "enable_monitoring": "false",
+            "enable_external_nfs": "false",
+            "enable_fsx_hydration": "false",
+            "enable_hpc_benchmarks": "false",
         }
 
     def _run(self, staged):
         return pcluster_core.core_delete_cluster(
-            cluster_name=CLUSTER, cluster_owner=OWNER, region="us-east-1",
-            repo_root=str(staged["root"]), delete_s3_bucketname="true",
-            debug_mode=False, wait=False,
+            cluster_name=CLUSTER,
+            cluster_owner=OWNER,
+            region="us-east-1",
+            repo_root=str(staged["root"]),
+            delete_s3_bucketname="true",
+            debug_mode=False,
+            wait=False,
         )
 
     def test_a_teardown_with_neither_local_file_still_deletes_the_stack(
-        self, staged, monkeypatch,
+        self,
+        staged,
+        monkeypatch,
     ):
         """The whole point: a machine that did not build the cluster has
         neither file, and that is exactly when teardown must still work."""
@@ -991,13 +1058,18 @@ class TestTeardownRunsOffTheStoreAlone:
         staged["vars_file"].unlink()
         rec = self._record()
         monkeypatch.setattr(
-            pcluster_core, "_cluster_record_from_store", lambda name, **kw: rec,
+            pcluster_core,
+            "_cluster_record_from_store",
+            lambda name, **kw: rec,
         )
         self._run(staged)
         assert staged["pc_lib"].delete_calls == [(CLUSTER, "us-east-1")]
 
     def test_the_store_values_are_what_teardown_acts_on(
-        self, staged, monkeypatch, capsys,
+        self,
+        staged,
+        monkeypatch,
+        capsys,
     ):
         """Not merely "it did not abort": every resource name is built from
         the serial, so the store's value has to be the one in play."""
@@ -1005,7 +1077,9 @@ class TestTeardownRunsOffTheStoreAlone:
         staged["vars_file"].unlink()
         rec = self._record()
         monkeypatch.setattr(
-            pcluster_core, "_cluster_record_from_store", lambda name, **kw: rec,
+            pcluster_core,
+            "_cluster_record_from_store",
+            lambda name, **kw: rec,
         )
         self._run(staged)
         assert SERIAL in capsys.readouterr().out
@@ -1033,7 +1107,9 @@ class TestTeardownRunsOffTheStoreAlone:
         staged["serial_file"].unlink()
         staged["vars_file"].unlink()
         monkeypatch.setattr(
-            pcluster_core, "_cluster_record_from_store", lambda name, **kw: None,
+            pcluster_core,
+            "_cluster_record_from_store",
+            lambda name, **kw: None,
         )
         result = self._run(staged)
         assert result.success is False
@@ -1046,14 +1122,19 @@ class TestTeardownRunsOffTheStoreAlone:
         staged["serial_file"].unlink()
         rec = dict(self._record(), serial="")
         monkeypatch.setattr(
-            pcluster_core, "_cluster_record_from_store", lambda name, **kw: rec,
+            pcluster_core,
+            "_cluster_record_from_store",
+            lambda name, **kw: rec,
         )
         result = self._run(staged)
         assert result.success is False
         assert staged["pc_lib"].delete_calls == []
 
     def test_a_record_predating_the_teardown_fields_is_refused(
-        self, staged, monkeypatch, capsys,
+        self,
+        staged,
+        monkeypatch,
+        capsys,
     ):
         """Every teardown field defaults to "", so an older record loads
         cleanly and would run cleanup against blank policy and role names --
@@ -1062,12 +1143,19 @@ class TestTeardownRunsOffTheStoreAlone:
         staged["serial_file"].unlink()
         staged["vars_file"].unlink()
         legacy = {
-            "serial": SERIAL, "cluster_name": CLUSTER, "cluster_owner": OWNER,
-            "region": "us-east-1", "ec2_keypair": "kp", "ec2_user": "ubuntu",
-            "s3_bucketname": "parallelclustermaker-x", "enable_monitoring": "false",
+            "serial": SERIAL,
+            "cluster_name": CLUSTER,
+            "cluster_owner": OWNER,
+            "region": "us-east-1",
+            "ec2_keypair": "kp",
+            "ec2_user": "ubuntu",
+            "s3_bucketname": "parallelclustermaker-x",
+            "enable_monitoring": "false",
         }
         monkeypatch.setattr(
-            pcluster_core, "_cluster_record_from_store", lambda name, **kw: legacy,
+            pcluster_core,
+            "_cluster_record_from_store",
+            lambda name, **kw: legacy,
         )
         result = self._run(staged)
         assert result.success is False
@@ -1083,7 +1171,9 @@ class TestTeardownRunsOffTheStoreAlone:
         staged["vars_file"].unlink()
         rec = self._record()
         monkeypatch.setattr(
-            pcluster_core, "_cluster_record_from_store", lambda name, **kw: rec,
+            pcluster_core,
+            "_cluster_record_from_store",
+            lambda name, **kw: rec,
         )
         self._run(staged)
         assert staged["pc_lib"].delete_calls == [(CLUSTER, "us-east-1")]
@@ -1091,11 +1181,14 @@ class TestTeardownRunsOffTheStoreAlone:
     def test_local_files_are_still_preferred(self, staged, monkeypatch):
         """Local wins, the same order as _read_cluster_record. The store is
         not consulted at all when both files are there."""
+
         def _should_not_run(*a, **k):
             raise AssertionError("the store must not be consulted when local files exist")
 
         monkeypatch.setattr(
-            pcluster_core, "_cluster_record_from_store", _should_not_run,
+            pcluster_core,
+            "_cluster_record_from_store",
+            _should_not_run,
         )
         self._run(staged)
         assert staged["pc_lib"].delete_calls == [(CLUSTER, "us-east-1")]
@@ -1141,7 +1234,9 @@ class TestAnAbsentLocalKeyIsNotAnOrphan:
         assert not pem.exists()
 
     def test_a_genuine_failure_on_a_real_key_is_still_reported(
-        self, tmp_path, monkeypatch,
+        self,
+        tmp_path,
+        monkeypatch,
     ):
         """The absence check must not swallow a failure to remove a key that
         is actually there."""

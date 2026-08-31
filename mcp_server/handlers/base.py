@@ -69,7 +69,8 @@ def handle(body, *, tier, server=None):
         # handler seeing one means the routing contract broke. Say that
         # rather than silently returning something plausible.
         return _error(
-            request_id, _METHOD_NOT_FOUND,
+            request_id,
+            _METHOD_NOT_FOUND,
             f"handler for tier {tier!r} received {method!r}; only tools/list and "
             f"tools/call are forwarded",
         )
@@ -79,13 +80,15 @@ def handle(body, *, tier, server=None):
 
     if TOOL_TIERS.get(name) != tier:
         return _error(
-            request_id, _INVALID_PARAMS,
+            request_id,
+            _INVALID_PARAMS,
             f"tool {name!r} is not served by tier {tier!r} -- the router forwarded it "
             f"to the wrong handler",
         )
     if name in UNIMPLEMENTED:
         return _error(
-            request_id, _METHOD_NOT_FOUND,
+            request_id,
+            _METHOD_NOT_FOUND,
             f"tool {name!r} is routed to this tier but not implemented yet",
         )
 
@@ -166,6 +169,7 @@ def make_lambda_handler(tier):
     The four tier modules are one line each because of this -- there is
     nothing tier-specific about a handler except its name.
     """
+
     def lambda_handler(event, context):
         # A teardown-completion poll arrives on the same function as a
         # tools/call and is told apart by an explicit marker, never by the

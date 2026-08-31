@@ -71,7 +71,8 @@ def _jwks_client(*, region, user_pool_id):
         from mcp_server.auth.discovery import jwks_uri
 
         _JWKS_CLIENT = jwt.PyJWKClient(
-            jwks_uri(region=region, user_pool_id=user_pool_id), cache_keys=True,
+            jwks_uri(region=region, user_pool_id=user_pool_id),
+            cache_keys=True,
         )
     return _JWKS_CLIENT
 
@@ -144,7 +145,8 @@ def _client_exists(client_id, *, user_pool_id, cognito=None):
         cognito = boto3.client("cognito-idp")
     try:
         cognito.describe_user_pool_client(
-            UserPoolId=user_pool_id, ClientId=client_id,
+            UserPoolId=user_pool_id,
+            ClientId=client_id,
         )
     except Exception as e:
         if type(e).__name__ == "ResourceNotFoundException":
@@ -162,7 +164,10 @@ def authorize(event, *, region, user_pool_id, cognito=None, jwks_client=None):
     """Verify the request's bearer token. Returns the allow policy."""
     token = _bearer_token(event)
     claims = verify_claims(
-        token, region=region, user_pool_id=user_pool_id, jwks_client=jwks_client,
+        token,
+        region=region,
+        user_pool_id=user_pool_id,
+        jwks_client=jwks_client,
     )
     client_id = claims["client_id"]
     if not _client_exists(client_id, user_pool_id=user_pool_id, cognito=cognito):
@@ -178,15 +183,17 @@ def _allow(claims, event):
         "principalId": claims["client_id"],
         "policyDocument": {
             "Version": "2012-10-17",
-            "Statement": [{
-                "Action": "execute-api:Invoke",
-                "Effect": "Allow",
-                # The whole API, not event["methodArn"]: API Gateway caches
-                # an authorizer response by token, and a policy scoped to
-                # the one path that happened to be called first would then
-                # be replayed for every other path and deny it.
-                "Resource": _api_wildcard(event.get("methodArn", "")),
-            }],
+            "Statement": [
+                {
+                    "Action": "execute-api:Invoke",
+                    "Effect": "Allow",
+                    # The whole API, not event["methodArn"]: API Gateway caches
+                    # an authorizer response by token, and a policy scoped to
+                    # the one path that happened to be called first would then
+                    # be replayed for every other path and deny it.
+                    "Resource": _api_wildcard(event.get("methodArn", "")),
+                }
+            ],
         },
         "context": {
             "client_id": claims["client_id"],
@@ -225,8 +232,7 @@ def lambda_handler(event, context):
     try:
         if not user_pool_id or not region:
             # Fail closed. A misconfigured authorizer must never allow.
-            raise Unauthorized(
-                "authorizer is not configured with a user pool and region")
+            raise Unauthorized("authorizer is not configured with a user pool and region")
         return authorize(event, region=region, user_pool_id=user_pool_id)
     except Unauthorized as e:
         print(f"Unauthorized: {e}")

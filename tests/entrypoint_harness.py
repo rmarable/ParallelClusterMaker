@@ -20,9 +20,7 @@ REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 def load_entrypoint(script, alias=None):
     """Import <repo_root>/<script> with the venv guard satisfied."""
     name = alias or ("_ep_" + script.replace(".py", "").replace("-", "_"))
-    spec = importlib.util.spec_from_file_location(
-        name, os.path.join(REPO_ROOT, script)
-    )
+    spec = importlib.util.spec_from_file_location(name, os.path.join(REPO_ROOT, script))
     mod = importlib.util.module_from_spec(spec)
     orig_prefix = sys.prefix
     orig_mod = sys.modules.get(name)
@@ -56,6 +54,7 @@ class RecordingRun:
                 break
         if kwargs.get("check") and rc != 0:
             import subprocess
+
             raise subprocess.CalledProcessError(rc, cmd)
         return _Completed(rc, cmd)
 

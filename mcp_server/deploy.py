@@ -133,9 +133,7 @@ def function_spec(tier, *, aws_account_id, code, environment=None):
             f"got keys {sorted(code)}"
         )
     if not is_image and "ImageUri" in code:
-        raise MCPDeploymentError(
-            f"tier {tier!r} is a zip artifact and cannot take an ImageUri"
-        )
+        raise MCPDeploymentError(f"tier {tier!r} is a zip artifact and cannot take an ImageUri")
 
     kwargs = {
         "FunctionName": FUNCTION_NAMES[tier],
@@ -164,7 +162,10 @@ def deploy_tier(lam, tier, *, aws_account_id, code, environment=None):
     deployment can be re-run. Returns the function ARN.
     """
     kwargs = function_spec(
-        tier, aws_account_id=aws_account_id, code=code, environment=environment,
+        tier,
+        aws_account_id=aws_account_id,
+        code=code,
+        environment=environment,
     )
     try:
         resp = _create_function_once_the_role_exists(lam, kwargs)
@@ -184,16 +185,11 @@ def deploy_tier(lam, tier, *, aws_account_id, code, environment=None):
     # redeploy. Invisible to the tests, which stub the client and answer
     # both calls instantly; it took a real second deployment to see.
     _wait_until_updated(lam, kwargs["FunctionName"])
-    cfg = {
-        k: kwargs[k]
-        for k in ("Role", "Timeout", "MemorySize", "Description")
-    }
+    cfg = {k: kwargs[k] for k in ("Role", "Timeout", "MemorySize", "Description")}
     for k in ("Runtime", "Handler", "Environment"):
         if k in kwargs:
             cfg[k] = kwargs[k]
-    resp = lam.update_function_configuration(
-        FunctionName=kwargs["FunctionName"], **cfg
-    )
+    resp = lam.update_function_configuration(FunctionName=kwargs["FunctionName"], **cfg)
     print(f"  Updated MCP function: {kwargs['FunctionName']}")
     _pin_async_retries_to_zero(lam, kwargs["FunctionName"])
     return resp["FunctionArn"]
@@ -214,7 +210,8 @@ def _pin_async_retries_to_zero(lam, function_name):
     """
     try:
         lam.put_function_event_invoke_config(
-            FunctionName=function_name, MaximumRetryAttempts=0,
+            FunctionName=function_name,
+            MaximumRetryAttempts=0,
         )
     except Exception as e:  # noqa: BLE001 - see docstring
         # Name the cause, not the wrapper. Every boto3 failure is a
@@ -227,12 +224,14 @@ def _pin_async_retries_to_zero(lam, function_name):
             code = e.response["Error"]["Code"]
         except (AttributeError, KeyError, TypeError):
             code = type(e).__name__
-        print(f"  WARNING: could not pin {function_name} to zero async "
-              f"retries: {code} on lambda:PutFunctionEventInvokeConfig. "
-              f"A retried async invocation may run twice; the cluster lock "
-              f"still refuses a duplicate build. Re-render the deploy "
-              f"policy (generate_operator_policy.py --mcp) and push it as "
-              f"a new policy version.")
+        print(
+            f"  WARNING: could not pin {function_name} to zero async "
+            f"retries: {code} on lambda:PutFunctionEventInvokeConfig. "
+            f"A retried async invocation may run twice; the cluster lock "
+            f"still refuses a duplicate build. Re-render the deploy "
+            f"policy (generate_operator_policy.py --mcp) and push it as "
+            f"a new policy version."
+        )
 
 
 def _wait_until_updated(lam, function_name):
@@ -284,9 +283,10 @@ def _is_role_not_yet_assumable(exc):
     if not isinstance(resp, dict):
         return False
     err = resp.get("Error", {})
-    return (
-        err.get("Code") == "InvalidParameterValueException"
-        and "cannot be assumed by Lambda" in (err.get("Message") or "")
+    return err.get(
+        "Code"
+    ) == "InvalidParameterValueException" and "cannot be assumed by Lambda" in (
+        err.get("Message") or ""
     )
 
 
@@ -350,9 +350,7 @@ def deployment_plan(aws_account_id):
         entry["timeout"] = TIER_RUNTIME[tier]["timeout"]
         entry["memory"] = TIER_RUNTIME[tier]["memory"]
         if entry["kind"] == "image":
-            entry["dockerfile"] = os.path.join(
-                "mcp_server", f"Dockerfile.{tier}"
-            )
+            entry["dockerfile"] = os.path.join("mcp_server", f"Dockerfile.{tier}")
         plan.append(entry)
     return plan
 
@@ -389,8 +387,7 @@ _PUBLIC_PATHS = (
 
 def _lambda_uri(region, account, function_name):
     arn = f"arn:aws:lambda:{region}:{account}:function:{function_name}"
-    return (f"arn:aws:apigateway:{region}:lambda:path/2015-03-31/functions/"
-            f"{arn}/invocations")
+    return f"arn:aws:apigateway:{region}:lambda:path/2015-03-31/functions/{arn}/invocations"
 
 
 def _allow_apigw_to_invoke(lam, function_name, *, region, account, api_id):
@@ -398,10 +395,12 @@ def _allow_apigw_to_invoke(lam, function_name, *, region, account, api_id):
     failure is a 500 with nothing in the function's own log."""
     try:
         lam.add_permission(
-            FunctionName=function_name, StatementId=f"apigw-{api_id}",
+            FunctionName=function_name,
+            StatementId=f"apigw-{api_id}",
             Action="lambda:InvokeFunction",
             Principal="apigateway.amazonaws.com",
-            SourceArn=f"arn:aws:execute-api:{region}:{account}:{api_id}/*")
+            SourceArn=f"arn:aws:execute-api:{region}:{account}:{api_id}/*",
+        )
     except Exception as e:
         if type(e).__name__ != "ResourceConflictException":
             raise
@@ -411,8 +410,7 @@ def _child(apigw, api_id, parent_id, part, index):
     for item in index:
         if item.get("parentId") == parent_id and item.get("pathPart") == part:
             return item["id"]
-    created = apigw.create_resource(
-        restApiId=api_id, parentId=parent_id, pathPart=part)
+    created = apigw.create_resource(restApiId=api_id, parentId=parent_id, pathPart=part)
     index.append(created)
     return created["id"]
 
@@ -436,16 +434,31 @@ def _wire(apigw, api_id, resource_id, method, uri, *, authorizer_id=None):
         if type(e).__name__ != "ConflictException":
             raise
         apigw.update_method(
-            restApiId=api_id, resourceId=resource_id, httpMethod=method,
+            restApiId=api_id,
+            resourceId=resource_id,
+            httpMethod=method,
             patchOperations=[
-                {"op": "replace", "path": "/authorizationType",
-                 "value": "CUSTOM" if authorizer_id else "NONE"},
-            ] + ([{"op": "replace", "path": "/authorizerId",
-                   "value": authorizer_id}] if authorizer_id else []))
+                {
+                    "op": "replace",
+                    "path": "/authorizationType",
+                    "value": "CUSTOM" if authorizer_id else "NONE",
+                },
+            ]
+            + (
+                [{"op": "replace", "path": "/authorizerId", "value": authorizer_id}]
+                if authorizer_id
+                else []
+            ),
+        )
     apigw.put_integration(
-        restApiId=api_id, resourceId=resource_id, httpMethod=method,
-        type="AWS_PROXY", integrationHttpMethod="POST", uri=uri,
-        timeoutInMillis=GATEWAY_INTEGRATION_TIMEOUT_MS)
+        restApiId=api_id,
+        resourceId=resource_id,
+        httpMethod=method,
+        type="AWS_PROXY",
+        integrationHttpMethod="POST",
+        uri=uri,
+        timeoutInMillis=GATEWAY_INTEGRATION_TIMEOUT_MS,
+    )
 
 
 # The app client the connector signs in with, created at deploy time
@@ -499,21 +512,20 @@ def ensure_connector_client(cog, *, user_pool_id):
     """
     from .auth.register_lambda import register
 
-    existing = _find_user_pool_client(
-        cog, user_pool_id=user_pool_id, name=CONNECTOR_CLIENT_NAME)
+    existing = _find_user_pool_client(cog, user_pool_id=user_pool_id, name=CONNECTOR_CLIENT_NAME)
     if existing:
         return existing, False
     doc = register(
-        {"client_name": CONNECTOR_CLIENT_NAME,
-         "redirect_uris": [CLAUDE_REDIRECT_URI]},
+        {"client_name": CONNECTOR_CLIENT_NAME, "redirect_uris": [CLAUDE_REDIRECT_URI]},
         user_pool_id=user_pool_id,
         cognito=cog,
     )
     return doc["client_id"], True
 
 
-def setup_gateway(*, account, region, user_pool_id, cognito_domain=None,
-                  apigw=None, lam=None, cog=None):
+def setup_gateway(
+    *, account, region, user_pool_id, cognito_domain=None, apigw=None, lam=None, cog=None
+):
     """Create (or reuse) the REST API, its authorizer, and its routes.
 
     Idempotent in the same way _setup_mcp_infra is: an existing API,
@@ -539,27 +551,31 @@ def setup_gateway(*, account, region, user_pool_id, cognito_domain=None,
     root_id = next(r["id"] for r in index if r["path"] == "/")
 
     auth_fn = FUNCTION_NAMES["authorizer"]
-    existing = {a["name"]: a for a in
-                apigw.get_authorizers(restApiId=api_id, limit=500)["items"]}
+    existing = {a["name"]: a for a in apigw.get_authorizers(restApiId=api_id, limit=500)["items"]}
     if "cognito-jwt" in existing:
         authorizer_id = existing["cognito-jwt"]["id"]
     else:
         authorizer_id = apigw.create_authorizer(
-            restApiId=api_id, name="cognito-jwt", type="TOKEN",
+            restApiId=api_id,
+            name="cognito-jwt",
+            type="TOKEN",
             authorizerUri=_lambda_uri(region, account, auth_fn),
             identitySource="method.request.header.Authorization",
             # No caching: a cached decision would outlive a client deleted
             # to revoke access, which is the revocation mechanism.
-            authorizerResultTtlInSeconds=0)["id"]
+            authorizerResultTtlInSeconds=0,
+        )["id"]
     print(f"  authorizer cognito-jwt ({authorizer_id})")
     _allow_apigw_to_invoke(lam, auth_fn, region=region, account=account, api_id=api_id)
 
     public_uri = _lambda_uri(region, account, FUNCTION_NAMES["register"])
     router_uri = _lambda_uri(region, account, FUNCTION_NAMES["router"])
-    _allow_apigw_to_invoke(lam, FUNCTION_NAMES["register"],
-                           region=region, account=account, api_id=api_id)
-    _allow_apigw_to_invoke(lam, FUNCTION_NAMES["router"],
-                           region=region, account=account, api_id=api_id)
+    _allow_apigw_to_invoke(
+        lam, FUNCTION_NAMES["register"], region=region, account=account, api_id=api_id
+    )
+    _allow_apigw_to_invoke(
+        lam, FUNCTION_NAMES["router"], region=region, account=account, api_id=api_id
+    )
 
     for path, method in _PUBLIC_PATHS:
         rid = _resource_for(apigw, api_id, path, root_id, index)
@@ -576,7 +592,8 @@ def setup_gateway(*, account, region, user_pool_id, cognito_domain=None,
     if cognito_domain or base_url:
         try:
             apigw.put_gateway_response(
-                restApiId=api_id, responseType="UNAUTHORIZED",
+                restApiId=api_id,
+                responseType="UNAUTHORIZED",
                 statusCode="401",
                 responseParameters={
                     # One source for the wire format. This was built inline
@@ -588,14 +605,14 @@ def setup_gateway(*, account, region, user_pool_id, cognito_domain=None,
                     # ending in "/" produced a doubled slash in the only
                     # header that tells a client where to authenticate.
                     # API Gateway wants a static mapping value quoted.
-                    "gatewayresponse.header.WWW-Authenticate":
-                        "'" + www_authenticate_header(
-                            api_base_url=base_url) + "'",
-                })
+                    "gatewayresponse.header.WWW-Authenticate": "'"
+                    + www_authenticate_header(api_base_url=base_url)
+                    + "'",
+                },
+            )
             print("  gateway response UNAUTHORIZED -> 401 + WWW-Authenticate")
         except Exception as e:
-            print(f"  WARNING: could not set the 401 gateway response: "
-                  f"{type(e).__name__}")
+            print(f"  WARNING: could not set the 401 gateway response: {type(e).__name__}")
 
     apigw.create_deployment(restApiId=api_id, stageName=_STAGE)
     print(f"  deployed to stage {_STAGE}")
@@ -606,19 +623,19 @@ def setup_gateway(*, account, region, user_pool_id, cognito_domain=None,
     # that away over the last, least step.
     connector_client_id = None
     try:
-        connector_client_id, made = ensure_connector_client(
-            cog, user_pool_id=user_pool_id)
-        print(f"  connector app client {CONNECTOR_CLIENT_NAME} "
-              f"({'created' if made else 'reusing'})")
+        connector_client_id, made = ensure_connector_client(cog, user_pool_id=user_pool_id)
+        print(
+            f"  connector app client {CONNECTOR_CLIENT_NAME} ({'created' if made else 'reusing'})"
+        )
     except Exception as e:
-        print(f"  WARNING: could not create the connector app client: "
-              f"{type(e).__name__}: {e}")
-        print("  The transport is up; create one with "
-              "cognito-idp create-user-pool-client, or POST to /register.")
+        print(f"  WARNING: could not create the connector app client: {type(e).__name__}: {e}")
+        print(
+            "  The transport is up; create one with "
+            "cognito-idp create-user-pool-client, or POST to /register."
+        )
 
     hosted_ui = (
-        f"https://{cognito_domain}.auth.{region}.amazoncognito.com"
-        if cognito_domain else ""
+        f"https://{cognito_domain}.auth.{region}.amazoncognito.com" if cognito_domain else ""
     )
     for fn in (FUNCTION_NAMES["register"],):
         cfg = lam.get_function_configuration(FunctionName=fn)
@@ -626,17 +643,18 @@ def setup_gateway(*, account, region, user_pool_id, cognito_domain=None,
         env.update(MCP_USER_POOL_ID=user_pool_id, MCP_API_BASE_URL=base_url)
         if hosted_ui:
             env["MCP_COGNITO_DOMAIN"] = hosted_ui
-        lam.update_function_configuration(
-            FunctionName=fn, Environment={"Variables": env})
+        lam.update_function_configuration(FunctionName=fn, Environment={"Variables": env})
     cfg = lam.get_function_configuration(FunctionName=auth_fn)
     env = dict((cfg.get("Environment") or {}).get("Variables") or {})
     env.update(MCP_USER_POOL_ID=user_pool_id)
-    lam.update_function_configuration(
-        FunctionName=auth_fn, Environment={"Variables": env})
+    lam.update_function_configuration(FunctionName=auth_fn, Environment={"Variables": env})
 
-    return {"api_id": api_id, "base_url": base_url,
-            "authorizer_id": authorizer_id,
-            "connector_client_id": connector_client_id}
+    return {
+        "api_id": api_id,
+        "base_url": base_url,
+        "authorizer_id": authorizer_id,
+        "connector_client_id": connector_client_id,
+    }
 
 
 # API Gateway REST caps an integration at 29s and this is already the
@@ -727,8 +745,7 @@ def generate_user_password(*, length=20):
 
     if length < 8:
         raise ValueError("Cognito's default policy requires at least 8 characters")
-    classes = (string.ascii_uppercase, string.ascii_lowercase,
-               string.digits, _PASSWORD_SYMBOLS)
+    classes = (string.ascii_uppercase, string.ascii_lowercase, string.digits, _PASSWORD_SYMBOLS)
     chars = [secrets.choice(c) for c in classes]
     pool = "".join(classes)
     chars += [secrets.choice(pool) for _ in range(length - len(classes))]
@@ -764,8 +781,7 @@ def ensure_cognito_user(cog, *, pool_id, username, password):
         # Only when it really is an address. Setting email to a non-address
         # is an InvalidParameterException, and the pool does not require
         # the attribute at all.
-        attrs = [{"Name": "email", "Value": username},
-                 {"Name": "email_verified", "Value": "true"}]
+        attrs = [{"Name": "email", "Value": username}, {"Name": "email_verified", "Value": "true"}]
     try:
         cog.admin_create_user(
             UserPoolId=pool_id,
@@ -779,8 +795,10 @@ def ensure_cognito_user(cog, *, pool_id, username, password):
         created = False
 
     cog.admin_set_user_password(
-        UserPoolId=pool_id, Username=username,
-        Password=password, Permanent=True,
+        UserPoolId=pool_id,
+        Username=username,
+        Password=password,
+        Permanent=True,
     )
     return created
 
@@ -801,8 +819,10 @@ _DEPLOY_PROBES = (
     # best-effort by design, so a missing grant warns after the fact
     # instead of stopping anything, and the async-retry guard is simply
     # never applied. That is how it shipped inert on its first deploy.
-    ("lambda:PutFunctionEventInvokeConfig",
-     "arn:aws:lambda:{region}:{acct}:function:pclustermaker-mcp-probe"),
+    (
+        "lambda:PutFunctionEventInvokeConfig",
+        "arn:aws:lambda:{region}:{acct}:function:pclustermaker-mcp-probe",
+    ),
     ("cognito-idp:CreateUserPool", "*"),
 )
 
@@ -835,7 +855,9 @@ def preflight_deploy_permissions(iam, *, caller_arn, aws_account_id, region):
         for action, resource in _DEPLOY_PROBES:
             res = resource.format(acct=aws_account_id, region=region)
             resp = iam.simulate_principal_policy(
-                PolicySourceArn=arn, ActionNames=[action], ResourceArns=[res],
+                PolicySourceArn=arn,
+                ActionNames=[action],
+                ResourceArns=[res],
             )
             for r in resp.get("EvaluationResults") or []:
                 # A conditional grant simulated without its context key is
@@ -909,28 +931,33 @@ def lambda_pull_policy(*, aws_account_id, region):
     any account could pull the image; AWS's own documented snippet uses
     `function:*`, which is every function in this account.
     """
-    return json.dumps({
-        "Version": "2012-10-17",
-        "Statement": [{
-            "Sid": "LambdaECRImageRetrievalPolicy",
-            "Effect": "Allow",
-            "Principal": {"Service": "lambda.amazonaws.com"},
-            "Action": ["ecr:BatchGetImage", "ecr:GetDownloadUrlForLayer"],
-            "Condition": {"StringLike": {"aws:SourceArn":
-                f"arn:aws:lambda:{region}:{aws_account_id}:function:"
-                f"{_GATEWAY_NAME_PREFIX}-*"}},
-        }],
-    })
+    return json.dumps(
+        {
+            "Version": "2012-10-17",
+            "Statement": [
+                {
+                    "Sid": "LambdaECRImageRetrievalPolicy",
+                    "Effect": "Allow",
+                    "Principal": {"Service": "lambda.amazonaws.com"},
+                    "Action": ["ecr:BatchGetImage", "ecr:GetDownloadUrlForLayer"],
+                    "Condition": {
+                        "StringLike": {
+                            "aws:SourceArn": f"arn:aws:lambda:{region}:{aws_account_id}:function:"
+                            f"{_GATEWAY_NAME_PREFIX}-*"
+                        }
+                    },
+                }
+            ],
+        }
+    )
 
 
-def ensure_lambda_can_pull(ecr, *, aws_account_id, region,
-                           repository=IMAGE_REPOSITORY):
+def ensure_lambda_can_pull(ecr, *, aws_account_id, region, repository=IMAGE_REPOSITORY):
     """Put the pull policy on the repository. Idempotent -- SetRepositoryPolicy
     replaces wholesale, so re-running converges rather than accumulating."""
     ecr.set_repository_policy(
         repositoryName=repository,
-        policyText=lambda_pull_policy(
-            aws_account_id=aws_account_id, region=region),
+        policyText=lambda_pull_policy(aws_account_id=aws_account_id, region=region),
     )
 
 
@@ -969,19 +996,25 @@ def ecr_login(ecr, runtime, *, run=None):
     data = ecr.get_authorization_token()["authorizationData"][0]
     user, _, password = base64.b64decode(data["authorizationToken"]).decode().partition(":")
     registry = data["proxyEndpoint"].removeprefix("https://")
-    proc = run([runtime, "login", "--username", user, "--password-stdin", registry],
-               input=password, text=True, capture_output=True)
+    proc = run(
+        [runtime, "login", "--username", user, "--password-stdin", registry],
+        input=password,
+        text=True,
+        capture_output=True,
+    )
     if proc.returncode != 0:
         raise ImageBuildError(
-            f"{runtime} login to {registry} failed:\n{(proc.stderr or '').strip()}")
+            f"{runtime} login to {registry} failed:\n{(proc.stderr or '').strip()}"
+        )
     return registry
 
 
 _NO_AUTH = "no basic auth credentials"
 
 
-def build_and_push_image(runtime, *, image_uri, repo_root, dockerfile,
-                         platform=IMAGE_PLATFORM, run=None):
+def build_and_push_image(
+    runtime, *, image_uri, repo_root, dockerfile, platform=IMAGE_PLATFORM, run=None
+):
     """Build the container tier's image and push it. Returns image_uri.
 
     `--platform` is passed always, never left to the host's default: an
@@ -992,11 +1025,13 @@ def build_and_push_image(runtime, *, image_uri, repo_root, dockerfile,
     import subprocess
 
     run = run or subprocess.run
-    build = run([runtime, "build", "--platform", platform, "-f", dockerfile,
-                 "-t", image_uri, repo_root], text=True, capture_output=True)
+    build = run(
+        [runtime, "build", "--platform", platform, "-f", dockerfile, "-t", image_uri, repo_root],
+        text=True,
+        capture_output=True,
+    )
     if build.returncode != 0:
-        raise ImageBuildError(
-            f"{runtime} build failed:\n{(build.stderr or '').strip()[-2000:]}")
+        raise ImageBuildError(f"{runtime} build failed:\n{(build.stderr or '').strip()[-2000:]}")
 
     push = run([runtime, "push", image_uri], text=True, capture_output=True)
     if push.returncode != 0:
@@ -1013,7 +1048,7 @@ def build_and_push_image(runtime, *, image_uri, repo_root, dockerfile,
                 f"  On Finch the push happens inside its Lima VM, which does "
                 f"not see the\n"
                 f"  credential `finch login` wrote to the host. See "
-                f"\"If the push fails with\n"
+                f'"If the push fails with\n'
                 f"  'no basic auth credentials'\" in INSTALL.md -- three "
                 f"locations are needed\n"
                 f"  and no two of them suffice."

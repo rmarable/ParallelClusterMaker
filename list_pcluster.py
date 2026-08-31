@@ -91,36 +91,46 @@ def _print_table(records, wide):
         login_t = fmt_loginnode(r)
         min_max_cpu = (
             f"{r['initial_cpu_queue_size']}/{r['max_cpu_queue_size']}"
-            if r.get("enable_cpu_queue") == "true" else "-/-"
+            if r.get("enable_cpu_queue") == "true"
+            else "-/-"
         )
         min_max_gpu = (
             f"{r['initial_gpu_queue_size']}/{r['max_gpu_queue_size']}"
-            if r.get("enable_gpu_queue") == "true" else "-/-"
+            if r.get("enable_gpu_queue") == "true"
+            else "-/-"
         )
-        rows.append([
-            r["cluster_name"],
-            r["cluster_owner"],
-            r["region"],
-            r["headnode_instance_type"],
-            login_t,
-            cpu_t,
-            gpu_t,
-            min_max_cpu,
-            min_max_gpu,
-            r["cluster_type"],
-            r["age"],
-            r["status"],
-        ])
+        rows.append(
+            [
+                r["cluster_name"],
+                r["cluster_owner"],
+                r["region"],
+                r["headnode_instance_type"],
+                login_t,
+                cpu_t,
+                gpu_t,
+                min_max_cpu,
+                min_max_gpu,
+                r["cluster_type"],
+                r["age"],
+                r["status"],
+            ]
+        )
 
     headers = [
-        "Cluster", "Owner", "Region", "Head Node", "Login Node",
-        "CPU Types", "GPU Types", "Min/Max CPU", "Min/Max GPU",
-        "Type", "Age", "Status",
+        "Cluster",
+        "Owner",
+        "Region",
+        "Head Node",
+        "Login Node",
+        "CPU Types",
+        "GPU Types",
+        "Min/Max CPU",
+        "Min/Max GPU",
+        "Type",
+        "Age",
+        "Status",
     ]
-    widths = [
-        max(len(h), max(len(row[i]) for row in rows))
-        for i, h in enumerate(headers)
-    ]
+    widths = [max(len(h), max(len(row[i]) for row in rows)) for i, h in enumerate(headers)]
     fmt = "  ".join(f"{{:<{w}}}" for w in widths)
     print(fmt.format(*headers))
     print("  ".join("-" * w for w in widths))
@@ -133,17 +143,23 @@ def main():
         description="List ParallelCluster stacks managed by this repo."
     )
     parser.add_argument(
-        "-L", "--live", action="store_true",
+        "-L",
+        "--live",
+        action="store_true",
         help="Query pcluster describe-cluster for live status (one API call per cluster).",
     )
     parser.add_argument("-R", "--region", help="Filter by AWS region.")
     parser.add_argument("-O", "--owner", help="Filter by cluster owner.")
     parser.add_argument(
-        "-W", "--wide", action="store_true",
+        "-W",
+        "--wide",
+        action="store_true",
         help="Disable column truncation.",
     )
     parser.add_argument(
-        "-J", "--json", action="store_true",
+        "-J",
+        "--json",
+        action="store_true",
         help="Emit JSON array instead of table.",
     )
     args = parser.parse_args()

@@ -15,9 +15,7 @@ from conftest import assert_source_is_real
 import pytest
 from botocore.exceptions import ClientError
 
-sys.path.insert(
-    0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src")
-)
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src"))
 
 from pcluster_core import (
     PClusterMakerError,
@@ -355,17 +353,13 @@ class TestNormalizeFsxBuckets:
         import bucket specified by ImportPath." Failing here costs seconds; failing
         in CloudFormation costs the whole build."""
         with pytest.raises(SystemExit) as exc:
-            _normalize_fsx_buckets(
-                "import-bucket", "export-bucket", "import/", "export/"
-            )
+            _normalize_fsx_buckets("import-bucket", "export-bucket", "import/", "export/")
         message = str(exc.value)
         assert "import-bucket" in message and "export-bucket" in message
         assert "same bucket" in message
 
     def test_export_undefined_defaults_to_the_import_bucket_and_path(self, capsys):
-        out_bucket, out_path = _normalize_fsx_buckets(
-            "my-bucket", "UNDEFINED", "data/", "export/"
-        )
+        out_bucket, out_path = _normalize_fsx_buckets("my-bucket", "UNDEFINED", "data/", "export/")
         assert out_bucket == "my-bucket"
         assert out_path == "data/", "the export path must follow the import path"
         assert "WARNING" in capsys.readouterr().out
@@ -373,9 +367,7 @@ class TestNormalizeFsxBuckets:
     def test_one_bucket_with_one_path_warns_about_overwriting(self, capsys):
         """Hydration source and dehydration target are the same prefix, so exported
         files land on top of the input data. Legal, but never what someone means."""
-        out_bucket, out_path = _normalize_fsx_buckets(
-            "same", "same", "path/", "path/"
-        )
+        out_bucket, out_path = _normalize_fsx_buckets("same", "same", "path/", "path/")
         assert (out_bucket, out_path) == ("same", "path/")
         out = capsys.readouterr().out
         assert "WARNING" in out
@@ -489,17 +481,13 @@ class TestAnEmptyExportPrefixIsNotAnError:
         equal the import bucket, so head_bucket still has to run."""
         client = _make_s3_client(head_ok=False)
         with pytest.raises(SystemExit) as exc:
-            _check_fsx_s3(
-                client, "typo-bucket", "output/", "export", require_objects=False
-            )
+            _check_fsx_s3(client, "typo-bucket", "output/", "export", require_objects=False)
         assert "export bucket s3://typo-bucket not found" in str(exc.value)
 
     def test_an_access_denied_export_bucket_still_fails(self):
         client = _make_s3_client(head_ok=False, head_error_code="403")
         with pytest.raises(SystemExit) as exc:
-            _check_fsx_s3(
-                client, "private-bucket", "output/", "export", require_objects=False
-            )
+            _check_fsx_s3(client, "private-bucket", "output/", "export", require_objects=False)
         assert "access is denied" in str(exc.value)
 
     def test_the_export_prefix_is_never_listed(self):
@@ -538,9 +526,7 @@ class TestAnEmptyExportPrefixIsNotAnError:
             if getattr(node.func, "id", None) != "_check_fsx_s3":
                 continue
             label = node.args[3].value
-            flags = [
-                kw.value.value for kw in node.keywords if kw.arg == "require_objects"
-            ]
+            flags = [kw.value.value for kw in node.keywords if kw.arg == "require_objects"]
             relaxed[label] = flags[0] if flags else True
         assert relaxed == {"import": True, "export": False}, relaxed
 
@@ -687,17 +673,13 @@ class TestDeriveHeadNodeBootstrapTimeout:
 
     def test_no_shared_filesystem_leaves_the_pcluster_default_alone(self):
         assert (
-            _derive_head_node_bootstrap_timeout(
-                configured=2100, enable_efs=False, enable_fsx=False
-            )
+            _derive_head_node_bootstrap_timeout(configured=2100, enable_efs=False, enable_fsx=False)
             == 2100
         )
 
     def test_fsx_adds_its_allowance(self):
         assert (
-            _derive_head_node_bootstrap_timeout(
-                configured=2100, enable_efs=False, enable_fsx=True
-            )
+            _derive_head_node_bootstrap_timeout(configured=2100, enable_efs=False, enable_fsx=True)
             == 3900
         )
 
@@ -707,9 +689,7 @@ class TestDeriveHeadNodeBootstrapTimeout:
         instance appeared 4m24s after the wait condition started -- so the 600s
         allowance is headroom over a measured window, not an estimate."""
         assert (
-            _derive_head_node_bootstrap_timeout(
-                configured=2100, enable_efs=True, enable_fsx=False
-            )
+            _derive_head_node_bootstrap_timeout(configured=2100, enable_efs=True, enable_fsx=False)
             == 2700
         )
 
@@ -727,15 +707,11 @@ class TestDeriveHeadNodeBootstrapTimeout:
         """Including downward: an operator who deliberately shortens the window to
         fail fast must not have it silently raised because FSx is on."""
         assert (
-            _derive_head_node_bootstrap_timeout(
-                configured=1200, enable_efs=True, enable_fsx=True
-            )
+            _derive_head_node_bootstrap_timeout(configured=1200, enable_efs=True, enable_fsx=True)
             == 1200
         )
         assert (
-            _derive_head_node_bootstrap_timeout(
-                configured=7200, enable_efs=False, enable_fsx=True
-            )
+            _derive_head_node_bootstrap_timeout(configured=7200, enable_efs=False, enable_fsx=True)
             == 7200
         )
 
@@ -750,9 +726,7 @@ class TestDeriveHeadNodeBootstrapTimeout:
             == 43200
         )
         assert (
-            _derive_head_node_bootstrap_timeout(
-                configured=0, enable_efs=False, enable_fsx=False
-            )
+            _derive_head_node_bootstrap_timeout(configured=0, enable_efs=False, enable_fsx=False)
             == 1
         )
 
@@ -779,14 +753,15 @@ class TestDeriveHeadNodeBootstrapTimeout:
             node
             for node in ast.walk(tree)
             if isinstance(node, ast.Call)
-            and getattr(node.func, "id", None)
-            == "_derive_head_node_bootstrap_timeout"
+            and getattr(node.func, "id", None) == "_derive_head_node_bootstrap_timeout"
         ]
         assert calls, "make_pcluster.py never derives the bootstrap timeout"
         for call in calls:
             assert not call.args, "call site passes a positional argument"
             passed = {kw.arg for kw in call.keywords}
-            assert passed, "test_the_make_pcluster_call_site_names_every_argument: nothing to assert absence against"
+            assert passed, (
+                "test_the_make_pcluster_call_site_names_every_argument: nothing to assert absence against"
+            )
             assert None not in passed, "call site splats **kwargs instead of naming"
             assert passed == {"configured", "enable_efs", "enable_fsx"}, (
                 f"call site keywords {sorted(passed)} do not match the signature"
@@ -806,7 +781,8 @@ class TestStorageSummaryLinesTakesKeywordsOnly:
 
         params = inspect.signature(_storage_summary_lines).parameters
         positional = [
-            name for name, p in params.items()
+            name
+            for name, p in params.items()
             if p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD)
         ]
         assert not positional, (
@@ -828,7 +804,8 @@ class TestStorageSummaryLinesTakesKeywordsOnly:
         with open(os.path.join(repo_root, "src", "pcluster_core.py")) as fh:
             tree = ast.parse(fh.read())
         calls = [
-            node for node in ast.walk(tree)
+            node
+            for node in ast.walk(tree)
             if isinstance(node, ast.Call)
             and getattr(node.func, "id", None) == "_storage_summary_lines"
         ]
@@ -837,7 +814,9 @@ class TestStorageSummaryLinesTakesKeywordsOnly:
         for call in calls:
             assert not call.args, "call site passes a positional argument"
             passed = {kw.arg for kw in call.keywords}
-            assert passed, "test_the_make_pcluster_call_site_names_every_argument: nothing to assert absence against"
+            assert passed, (
+                "test_the_make_pcluster_call_site_names_every_argument: nothing to assert absence against"
+            )
             assert None not in passed, "call site splats **kwargs instead of naming"
             assert passed == expected, (
                 f"call site keywords {sorted(passed ^ expected)} do not match the "
@@ -872,7 +851,8 @@ class TestValidateNetworkTakesKeywordsOnly:
     def test_positional_arguments_are_rejected(self):
         params = inspect.signature(_validate_network).parameters
         positional = [
-            name for name, p in params.items()
+            name
+            for name, p in params.items()
             if p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD)
         ]
         assert not positional, (
@@ -895,23 +875,24 @@ class TestValidateNetworkTakesKeywordsOnly:
         with open(os.path.join(repo_root, "src", "pcluster_core.py")) as fh:
             tree = ast.parse(fh.read())
         calls = [
-            node for node in ast.walk(tree)
+            node
+            for node in ast.walk(tree)
             if isinstance(node, ast.Call)
-            and any(
-                isinstance(a, ast.Name) and a.id == "_validate_network"
-                for a in node.args
-            )
+            and any(isinstance(a, ast.Name) and a.id == "_validate_network" for a in node.args)
         ]
         assert calls, "no _validate_network call found in src/pcluster_core.py"
         expected = set(_VALIDATE_NETWORK_DEFAULTS)
         for call in calls:
             other_positional = [
-                a for a in call.args
+                a
+                for a in call.args
                 if not (isinstance(a, ast.Name) and a.id == "_validate_network")
             ]
             assert not other_positional, "call site passes a positional argument"
             passed = {kw.arg for kw in call.keywords}
-            assert passed, "test_the_make_pcluster_call_site_names_every_argument: nothing to assert absence against"
+            assert passed, (
+                "test_the_make_pcluster_call_site_names_every_argument: nothing to assert absence against"
+            )
             assert None not in passed, "call site splats **kwargs instead of naming"
             assert passed == expected, (
                 f"call site keywords {sorted(passed ^ expected)} do not match "
@@ -986,8 +967,7 @@ class TestStorageSummaryLines:
         assert "/efs" not in "\n".join(_storage())
 
     def test_external_nfs_names_its_server(self):
-        text = "\n".join(_storage(enable_external_nfs=True,
-                                 external_nfs_server="filer.corp"))
+        text = "\n".join(_storage(enable_external_nfs=True, external_nfs_server="filer.corp"))
         assert "/nfs" in text
         assert "filer.corp" in text
 
@@ -1013,8 +993,7 @@ class TestStorageSummaryLines:
         assert "import-s3-to-lustre.sh" not in text
 
     def test_every_enabled_filesystem_appears_together(self):
-        text = "\n".join(_storage(enable_efs=True, enable_fsx=True,
-                                 enable_external_nfs=True))
+        text = "\n".join(_storage(enable_efs=True, enable_fsx=True, enable_external_nfs=True))
         for mount in ("/shared", "/efs", "/fsx", "/nfs"):
             assert mount in text, f"{mount} missing from a fully-loaded cluster"
 
@@ -1026,8 +1005,7 @@ _PKG_DIR_CASES = [
     ({"enable_efs": True, "enable_external_nfs": True}, "/efs/pkg"),
     ({"enable_fsx": True}, "/fsx/pkg"),
     ({"enable_fsx": True, "enable_efs": True}, "/fsx/pkg"),
-    ({"enable_fsx": True, "enable_efs": True, "enable_external_nfs": True},
-     "/fsx/pkg"),
+    ({"enable_fsx": True, "enable_efs": True, "enable_external_nfs": True}, "/fsx/pkg"),
 ]
 
 
@@ -1155,9 +1133,7 @@ class TestDeriveDockerComposeStaging:
             _, arch = self._derive(base_os, enable_monitoring=False)
             assert arch in ("x86_64", "aarch64")
 
-    @pytest.mark.parametrize(
-        "version", ["2.29.7", "v2.29", "v2", "latest", "", None, "v2.29.7.1"]
-    )
+    @pytest.mark.parametrize("version", ["2.29.7", "v2.29", "v2", "latest", "", None, "v2.29.7.1"])
     def test_a_malformed_version_exits_rather_than_building_a_bad_url(self, version):
         """The version goes straight into the GitHub release URL and into the S3
         object name. A malformed one is a 404 at build time, which is cheap -- but
@@ -1220,7 +1196,7 @@ class TestDownloadChecksumsAreValidatedBeforeAnythingIsCreated:
             _validate_download_checksum("monitoring_version_checksum", value)
 
     def test_the_error_names_the_parameter_and_how_to_fix_it(self):
-        """"The checksum format is invalid" names neither the key nor the file it
+        """ "The checksum format is invalid" names neither the key nor the file it
         came from, which is what made the live failure hard to place."""
         with pytest.raises(SystemExit) as exc:
             _validate_download_checksum("docker_compose_checksum_x86_64", "sha256:nope")
@@ -1247,7 +1223,8 @@ class TestDownloadChecksumsAreValidatedBeforeAnythingIsCreated:
         # by anything else). make_pcluster.py now just aliases it.
         path = os.path.join(
             os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-            "src", "pcluster_core.py",
+            "src",
+            "pcluster_core.py",
         )
         with open(path) as fh:
             tree = ast.parse(fh.read())
@@ -1347,7 +1324,9 @@ class TestDownloadChecksumsAreValidatedBeforeAnythingIsCreated:
             "expected the monitoring tarball and the compose plugin checksums to "
             f"be validated; found {len(validate_lines)} call(s)"
         )
-        assert core_call_lines, "vacuity guard: core_create_cluster call not found in make_pcluster.py"
+        assert core_call_lines, (
+            "vacuity guard: core_create_cluster call not found in make_pcluster.py"
+        )
         assert max(validate_lines) < min(core_call_lines), (
             "checksum validation must complete before core_create_cluster -- the "
             "only caller of _setup_iam -- is ever invoked"
@@ -1356,9 +1335,9 @@ class TestDownloadChecksumsAreValidatedBeforeAnythingIsCreated:
         with open(os.path.join(root, "src", "pcluster_core.py")) as fh:
             core_tree = ast.parse(fh.read())
         iam_lines = [
-            node.lineno for node in ast.walk(core_tree)
-            if isinstance(node, ast.Call)
-            and getattr(node.func, "id", None) == "_setup_iam"
+            node.lineno
+            for node in ast.walk(core_tree)
+            if isinstance(node, ast.Call) and getattr(node.func, "id", None) == "_setup_iam"
         ]
         assert iam_lines, "vacuity guard: _setup_iam call not found in src/pcluster_core.py"
         assert max(validate_lines) < min(iam_lines), (
@@ -1398,18 +1377,15 @@ class TestDeriveResultsBucket:
             f"unexpected inputs {sorted(params)}; anything cluster- or "
             f"serial-derived makes this a per-build bucket again"
         )
-        assert all(
-            p.kind is inspect.Parameter.KEYWORD_ONLY for p in params.values()
-        ), "must be keyword-only: two string parameters transpose silently"
+        assert all(p.kind is inspect.Parameter.KEYWORD_ONLY for p in params.values()), (
+            "must be keyword-only: two string parameters transpose silently"
+        )
 
     def test_the_name_is_never_the_per_build_bucket(self):
         """s3_bucketname is deleted on teardown by default; this one must not be it."""
         serial = "osiris-00412128072026"
         per_build = "parallelclustermaker-" + serial
-        assert (
-            _derive_results_bucket(aws_account_id=self._ACCT, region="us-east-1")
-            != per_build
-        )
+        assert _derive_results_bucket(aws_account_id=self._ACCT, region="us-east-1") != per_build
 
     def test_the_region_is_in_the_name(self):
         """S3 bucket names are global but buckets are regional, so one name for two
@@ -1461,12 +1437,14 @@ class TestDeriveAzList:
 
     def test_several_azs_parse_in_order(self):
         assert _derive_az_list("us-east-1a,us-east-1b", fallback=None) == [
-            "us-east-1a", "us-east-1b"
+            "us-east-1a",
+            "us-east-1b",
         ]
 
     def test_whitespace_is_stripped(self):
         assert _derive_az_list(" us-east-1a , us-east-1b ", fallback=None) == [
-            "us-east-1a", "us-east-1b"
+            "us-east-1a",
+            "us-east-1b",
         ]
 
     def test_a_trailing_comma_does_not_yield_an_empty_az(self):
@@ -1533,8 +1511,10 @@ class TestBuildMakeClusterParams:
     """
 
     _REQUIRED = dict(
-        cluster_name="osiris", cluster_owner="testuser",
-        cluster_owner_email="testuser@example.com", az="us-east-2a",
+        cluster_name="osiris",
+        cluster_owner="testuser",
+        cluster_owner_email="testuser@example.com",
+        az="us-east-2a",
         headnode_instance_type="c5.xlarge",
     )
     # Both instance-type defaults are "", and a cluster with neither queue
@@ -1621,8 +1601,9 @@ class TestBuildMakeClusterParams:
 
     def test_the_checksum_matches_the_derived_arch(self):
         arm = self._build(overrides={"base_os": "rhel9arm"})
-        assert arm.docker_compose_checksum == \
-            MAKE_CLUSTER_DEFAULTS["docker_compose_checksum_aarch64"]
+        assert (
+            arm.docker_compose_checksum == MAKE_CLUSTER_DEFAULTS["docker_compose_checksum_aarch64"]
+        )
 
     def test_the_bootstrap_timeout_is_bumped_for_shared_filesystems(self):
         """FSx provisioning runs on the head node's critical path with the
@@ -1663,8 +1644,10 @@ class TestAtLeastOneQueue:
     """
 
     _REQ = dict(
-        cluster_name="osiris", cluster_owner="testuser",
-        cluster_owner_email="testuser@example.com", az="us-east-2a",
+        cluster_name="osiris",
+        cluster_owner="testuser",
+        cluster_owner_email="testuser@example.com",
+        az="us-east-2a",
         headnode_instance_type="c5.xlarge",
     )
 
@@ -1686,9 +1669,7 @@ class TestAtLeastOneQueue:
         assert self._build(gpu_instance_type="g5.xlarge").gpu_instance_type
 
     def test_both_together_are_fine(self):
-        params = self._build(
-            compute_instance_type="c5.xlarge", gpu_instance_type="g5.xlarge"
-        )
+        params = self._build(compute_instance_type="c5.xlarge", gpu_instance_type="g5.xlarge")
         assert params.compute_instance_type and params.gpu_instance_type
 
     def test_the_message_names_both_parameters_and_a_concrete_value(self):
@@ -1716,17 +1697,24 @@ class TestAtLeastOneQueue:
         from pcluster_core import render_template
 
         ctx = dict(conftest.cluster_params.__wrapped__())
-        ctx.update({
-            "enable_cpu_queue": "false", "enable_gpu_queue": "false",
-            "cpu_instance_types": [], "gpu_instance_types": [],
-            "external_nfs_sg": {"group_id": "sg-0"},
-        })
-        rendered = yaml.safe_load(render_template(
-            os.path.join(
-                os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "templates"
-            ),
-            "config.pcluster.j2", **ctx,
-        ))
+        ctx.update(
+            {
+                "enable_cpu_queue": "false",
+                "enable_gpu_queue": "false",
+                "cpu_instance_types": [],
+                "gpu_instance_types": [],
+                "external_nfs_sg": {"group_id": "sg-0"},
+            }
+        )
+        rendered = yaml.safe_load(
+            render_template(
+                os.path.join(
+                    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "templates"
+                ),
+                "config.pcluster.j2",
+                **ctx,
+            )
+        )
         assert rendered["Scheduling"]["SlurmQueues"] is None
 
 
@@ -1747,7 +1735,9 @@ class TestTheExistingVarsFileAbortNamesTheRightRemedy:
     """
 
     _ARGS = dict(
-        cluster_name="osiris", cluster_owner="rmarable", az="us-east-1a",
+        cluster_name="osiris",
+        cluster_owner="rmarable",
+        az="us-east-1a",
         cluster_build_command="./make_pcluster.py -N osiris ...",
     )
 
@@ -1776,9 +1766,7 @@ class TestTheExistingVarsFileAbortNamesTheRightRemedy:
         text = "\n".join(self._lines(tmp_path, serial=False))
         assert "rm -f src/vars_files/osiris.yml" in text
         assert "rm -rf active_clusters/osiris" in text
-        assert "kill_pcluster.py" not in text, (
-            "there is no cluster to tear down on this branch"
-        )
+        assert "kill_pcluster.py" not in text, "there is no cluster to tear down on this branch"
 
     def test_the_vars_file_is_named_not_merely_alluded_to(self, tmp_path):
         """The original said a vars file 'was found' without saying where,
@@ -1823,18 +1811,21 @@ class TestAFailedPreLaunchBuildLeavesNoLocalState:
 
         src = os.path.join(
             os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-            "src", "pcluster_core.py",
+            "src",
+            "pcluster_core.py",
         )
         with open(src) as fh:
             tree = ast.parse(fh.read())
         fn = next(
-            n for n in ast.walk(tree)
+            n
+            for n in ast.walk(tree)
             if isinstance(n, ast.FunctionDef) and n.name == "core_create_cluster"
         )
         # The rollback handler is the except: block that prints the
         # "Cleaning up" banner.
         bodies = [
-            h for h in ast.walk(fn)
+            h
+            for h in ast.walk(fn)
             if isinstance(h, ast.ExceptHandler)
             and "Cleaning up everything this build" in ast.dump(h)
         ]
@@ -1865,9 +1856,7 @@ class TestAFailedPreLaunchBuildLeavesNoLocalState:
             "on state this build created"
         )
         assert "cluster_serial_number_file" in removed, "serial removal was dropped"
-        assert "cluster_data_dir" in rmtree_targets, (
-            "rollback leaves active_clusters/<name> behind"
-        )
+        assert "cluster_data_dir" in rmtree_targets, "rollback leaves active_clusters/<name> behind"
 
 
 class TestTheDefaultsFileIsAppliedWhenItExists:
@@ -1883,8 +1872,10 @@ class TestTheDefaultsFileIsAppliedWhenItExists:
     """
 
     _REQUIRED = dict(
-        cluster_name="osiris", cluster_owner="testuser",
-        cluster_owner_email="testuser@example.com", az="us-east-2a",
+        cluster_name="osiris",
+        cluster_owner="testuser",
+        cluster_owner_email="testuser@example.com",
+        az="us-east-2a",
         headnode_instance_type="c5.xlarge",
     )
 
@@ -1893,9 +1884,7 @@ class TestTheDefaultsFileIsAppliedWhenItExists:
 
         path = tmp_path / f"{name}_defaults.yml"
         path.write_text(_yaml.safe_dump(contents))
-        monkeypatch.setattr(
-            "pcluster_core._default_repo_root", lambda: str(tmp_path)
-        )
+        monkeypatch.setattr("pcluster_core._default_repo_root", lambda: str(tmp_path))
         return path
 
     def _build(self, **kw):
@@ -1903,12 +1892,15 @@ class TestTheDefaultsFileIsAppliedWhenItExists:
 
         return build_make_cluster_params(**dict(self._REQUIRED, **kw))
 
-    def test_a_value_in_the_file_reaches_the_built_cluster(
-        self, tmp_path, monkeypatch
-    ):
-        self._write(tmp_path, monkeypatch, {
-            "compute_instance_type": "c6g.8xlarge", "base_os": "rhel9arm",
-        })
+    def test_a_value_in_the_file_reaches_the_built_cluster(self, tmp_path, monkeypatch):
+        self._write(
+            tmp_path,
+            monkeypatch,
+            {
+                "compute_instance_type": "c6g.8xlarge",
+                "base_os": "rhel9arm",
+            },
+        )
         params = self._build()
         assert params.compute_instance_type == "c6g.8xlarge"
         assert params.base_os == "rhel9arm"
@@ -1916,27 +1908,31 @@ class TestTheDefaultsFileIsAppliedWhenItExists:
     def test_the_file_beats_the_hardcoded_default(self, tmp_path, monkeypatch):
         from pcluster_core import MAKE_CLUSTER_DEFAULTS
 
-        other = (
-            "ondemand" if MAKE_CLUSTER_DEFAULTS["cluster_type"] == "spot"
-            else "spot"
+        other = "ondemand" if MAKE_CLUSTER_DEFAULTS["cluster_type"] == "spot" else "spot"
+        self._write(
+            tmp_path,
+            monkeypatch,
+            {
+                "compute_instance_type": "c5.2xlarge",
+                "cluster_type": other,
+            },
         )
-        self._write(tmp_path, monkeypatch, {
-            "compute_instance_type": "c5.2xlarge", "cluster_type": other,
-        })
         assert self._build().cluster_type == other
 
     def test_an_explicit_override_beats_the_file(self, tmp_path, monkeypatch):
         """Precedence, and the half an operator notices: a parameter typed
         at the tool must not be silently overruled by a file on disk."""
-        self._write(tmp_path, monkeypatch, {
-            "compute_instance_type": "c6g.8xlarge",
-        })
+        self._write(
+            tmp_path,
+            monkeypatch,
+            {
+                "compute_instance_type": "c6g.8xlarge",
+            },
+        )
         params = self._build(overrides={"compute_instance_type": "c5.9xlarge"})
         assert params.compute_instance_type == "c5.9xlarge"
 
-    def test_a_teardown_key_in_the_file_is_ignored_not_rejected(
-        self, tmp_path, monkeypatch
-    ):
+    def test_a_teardown_key_in_the_file_is_ignored_not_rejected(self, tmp_path, monkeypatch):
         """One file serves make_pcluster.py and kill_pcluster.py both, so
         `delete_s3_bucketname` is legitimately in there and is not a build
         parameter. Rejecting it -- which is right for a typo'd override --
@@ -1948,15 +1944,17 @@ class TestTheDefaultsFileIsAppliedWhenItExists:
         one at the merge passed this whole class, because the other still
         drops the key.
         """
-        self._write(tmp_path, monkeypatch, {
-            "compute_instance_type": "c5.2xlarge",
-            "delete_s3_bucketname": "true",
-        })
+        self._write(
+            tmp_path,
+            monkeypatch,
+            {
+                "compute_instance_type": "c5.2xlarge",
+                "delete_s3_bucketname": "true",
+            },
+        )
         assert self._build().compute_instance_type == "c5.2xlarge"
 
-    def test_a_typo_in_an_override_is_still_rejected(
-        self, tmp_path, monkeypatch
-    ):
+    def test_a_typo_in_an_override_is_still_rejected(self, tmp_path, monkeypatch):
         """The tolerance above is scoped to the file. An override is
         something a caller just typed, and silently ignoring it builds a
         cluster that differs from the one asked for."""
@@ -1964,47 +1962,45 @@ class TestTheDefaultsFileIsAppliedWhenItExists:
 
         self._write(tmp_path, monkeypatch, {})
         with pytest.raises(PClusterMakerError, match="unknown cluster parameter"):
-            self._build(overrides={
-                "compute_instance_type": "c5.2xlarge", "enable_fsxx": "true",
-            })
+            self._build(
+                overrides={
+                    "compute_instance_type": "c5.2xlarge",
+                    "enable_fsxx": "true",
+                }
+            )
 
     def test_another_clusters_file_is_not_applied(self, tmp_path, monkeypatch):
         """Discovery is keyed on the cluster name. A prefix or glob match
         would let `osiris-test` inherit `osiris`'s cluster."""
-        self._write(tmp_path, monkeypatch, {
-            "compute_instance_type": "c6g.8xlarge",
-        }, name="something-else")
+        self._write(
+            tmp_path,
+            monkeypatch,
+            {
+                "compute_instance_type": "c6g.8xlarge",
+            },
+            name="something-else",
+        )
         params = self._build(overrides={"compute_instance_type": "c5.2xlarge"})
         assert params.compute_instance_type == "c5.2xlarge"
 
-    def test_no_file_leaves_the_hardcoded_defaults_in_charge(
-        self, tmp_path, monkeypatch
-    ):
+    def test_no_file_leaves_the_hardcoded_defaults_in_charge(self, tmp_path, monkeypatch):
         """Absence is the ordinary case, not an error -- unlike the
         --use_defaults path, which exits when the named file is missing."""
         from pcluster_core import MAKE_CLUSTER_DEFAULTS
 
-        monkeypatch.setattr(
-            "pcluster_core._default_repo_root", lambda: str(tmp_path)
-        )
+        monkeypatch.setattr("pcluster_core._default_repo_root", lambda: str(tmp_path))
         params = self._build(overrides={"compute_instance_type": "c5.2xlarge"})
         assert params.cluster_type == MAKE_CLUSTER_DEFAULTS["cluster_type"]
 
-    def test_a_file_that_is_not_valid_yaml_names_itself(
-        self, tmp_path, monkeypatch
-    ):
+    def test_a_file_that_is_not_valid_yaml_names_itself(self, tmp_path, monkeypatch):
         from pcluster_core import PClusterMakerError
 
         (tmp_path / "osiris_defaults.yml").write_text("compute: [unclosed\n")
-        monkeypatch.setattr(
-            "pcluster_core._default_repo_root", lambda: str(tmp_path)
-        )
+        monkeypatch.setattr("pcluster_core._default_repo_root", lambda: str(tmp_path))
         with pytest.raises(PClusterMakerError, match="osiris_defaults.yml"):
             self._build(overrides={"compute_instance_type": "c5.2xlarge"})
 
-    def test_a_key_with_no_value_falls_through_to_the_default(
-        self, tmp_path, monkeypatch
-    ):
+    def test_a_key_with_no_value_falls_through_to_the_default(self, tmp_path, monkeypatch):
         """`gpu_instance_type:` with nothing after it is None once YAML
         parses it. Every reader treats a present key as an explicit
         setting, so None overwrote the default and reached a field typed
@@ -2018,9 +2014,14 @@ class TestTheDefaultsFileIsAppliedWhenItExists:
         """
         from pcluster_core import MAKE_CLUSTER_DEFAULTS
 
-        self._write(tmp_path, monkeypatch, {
-            "compute_instance_type": "c5.2xlarge", "gpu_instance_type": None,
-        })
+        self._write(
+            tmp_path,
+            monkeypatch,
+            {
+                "compute_instance_type": "c5.2xlarge",
+                "gpu_instance_type": None,
+            },
+        )
         params = self._build()
         assert params.gpu_instance_type == MAKE_CLUSTER_DEFAULTS["gpu_instance_type"]
         assert params.gpu_instance_type.split(",") == [""]
@@ -2034,9 +2035,7 @@ class TestTheDefaultsFileIsAppliedWhenItExists:
 
         path = tmp_path / "named.yml"
         path.write_text(_yaml.safe_dump({"gpu_instance_type": None, "base_os": "rhel9"}))
-        loaded = _load_defaults_file(
-            str(path), str(tmp_path / "toolkit.yml"), "osiris"
-        )
+        loaded = _load_defaults_file(str(path), str(tmp_path / "toolkit.yml"), "osiris")
         assert loaded == {"base_os": "rhel9"}
 
 
@@ -2051,24 +2050,41 @@ class TestTheClusterRecordStore:
     """
 
     _RECORD = {
-        "cluster_name": "osiris", "cluster_owner": "rmarable",
-        "serial": "osiris-202608221200", "region": "us-east-2",
-        "headnode_instance_type": "c8g.large", "enable_loginnode": "false",
-        "loginnode_instance_type": "", "loginnode_count": 0,
-        "cpu_instance_types": ["c8g.xlarge"], "gpu_instance_types": [],
-        "enable_cpu_queue": "true", "enable_gpu_queue": "false",
-        "initial_cpu_queue_size": 1, "max_cpu_queue_size": 8,
-        "initial_gpu_queue_size": 0, "max_gpu_queue_size": 0,
-        "cluster_type": "spot", "deployment_date": "2026-08-22",
-        "ssh_keypair": "osiris.pem", "ec2_keypair": "osiris-key",
-        "ec2_user": "ubuntu", "s3_bucketname": "parallelclustermaker-osiris",
+        "cluster_name": "osiris",
+        "cluster_owner": "rmarable",
+        "serial": "osiris-202608221200",
+        "region": "us-east-2",
+        "headnode_instance_type": "c8g.large",
+        "enable_loginnode": "false",
+        "loginnode_instance_type": "",
+        "loginnode_count": 0,
+        "cpu_instance_types": ["c8g.xlarge"],
+        "gpu_instance_types": [],
+        "enable_cpu_queue": "true",
+        "enable_gpu_queue": "false",
+        "initial_cpu_queue_size": 1,
+        "max_cpu_queue_size": 8,
+        "initial_gpu_queue_size": 0,
+        "max_gpu_queue_size": 0,
+        "cluster_type": "spot",
+        "deployment_date": "2026-08-22",
+        "ssh_keypair": "osiris.pem",
+        "ec2_keypair": "osiris-key",
+        "ec2_user": "ubuntu",
+        "s3_bucketname": "parallelclustermaker-osiris",
         "enable_monitoring": "false",
         # Teardown's own inputs, added once core_delete_cluster had to run
         # on a machine that did not build the cluster.
-        "aws_account_id": "", "az": "", "ec2_iam_policy": "",
-        "ec2_iam_role": "", "ec2_user_home": "", "ssh_secret_name": "",
-        "fsx_hydration_iam_policy": "", "results_bucketname": "",
-        "enable_external_nfs": "false", "enable_fsx_hydration": "false",
+        "aws_account_id": "",
+        "az": "",
+        "ec2_iam_policy": "",
+        "ec2_iam_role": "",
+        "ec2_user_home": "",
+        "ssh_secret_name": "",
+        "fsx_hydration_iam_policy": "",
+        "results_bucketname": "",
+        "enable_external_nfs": "false",
+        "enable_fsx_hydration": "false",
         "enable_hpc_benchmarks": "false",
     }
 
@@ -2109,8 +2125,10 @@ class TestTheClusterRecordStore:
             from botocore.exceptions import ClientError
 
             return ClientError(
-                {"Error": {"Code": code, "Message": code},
-                 "ResponseMetadata": {"HTTPStatusCode": status}},
+                {
+                    "Error": {"Code": code, "Message": code},
+                    "ResponseMetadata": {"HTTPStatusCode": status},
+                },
                 op,
             )
 
@@ -2124,8 +2142,7 @@ class TestTheClusterRecordStore:
             return self.etags[Key]
 
         # -- operations ----------------------------------------------
-        def put_object(self, Bucket=None, Key=None, Body=None, IfMatch=None,
-                       **kw):
+        def put_object(self, Bucket=None, Key=None, Body=None, IfMatch=None, **kw):
             self._check(Bucket, "PutObject")
             self.calls.append(("put", Key))
             if IfMatch is not None:
@@ -2164,17 +2181,19 @@ class TestTheClusterRecordStore:
             self.etags.pop(Key, None)
             return {}
 
-        def list_objects_v2(self, Bucket=None, Prefix="", ContinuationToken=None,
-                            **kw):
+        def list_objects_v2(self, Bucket=None, Prefix="", ContinuationToken=None, **kw):
             self._check(Bucket, "ListObjectsV2")
             self.calls.append(("list", Prefix))
             keys = sorted(k for k in self.objects if k.startswith(Prefix))
             if ContinuationToken:
                 keys = [k for k in keys if k > ContinuationToken]
-            page, rest = keys[:self.max_keys], keys[self.max_keys:]
+            page, rest = keys[: self.max_keys], keys[self.max_keys :]
             out = {
-                "Name": Bucket, "Prefix": Prefix, "MaxKeys": self.max_keys,
-                "KeyCount": len(page), "IsTruncated": bool(rest),
+                "Name": Bucket,
+                "Prefix": Prefix,
+                "MaxKeys": self.max_keys,
+                "KeyCount": len(page),
+                "IsTruncated": bool(rest),
             }
             # S3 omits Contents entirely when nothing matches. Always
             # returning it means `resp.get("Contents") or []` is never
@@ -2196,9 +2215,7 @@ class TestTheClusterRecordStore:
 
         assert _records_key("osiris") == "vars/osiris.json"
         repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        policies = glob.glob(
-            os.path.join(repo_root, "templates", "MCPStateAccess*.json_src")
-        )
+        policies = glob.glob(os.path.join(repo_root, "templates", "MCPStateAccess*.json_src"))
         assert policies
         for path in policies:
             assert "/vars/*" in open(path).read(), path
@@ -2207,34 +2224,27 @@ class TestTheClusterRecordStore:
         from pcluster_core import get_cluster_record, put_cluster_record
 
         s3 = self._S3()
-        put_cluster_record(
-            s3, locks_bucketname="b", cluster_name="osiris", record=self._RECORD
-        )
-        assert get_cluster_record(
-            s3, locks_bucketname="b", cluster_name="osiris"
-        ) == self._RECORD
+        put_cluster_record(s3, locks_bucketname="b", cluster_name="osiris", record=self._RECORD)
+        assert get_cluster_record(s3, locks_bucketname="b", cluster_name="osiris") == self._RECORD
 
     def test_a_cluster_record_dataclass_is_accepted_directly(self):
         """The wire format and the in-process type stay pinned to each
         other: a second serializer is a second thing to keep in step."""
-        from pcluster_core import (ClusterRecord, get_cluster_record,
-                                   put_cluster_record)
+        from pcluster_core import ClusterRecord, get_cluster_record, put_cluster_record
 
         s3 = self._S3()
         put_cluster_record(
-            s3, locks_bucketname="b", cluster_name="osiris",
+            s3,
+            locks_bucketname="b",
+            cluster_name="osiris",
             record=ClusterRecord.from_dict(self._RECORD),
         )
-        assert get_cluster_record(
-            s3, locks_bucketname="b", cluster_name="osiris"
-        ) == self._RECORD
+        assert get_cluster_record(s3, locks_bucketname="b", cluster_name="osiris") == self._RECORD
 
     def test_an_absent_record_is_none_not_an_error(self):
         from pcluster_core import get_cluster_record
 
-        assert get_cluster_record(
-            self._S3(), locks_bucketname="b", cluster_name="nope"
-        ) is None
+        assert get_cluster_record(self._S3(), locks_bucketname="b", cluster_name="nope") is None
 
     def test_delete_is_idempotent(self):
         """A re-run teardown must not fail on a record already gone."""
@@ -2257,17 +2267,23 @@ class TestTheClusterRecordStore:
         to prune them, and as the forced ECR delete. A create and its
         delete land together or the leak is one per cluster, forever.
         """
-        from pcluster_core import (delete_cluster_record, put_cluster_record,
-                                   put_cluster_vars_file, _records_key,
-                                   _vars_file_key)
+        from pcluster_core import (
+            delete_cluster_record,
+            put_cluster_record,
+            put_cluster_vars_file,
+            _records_key,
+            _vars_file_key,
+        )
 
         s3 = self._S3()
         vf = tmp_path / "osiris.yml"
         vf.write_text("cluster_name: osiris\n")
-        put_cluster_record(s3, locks_bucketname="b", cluster_name="osiris",
-                           record={"cluster_name": "osiris"})
-        put_cluster_vars_file(s3, locks_bucketname="b", cluster_name="osiris",
-                              vars_file_path=str(vf))
+        put_cluster_record(
+            s3, locks_bucketname="b", cluster_name="osiris", record={"cluster_name": "osiris"}
+        )
+        put_cluster_vars_file(
+            s3, locks_bucketname="b", cluster_name="osiris", vars_file_path=str(vf)
+        )
         for key in (_records_key("osiris"), _vars_file_key("osiris")):
             assert key in s3.objects, f"{key} was never stored"
 
@@ -2275,8 +2291,7 @@ class TestTheClusterRecordStore:
 
         assert _records_key("osiris") not in s3.objects
         assert _vars_file_key("osiris") not in s3.objects, (
-            "the stored vars file outlived the cluster; the store leaks one "
-            "object per teardown"
+            "the stored vars file outlived the cluster; the store leaks one object per teardown"
         )
 
     def test_listing_returns_cluster_names_not_keys(self):
@@ -2285,7 +2300,9 @@ class TestTheClusterRecordStore:
         s3 = self._S3()
         for name in ("osiris", "iris"):
             put_cluster_record(
-                s3, locks_bucketname="b", cluster_name=name,
+                s3,
+                locks_bucketname="b",
+                cluster_name=name,
                 record=dict(self._RECORD, cluster_name=name),
             )
         s3.objects["locks/osiris.lock"] = b"{}"
@@ -2304,7 +2321,9 @@ class TestTheClusterRecordStore:
         assert len(names) > s3.max_keys * 2, "must span at least three pages"
         for name in names:
             put_cluster_record(
-                s3, locks_bucketname="b", cluster_name=name,
+                s3,
+                locks_bucketname="b",
+                cluster_name=name,
                 record=dict(self._RECORD, cluster_name=name),
             )
 
@@ -2318,7 +2337,7 @@ class TestTheClusterRecordStore:
         from pcluster_core import list_cluster_records
 
         s3 = self._S3()
-        s3.objects["locks/other.lock"] = b"{}"   # present, but not under vars/
+        s3.objects["locks/other.lock"] = b"{}"  # present, but not under vars/
         assert list_cluster_records(s3, locks_bucketname="b") == []
 
     def test_an_unknown_bucket_is_not_reported_as_an_empty_store(self):
@@ -2343,18 +2362,17 @@ class TestTheClusterRecordStore:
         os.makedirs(root / "active_clusters" / "osiris")
         os.makedirs(root / "src" / "vars_files")
         (root / "src" / "vars_files" / "osiris.yml").write_text(
-            "cluster_name: osiris\nregion: us-east-2\n"
-            "cluster_serial_number: local-serial\n"
+            "cluster_name: osiris\nregion: us-east-2\ncluster_serial_number: local-serial\n"
         )
         s3 = self._S3()
         put_cluster_record(
-            s3, locks_bucketname="b", cluster_name="osiris",
+            s3,
+            locks_bucketname="b",
+            cluster_name="osiris",
             record=dict(self._RECORD, serial="stored-serial"),
         )
 
-        rec = _read_cluster_record(
-            "osiris", str(root), s3=s3, locks_bucketname="b"
-        )
+        rec = _read_cluster_record("osiris", str(root), s3=s3, locks_bucketname="b")
 
         assert rec["serial"] == "local-serial"
         assert ("get", "vars/osiris.json") not in s3.calls, (
@@ -2365,13 +2383,9 @@ class TestTheClusterRecordStore:
         from pcluster_core import _read_cluster_record, put_cluster_record
 
         s3 = self._S3()
-        put_cluster_record(
-            s3, locks_bucketname="b", cluster_name="osiris", record=self._RECORD
-        )
+        put_cluster_record(s3, locks_bucketname="b", cluster_name="osiris", record=self._RECORD)
 
-        rec = _read_cluster_record(
-            "osiris", str(tmp_path), s3=s3, locks_bucketname="b"
-        )
+        rec = _read_cluster_record("osiris", str(tmp_path), s3=s3, locks_bucketname="b")
 
         assert rec["serial"] == "osiris-202608221200"
         assert rec["deployment_date"] == "2026-08-22"
@@ -2389,12 +2403,8 @@ class TestTheClusterRecordStore:
         from pcluster_core import _read_cluster_record, put_cluster_record
 
         s3 = self._S3()
-        put_cluster_record(
-            s3, locks_bucketname="b", cluster_name="osiris", record=self._RECORD
-        )
-        rec = _read_cluster_record(
-            "osiris", str(tmp_path), s3=s3, locks_bucketname="b"
-        )
+        put_cluster_record(s3, locks_bucketname="b", cluster_name="osiris", record=self._RECORD)
+        rec = _read_cluster_record("osiris", str(tmp_path), s3=s3, locks_bucketname="b")
         assert rec["serial"] and rec["deployment_date"]
 
     def test_a_stored_record_is_sanitized_like_a_local_one(self, tmp_path):
@@ -2406,13 +2416,13 @@ class TestTheClusterRecordStore:
 
         s3 = self._S3()
         put_cluster_record(
-            s3, locks_bucketname="b", cluster_name="osiris",
+            s3,
+            locks_bucketname="b",
+            cluster_name="osiris",
             record=dict(self._RECORD, cluster_owner="rmarable\n\x1b[31mEVIL"),
         )
 
-        rec = _read_cluster_record(
-            "osiris", str(tmp_path), s3=s3, locks_bucketname="b"
-        )
+        rec = _read_cluster_record("osiris", str(tmp_path), s3=s3, locks_bucketname="b")
 
         assert "\n" not in rec["cluster_owner"]
         assert "\x1b" not in rec["cluster_owner"]
@@ -2432,12 +2442,12 @@ class TestTheClusterRecordStore:
         from pcluster_core import delete_cluster_record_step, put_cluster_record
 
         s3 = self._S3()
-        put_cluster_record(
-            s3, locks_bucketname="b", cluster_name="osiris", record=self._RECORD
-        )
+        put_cluster_record(s3, locks_bucketname="b", cluster_name="osiris", record=self._RECORD)
 
         skipped = delete_cluster_record_step(
-            s3, cf_delete_confirmed=False, locks_bucketname="b",
+            s3,
+            cf_delete_confirmed=False,
+            locks_bucketname="b",
             cluster_name="osiris",
         )
 
@@ -2446,7 +2456,9 @@ class TestTheClusterRecordStore:
         assert "vars/osiris.json" in s3.objects, "the record must survive"
 
         done = delete_cluster_record_step(
-            s3, cf_delete_confirmed=True, locks_bucketname="b",
+            s3,
+            cf_delete_confirmed=True,
+            locks_bucketname="b",
             cluster_name="osiris",
         )
 
@@ -2468,7 +2480,9 @@ class TestTheClusterRecordStore:
                 )
 
         result = delete_cluster_record_step(
-            _Denied(), cf_delete_confirmed=True, locks_bucketname="b",
+            _Denied(),
+            cf_delete_confirmed=True,
+            locks_bucketname="b",
             cluster_name="osiris",
         )
 
@@ -2499,10 +2513,15 @@ class TestTheClusterRecordStore:
                     "PutObject",
                 )
 
-        assert _publish_cluster_record(
-            _Denied(), locks_bucketname="b", cluster_name="osiris",
-            repo_root=str(root),
-        ) is False
+        assert (
+            _publish_cluster_record(
+                _Denied(),
+                locks_bucketname="b",
+                cluster_name="osiris",
+                repo_root=str(root),
+            )
+            is False
+        )
         out = capsys.readouterr().out
         assert "WARNING" in out
         assert "The cluster is fine" in out
@@ -2578,15 +2597,13 @@ class TestTheClusterConfigStore:
         # existed to catch.
         # Presence of a configs/ grant at all, per tier.
         expected = {
-            "MCPStateAccessReadOnly.json_src": True,       # list_queues reads it
+            "MCPStateAccessReadOnly.json_src": True,  # list_queues reads it
             "MCPStateAccessStackMutation.json_src": True,  # edit + apply + teardown
-            "MCPStateAccessFleetToggle.json_src": False,   # touches no config
+            "MCPStateAccessFleetToggle.json_src": False,  # touches no config
         }
         found = {
             os.path.basename(p): open(p).read()
-            for p in glob.glob(
-                os.path.join(repo_root, "templates", "MCPStateAccess*.json_src")
-            )
+            for p in glob.glob(os.path.join(repo_root, "templates", "MCPStateAccess*.json_src"))
         }
         assert set(found) == set(expected), (
             f"policy set changed: {sorted(found)} vs {sorted(expected)}"
@@ -2611,19 +2628,20 @@ class TestTheClusterConfigStore:
                     return set(a if isinstance(a, list) else [a])
             return set()
 
-        assert _config_actions("MCPStateAccessReadOnly.json_src") == {
-            "s3:GetObject"
-        }, "the read-only tier must not write cluster configs"
+        assert _config_actions("MCPStateAccessReadOnly.json_src") == {"s3:GetObject"}, (
+            "the read-only tier must not write cluster configs"
+        )
         assert _config_actions("MCPStateAccessStackMutation.json_src") == {
-            "s3:GetObject", "s3:PutObject", "s3:DeleteObject"
+            "s3:GetObject",
+            "s3:PutObject",
+            "s3:DeleteObject",
         }, "the tier that owns config edits needs the whole lifecycle"
 
     def test_a_losing_edit_is_refused_not_swallowed(self, tmp_path):
         """The whole reason for the ETag. Both callers read the same
         config, both add a queue; without IfMatch the second write wins and
         the first queue is gone with nothing raised anywhere."""
-        from pcluster_core import (ClusterConfigConflict, _load_cluster_config,
-                                   _save_cluster_config)
+        from pcluster_core import ClusterConfigConflict, _load_cluster_config, _save_cluster_config
 
         s3 = self._seeded()
         first, _, etag_a = _load_cluster_config(
@@ -2636,25 +2654,35 @@ class TestTheClusterConfigStore:
 
         first["Region"] = "us-west-2"
         _save_cluster_config(
-            first, config_path=None, etag=etag_a, s3=s3,
-            locks_bucketname="b", cluster_name="osiris",
+            first,
+            config_path=None,
+            etag=etag_a,
+            s3=s3,
+            locks_bucketname="b",
+            cluster_name="osiris",
         )
 
         second["Region"] = "eu-west-1"
         with pytest.raises(ClusterConfigConflict, match="Re-read"):
             _save_cluster_config(
-                second, config_path=None, etag=etag_b, s3=s3,
-                locks_bucketname="b", cluster_name="osiris",
+                second,
+                config_path=None,
+                etag=etag_b,
+                s3=s3,
+                locks_bucketname="b",
+                cluster_name="osiris",
             )
 
-        winner, _, _ = _load_cluster_config(
-            "osiris", str(tmp_path), s3=s3, locks_bucketname="b"
-        )
+        winner, _, _ = _load_cluster_config("osiris", str(tmp_path), s3=s3, locks_bucketname="b")
         assert winner["Region"] == "us-west-2", "the first edit must survive"
 
-    @pytest.mark.parametrize("code,status", [
-        ("PreconditionFailed", 412), ("ConditionalRequestConflict", 409),
-    ])
+    @pytest.mark.parametrize(
+        "code,status",
+        [
+            ("PreconditionFailed", 412),
+            ("ConditionalRequestConflict", 409),
+        ],
+    )
     def test_both_rejection_shapes_are_a_conflict(self, code, status):
         """S3 reports a same-instant race as 409 rather than 412 and its own
         documentation says to treat them identically. Handling only 412
@@ -2666,15 +2694,20 @@ class TestTheClusterConfigStore:
         class _Rejects(self._S3):
             def put_object(self, **kw):
                 raise ClientError(
-                    {"Error": {"Code": code, "Message": "x"},
-                     "ResponseMetadata": {"HTTPStatusCode": status}},
+                    {
+                        "Error": {"Code": code, "Message": "x"},
+                        "ResponseMetadata": {"HTTPStatusCode": status},
+                    },
                     "PutObject",
                 )
 
         with pytest.raises(ClusterConfigConflict):
             put_cluster_config_object(
-                _Rejects(), locks_bucketname="b", cluster_name="osiris",
-                text="Region: x\n", etag='"stale"',
+                _Rejects(),
+                locks_bucketname="b",
+                cluster_name="osiris",
+                text="Region: x\n",
+                etag='"stale"',
             )
 
     def _local(self, tmp_path, text):
@@ -2698,8 +2731,11 @@ class TestTheClusterConfigStore:
     def test_a_local_edit_mirrors_when_the_store_agrees(self, tmp_path):
         """The ordinary case: the store holds what this machine last put
         there, so the mirror follows the local edit."""
-        from pcluster_core import (_load_cluster_config, _save_cluster_config,
-                                   get_cluster_config_object)
+        from pcluster_core import (
+            _load_cluster_config,
+            _save_cluster_config,
+            get_cluster_config_object,
+        )
 
         s3 = self._seeded()
         self._local(tmp_path, self._CONFIG)
@@ -2709,31 +2745,34 @@ class TestTheClusterConfigStore:
         )
         config["Region"] = "eu-west-1"
         _save_cluster_config(
-            config, config_path=path, etag=etag, s3=s3,
-            locks_bucketname="b", cluster_name="osiris",
+            config,
+            config_path=path,
+            etag=etag,
+            s3=s3,
+            locks_bucketname="b",
+            cluster_name="osiris",
         )
 
-        text, _ = get_cluster_config_object(
-            s3, locks_bucketname="b", cluster_name="osiris"
-        )
+        text, _ = get_cluster_config_object(s3, locks_bucketname="b", cluster_name="osiris")
         assert "eu-west-1" in text
 
     def test_a_local_edit_mirrors_when_there_is_no_stored_copy_yet(self, tmp_path):
         """Vacuity guard for the staleness check: an absent stored object
         is not divergence, and refusing here would break the first edit
         after every build."""
-        from pcluster_core import (_save_cluster_config,
-                                   get_cluster_config_object)
+        from pcluster_core import _save_cluster_config, get_cluster_config_object
 
         s3 = self._S3()
         path = self._local(tmp_path, self._CONFIG)
         _save_cluster_config(
-            {"Region": "us-east-2"}, config_path=str(path), etag=None, s3=s3,
-            locks_bucketname="b", cluster_name="osiris",
+            {"Region": "us-east-2"},
+            config_path=str(path),
+            etag=None,
+            s3=s3,
+            locks_bucketname="b",
+            cluster_name="osiris",
         )
-        text, _ = get_cluster_config_object(
-            s3, locks_bucketname="b", cluster_name="osiris"
-        )
+        text, _ = get_cluster_config_object(s3, locks_bucketname="b", cluster_name="osiris")
         assert text is not None
 
     def test_a_stale_local_copy_is_refused_rather_than_pushed_down(self, tmp_path):
@@ -2746,21 +2785,25 @@ class TestTheClusterConfigStore:
         gone, no exception, no warning, and then applied to the live
         cluster by the next apply_cluster_update.
         """
-        from pcluster_core import (ClusterConfigConflict, _save_cluster_config,
-                                   get_cluster_config_object)
+        from pcluster_core import (
+            ClusterConfigConflict,
+            _save_cluster_config,
+            get_cluster_config_object,
+        )
 
-        s3 = self._seeded()                       # store holds _CONFIG
+        s3 = self._seeded()  # store holds _CONFIG
         path = self._local(tmp_path, self._CONFIG)
 
         # B moves the store on.
         from pcluster_core import put_cluster_config_object
 
-        _, etag = get_cluster_config_object(
-            s3, locks_bucketname="b", cluster_name="osiris"
-        )
+        _, etag = get_cluster_config_object(s3, locks_bucketname="b", cluster_name="osiris")
         put_cluster_config_object(
-            s3, locks_bucketname="b", cluster_name="osiris",
-            text="Region: eu-central-1\n", etag=etag,
+            s3,
+            locks_bucketname="b",
+            cluster_name="osiris",
+            text="Region: eu-central-1\n",
+            etag=etag,
         )
 
         # Refusal is the property; the *wording* depends on whether this
@@ -2770,19 +2813,19 @@ class TestTheClusterConfigStore:
         # test_divergence_with_no_marker_claims_no_direction.
         with pytest.raises(ClusterConfigConflict):
             _save_cluster_config(
-                {"Region": "us-west-1"}, config_path=str(path), etag=None,
-                s3=s3, locks_bucketname="b", cluster_name="osiris",
+                {"Region": "us-west-1"},
+                config_path=str(path),
+                etag=None,
+                s3=s3,
+                locks_bucketname="b",
+                cluster_name="osiris",
             )
 
-        text, _ = get_cluster_config_object(
-            s3, locks_bucketname="b", cluster_name="osiris"
-        )
+        text, _ = get_cluster_config_object(s3, locks_bucketname="b", cluster_name="osiris")
         assert "eu-central-1" in text, "the other machine's edit must survive"
         assert path.read_text() == self._CONFIG, "the local file is untouched too"
 
-    def test_a_writer_landing_after_the_staleness_check_is_still_caught(
-        self, tmp_path
-    ):
+    def test_a_writer_landing_after_the_staleness_check_is_still_caught(self, tmp_path):
         """What the ETag is actually for.
 
         The staleness check closes the "local was already behind" case, but
@@ -2791,9 +2834,12 @@ class TestTheClusterConfigStore:
         with no error, which is why removing the etag= argument survived
         every other test in this class.
         """
-        from pcluster_core import (ClusterConfigConflict, _save_cluster_config,
-                                   get_cluster_config_object,
-                                   put_cluster_config_object)
+        from pcluster_core import (
+            ClusterConfigConflict,
+            _save_cluster_config,
+            get_cluster_config_object,
+            put_cluster_config_object,
+        )
 
         outer = self
 
@@ -2810,7 +2856,8 @@ class TestTheClusterConfigStore:
                     self.raced = True
                     # Someone else writes between our read and our write.
                     super().put_object(
-                        Bucket=Bucket, Key=Key,
+                        Bucket=Bucket,
+                        Key=Key,
                         Body=b"Region: ap-south-1\n",
                     )
                     self.etags[Key] = '"etag-raced"'
@@ -2824,13 +2871,15 @@ class TestTheClusterConfigStore:
 
         with pytest.raises(ClusterConfigConflict):
             _save_cluster_config(
-                {"Region": "us-west-1"}, config_path=str(path), etag=None,
-                s3=s3, locks_bucketname="b", cluster_name="osiris",
+                {"Region": "us-west-1"},
+                config_path=str(path),
+                etag=None,
+                s3=s3,
+                locks_bucketname="b",
+                cluster_name="osiris",
             )
 
-        text, _ = get_cluster_config_object(
-            s3, locks_bucketname="b", cluster_name="osiris"
-        )
+        text, _ = get_cluster_config_object(s3, locks_bucketname="b", cluster_name="osiris")
         assert "ap-south-1" in text, "the racing writer's edit must survive"
 
     def test_whitespace_alone_is_not_divergence(self, tmp_path):
@@ -2843,12 +2892,15 @@ class TestTheClusterConfigStore:
         s3 = self._seeded()
         path = self._local(tmp_path, "Region:    us-east-2\n\n\nImage:\n  Os: ubuntu2404\n")
         _save_cluster_config(
-            {"Region": "us-east-2"}, config_path=str(path), etag=None, s3=s3,
-            locks_bucketname="b", cluster_name="osiris",
+            {"Region": "us-east-2"},
+            config_path=str(path),
+            etag=None,
+            s3=s3,
+            locks_bucketname="b",
+            cluster_name="osiris",
         )
 
-    def test_apply_gets_a_path_that_exists_and_cleans_it_up(self, tmp_path,
-                                                            monkeypatch):
+    def test_apply_gets_a_path_that_exists_and_cleans_it_up(self, tmp_path, monkeypatch):
         """pcluster.lib's cluster_configuration must be a PATH -- the CLI
         model tags it "file" and the dispatcher calls read_file() on it, so
         YAML content in its place does not work."""
@@ -2865,13 +2917,15 @@ class TestTheClusterConfigStore:
         import os
 
         monkeypatch.setattr(pcluster_core, "_update_cluster_lib", _fake_update)
-        monkeypatch.setattr(
-            pcluster_core, "_poll_cluster_update", lambda *a, **kw: None
-        )
+        monkeypatch.setattr(pcluster_core, "_poll_cluster_update", lambda *a, **kw: None)
 
         pcluster_core.core_apply_cluster_update(
-            cluster_name="osiris", region="us-east-2", pcluster_bin="pcluster",
-            wait=False, s3=self._seeded(), locks_bucketname="b",
+            cluster_name="osiris",
+            region="us-east-2",
+            pcluster_bin="pcluster",
+            wait=False,
+            s3=self._seeded(),
+            locks_bucketname="b",
         )
 
         assert seen["existed"], "a path that does not exist is not a config"
@@ -2886,8 +2940,11 @@ class TestTheClusterConfigStore:
 
         with pytest.raises(PClusterMakerError, match="no stored configuration"):
             core_apply_cluster_update(
-                cluster_name="osiris", region="us-east-2",
-                pcluster_bin="pcluster", wait=False, s3=self._S3(),
+                cluster_name="osiris",
+                region="us-east-2",
+                pcluster_bin="pcluster",
+                wait=False,
+                s3=self._S3(),
                 locks_bucketname="b",
             )
 
@@ -2899,28 +2956,34 @@ class TestTheClusterConfigStore:
         including the one the un-mirrored CLI produced, where local was
         the *newer* copy. The operator was told to re-read the stale one.
         """
-        from pcluster_core import (_publish_cluster_config,
-                                   _save_cluster_config,
-                                   get_cluster_config_object)
+        from pcluster_core import (
+            _publish_cluster_config,
+            _save_cluster_config,
+            get_cluster_config_object,
+        )
 
         s3 = self._seeded()
         path = self._local(tmp_path, self._CONFIG)
         # This machine published it, so the marker records what it wrote.
         _publish_cluster_config(
-            s3, locks_bucketname="b", cluster_name="osiris",
+            s3,
+            locks_bucketname="b",
+            cluster_name="osiris",
             repo_root=str(tmp_path),
         )
         # An edit through a path that does not mirror -- the CLI, before.
         path.write_text("Region: eu-west-1\n")
 
         _save_cluster_config(
-            {"Region": "ap-south-1"}, config_path=str(path), etag=None,
-            s3=s3, locks_bucketname="b", cluster_name="osiris",
+            {"Region": "ap-south-1"},
+            config_path=str(path),
+            etag=None,
+            s3=s3,
+            locks_bucketname="b",
+            cluster_name="osiris",
         )
 
-        text, _ = get_cluster_config_object(
-            s3, locks_bucketname="b", cluster_name="osiris"
-        )
+        text, _ = get_cluster_config_object(s3, locks_bucketname="b", cluster_name="osiris")
         assert "ap-south-1" in text, "the local edit should have been mirrored"
 
     def test_the_marker_keeps_up_across_successive_edits(self, tmp_path):
@@ -2930,14 +2993,18 @@ class TestTheClusterConfigStore:
         write -- by this machine, about its own change. Not updating it
         survived every other test in this class.
         """
-        from pcluster_core import (_publish_cluster_config,
-                                   _save_cluster_config,
-                                   get_cluster_config_object)
+        from pcluster_core import (
+            _publish_cluster_config,
+            _save_cluster_config,
+            get_cluster_config_object,
+        )
 
         s3 = self._seeded()
         path = self._local(tmp_path, self._CONFIG)
         _publish_cluster_config(
-            s3, locks_bucketname="b", cluster_name="osiris",
+            s3,
+            locks_bucketname="b",
+            cluster_name="osiris",
             repo_root=str(tmp_path),
         )
 
@@ -2945,40 +3012,52 @@ class TestTheClusterConfigStore:
             # Each round: an out-of-band local edit, then a mirror.
             path.write_text(f"Region: {region}\n")
             _save_cluster_config(
-                {"Region": region}, config_path=str(path), etag=None,
-                s3=s3, locks_bucketname="b", cluster_name="osiris",
+                {"Region": region},
+                config_path=str(path),
+                etag=None,
+                s3=s3,
+                locks_bucketname="b",
+                cluster_name="osiris",
             )
-            text, _ = get_cluster_config_object(
-                s3, locks_bucketname="b", cluster_name="osiris"
-            )
+            text, _ = get_cluster_config_object(s3, locks_bucketname="b", cluster_name="osiris")
             assert region in text, f"round {region} was not mirrored"
 
     def test_a_second_machines_write_still_refuses(self, tmp_path):
         """Vacuity guard for the above: recognising 'ahead' must not become
         'always mirror'. Once someone else writes, our marker no longer
         matches the store and the local copy really is behind."""
-        from pcluster_core import (ClusterConfigConflict,
-                                   _publish_cluster_config,
-                                   _save_cluster_config,
-                                   put_cluster_config_object)
+        from pcluster_core import (
+            ClusterConfigConflict,
+            _publish_cluster_config,
+            _save_cluster_config,
+            put_cluster_config_object,
+        )
 
         s3 = self._seeded()
         path = self._local(tmp_path, self._CONFIG)
         _publish_cluster_config(
-            s3, locks_bucketname="b", cluster_name="osiris",
+            s3,
+            locks_bucketname="b",
+            cluster_name="osiris",
             repo_root=str(tmp_path),
         )
         # Another machine writes after our mirror.
         put_cluster_config_object(
-            s3, locks_bucketname="b", cluster_name="osiris",
+            s3,
+            locks_bucketname="b",
+            cluster_name="osiris",
             text="Region: eu-central-1\n",
         )
         path.write_text("Region: eu-west-1\n")
 
         with pytest.raises(ClusterConfigConflict, match="another machine"):
             _save_cluster_config(
-                {"Region": "ap-south-1"}, config_path=str(path), etag=None,
-                s3=s3, locks_bucketname="b", cluster_name="osiris",
+                {"Region": "ap-south-1"},
+                config_path=str(path),
+                etag=None,
+                s3=s3,
+                locks_bucketname="b",
+                cluster_name="osiris",
             )
 
     def test_divergence_with_no_marker_claims_no_direction(self, tmp_path):
@@ -2992,8 +3071,12 @@ class TestTheClusterConfigStore:
 
         with pytest.raises(ClusterConfigConflict) as exc:
             _save_cluster_config(
-                {"Region": "ap-south-1"}, config_path=str(path), etag=None,
-                s3=s3, locks_bucketname="b", cluster_name="osiris",
+                {"Region": "ap-south-1"},
+                config_path=str(path),
+                etag=None,
+                s3=s3,
+                locks_bucketname="b",
+                cluster_name="osiris",
             )
         msg = str(exc.value)
         assert "no record of which is newer" in msg
@@ -3012,15 +3095,21 @@ class TestTheClusterConfigStore:
         class _Denied(self._S3):
             def get_object(self, **kw):
                 raise ClientError(
-                    {"Error": {"Code": "AccessDenied", "Message": "no"},
-                     "ResponseMetadata": {"HTTPStatusCode": 403}},
+                    {
+                        "Error": {"Code": "AccessDenied", "Message": "no"},
+                        "ResponseMetadata": {"HTTPStatusCode": 403},
+                    },
                     "GetObject",
                 )
 
         path = self._local(tmp_path, self._CONFIG)
         _save_cluster_config(
-            {"Region": "ap-south-1"}, config_path=str(path), etag=None,
-            s3=_Denied(), locks_bucketname="b", cluster_name="osiris",
+            {"Region": "ap-south-1"},
+            config_path=str(path),
+            etag=None,
+            s3=_Denied(),
+            locks_bucketname="b",
+            cluster_name="osiris",
         )
         assert "ap-south-1" in path.read_text(), "the local edit must land"
         assert "Shared store unreachable" in capsys.readouterr().out
@@ -3032,22 +3121,27 @@ class TestTheClusterConfigStore:
         case escaped as a boto ClientError for a situation
         ClusterConfigConflict exists to describe.
         """
-        from pcluster_core import (ClusterConfigConflict,
-                                   put_cluster_config_object)
+        from pcluster_core import ClusterConfigConflict, put_cluster_config_object
 
         s3 = self._S3()
         with pytest.raises(ClusterConfigConflict, match="was deleted"):
             put_cluster_config_object(
-                s3, locks_bucketname="b", cluster_name="osiris",
-                text="Region: us-east-2\n", etag='"gone"',
+                s3,
+                locks_bucketname="b",
+                cluster_name="osiris",
+                text="Region: us-east-2\n",
+                etag='"gone"',
             )
 
-    @pytest.mark.parametrize("code,status", [
-        ("AccessDenied", 403), ("InternalError", 500), ("SlowDown", 503),
-    ])
-    def test_an_unrelated_error_is_not_reported_as_a_deleted_config(
-        self, code, status
-    ):
+    @pytest.mark.parametrize(
+        "code,status",
+        [
+            ("AccessDenied", 403),
+            ("InternalError", 500),
+            ("SlowDown", 503),
+        ],
+    )
+    def test_an_unrelated_error_is_not_reported_as_a_deleted_config(self, code, status):
         """The predicate has to discriminate, not just say yes. Returning
         True for everything satisfies the deleted-config test and turns an
         IAM denial into "your config was deleted" -- pointing the operator
@@ -3055,8 +3149,7 @@ class TestTheClusterConfigStore:
         `_s3_absence_or_raise` was written to stop."""
         from botocore.exceptions import ClientError
 
-        from pcluster_core import (ClusterConfigConflict,
-                                   put_cluster_config_object)
+        from pcluster_core import ClusterConfigConflict, put_cluster_config_object
 
         class _Broken(self._S3):
             def put_object(self, **kw):
@@ -3064,16 +3157,18 @@ class TestTheClusterConfigStore:
 
         with pytest.raises(ClientError):
             put_cluster_config_object(
-                _Broken(), locks_bucketname="b", cluster_name="osiris",
-                text="Region: us-east-2\n", etag='"whatever"',
+                _Broken(),
+                locks_bucketname="b",
+                cluster_name="osiris",
+                text="Region: us-east-2\n",
+                etag='"whatever"',
             )
 
     def test_the_two_conflict_causes_read_differently(self):
-        """"Changed" and "deleted" need different remedies -- re-read
+        """ "Changed" and "deleted" need different remedies -- re-read
         versus re-publish -- so one message covering both would be worse
         than the raw error it replaced."""
-        from pcluster_core import (ClusterConfigConflict,
-                                   put_cluster_config_object)
+        from pcluster_core import ClusterConfigConflict, put_cluster_config_object
 
         s3 = self._seeded()
         _, etag = __import__("pcluster_core").get_cluster_config_object(
@@ -3081,13 +3176,18 @@ class TestTheClusterConfigStore:
         )
         # Someone else writes: the key exists, our ETag is stale -> 412.
         put_cluster_config_object(
-            s3, locks_bucketname="b", cluster_name="osiris",
+            s3,
+            locks_bucketname="b",
+            cluster_name="osiris",
             text="Region: eu-west-1\n",
         )
         with pytest.raises(ClusterConfigConflict) as changed:
             put_cluster_config_object(
-                s3, locks_bucketname="b", cluster_name="osiris",
-                text="Region: sa-east-1\n", etag=etag,
+                s3,
+                locks_bucketname="b",
+                cluster_name="osiris",
+                text="Region: sa-east-1\n",
+                etag=etag,
             )
         assert "changed while this edit" in str(changed.value)
         assert "deleted" not in str(changed.value)
@@ -3102,8 +3202,10 @@ class TestTheClusterConfigStore:
         from pcluster_core import _is_conditional_write_rejection
 
         gone = ClientError(
-            {"Error": {"Code": "NoSuchKey", "Message": "gone"},
-             "ResponseMetadata": {"HTTPStatusCode": 404}},
+            {
+                "Error": {"Code": "NoSuchKey", "Message": "gone"},
+                "ResponseMetadata": {"HTTPStatusCode": 404},
+            },
             "PutObject",
         )
         assert not _is_conditional_write_rejection(gone)
@@ -3113,14 +3215,18 @@ class TestTheClusterConfigStore:
 
         s3 = self._seeded()
         skipped = delete_cluster_config_step(
-            s3, cf_delete_confirmed=False, locks_bucketname="b",
+            s3,
+            cf_delete_confirmed=False,
+            locks_bucketname="b",
             cluster_name="osiris",
         )
         assert skipped.succeeded and "not confirmed" in skipped.detail
         assert "configs/osiris.yaml" in s3.objects
 
         done = delete_cluster_config_step(
-            s3, cf_delete_confirmed=True, locks_bucketname="b",
+            s3,
+            cf_delete_confirmed=True,
+            locks_bucketname="b",
             cluster_name="osiris",
         )
         assert done.succeeded
@@ -3136,18 +3242,23 @@ class TestTheClusterConfigStore:
 
         seen = {}
         monkeypatch.setattr(
-            pcluster_core, "_update_cluster_lib",
-            lambda cluster, region, config_path: seen.update(path=config_path)
-            or {"cluster": {"clusterStatus": "UPDATE_IN_PROGRESS"}},
+            pcluster_core,
+            "_update_cluster_lib",
+            lambda cluster, region, config_path: (
+                seen.update(path=config_path)
+                or {"cluster": {"clusterStatus": "UPDATE_IN_PROGRESS"}}
+            ),
         )
-        monkeypatch.setattr(
-            pcluster_core, "_poll_cluster_update", lambda *a, **kw: None
-        )
+        monkeypatch.setattr(pcluster_core, "_poll_cluster_update", lambda *a, **kw: None)
 
         pcluster_core.core_apply_cluster_update(
-            cluster_name="osiris", config_path="/nowhere/cfg.yaml",
-            region="us-east-2", pcluster_bin="pcluster", wait=False,
-            s3=self._seeded(), locks_bucketname="b",
+            cluster_name="osiris",
+            config_path="/nowhere/cfg.yaml",
+            region="us-east-2",
+            pcluster_bin="pcluster",
+            wait=False,
+            s3=self._seeded(),
+            locks_bucketname="b",
         )
 
         assert seen["path"] == "/nowhere/cfg.yaml", (
@@ -3164,8 +3275,12 @@ class TestTheClusterConfigStore:
 
         import pcluster_core
 
-        for name in ("core_list_queues", "core_add_queue", "core_remove_queue",
-                     "core_apply_cluster_update"):
+        for name in (
+            "core_list_queues",
+            "core_add_queue",
+            "core_remove_queue",
+            "core_apply_cluster_update",
+        ):
             params = inspect.signature(getattr(pcluster_core, name)).parameters
             assert "s3" in params and "locks_bucketname" in params, (
                 f"{name} cannot reach the shared config store"
@@ -3175,8 +3290,10 @@ class TestTheClusterConfigStore:
         from pcluster_core import core_list_queues
 
         result = core_list_queues(
-            cluster_name="osiris", repo_root=str(tmp_path),
-            s3=self._seeded(), locks_bucketname="b",
+            cluster_name="osiris",
+            repo_root=str(tmp_path),
+            s3=self._seeded(),
+            locks_bucketname="b",
         )
         assert result is not None
 
@@ -3198,8 +3315,10 @@ class TestEveryBoolFieldIsARealBool:
     """
 
     _REQUIRED = dict(
-        cluster_name="zzz-no-defaults-file", cluster_owner="testuser",
-        cluster_owner_email="testuser@example.com", az="us-east-2a",
+        cluster_name="zzz-no-defaults-file",
+        cluster_owner="testuser",
+        cluster_owner_email="testuser@example.com",
+        az="us-east-2a",
         headnode_instance_type="c5.xlarge",
     )
     _QUEUE = {"compute_instance_type": "c5.2xlarge"}
@@ -3221,8 +3340,7 @@ class TestEveryBoolFieldIsARealBool:
         assert names, "the dataclass introspection found no bool fields"
 
         wrong = {
-            n: repr(getattr(params, n)) for n in names
-            if not isinstance(getattr(params, n), bool)
+            n: repr(getattr(params, n)) for n in names if not isinstance(getattr(params, n), bool)
         }
         assert not wrong, f"bool-annotated fields holding non-bools: {wrong}"
 
@@ -3230,9 +3348,15 @@ class TestEveryBoolFieldIsARealBool:
         """The behavioral half. `if enable_fsx:` is what core_create_cluster
         actually runs, so the property that matters is falsiness, not type."""
         params = self._build()
-        for name in ("enable_fsx", "enable_efs", "enable_efa",
-                     "enable_monitoring", "enable_loginnode",
-                     "enable_external_nfs", "enable_hpc_benchmarks"):
+        for name in (
+            "enable_fsx",
+            "enable_efs",
+            "enable_efa",
+            "enable_monitoring",
+            "enable_loginnode",
+            "enable_external_nfs",
+            "enable_hpc_benchmarks",
+        ):
             assert not getattr(params, name), f"{name} is truthy by default"
 
     def test_a_feature_that_was_asked_for_is_on(self):
@@ -3241,20 +3365,16 @@ class TestEveryBoolFieldIsARealBool:
         params = self._build(enable_efs="true")
         assert params.enable_efs is True
 
-    def test_a_yaml_native_bool_from_a_defaults_file_is_accepted(self, tmp_path,
-                                                                 monkeypatch):
+    def test_a_yaml_native_bool_from_a_defaults_file_is_accepted(self, tmp_path, monkeypatch):
         """`enable_efs: true` is the natural thing to write in YAML and
         parses as a real bool. The CLI's _resolve_bool has always accepted
         it; the shim must agree, or one file builds two clusters."""
         import yaml as _yaml
 
         (tmp_path / "zzz-no-defaults-file_defaults.yml").write_text(
-            _yaml.safe_dump({"compute_instance_type": "c5.2xlarge",
-                             "enable_efs": True})
+            _yaml.safe_dump({"compute_instance_type": "c5.2xlarge", "enable_efs": True})
         )
-        monkeypatch.setattr(
-            "pcluster_core._default_repo_root", lambda: str(tmp_path)
-        )
+        monkeypatch.setattr("pcluster_core._default_repo_root", lambda: str(tmp_path))
         from pcluster_core import build_make_cluster_params
 
         params = build_make_cluster_params(**self._REQUIRED)
@@ -3267,8 +3387,14 @@ class TestEveryBoolFieldIsARealBool:
         from pcluster_core import _coerce_bool
 
         for raw, expected in (
-            ("true", True), ("false", False), ("True", True), ("FALSE", False),
-            (True, True), (False, False), (1, True), (0, False),
+            ("true", True),
+            ("false", False),
+            ("True", True),
+            ("FALSE", False),
+            (True, True),
+            (False, False),
+            (1, True),
+            (0, False),
         ):
             assert _coerce_bool(raw) is expected, raw
 
@@ -3284,22 +3410,35 @@ class TestTheBuildPathValidatesItsOwnInputs:
     """
 
     _REQ = dict(
-        cluster_owner="testuser", cluster_owner_email="testuser@example.com",
-        az="us-east-2a", headnode_instance_type="c5.xlarge",
+        cluster_owner="testuser",
+        cluster_owner_email="testuser@example.com",
+        az="us-east-2a",
+        headnode_instance_type="c5.xlarge",
     )
 
     def _build(self, name):
         from pcluster_core import build_make_cluster_params
 
         return build_make_cluster_params(
-            cluster_name=name, **self._REQ,
+            cluster_name=name,
+            **self._REQ,
             overrides={"compute_instance_type": "c5.2xlarge"},
         )
 
-    @pytest.mark.parametrize("name", [
-        "../../tmp/evil", "../osiris", "/etc/passwd", "UPPER", "9start",
-        "trailing-", "double--hyphen", "", "a" * 40,
-    ])
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "../../tmp/evil",
+            "../osiris",
+            "/etc/passwd",
+            "UPPER",
+            "9start",
+            "trailing-",
+            "double--hyphen",
+            "",
+            "a" * 40,
+        ],
+    )
     def test_a_name_that_is_not_a_cluster_name_is_refused(self, name):
         from pcluster_core import PClusterMakerError
 
@@ -3320,9 +3459,7 @@ class TestTheBuildPathValidatesItsOwnInputs:
 
     def test_a_real_name_still_builds(self):
         """Vacuity guard -- refusing everything would pass the above."""
-        assert self._build("zzz-no-defaults-file").cluster_name == (
-            "zzz-no-defaults-file"
-        )
+        assert self._build("zzz-no-defaults-file").cluster_name == ("zzz-no-defaults-file")
 
     def test_the_toolkit_template_is_not_a_cluster_defaults_file(self):
         """`pcluster_defaults.yml` is tracked, sits at the repo root, and
@@ -3380,7 +3517,8 @@ class TestEveryCreateExitPublishesTheClusterState:
 
         tree = ast.parse(open(core_file).read())
         return next(
-            n for n in ast.walk(tree)
+            n
+            for n in ast.walk(tree)
             if isinstance(n, ast.FunctionDef) and n.name == "core_create_cluster"
         )
 
@@ -3398,8 +3536,10 @@ class TestEveryCreateExitPublishesTheClusterState:
 
         fn = self._create_fn()
         publishes = [
-            n.lineno for n in ast.walk(fn)
-            if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+            n.lineno
+            for n in ast.walk(fn)
+            if isinstance(n, ast.Call)
+            and isinstance(n.func, ast.Name)
             and n.func.id == "_publish_cluster_state"
         ]
         successes = []
@@ -3409,8 +3549,11 @@ class TestEveryCreateExitPublishesTheClusterState:
             if getattr(n_.value.func, "id", None) != "CreateClusterResult":
                 continue
             for kw in n_.value.keywords:
-                if (kw.arg == "success" and isinstance(kw.value, ast.Constant)
-                        and kw.value.value is True):
+                if (
+                    kw.arg == "success"
+                    and isinstance(kw.value, ast.Constant)
+                    and kw.value.value is True
+                ):
                     successes.append(n_.lineno)
         assert successes, "no successful return found -- this guard is vacuous"
         assert publishes, "core_create_cluster never publishes"
@@ -3429,7 +3572,7 @@ class TestEveryCreateExitPublishesTheClusterState:
         def _publishes_on_this_path(ret):
             block_owner = parents.get(ret)
             for field in ("body", "orelse", "finalbody"):
-                for stmts in ([getattr(block_owner, field, None)] if block_owner else []):
+                for stmts in [getattr(block_owner, field, None)] if block_owner else []:
                     if not isinstance(stmts, list) or ret not in stmts:
                         continue
                     for stmt in stmts[: stmts.index(ret)]:
@@ -3442,15 +3585,15 @@ class TestEveryCreateExitPublishesTheClusterState:
                         if not isinstance(stmt, ast.Expr):
                             continue
                         call = stmt.value
-                        if (isinstance(call, ast.Call)
-                                and getattr(call.func, "id", None)
-                                == "_publish_cluster_state"):
+                        if (
+                            isinstance(call, ast.Call)
+                            and getattr(call.func, "id", None) == "_publish_cluster_state"
+                        ):
                             return True
             return False
 
         returns = [
-            n_ for n_ in ast.walk(fn)
-            if isinstance(n_, ast.Return) and n_.lineno in successes
+            n_ for n_ in ast.walk(fn) if isinstance(n_, ast.Return) and n_.lineno in successes
         ]
         for ret in returns:
             assert _publishes_on_this_path(ret), (
@@ -3469,8 +3612,10 @@ class TestEveryCreateExitPublishesTheClusterState:
 
         fn = self._create_fn()
         exits = [
-            n.lineno for n in ast.walk(fn)
-            if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+            n.lineno
+            for n in ast.walk(fn)
+            if isinstance(n, ast.Call)
+            and isinstance(n.func, ast.Attribute)
             and n.func.attr == "exit"
             and getattr(n.func.value, "id", None) == "sys"
         ]
@@ -3485,30 +3630,27 @@ class TestEveryCreateExitPublishesTheClusterState:
         import os
         import tempfile
 
-        from pcluster_core import (_publish_cluster_state,
-                                   get_cluster_config_object,
-                                   get_cluster_record)
+        from pcluster_core import (
+            _publish_cluster_state,
+            get_cluster_config_object,
+            get_cluster_record,
+        )
 
         s3 = TestTheClusterConfigStore._S3()
         with tempfile.TemporaryDirectory() as tmp:
             os.makedirs(os.path.join(tmp, "active_clusters", "osiris"))
             os.makedirs(os.path.join(tmp, "src", "vars_files"))
             with open(os.path.join(tmp, "src", "vars_files", "osiris.yml"), "w") as fh:
-                fh.write("cluster_name: osiris\nregion: us-east-2\n"
-                         "cluster_serial_number: osiris-1\n")
-            with open(os.path.join(tmp, "active_clusters", "osiris",
-                                   "config.osiris"), "w") as fh:
+                fh.write(
+                    "cluster_name: osiris\nregion: us-east-2\ncluster_serial_number: osiris-1\n"
+                )
+            with open(os.path.join(tmp, "active_clusters", "osiris", "config.osiris"), "w") as fh:
                 fh.write("Region: us-east-2\n")
 
-            _publish_cluster_state(
-                s3, locks_bucketname="b", cluster_name="osiris", repo_root=tmp
-            )
+            _publish_cluster_state(s3, locks_bucketname="b", cluster_name="osiris", repo_root=tmp)
 
-        assert get_cluster_record(s3, locks_bucketname="b",
-                                  cluster_name="osiris") is not None
-        text, _ = get_cluster_config_object(
-            s3, locks_bucketname="b", cluster_name="osiris"
-        )
+        assert get_cluster_record(s3, locks_bucketname="b", cluster_name="osiris") is not None
+        text, _ = get_cluster_config_object(s3, locks_bucketname="b", cluster_name="osiris")
         assert text and "us-east-2" in text
 
 
@@ -3528,18 +3670,23 @@ class TestTheSmallerReviewFindings:
         class _Denied(TestTheClusterRecordStore._S3):
             def get_object(self, **kw):
                 raise ClientError(
-                    {"Error": {"Code": "AccessDenied", "Message": "no"},
-                     "ResponseMetadata": {"HTTPStatusCode": 403}},
+                    {
+                        "Error": {"Code": "AccessDenied", "Message": "no"},
+                        "ResponseMetadata": {"HTTPStatusCode": 403},
+                    },
                     "GetObject",
                 )
 
         with pytest.raises(PClusterMakerError, match="MCPStateAccess"):
-            get_cluster_record(_Denied(), locks_bucketname="b",
-                               cluster_name="osiris")
+            get_cluster_record(_Denied(), locks_bucketname="b", cluster_name="osiris")
 
-    @pytest.mark.parametrize("code,status", [
-        ("NoSuchKey", 404), ("NoSuchBucket", 404),
-    ])
+    @pytest.mark.parametrize(
+        "code,status",
+        [
+            ("NoSuchKey", 404),
+            ("NoSuchBucket", 404),
+        ],
+    )
     def test_a_genuine_absence_is_still_none(self, code, status):
         """Vacuity guard: raising on everything would break the ordinary
         pre-first-build case, where neither key nor bucket exists yet."""
@@ -3550,13 +3697,14 @@ class TestTheSmallerReviewFindings:
         class _Absent(TestTheClusterRecordStore._S3):
             def get_object(self, **kw):
                 raise ClientError(
-                    {"Error": {"Code": code, "Message": "gone"},
-                     "ResponseMetadata": {"HTTPStatusCode": status}},
+                    {
+                        "Error": {"Code": code, "Message": "gone"},
+                        "ResponseMetadata": {"HTTPStatusCode": status},
+                    },
                     "GetObject",
                 )
 
-        assert get_cluster_record(_Absent(), locks_bucketname="b",
-                                  cluster_name="osiris") is None
+        assert get_cluster_record(_Absent(), locks_bucketname="b", cluster_name="osiris") is None
 
     def test_an_s3_uri_is_refused_as_a_config_path(self):
         """add_queue returns `s3://bucket/configs/x.yaml` when it edited the
@@ -3569,24 +3717,28 @@ class TestTheSmallerReviewFindings:
             core_apply_cluster_update(
                 cluster_name="osiris",
                 config_path="s3://parallelclustermaker-locks-1-2/configs/osiris.yaml",
-                region="us-east-2", pcluster_bin="pcluster", wait=False,
+                region="us-east-2",
+                pcluster_bin="pcluster",
+                wait=False,
             )
 
-    @pytest.mark.parametrize("body,expected", [
-        ("- enable_efs: true\n", "mapping"),
-        ("just a string\n", "mapping"),
-    ])
-    def test_a_defaults_file_that_is_not_a_mapping_says_so(self, body, expected,
-                                                           tmp_path, monkeypatch):
+    @pytest.mark.parametrize(
+        "body,expected",
+        [
+            ("- enable_efs: true\n", "mapping"),
+            ("just a string\n", "mapping"),
+        ],
+    )
+    def test_a_defaults_file_that_is_not_a_mapping_says_so(
+        self, body, expected, tmp_path, monkeypatch
+    ):
         """`_drop_unset` calls .items(); a list or scalar document raised a
         raw AttributeError. Inert while the file was only read under
         --use_defaults; read on every run now."""
         from pcluster_core import PClusterMakerError, load_cluster_defaults
 
         (tmp_path / "osiris_defaults.yml").write_text(body)
-        monkeypatch.setattr(
-            "pcluster_core._default_repo_root", lambda: str(tmp_path)
-        )
+        monkeypatch.setattr("pcluster_core._default_repo_root", lambda: str(tmp_path))
         with pytest.raises(PClusterMakerError, match=expected):
             load_cluster_defaults("osiris")
 
@@ -3607,8 +3759,11 @@ class TestTheSmallerReviewFindings:
         """The CLI maps this one to illegal_az_msg's exact wording, so it
         has to be distinguishable from a failed call -- and it must still
         be a PClusterMakerError so every existing handler catches it."""
-        from pcluster_core import (AvailabilityZoneNotFound, PClusterMakerError,
-                                   resolve_region_from_az)
+        from pcluster_core import (
+            AvailabilityZoneNotFound,
+            PClusterMakerError,
+            resolve_region_from_az,
+        )
 
         class _Empty:
             def describe_availability_zones(self, ZoneNames=None, **kw):
@@ -3628,14 +3783,16 @@ class TestTheSmallerReviewFindings:
         root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         tree = ast.parse(open(os.path.join(root, "make_pcluster.py")).read())
         calls = [
-            n.func.attr for n in ast.walk(tree)
+            n.func.attr
+            for n in ast.walk(tree)
             if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
         ]
         assert "describe_availability_zones" not in calls, (
             "make_pcluster.py resolves the region itself again"
         )
         names = [
-            n.func.id for n in ast.walk(tree)
+            n.func.id
+            for n in ast.walk(tree)
             if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
         ]
         assert "resolve_region_from_az" in names
@@ -3685,18 +3842,19 @@ Scheduling:
         import os
 
         os.makedirs(tmp_path / "active_clusters" / "osiris")
-        (tmp_path / "active_clusters" / "osiris" / "config.osiris").write_text(
-            self._CONFIG
-        )
+        (tmp_path / "active_clusters" / "osiris" / "config.osiris").write_text(self._CONFIG)
         return str(tmp_path)
 
     def _add(self, tmp_path, describe_fn):
         from pcluster_core import core_add_queue
 
         return core_add_queue(
-            cluster_name="osiris", repo_root=self._repo(tmp_path),
-            queue_type="cpu", ec2_instance_type="c5.xlarge",
-            queue_name="q1", describe_fn=describe_fn,
+            cluster_name="osiris",
+            repo_root=self._repo(tmp_path),
+            queue_type="cpu",
+            ec2_instance_type="c5.xlarge",
+            queue_name="q1",
+            describe_fn=describe_fn,
         )
 
     def test_an_update_in_progress_refuses_the_edit(self, tmp_path):
@@ -3717,8 +3875,11 @@ Scheduling:
             from pcluster_core import core_add_queue
 
             core_add_queue(
-                cluster_name="osiris", repo_root=root, queue_type="cpu",
-                ec2_instance_type="c5.xlarge", queue_name="q1",
+                cluster_name="osiris",
+                repo_root=root,
+                queue_type="cpu",
+                ec2_instance_type="c5.xlarge",
+                queue_name="q1",
                 describe_fn=lambda n, r: {"clusterStatus": "UPDATE_IN_PROGRESS"},
             )
         assert open(path).read() == self._CONFIG
@@ -3726,16 +3887,17 @@ Scheduling:
     def test_a_settled_cluster_still_accepts_the_edit(self, tmp_path):
         """Vacuity guard: refusing on every status would break queue
         editing entirely."""
-        result = self._add(
-            tmp_path, lambda n, r: {"clusterStatus": "UPDATE_COMPLETE"}
-        )
+        result = self._add(tmp_path, lambda n, r: {"clusterStatus": "UPDATE_COMPLETE"})
         assert result.queue_name == "q1"
 
-    @pytest.mark.parametrize("boom", [
-        lambda n, r: (_ for _ in ()).throw(RuntimeError("no credentials")),
-        lambda n, r: None,
-        lambda n, r: {},
-    ])
+    @pytest.mark.parametrize(
+        "boom",
+        [
+            lambda n, r: (_ for _ in ()).throw(RuntimeError("no credentials")),
+            lambda n, r: None,
+            lambda n, r: {},
+        ],
+    )
     def test_an_unanswerable_describe_lets_the_edit_proceed(self, tmp_path, boom):
         """A describe that fails -- no credentials, no such cluster, an API
         error -- must not block editing a config file. Only a confirmed
@@ -3750,7 +3912,9 @@ Scheduling:
         root = self._repo(tmp_path)
         with pytest.raises(ClusterConfigConflict, match="UPDATE_IN_PROGRESS"):
             core_remove_queue(
-                cluster_name="osiris", repo_root=root, queue_name="compute",
+                cluster_name="osiris",
+                repo_root=root,
+                queue_name="compute",
                 describe_fn=lambda n, r: {"clusterStatus": "UPDATE_IN_PROGRESS"},
             )
 
@@ -3767,8 +3931,7 @@ class TestFinalizeCompletesWhatTheBuildStarted:
     Verified live on 2026-08-25 against a cluster in exactly that state.
     """
 
-    def _staged(self, tmp_path, monkeypatch, status="CREATE_COMPLETE",
-                describe_calls=None):
+    def _staged(self, tmp_path, monkeypatch, status="CREATE_COMPLETE", describe_calls=None):
         import sys
         import types
 
@@ -3791,10 +3954,10 @@ class TestFinalizeCompletesWhatTheBuildStarted:
 
         pc.describe_cluster = _describe
         monkeypatch.setitem(sys.modules, "pcluster.lib", pc)
-        monkeypatch.setattr(pcluster_core, "_acquire_distributed_cluster_lock",
-                            lambda *a, **k: None)
-        monkeypatch.setattr(pcluster_core, "s3_release_cluster_lock",
-                            lambda *a, **k: None)
+        monkeypatch.setattr(
+            pcluster_core, "_acquire_distributed_cluster_lock", lambda *a, **k: None
+        )
+        monkeypatch.setattr(pcluster_core, "s3_release_cluster_lock", lambda *a, **k: None)
         monkeypatch.setattr(pcluster_core.boto3, "client", lambda *a, **k: object())
         return calls
 
@@ -3802,12 +3965,15 @@ class TestFinalizeCompletesWhatTheBuildStarted:
         import pcluster_core
 
         return pcluster_core.core_finalize_cluster_build(
-            cluster_name="certify", cluster_owner="rmarable",
-            region="us-east-1", repo_root=str(tmp_path),
+            cluster_name="certify",
+            cluster_owner="rmarable",
+            region="us-east-1",
+            repo_root=str(tmp_path),
         )
 
-    @pytest.mark.parametrize("status", ["CREATE_IN_PROGRESS", "CREATE_FAILED",
-                                        "ROLLBACK_COMPLETE", "DELETE_IN_PROGRESS"])
+    @pytest.mark.parametrize(
+        "status", ["CREATE_IN_PROGRESS", "CREATE_FAILED", "ROLLBACK_COMPLETE", "DELETE_IN_PROGRESS"]
+    )
     def test_it_refuses_unless_the_stack_is_complete(self, tmp_path, monkeypatch, status):
         """Every step needs a head node that answers. Running against a
         half-built stack would scp into nothing and publish a summary for a
@@ -3829,8 +3995,7 @@ class TestFinalizeCompletesWhatTheBuildStarted:
         """Structural, like the teardown twin: one describe, no retry loop,
         so it stays callable from anything that cannot block."""
         calls = []
-        self._staged(tmp_path, monkeypatch, status="CREATE_IN_PROGRESS",
-                     describe_calls=calls)
+        self._staged(tmp_path, monkeypatch, status="CREATE_IN_PROGRESS", describe_calls=calls)
         self._run(tmp_path)
         assert len(calls) == 1
 
@@ -3895,9 +4060,7 @@ class TestAccessDoesNotDependOnTheBuildHavingFinished:
 
         (tmp_path / "src" / "vars_files").mkdir(parents=True)
         (tmp_path / "active_clusters" / "certify").mkdir(parents=True)
-        shutil.copytree(
-            os.path.join(self._ROOT, "templates"), str(tmp_path / "templates")
-        )
+        shutil.copytree(os.path.join(self._ROOT, "templates"), str(tmp_path / "templates"))
         return tmp_path
 
     def test_it_renders_the_script_when_the_build_did_not(self, tmp_path):
@@ -3911,8 +4074,9 @@ class TestAccessDoesNotDependOnTheBuildHavingFinished:
         # machine has it, else skip -- this asserts the rendering path, not
         # the template's own contents.
         live = os.path.join(self._ROOT, "src", "vars_files")
-        candidates = [f for f in os.listdir(live) if f.endswith(".yml")] \
-            if os.path.isdir(live) else []
+        candidates = (
+            [f for f in os.listdir(live) if f.endswith(".yml")] if os.path.isdir(live) else []
+        )
         if not candidates:
             pytest.skip("no rendered vars file on this machine to render from")
         ctx = yaml.safe_load(open(os.path.join(live, candidates[0])))
@@ -3920,8 +4084,10 @@ class TestAccessDoesNotDependOnTheBuildHavingFinished:
 
         path = core_ensure_generated_script(
             cluster_data_root=str(repo / "active_clusters"),
-            cluster_name="certify", repo_root=str(repo),
-            template="access_cluster.j2", dest_name="access_cluster.certify.sh",
+            cluster_name="certify",
+            repo_root=str(repo),
+            template="access_cluster.j2",
+            dest_name="access_cluster.certify.sh",
         )
         assert os.path.isfile(path)
         assert os.access(path, os.X_OK), "the rendered script must be executable"
@@ -3936,8 +4102,10 @@ class TestAccessDoesNotDependOnTheBuildHavingFinished:
         dest.write_text("# hand-edited\n")
         path = core_ensure_generated_script(
             cluster_data_root=str(repo / "active_clusters"),
-            cluster_name="certify", repo_root=str(repo),
-            template="access_cluster.j2", dest_name="access_cluster.certify.sh",
+            cluster_name="certify",
+            repo_root=str(repo),
+            template="access_cluster.j2",
+            dest_name="access_cluster.certify.sh",
         )
         assert open(path).read() == "# hand-edited\n"
 
@@ -3951,7 +4119,8 @@ class TestAccessDoesNotDependOnTheBuildHavingFinished:
         with pytest.raises(PClusterMakerError) as exc:
             core_ensure_generated_script(
                 cluster_data_root=str(repo / "active_clusters"),
-                cluster_name="certify", repo_root=str(repo),
+                cluster_name="certify",
+                repo_root=str(repo),
                 template="access_cluster.j2",
                 dest_name="access_cluster.certify.sh",
             )
@@ -3973,8 +4142,10 @@ class TestAccessDoesNotDependOnTheBuildHavingFinished:
         with pytest.raises(PClusterMakerError) as exc:
             core_ensure_generated_script(
                 cluster_data_root=str(repo / "active_clusters"),
-                cluster_name="../escape", repo_root=str(repo),
-                template="access_cluster.j2", dest_name="x.sh",
+                cluster_name="../escape",
+                repo_root=str(repo),
+                template="access_cluster.j2",
+                dest_name="x.sh",
             )
         assert "escapes active_clusters/" in str(exc.value)
 
@@ -3986,7 +4157,8 @@ class TestAccessDoesNotDependOnTheBuildHavingFinished:
 
         tree = ast.parse(open(os.path.join(self._ROOT, "access_cluster.py")).read())
         called = {
-            n.func.id for n in ast.walk(tree)
+            n.func.id
+            for n in ast.walk(tree)
             if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
         }
         assert "core_ensure_generated_script" in called, (
@@ -4001,7 +4173,8 @@ class TestAccessDoesNotDependOnTheBuildHavingFinished:
 
         tree = ast.parse(open(os.path.join(self._ROOT, "grafana_tunnel.py")).read())
         called = {
-            n.func.id for n in ast.walk(tree)
+            n.func.id
+            for n in ast.walk(tree)
             if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
         }
         assert "core_ensure_generated_script" in called
@@ -4011,7 +4184,7 @@ class TestAccessDoesNotDependOnTheBuildHavingFinished:
         not come back in either the access or the tunnel path."""
         for rel in ("access_cluster.py", "grafana_tunnel.py", "src/pcluster_core.py"):
             body = open(os.path.join(self._ROOT, rel)).read()
-            assert_source_is_real(body, 'test_no_shim_tells_the_operator_to_rebuild')
+            assert_source_is_real(body, "test_no_shim_tells_the_operator_to_rebuild")
             assert "Make sure the cluster was built" not in body, rel
 
 
@@ -4052,8 +4225,7 @@ class TestPclusterCallsWorkOffTheMainThread:
         t.start()
         t.join()
         assert seen["before"] == "none", (
-            "a fresh worker thread must start with no loop, or this test "
-            "cannot see the fix"
+            "a fresh worker thread must start with no loop, or this test cannot see the fix"
         )
         assert "EventLoop" in seen["after"]
 
@@ -4065,9 +4237,7 @@ class TestPclusterCallsWorkOffTheMainThread:
         ensure_event_loop()
         first = asyncio.get_event_loop()
         ensure_event_loop()
-        assert asyncio.get_event_loop() is first, (
-            "an existing loop must not be replaced"
-        )
+        assert asyncio.get_event_loop() is first, "an existing loop must not be replaced"
 
     def test_every_pcluster_lib_import_installs_a_loop(self):
         """Any of these can be reached from a tool call, so the guard has to
@@ -4132,12 +4302,15 @@ class TestAPclusterExceptionAlwaysSaysSomething:
     """
 
     def _exc(self, message=None, errors=()):
-        content = type("C", (), {
-            "message": message,
-            "configuration_validation_errors": list(errors),
-        })()
-        return type("CreateClusterBadRequestException", (Exception,),
-                    {})(), content
+        content = type(
+            "C",
+            (),
+            {
+                "message": message,
+                "configuration_validation_errors": list(errors),
+            },
+        )()
+        return type("CreateClusterBadRequestException", (Exception,), {})(), content
 
     def test_the_message_is_extracted_from_content(self):
         from pcluster_core import pcluster_exception_detail
@@ -4153,8 +4326,9 @@ class TestAPclusterExceptionAlwaysSaysSomething:
         tells you where to look, the prose alone often does not."""
         from pcluster_core import pcluster_exception_detail
 
-        err = type("E", (), {"level": "ERROR", "type": "RoleValidator",
-                             "message": "role not found"})()
+        err = type(
+            "E", (), {"level": "ERROR", "type": "RoleValidator", "message": "role not found"}
+        )()
         exc, content = self._exc(message="Invalid", errors=[err])
         exc.content = content
         out = pcluster_exception_detail(exc)
@@ -4165,8 +4339,15 @@ class TestAPclusterExceptionAlwaysSaysSomething:
         them in makes a one-line problem read as several."""
         from pcluster_core import pcluster_exception_detail
 
-        info = type("E", (), {"level": "INFO", "type": "DeletionPolicyValidator",
-                              "message": "storage will be deleted"})()
+        info = type(
+            "E",
+            (),
+            {
+                "level": "INFO",
+                "type": "DeletionPolicyValidator",
+                "message": "storage will be deleted",
+            },
+        )()
         exc, content = self._exc(message="Invalid", errors=[info])
         exc.content = content
         assert "DeletionPolicyValidator" not in pcluster_exception_detail(exc)
@@ -4229,7 +4410,8 @@ class TestABuildFailureSaysWhatWentWrong:
         assert "template render failed" in msg
         assert "SilentBoom" in msg
         assert msg.count("SilentBoom") == 1, (
-            f"the class name is repeated, which reads as two errors: {msg}")
+            f"the class name is repeated, which reads as two errors: {msg}"
+        )
 
     def test_it_is_truncated(self):
         """A message summarizes; the log is still printed in full."""
@@ -4249,13 +4431,10 @@ class TestABuildFailureSaysWhatWentWrong:
         import os
 
         root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        src = io.open(
-            os.path.join(root, "src", "pcluster_core.py"), encoding="utf-8"
-        ).read()
-        assert_source_is_real(src, 'test_no_failure_path_still_returns_the_generic_string')
+        src = io.open(os.path.join(root, "src", "pcluster_core.py"), encoding="utf-8").read()
+        assert_source_is_real(src, "test_no_failure_path_still_returns_the_generic_string")
         assert "build failed; see the messages above" not in src, (
-            "a build failure still tells a remote caller to read stdout it "
-            "cannot see"
+            "a build failure still tells a remote caller to read stdout it cannot see"
         )
 
     def test_every_create_failure_path_builds_a_real_message(self):
@@ -4265,12 +4444,13 @@ class TestABuildFailureSaysWhatWentWrong:
         import os
 
         root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        src = io.open(
-            os.path.join(root, "src", "pcluster_core.py"), encoding="utf-8"
-        ).read()
+        src = io.open(os.path.join(root, "src", "pcluster_core.py"), encoding="utf-8").read()
         tree = ast.parse(src)
-        fn = next(n for n in ast.walk(tree)
-                  if isinstance(n, ast.FunctionDef) and n.name == "core_create_cluster")
+        fn = next(
+            n
+            for n in ast.walk(tree)
+            if isinstance(n, ast.FunctionDef) and n.name == "core_create_cluster"
+        )
         # The message may be built inline or bound to a name first -- the
         # failure paths now compute it once so the same text can be
         # published to the store *and* returned. Following the binding is
@@ -4279,9 +4459,11 @@ class TestABuildFailureSaysWhatWentWrong:
         # that strictly improved the thing being tested.
         bound = {
             t.id
-            for n in ast.walk(fn) if isinstance(n, ast.Assign)
+            for n in ast.walk(fn)
+            if isinstance(n, ast.Assign)
             for t in n.targets
-            if isinstance(t, ast.Name) and isinstance(n.value, ast.Call)
+            if isinstance(t, ast.Name)
+            and isinstance(n.value, ast.Call)
             and isinstance(n.value.func, ast.Name)
             and n.value.func.id == "_build_failure_message"
         }
@@ -4289,15 +4471,17 @@ class TestABuildFailureSaysWhatWentWrong:
         for node in ast.walk(fn):
             if not isinstance(node, ast.Call):
                 continue
-            if not (isinstance(node.func, ast.Name)
-                    and node.func.id == "CreateClusterResult"):
+            if not (isinstance(node.func, ast.Name) and node.func.id == "CreateClusterResult"):
                 continue
             for kw in node.keywords:
                 if kw.arg != "message":
                     continue
                 v = kw.value
-                if isinstance(v, ast.Call) and isinstance(v.func, ast.Name) \
-                        and v.func.id == "_build_failure_message":
+                if (
+                    isinstance(v, ast.Call)
+                    and isinstance(v.func, ast.Name)
+                    and v.func.id == "_build_failure_message"
+                ):
                     built += 1
                 elif isinstance(v, ast.Name) and v.id in bound:
                     built += 1
@@ -4327,8 +4511,7 @@ class TestARetryAfterTheGatewayTimeoutIsNotToldToCleanUp:
     def _guarded(self, monkeypatch, status, tmp_path):
         import pcluster_core as pc
 
-        monkeypatch.setattr(
-            pc, "_describe_cluster_status_quietly", lambda n, r: status)
+        monkeypatch.setattr(pc, "_describe_cluster_status_quietly", lambda n, r: status)
         return pc
 
     def test_an_in_flight_build_says_so_and_says_not_to_clean_up(self):
@@ -4350,8 +4533,13 @@ class TestARetryAfterTheGatewayTimeoutIsNotToldToCleanUp:
         states it knows nothing about."""
         import pcluster_core as pc
 
-        for s in ("UPDATE_IN_PROGRESS", "DELETE_IN_PROGRESS",
-                  "CREATE_FAILED", "DELETE_FAILED", "ROLLBACK_COMPLETE"):
+        for s in (
+            "UPDATE_IN_PROGRESS",
+            "DELETE_IN_PROGRESS",
+            "CREATE_FAILED",
+            "DELETE_FAILED",
+            "ROLLBACK_COMPLETE",
+        ):
             assert s not in pc._CLUSTER_BUILD_IN_FLIGHT, s
 
     def test_an_unreadable_status_falls_back_rather_than_failing(self, monkeypatch):
@@ -4373,7 +4561,8 @@ class TestARetryAfterTheGatewayTimeoutIsNotToldToCleanUp:
 
         stub = types.ModuleType("pcluster.lib")
         stub.describe_cluster = lambda **kw: (_ for _ in ()).throw(
-            RuntimeError("CloudFormation unreachable"))
+            RuntimeError("CloudFormation unreachable")
+        )
         monkeypatch.setitem(sys.modules, "pcluster.lib", stub)
 
         assert pc._describe_cluster_status_quietly("nope", "us-east-1") == ""
@@ -4386,22 +4575,31 @@ class TestARetryAfterTheGatewayTimeoutIsNotToldToCleanUp:
         import os
 
         root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        src = io.open(os.path.join(root, "src", "pcluster_core.py"),
-                      encoding="utf-8").read()
+        src = io.open(os.path.join(root, "src", "pcluster_core.py"), encoding="utf-8").read()
         tree = ast.parse(src)
-        fn = next(n for n in ast.walk(tree)
-                  if isinstance(n, ast.FunctionDef) and n.name == "core_create_cluster")
-        status_at = [n.lineno for n in ast.walk(fn)
-                     if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
-                     and n.func.id == "_describe_cluster_status_quietly"]
-        guidance_at = [n.lineno for n in ast.walk(fn)
-                       if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
-                       and n.func.id == "existing_vars_file_guidance"]
+        fn = next(
+            n
+            for n in ast.walk(tree)
+            if isinstance(n, ast.FunctionDef) and n.name == "core_create_cluster"
+        )
+        status_at = [
+            n.lineno
+            for n in ast.walk(fn)
+            if isinstance(n, ast.Call)
+            and isinstance(n.func, ast.Name)
+            and n.func.id == "_describe_cluster_status_quietly"
+        ]
+        guidance_at = [
+            n.lineno
+            for n in ast.walk(fn)
+            if isinstance(n, ast.Call)
+            and isinstance(n.func, ast.Name)
+            and n.func.id == "existing_vars_file_guidance"
+        ]
         assert status_at, "the in-flight check is gone"
         assert guidance_at, "the guidance call is gone"
         assert min(status_at) < min(guidance_at), (
-            "the status check runs after the guidance returns, so it never "
-            "runs at all"
+            "the status check runs after the guidance returns, so it never runs at all"
         )
 
 
@@ -4450,40 +4648,87 @@ class TestAFailedBuildLeavesARecordTheCallerCanRead:
         import os
 
         root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        src = io.open(
-            os.path.join(root, "src", "pcluster_core.py"), encoding="utf-8"
-        ).read()
-        fn = next(n for n in ast.walk(ast.parse(src))
-                  if isinstance(n, ast.FunctionDef)
-                  and n.name == "core_create_cluster")
-        lock_line = min(
-            n.lineno for n in ast.walk(fn)
-            if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
-            and n.func.attr == "client"
-            and any(isinstance(a, ast.Constant) and a.value == "s3"
-                    for a in n.args)
+        src = io.open(os.path.join(root, "src", "pcluster_core.py"), encoding="utf-8").read()
+        fn = next(
+            n
+            for n in ast.walk(ast.parse(src))
+            if isinstance(n, ast.FunctionDef) and n.name == "core_create_cluster"
         )
-        published = sorted(
-            n.lineno for n in ast.walk(fn)
-            if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
-            and n.func.id == "_publish_build_failure"
+        lock_line = min(
+            n.lineno
+            for n in ast.walk(fn)
+            if isinstance(n, ast.Call)
+            and isinstance(n.func, ast.Attribute)
+            and n.func.attr == "client"
+            and any(isinstance(a, ast.Constant) and a.value == "s3" for a in n.args)
         )
         failures = sorted(
-            n.lineno for n in ast.walk(fn)
-            if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+            n.lineno
+            for n in ast.walk(fn)
+            if isinstance(n, ast.Call)
+            and isinstance(n.func, ast.Name)
             and n.func.id == "CreateClusterResult"
-            and any(k.arg == "success"
-                    and isinstance(k.value, ast.Constant)
-                    and k.value.value is False for k in n.keywords)
+            and any(
+                k.arg == "success" and isinstance(k.value, ast.Constant) and k.value.value is False
+                for k in n.keywords
+            )
             and n.lineno > lock_line
         )
         assert failures, "no post-lock failure path found -- the scan is broken"
-        for line in failures:
-            near = [p for p in published if 0 < line - p <= 12]
-            assert near, (
-                f"the failure path returning at line {line} publishes no "
-                f"build-failure record, so a caller cut off at 29s has no "
-                f"way to learn why"
+
+        # Paired by *block*, not by line distance. This used to require the
+        # publish within 12 lines of the return, which is a fact about
+        # layout rather than about the code: reformatting spread the calls
+        # apart and every post-lock path looked unrecorded. Same suite,
+        # same behaviour, different whitespace.
+        parents = {}
+        for node in ast.walk(fn):
+            for child in ast.iter_child_nodes(node):
+                parents[child] = node
+
+        def _publishes_in_the_same_block(return_node):
+            """The publish must be in the *handler* this return sits in.
+
+            Walking all the way up to the function body would accept a
+            publish anywhere in core_create_cluster, which is looser than
+            the 12-line window it replaced -- caught by mutation: deleting
+            one of the four publishes left every path still passing. So the
+            walk stops at the first except/if that encloses the return.
+            """
+            # Stops at core_create_cluster itself, and counts a nested
+            # helper's own body: _fail_after_launch publishes and returns as
+            # siblings there, inside no branch at all, so a walk that halted
+            # at the first FunctionDef reported it as unrecorded.
+            node = parents.get(return_node)
+            while node is not None and node is not fn:
+                if isinstance(node, (ast.ExceptHandler, ast.If, ast.FunctionDef)) and any(
+                    isinstance(c, ast.Call)
+                    and isinstance(c.func, ast.Name)
+                    and c.func.id == "_publish_build_failure"
+                    for stmt in node.body
+                    for c in ast.walk(stmt)
+                ):
+                    return True
+                node = parents.get(node)
+            return False
+
+        failure_nodes = [
+            n
+            for n in ast.walk(fn)
+            if isinstance(n, ast.Call)
+            and isinstance(n.func, ast.Name)
+            and n.func.id == "CreateClusterResult"
+            and any(
+                k.arg == "success" and isinstance(k.value, ast.Constant) and k.value.value is False
+                for k in n.keywords
+            )
+            and n.lineno > lock_line
+        ]
+        for node in failure_nodes:
+            assert _publishes_in_the_same_block(node), (
+                f"the failure path returning at line {node.lineno} publishes no "
+                f"build-failure record in its own block, so a caller cut off "
+                f"at 29s has no way to learn why"
             )
 
     def test_recording_the_failure_can_never_replace_the_failure(self):
@@ -4499,29 +4744,46 @@ class TestAFailedBuildLeavesARecordTheCallerCanRead:
                 raise RuntimeError("store is on fire")
 
         ok = _publish_build_failure(
-            _Boom(), locks_bucketname="b", cluster_name="osiris",
-            region="us-east-1", cluster_owner="rmarable",
-            stage="IAM setup", message="AccessDenied",
+            _Boom(),
+            locks_bucketname="b",
+            cluster_name="osiris",
+            region="us-east-1",
+            cluster_owner="rmarable",
+            stage="IAM setup",
+            message="AccessDenied",
         )
         assert ok is False
 
     def test_no_store_is_a_no_op_rather_than_a_crash(self):
         from pcluster_core import _publish_build_failure
 
-        assert _publish_build_failure(
-            None, locks_bucketname="b", cluster_name="osiris",
-            region="us-east-1", cluster_owner="rmarable",
-            stage="IAM setup", message="x") is False
+        assert (
+            _publish_build_failure(
+                None,
+                locks_bucketname="b",
+                cluster_name="osiris",
+                region="us-east-1",
+                cluster_owner="rmarable",
+                stage="IAM setup",
+                message="x",
+            )
+            is False
+        )
 
     def test_what_is_stored_is_what_is_read_back(self):
         from pcluster_core import (
-            _publish_build_failure, get_build_failure, delete_build_failure,
+            _publish_build_failure,
+            get_build_failure,
+            delete_build_failure,
         )
 
         s3 = self._S3()
         _publish_build_failure(
-            s3, locks_bucketname="b", cluster_name="osiris",
-            region="us-east-1", cluster_owner="rmarable",
+            s3,
+            locks_bucketname="b",
+            cluster_name="osiris",
+            region="us-east-1",
+            cluster_owner="rmarable",
             stage="IAM setup",
             message="AccessDenied: iam:CreatePolicy on pclustermaker-policy-*",
             serial="osiris-202608280001",
@@ -4534,8 +4796,7 @@ class TestAFailedBuildLeavesARecordTheCallerCanRead:
         assert rec["failed_at"]
 
         delete_build_failure(s3, locks_bucketname="b", cluster_name="osiris")
-        assert get_build_failure(
-            s3, locks_bucketname="b", cluster_name="osiris") is None
+        assert get_build_failure(s3, locks_bucketname="b", cluster_name="osiris") is None
 
     def test_deleting_an_absent_record_is_not_an_error(self):
         """Called from the success path without a preceding read, so it has
@@ -4543,8 +4804,7 @@ class TestAFailedBuildLeavesARecordTheCallerCanRead:
         majority of builds."""
         from pcluster_core import delete_build_failure
 
-        delete_build_failure(
-            self._S3(), locks_bucketname="b", cluster_name="never-failed")
+        delete_build_failure(self._S3(), locks_bucketname="b", cluster_name="never-failed")
 
     def test_a_successful_build_clears_a_stale_record(self):
         """Left behind, a previous attempt's reason answers the next
@@ -4554,14 +4814,17 @@ class TestAFailedBuildLeavesARecordTheCallerCanRead:
         import os
 
         root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        src = io.open(
-            os.path.join(root, "src", "pcluster_core.py"), encoding="utf-8"
-        ).read()
-        fn = next(n for n in ast.walk(ast.parse(src))
-                  if isinstance(n, ast.FunctionDef)
-                  and n.name == "_publish_cluster_state")
-        called = {n.func.id for n in ast.walk(fn)
-                  if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)}
+        src = io.open(os.path.join(root, "src", "pcluster_core.py"), encoding="utf-8").read()
+        fn = next(
+            n
+            for n in ast.walk(ast.parse(src))
+            if isinstance(n, ast.FunctionDef) and n.name == "_publish_cluster_state"
+        )
+        called = {
+            n.func.id
+            for n in ast.walk(fn)
+            if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+        }
         assert "delete_build_failure" in called, (
             "the one publisher every create-path success goes through does "
             "not clear a stale build-failure record"
@@ -4573,14 +4836,17 @@ class TestAFailedBuildLeavesARecordTheCallerCanRead:
         import os
 
         root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        src = io.open(
-            os.path.join(root, "src", "pcluster_core.py"), encoding="utf-8"
-        ).read()
-        fn = next(n for n in ast.walk(ast.parse(src))
-                  if isinstance(n, ast.FunctionDef)
-                  and n.name == "delete_cluster_record_step")
-        called = {n.func.id for n in ast.walk(fn)
-                  if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)}
+        src = io.open(os.path.join(root, "src", "pcluster_core.py"), encoding="utf-8").read()
+        fn = next(
+            n
+            for n in ast.walk(ast.parse(src))
+            if isinstance(n, ast.FunctionDef) and n.name == "delete_cluster_record_step"
+        )
+        called = {
+            n.func.id
+            for n in ast.walk(fn)
+            if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+        }
         assert "delete_build_failure" in called
 
 
@@ -4605,8 +4871,7 @@ class TestGetBuildStatusAnswersHonestly:
     def test_a_reachable_store_with_no_record_says_so_differently(self):
         from pcluster_core import core_get_build_status
 
-        out = core_get_build_status(
-            "osiris", s3=self._S3(), locks_bucketname="b")
+        out = core_get_build_status("osiris", s3=self._S3(), locks_bucketname="b")
         assert out["failed"] is False
         assert out["store_reachable"] is True
         assert "list_clusters" in out["detail"]
@@ -4616,9 +4881,14 @@ class TestGetBuildStatusAnswersHonestly:
 
         s3 = self._S3()
         _publish_build_failure(
-            s3, locks_bucketname="b", cluster_name="osiris",
-            region="us-east-1", cluster_owner="rmarable",
-            stage="cluster launch", message="Exception launching cluster: boom")
+            s3,
+            locks_bucketname="b",
+            cluster_name="osiris",
+            region="us-east-1",
+            cluster_owner="rmarable",
+            stage="cluster launch",
+            message="Exception launching cluster: boom",
+        )
         out = core_get_build_status("osiris", s3=s3, locks_bucketname="b")
         assert out["failed"] is True
         assert out["store_reachable"] is True
@@ -4635,8 +4905,7 @@ class TestGetBuildStatusAnswersHonestly:
         # also have been satisfied by a KeyboardInterrupt or a typo in the
         # call above.
         with pytest.raises(SystemExit):
-            core_get_build_status(
-                "../../etc/passwd", s3=self._S3(), locks_bucketname="b")
+            core_get_build_status("../../etc/passwd", s3=self._S3(), locks_bucketname="b")
 
     def test_it_is_read_only_and_on_the_read_only_tier(self):
         from mcp_server.tiers import TOOL_TIERS
@@ -4670,14 +4939,11 @@ class TestTheSummaryNamesTheBucketResultsActuallyGoTo:
 
     def test_the_summary_line_uses_the_long_lived_bucket(self):
         src = self._core_source()
-        line = next(
-            (ln for ln in src.splitlines() if "Results sync to s3://" in ln), None
-        )
+        line = next((ln for ln in src.splitlines() if "Results sync to s3://" in ln), None)
         assert line is not None, "the summary no longer names a results bucket"
         assert "results_bucketname" in line, line.strip()
         assert "{s3_bucketname}" not in line, (
-            "the summary names the per-build bucket, which teardown deletes: "
-            + line.strip()
+            "the summary names the per-build bucket, which teardown deletes: " + line.strip()
         )
 
     def test_the_sync_itself_still_uses_it(self):
@@ -4690,7 +4956,8 @@ class TestTheSummaryNamesTheBucketResultsActuallyGoTo:
         """The property, stated once. Both lines mention the prefix; neither
         may reach for the per-build bucket to do it."""
         offenders = [
-            ln.strip() for ln in self._core_source().splitlines()
+            ln.strip()
+            for ln in self._core_source().splitlines()
             if "hpc-benchmark-results" in ln and "{s3_bucketname}" in ln
         ]
         assert offenders == [], offenders
@@ -4735,8 +5002,7 @@ class TestBuildContextKeepsTheTypesItWasValidatedAs:
         cls = self._ctx_cls
         flags = set(cls._COERCED_TO_STRINGS)
         kwargs = {
-            f.name: (True if f.name in flags else f"<{f.name}>")
-            for f in dataclasses.fields(cls)
+            f.name: (True if f.name in flags else f"<{f.name}>") for f in dataclasses.fields(cls)
         }
         ctx = cls(**kwargs)
         for name in flags:
@@ -4753,8 +5019,7 @@ class TestBuildContextKeepsTheTypesItWasValidatedAs:
         cls = self._ctx_cls
         flags = set(cls._COERCED_TO_STRINGS)
         kwargs = {
-            f.name: (False if f.name in flags else f"<{f.name}>")
-            for f in dataclasses.fields(cls)
+            f.name: (False if f.name in flags else f"<{f.name}>") for f in dataclasses.fields(cls)
         }
         ctx = cls(**kwargs)
         for name in flags:
@@ -4816,12 +5081,10 @@ class TestPartialProgressSurvivesForTheRollback:
         src = inspect.getsource(pcluster_core._provision_pre_launch_resources)
         tree = ast.parse(src.lstrip())
         recorded = [
-            n for n in ast.walk(tree)
+            n
+            for n in ast.walk(tree)
             if isinstance(n, ast.Assign)
-            and any(
-                isinstance(t, ast.Attribute) and t.attr == "sns_topic_arn"
-                for t in n.targets
-            )
+            and any(isinstance(t, ast.Attribute) and t.attr == "sns_topic_arn" for t in n.targets)
         ]
         assert recorded, (
             "the SNS topic is not recorded on the progress object; a failure "
@@ -4835,7 +5098,7 @@ class TestPartialProgressSurvivesForTheRollback:
 
         src = inspect.getsource(pcluster_core.core_create_cluster)
         start = src.index("def _rollback_pre_launch_resources")
-        body = src[start:src.index("def _fail_after_launch")]
+        body = src[start : src.index("def _fail_after_launch")]
         assert "_progress.sns_topic_arn" in body, (
             "the rollback reads a local, which is unbound after the stage "
             "moved into its own function"
@@ -4845,9 +5108,7 @@ class TestPartialProgressSurvivesForTheRollback:
         # them reverted, which is how a mutation slipped through once.
         import re
 
-        bare = [
-            m for m in re.finditer(r"(?<!_progress\.)\bsns_topic_arn\b", body)
-        ]
+        bare = [m for m in re.finditer(r"(?<!_progress\.)\bsns_topic_arn\b", body)]
         assert not bare, (
             f"{len(bare)} bare `sns_topic_arn` reference(s) left in the "
             f"rollback; on a mid-way failure that name is unbound"

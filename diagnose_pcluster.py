@@ -92,7 +92,11 @@ def _print_report(report, hours, log_lines):
                     print("  (no events found)")
 
     if report.sinfo is None:
-        reason = "head node unreachable" if report.head_ip is None else "SSH unavailable on this transport"
+        reason = (
+            "head node unreachable"
+            if report.head_ip is None
+            else "SSH unavailable on this transport"
+        )
         print(f"\nSkipping SSH-dependent sections — {reason}.")
         sys.exit(0)
 
@@ -142,23 +146,33 @@ def main():
     parser.add_argument("-N", "--cluster_name", required=True, help="Cluster name")
     parser.add_argument("-R", "--region", default=None, help="Override AWS region")
     parser.add_argument(
-        "-T", "--timeout", type=int, default=20,
+        "-T",
+        "--timeout",
+        type=int,
+        default=20,
         help=f"SSH timeout in seconds (default: 20, min: {_MIN_TIMEOUT}, max: {_MAX_TIMEOUT})",
     )
     parser.add_argument(
-        "--cw_lines", type=int, default=50,
+        "--cw_lines",
+        type=int,
+        default=50,
         help=f"CloudWatch log lines per stream (default: 50, max: {_MAX_CW_LINES})",
     )
     parser.add_argument(
-        "--log_lines", type=int, default=30,
+        "--log_lines",
+        type=int,
+        default=30,
         help=f"Local log file tail lines (default: 30, max: {_MAX_LOG_LINES})",
     )
     parser.add_argument(
-        "--hours", type=int, default=24,
+        "--hours",
+        type=int,
+        default=24,
         help=f"sacct lookback window in hours (default: 24, min: {_MIN_HOURS}, max: {_MAX_HOURS})",
     )
     parser.add_argument(
-        "--no_cw", action="store_true",
+        "--no_cw",
+        action="store_true",
         help="Skip CloudWatch log section",
     )
     args = parser.parse_args()

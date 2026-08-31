@@ -46,8 +46,12 @@ def _list(tier):
 
 
 def _call(tier, name, arguments=None, **kw):
-    body = {"jsonrpc": "2.0", "id": 2, "method": "tools/call",
-            "params": {"name": name, "arguments": arguments or {}}}
+    body = {
+        "jsonrpc": "2.0",
+        "id": 2,
+        "method": "tools/call",
+        "params": {"name": name, "arguments": arguments or {}},
+    }
     return base.handle(body, tier=tier, **kw)
 
 
@@ -186,7 +190,7 @@ class TestErrorsBecomeShapedNotTracebacks:
         blob = json.dumps(resp)
         assert "Traceback" not in blob
         assert "mcp_server/handlers" not in blob
-        assert ".py\", line" not in blob
+        assert '.py", line' not in blob
 
     def test_a_pcluster_lib_exception_is_translated_too(self):
         from pcluster.api.errors import NotFoundException
@@ -277,22 +281,24 @@ class TestDeleteIsConfirmationGated:
         """The property the whole gate exists for."""
         from mcp_server.confirmation_token import TokenMismatch, mint, verify
 
-        token = mint("delete_cluster",
-                     {"cluster_name": "osiris", "delete_s3_bucketname": True})
+        token = mint("delete_cluster", {"cluster_name": "osiris", "delete_s3_bucketname": True})
         with pytest.raises(TokenMismatch):
-            verify(token, "delete_cluster",
-                   {"cluster_name": "production", "delete_s3_bucketname": True})
+            verify(
+                token,
+                "delete_cluster",
+                {"cluster_name": "production", "delete_s3_bucketname": True},
+            )
 
     def test_a_token_does_not_survive_a_changed_bucket_option(self):
         """Previewing a delete that retains the S3 bucket must not
         authorize one that destroys it."""
         from mcp_server.confirmation_token import TokenMismatch, mint, verify
 
-        token = mint("delete_cluster",
-                     {"cluster_name": "osiris", "delete_s3_bucketname": False})
+        token = mint("delete_cluster", {"cluster_name": "osiris", "delete_s3_bucketname": False})
         with pytest.raises(TokenMismatch):
-            verify(token, "delete_cluster",
-                   {"cluster_name": "osiris", "delete_s3_bucketname": True})
+            verify(
+                token, "delete_cluster", {"cluster_name": "osiris", "delete_s3_bucketname": True}
+            )
 
 
 class TestUnimplementedIsHonest:
@@ -350,9 +356,9 @@ class TestTheDeleteWrapperActuallyCallsTheGate:
     def test_an_expired_token_is_rejected_by_the_wrapper(self):
         from mcp_server.confirmation_token import ExpiredToken, mint
 
-        stale = mint("delete_cluster",
-                     {"cluster_name": "osiris", "delete_s3_bucketname": True},
-                     issued_at=1)
+        stale = mint(
+            "delete_cluster", {"cluster_name": "osiris", "delete_s3_bucketname": True}, issued_at=1
+        )
         with pytest.raises(ExpiredToken):
             self._delete_tool()(cluster_name="osiris", confirmation_token=stale)
 
@@ -372,7 +378,10 @@ class TestTheDeleteWrapperActuallyCallsTheGate:
             if not isinstance(node, ast.FunctionDef) or node.name != "delete_cluster":
                 continue
             for call in ast.walk(node):
-                if isinstance(call, ast.Call) and getattr(call.func, "id", "") == "core_delete_cluster":
+                if (
+                    isinstance(call, ast.Call)
+                    and getattr(call.func, "id", "") == "core_delete_cluster"
+                ):
                     for kw in call.keywords:
                         if kw.arg == "wait":
                             found.append(ast.literal_eval(kw.value))
@@ -418,9 +427,14 @@ class TestTheHandlerDrivesTheRealFastmcpApi:
 
     def test_a_tool_call_against_a_real_server_succeeds(self):
         resp = base.handle(
-            {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
-             "params": {"name": "list_clusters", "arguments": {}}},
-            tier="read-only", server=self._server(),
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {"name": "list_clusters", "arguments": {}},
+            },
+            tier="read-only",
+            server=self._server(),
         )
         assert "error" not in resp, resp
 
@@ -439,35 +453,52 @@ class TestTheHandlerDrivesTheRealFastmcpApi:
         round-trip through `json.loads` can.
         """
         resp = base.handle(
-            {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
-             "params": {"name": "list_clusters", "arguments": {}}},
-            tier="read-only", server=self._server(),
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {"name": "list_clusters", "arguments": {}},
+            },
+            tier="read-only",
+            server=self._server(),
         )
         blocks = resp["result"]["content"]
         assert [b["type"] for b in blocks] == ["text"]
         assert json.loads(blocks[0]["text"]) == {
-            "clusters": ["osiris"], "region": None,
+            "clusters": ["osiris"],
+            "region": None,
         }
 
     def test_the_structured_content_survives(self):
         """MCP carries the tool's typed return alongside the text block,
         and it is what a caller should read rather than re-parsing text."""
         resp = base.handle(
-            {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
-             "params": {"name": "list_clusters", "arguments": {}}},
-            tier="read-only", server=self._server(),
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {"name": "list_clusters", "arguments": {}},
+            },
+            tier="read-only",
+            server=self._server(),
         )
         assert resp["result"]["structuredContent"] == {
-            "clusters": ["osiris"], "region": None,
+            "clusters": ["osiris"],
+            "region": None,
         }
 
     def test_the_content_blocks_are_json_serializable(self):
         """They arrive as pydantic models and have to cross the transport
         as plain dicts -- json.dumps on a model raises."""
         resp = base.handle(
-            {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
-             "params": {"name": "list_clusters", "arguments": {}}},
-            tier="read-only", server=self._server(),
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {"name": "list_clusters", "arguments": {}},
+            },
+            tier="read-only",
+            server=self._server(),
         )
         json.loads(json.dumps(resp))
 
@@ -476,10 +507,14 @@ class TestTheHandlerDrivesTheRealFastmcpApi:
         the right method with the wrong payload returns a plausible result
         for the wrong input."""
         resp = base.handle(
-            {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
-             "params": {"name": "list_clusters",
-                        "arguments": {"region": "us-east-2"}}},
-            tier="read-only", server=self._server(),
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {"name": "list_clusters", "arguments": {"region": "us-east-2"}},
+            },
+            tier="read-only",
+            server=self._server(),
         )
         assert "us-east-2" in resp["result"]["content"][0]["text"]
 
@@ -490,8 +525,7 @@ class TestTheHandlerDrivesTheRealFastmcpApi:
 
         assert hasattr(FastMCP, "call_tool")
         assert not hasattr(FastMCP, "_call_tool"), (
-            "if FastMCP grows a _call_tool again, re-check which one "
-            "base.handle should be using"
+            "if FastMCP grows a _call_tool again, re-check which one base.handle should be using"
         )
 
     def test_a_raising_tool_becomes_a_shaped_error_not_a_traceback(self):
@@ -514,13 +548,18 @@ class TestTheHandlerDrivesTheRealFastmcpApi:
             raise RuntimeError("cluster vanished")
 
         resp = base.handle(
-            {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
-             "params": {"name": "list_clusters", "arguments": {}}},
-            tier="read-only", server=mcp,
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {"name": "list_clusters", "arguments": {}},
+            },
+            tier="read-only",
+            server=mcp,
         )
         blob = json.dumps(resp)
         assert "cluster vanished" in blob
-        assert "Traceback" not in blob and "File \"" not in blob, (
+        assert "Traceback" not in blob and 'File "' not in blob, (
             "a traceback crossing the transport tells the model nothing "
             "actionable and can carry ARNs and server paths into a chat"
         )
@@ -564,8 +603,10 @@ class TestTheCreateWrapperActuallyCallsTheGate:
         return tools["create_cluster"].fn
 
     _ARGS = dict(
-        cluster_name="osiris", cluster_owner="rmarable",
-        cluster_owner_email="rmarable@gmail.com", az="us-east-1a",
+        cluster_name="osiris",
+        cluster_owner="rmarable",
+        cluster_owner_email="rmarable@gmail.com",
+        az="us-east-1a",
         headnode_instance_type="c8g.large",
     )
 
@@ -632,7 +673,8 @@ class TestTheCreateWrapperActuallyCallsTheGate:
 
         seen = {}
         monkeypatch.setattr(
-            tools_mod, "core_create_cluster",
+            tools_mod,
+            "core_create_cluster",
             lambda **kw: seen.update(kw) or {"status": "kicked off"},
         )
         # This stub used to fabricate `region` on the params object, which
@@ -642,12 +684,11 @@ class TestTheCreateWrapperActuallyCallsTheGate:
         # stubbed here because this test is about the token gate;
         # TestCreateClusterResolvesTheRegionItBuildsIn drives the real one.
         monkeypatch.setattr(
-            tools_mod, "build_make_cluster_params",
+            tools_mod,
+            "build_make_cluster_params",
             lambda **kw: types.SimpleNamespace(),
         )
-        monkeypatch.setattr(
-            tools_mod, "resolve_region_from_az", lambda az: "us-east-1"
-        )
+        monkeypatch.setattr(tools_mod, "resolve_region_from_az", lambda az: "us-east-1")
 
         params = dict(self._ARGS)
         params["overrides"] = {}

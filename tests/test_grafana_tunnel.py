@@ -40,6 +40,7 @@ _FULL_REC_DICT = {
 
 def _load():
     import importlib.util
+
     spec = importlib.util.spec_from_file_location(
         "grafana_tunnel", os.path.join(REPO_ROOT, "grafana_tunnel.py")
     )
@@ -60,12 +61,11 @@ def _stage(tmp_path, monkeypatch, returncode):
     script_dir.mkdir(parents=True)
     (script_dir / f"grafana_tunnel.{name}.sh").write_text("#!/bin/bash\nexit 0\n")
     monkeypatch.setattr(mod, "_repo_root", str(tmp_path))
+    monkeypatch.setattr(mod, "_read_cluster_record", lambda n, r: dict(_FULL_REC_DICT))
     monkeypatch.setattr(
-        mod, "_read_cluster_record", lambda n, r: dict(_FULL_REC_DICT)
-    )
-    monkeypatch.setattr(
-        mod.subprocess, "run",
-        lambda *a, **k: types.SimpleNamespace(returncode=returncode, stdout='', stderr=''),
+        mod.subprocess,
+        "run",
+        lambda *a, **k: types.SimpleNamespace(returncode=returncode, stdout="", stderr=""),
     )
     monkeypatch.setattr(sys, "argv", ["grafana_tunnel.py", "-N", name])
     return mod
@@ -128,11 +128,14 @@ class TestCoreManageGrafanaTunnel:
         script = tmp_path / "grafana_tunnel.mycluster.sh"
         script.write_text("#!/bin/bash\nexit 0\n")
         monkeypatch.setattr(
-            pcluster_core.subprocess, "run",
-            lambda *a, **k: types.SimpleNamespace(returncode=0, stdout='', stderr=''),
+            pcluster_core.subprocess,
+            "run",
+            lambda *a, **k: types.SimpleNamespace(returncode=0, stdout="", stderr=""),
         )
         result = pcluster_core.core_manage_grafana_tunnel(
-            cluster_record=_record(), tunnel_script_path=str(script), port=9000,
+            cluster_record=_record(),
+            tunnel_script_path=str(script),
+            port=9000,
         )
         assert result.success is True
         assert result.error is None
@@ -147,11 +150,13 @@ class TestCoreManageGrafanaTunnel:
 
         def _fake_run(cmd, **k):
             seen["cmd"] = cmd
-            return types.SimpleNamespace(returncode=0, stdout='', stderr='')
+            return types.SimpleNamespace(returncode=0, stdout="", stderr="")
 
         monkeypatch.setattr(pcluster_core.subprocess, "run", _fake_run)
         result = pcluster_core.core_manage_grafana_tunnel(
-            cluster_record=_record(), tunnel_script_path=str(script), stop=True,
+            cluster_record=_record(),
+            tunnel_script_path=str(script),
+            stop=True,
         )
         assert result.action == "stop"
         assert seen["cmd"][-1] == "stop"
@@ -163,11 +168,13 @@ class TestCoreManageGrafanaTunnel:
         script = tmp_path / "grafana_tunnel.mycluster.sh"
         script.write_text("#!/bin/bash\nexit 1\n")
         monkeypatch.setattr(
-            pcluster_core.subprocess, "run",
-            lambda *a, **k: types.SimpleNamespace(returncode=1, stdout='', stderr=''),
+            pcluster_core.subprocess,
+            "run",
+            lambda *a, **k: types.SimpleNamespace(returncode=1, stdout="", stderr=""),
         )
         result = pcluster_core.core_manage_grafana_tunnel(
-            cluster_record=_record(), tunnel_script_path=str(script),
+            cluster_record=_record(),
+            tunnel_script_path=str(script),
         )
         assert result.success is False
         assert "exit 1" in result.error
@@ -204,7 +211,9 @@ class TestTheTunnelScriptNeverWritesToOurStdout:
         script.write_text("#!/bin/bash\necho noisy\n")
         monkeypatch.setattr(pcluster_core.subprocess, "run", _fake_run)
         pcluster_core.core_manage_grafana_tunnel(
-            cluster_record=_record(), tunnel_script_path=str(script), port=3000,
+            cluster_record=_record(),
+            tunnel_script_path=str(script),
+            port=3000,
         )
         assert seen.get("capture_output") is True, (
             "the tunnel script's stdout must be captured; inheriting it "
@@ -219,14 +228,18 @@ class TestTheTunnelScriptNeverWritesToOurStdout:
         import pcluster_core
 
         monkeypatch.setattr(
-            pcluster_core.subprocess, "run",
+            pcluster_core.subprocess,
+            "run",
             lambda *a, **k: types.SimpleNamespace(
-                returncode=1, stdout="Tunnelling via SSM (i-abc)\n", stderr="boom\n"),
+                returncode=1, stdout="Tunnelling via SSM (i-abc)\n", stderr="boom\n"
+            ),
         )
         script = tmp_path / "tunnel.sh"
         script.write_text("#!/bin/bash\n")
         r = pcluster_core.core_manage_grafana_tunnel(
-            cluster_record=_record(), tunnel_script_path=str(script), port=3000,
+            cluster_record=_record(),
+            tunnel_script_path=str(script),
+            port=3000,
         )
         assert r.success is False
         assert "Tunnelling via SSM" in r.output and "boom" in r.output
@@ -236,9 +249,11 @@ class TestTheTunnelScriptNeverWritesToOurStdout:
         text, so grafana_tunnel.py prints it back."""
         import os
 
-        body = open(os.path.join(
-            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-            "grafana_tunnel.py")).read()
+        body = open(
+            os.path.join(
+                os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "grafana_tunnel.py"
+            )
+        ).read()
         assert "result.output" in body, (
             "the CLI must print the captured output or the operator loses it"
         )

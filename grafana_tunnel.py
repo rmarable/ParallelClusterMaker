@@ -37,10 +37,12 @@ def main():
         description="Open or close the Grafana SSH tunnel for a ParallelCluster stack."
     )
     parser.add_argument("-N", "--cluster_name", required=True, help="Cluster name")
-    parser.add_argument("-P", "--port", type=int, default=8443,
-                        help="Local port for the tunnel (default: 8443)")
-    parser.add_argument("-S", "--stop", action="store_true",
-                        help="Stop a running tunnel instead of starting one")
+    parser.add_argument(
+        "-P", "--port", type=int, default=8443, help="Local port for the tunnel (default: 8443)"
+    )
+    parser.add_argument(
+        "-S", "--stop", action="store_true", help="Stop a running tunnel instead of starting one"
+    )
     args = parser.parse_args()
 
     cluster_name = args.cluster_name
@@ -52,7 +54,9 @@ def main():
     cluster_record = ClusterRecord.from_dict(rec)
 
     tunnel_script = os.path.join(
-        _repo_root, "active_clusters", cluster_name,
+        _repo_root,
+        "active_clusters",
+        cluster_name,
         f"grafana_tunnel.{cluster_name}.sh",
     )
 
@@ -64,7 +68,8 @@ def main():
         try:
             core_ensure_generated_script(
                 cluster_data_root=os.path.join(_repo_root, "active_clusters"),
-                cluster_name=cluster_name, repo_root=_repo_root,
+                cluster_name=cluster_name,
+                repo_root=_repo_root,
                 template="grafana_tunnel.j2",
                 dest_name=f"grafana_tunnel.{cluster_name}.sh",
             )

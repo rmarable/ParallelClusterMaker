@@ -13,9 +13,9 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from entrypoint_harness import load_entrypoint  # noqa: E402
 
-sys.path.insert(0, os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src"))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src"))
 import pcluster_core  # noqa: E402
+
 
 class TestAnUnreachableStoreIsAnnounced:
     """There are two ways to lose the shared store and they took different
@@ -36,7 +36,8 @@ class TestAnUnreachableStoreIsAnnounced:
     def test_a_resolution_failure_warns(self, monkeypatch, capsys):
         mod = self._mod()
         monkeypatch.setattr(
-            mod, "_read_cluster_record",
+            mod,
+            "_read_cluster_record",
             lambda name, root: {"region": "us-east-1"},
         )
 
@@ -68,13 +69,16 @@ class TestAnUnreachableStoreIsAnnounced:
         ignore it."""
         mod = self._mod()
         monkeypatch.setattr(
-            mod, "_read_cluster_record",
+            mod,
+            "_read_cluster_record",
             lambda name, root: {"region": "us-east-1"},
         )
         monkeypatch.setattr(mod, "_aws_account_id", lambda region: "123456789012")
-        monkeypatch.setattr(mod, "_derive_locks_bucket",
-                            lambda **kw: "parallelclustermaker-locks-x")
+        monkeypatch.setattr(
+            mod, "_derive_locks_bucket", lambda **kw: "parallelclustermaker-locks-x"
+        )
         import boto3
+
         monkeypatch.setattr(boto3, "client", lambda *a, **k: object())
         s3, bucket = mod._cluster_store("certify")
         assert bucket == "parallelclustermaker-locks-x"

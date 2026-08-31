@@ -26,9 +26,7 @@ REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 BENCHMARK = os.path.join(REPO_ROOT, "hpc-benchmark", "hpc-benchmark.sh")
 TEMPLATE_DIR = os.path.join(REPO_ROOT, "templates")
 
-pytestmark = pytest.mark.skipif(
-    shutil.which("bash") is None, reason="bash not available"
-)
+pytestmark = pytest.mark.skipif(shutil.which("bash") is None, reason="bash not available")
 
 
 def _sha256(path):
@@ -77,7 +75,7 @@ class TestTheDriverCanBeSourcedFromAnInteractiveShell:
             "echo SOURCE_OK\n"
         )
         return subprocess.run(
-            ["bash", "-c", f'exec -a {argv0} bash -s'],
+            ["bash", "-c", f"exec -a {argv0} bash -s"],
             input=inner.encode(),
             capture_output=True,
             cwd=str(tmp_path),
@@ -116,14 +114,12 @@ class TestTheDriverCanBeSourcedFromAnInteractiveShell:
         implementation. This asserts the bare `dirname "$0"` this replaced does
         still fail on that argv[0]."""
         r = subprocess.run(
-            ["bash", "-c", 'exec -a -bash bash -s'],
+            ["bash", "-c", "exec -a -bash bash -s"],
             input=b'dirname "$0"\n',
             capture_output=True,
             cwd=str(tmp_path),
         )
-        assert r.returncode != 0, (
-            "`dirname \"-bash\"` no longer fails, so these tests prove nothing"
-        )
+        assert r.returncode != 0, '`dirname "-bash"` no longer fails, so these tests prove nothing'
 
 
 class TestSourcingDoesNotLeakShellOptionsIntoTheCaller:
@@ -185,9 +181,10 @@ class TestSourcingDoesNotLeakShellOptionsIntoTheCaller:
     def test_an_unset_variable_after_sourcing_does_not_kill_the_session(self, tmp_path):
         """-u is the other half, and it fires on ordinary interactive typing --
         referencing any variable the caller has not set."""
-        r = self._source_then('echo "[${THIS_IS_NOT_SET:-}]"\n'
-                              'echo "$THIS_IS_ALSO_NOT_SET"\n'
-                              "echo STILL_ALIVE", tmp_path)
+        r = self._source_then(
+            'echo "[${THIS_IS_NOT_SET:-}]"\necho "$THIS_IS_ALSO_NOT_SET"\necho STILL_ALIVE',
+            tmp_path,
+        )
         assert b"STILL_ALIVE" in r.stdout, (
             "the shell died on an unset variable after sourcing -- set -u leaked.\n"
             f"stdout: {r.stdout.decode()}\nstderr: {r.stderr.decode()}"
@@ -198,12 +195,7 @@ class TestSourcingDoesNotLeakShellOptionsIntoTheCaller:
         pass against a driver carrying no `set` line at all, and against a harness
         whose shell never had -e in the first place -- so assert that this harness
         does observe the leak when the shell really is put into -e."""
-        inner = (
-            "set -euo pipefail\n"
-            'echo "OPTS_AFTER=[$-]"\n'
-            "false\n"
-            "echo STILL_ALIVE\n"
-        )
+        inner = 'set -euo pipefail\necho "OPTS_AFTER=[$-]"\nfalse\necho STILL_ALIVE\n'
         r = subprocess.run(
             ["bash", "-c", "exec -a -bash bash -s"],
             input=inner.encode(),
@@ -240,8 +232,7 @@ class TestTheDispatchPathStillRunsUnderStrictMode:
         with open(BENCHMARK) as fh:
             lines = fh.read().splitlines()
         guard = next(
-            i for i, ln in enumerate(lines)
-            if ln.startswith('[[ -n "${HPC_BENCHMARK_LIB_ONLY')
+            i for i, ln in enumerate(lines) if ln.startswith('[[ -n "${HPC_BENCHMARK_LIB_ONLY')
         )
         sets = [i for i, ln in enumerate(lines) if ln.strip() == "set -euo pipefail"]
         assert len(sets) == 1, f"expected exactly one top-level `set`: lines {sets}"
@@ -256,12 +247,8 @@ class TestTheDispatchPathStillRunsUnderStrictMode:
         bin/ and the mkdir lock live."""
         with open(BENCHMARK) as fh:
             lines = fh.read().splitlines()
-        set_at = next(
-            i for i, ln in enumerate(lines) if ln.strip() == "set -euo pipefail"
-        )
-        case_at = next(
-            i for i, ln in enumerate(lines) if ln.strip() == 'case "$command" in'
-        )
+        set_at = next(i for i, ln in enumerate(lines) if ln.strip() == "set -euo pipefail")
+        case_at = next(i for i, ln in enumerate(lines) if ln.strip() == 'case "$command" in')
         assert set_at < case_at, (
             f"the `set` is at line {set_at + 1}, after the dispatch case at "
             f"{case_at + 1} -- cmd_install/cmd_run would run without strict mode"
@@ -272,17 +259,15 @@ class TestTheDispatchPathStillRunsUnderStrictMode:
         assert r.returncode != 0, r.stdout + r.stderr
         assert b"unknown command" in r.stderr, r.stderr
 
-    def test_strict_mode_is_actually_in_force_by_the_time_a_command_runs(
-        self, tmp_path
-    ):
+    def test_strict_mode_is_actually_in_force_by_the_time_a_command_runs(self, tmp_path):
         """Reads the options back out of the running dispatch path rather than
         trusting the source: a `set` that is present but somehow not reached would
         pass the two static tests above."""
         with open(BENCHMARK) as fh:
             src = fh.read()
         probe = src.replace(
-            '    -h|--help) _usage_main; exit 0 ;;',
-            '    -h|--help) _usage_main; exit 0 ;;\n'
+            "    -h|--help) _usage_main; exit 0 ;;",
+            "    -h|--help) _usage_main; exit 0 ;;\n"
             '    _opts) echo "DISPATCH_OPTS=[$-]";'
             ' echo "PIPEFAIL=[$(set -o | grep ^pipefail)]"; exit 0 ;;',
             1,
@@ -291,9 +276,7 @@ class TestTheDispatchPathStillRunsUnderStrictMode:
         spliced = tmp_path / "probe-driver.sh"
         spliced.write_text(probe)
         spliced.chmod(0o755)
-        r = subprocess.run(
-            [_BASH, str(spliced), "_opts"], capture_output=True, cwd=str(tmp_path)
-        )
+        r = subprocess.run([_BASH, str(spliced), "_opts"], capture_output=True, cwd=str(tmp_path))
         out = r.stdout.decode()
         opts = re.search(r"DISPATCH_OPTS=\[(.*)\]", out).group(1)
         assert "e" in opts, f"-e is not in force in the dispatch path: {opts!r}"
@@ -398,13 +381,9 @@ def _function_body(name):
     """
     with open(BENCHMARK) as fh:
         lines = fh.read().splitlines()
-    start = next(
-        (i for i, l in enumerate(lines) if l.startswith(f"{name}() {{")), None
-    )
+    start = next((i for i, l in enumerate(lines) if l.startswith(f"{name}() {{")), None)
     assert start is not None, f"function {name}() not found in {BENCHMARK}"
-    end = next(
-        (i for i in range(start + 1, len(lines)) if lines[i] == "}"), None
-    )
+    end = next((i for i in range(start + 1, len(lines)) if lines[i] == "}"), None)
     assert end is not None, f"no closing brace found for {name}()"
     return "\n".join(lines[start : end + 1])
 
@@ -494,9 +473,7 @@ _BASH = shutil.which("bash")
 
 def _run_bash(script):
     """Run a snippet under the real bash and return its stdout."""
-    return subprocess.run(
-        [_BASH, "-c", script], capture_output=True, text=True
-    ).stdout
+    return subprocess.run([_BASH, "-c", script], capture_output=True, text=True).stdout
 
 
 # Everything cmd_run's stream path shells out to. PATH is replaced wholesale so
@@ -507,15 +484,38 @@ def _run_bash(script):
 # via libarchive. Since these harnesses replace PATH wholesale, omitting gzip
 # passes locally and fails on a Linux CI runner with "gzip: Cannot exec".
 _STUB_PASSTHROUGH = (
-    "bash", "sh", "mv", "rm", "find", "sort", "head", "awk", "uname",
-    "basename", "dirname", "mkdir", "tee", "cat", "date", "cp", "chmod",
-    "sed", "grep", "tr", "cut", "wc", "mktemp", "make", "sha256sum", "shasum",
-    "gzip", "gunzip",
+    "bash",
+    "sh",
+    "mv",
+    "rm",
+    "find",
+    "sort",
+    "head",
+    "awk",
+    "uname",
+    "basename",
+    "dirname",
+    "mkdir",
+    "tee",
+    "cat",
+    "date",
+    "cp",
+    "chmod",
+    "sed",
+    "grep",
+    "tr",
+    "cut",
+    "wc",
+    "mktemp",
+    "make",
+    "sha256sum",
+    "shasum",
+    "gzip",
+    "gunzip",
 )
 
 
-def _fake_gcc(bindir, march, compile_rc=0, resolvable=True, probe_rc=2,
-              march_row=True):
+def _fake_gcc(bindir, march, compile_rc=0, resolvable=True, probe_rc=2, march_row=True):
     """A gcc stub that answers -Q --help=target with `march` and "compiles".
 
     The driver reads the microarchitecture out of gcc rather than out of
@@ -557,7 +557,7 @@ def _fake_gcc(bindir, march, compile_rc=0, resolvable=True, probe_rc=2,
         "done\n"
         f"[[ {compile_rc} -eq 0 ]] || exit {compile_rc}\n"
         "out=\n"
-        'while [[ $# -gt 0 ]]; do\n'
+        "while [[ $# -gt 0 ]]; do\n"
         '  [[ "$1" == "-o" ]] && { out="$2"; shift 2; continue; }\n'
         "  shift\n"
         "done\n"
@@ -568,9 +568,17 @@ def _fake_gcc(bindir, march, compile_rc=0, resolvable=True, probe_rc=2,
     return gcc
 
 
-def _stream_harness(tmp_path, march, script, compile_rc=0, with_gcc=True,
-                    resolvable=True, break_mv=False, probe_rc=2,
-                    march_row=True):
+def _stream_harness(
+    tmp_path,
+    march,
+    script,
+    compile_rc=0,
+    with_gcc=True,
+    resolvable=True,
+    break_mv=False,
+    probe_rc=2,
+    march_row=True,
+):
     """Run `script` against the real driver with only a fake gcc on PATH.
 
     `nproc` is stubbed too: it is absent on macOS, where the suite also runs.
@@ -651,7 +659,8 @@ class TestStreamFollowsTheNodeClass:
         """An empty march would name the binary `stream-`, which collides across
         every node class."""
         r = _stream_harness(
-            tmp_path, "irrelevant",
+            tmp_path,
+            "irrelevant",
             f"""
             set -euo pipefail
             HPC_BENCHMARK_LIB_ONLY=1 source {BENCHMARK!r}
@@ -661,7 +670,6 @@ class TestStreamFollowsTheNodeClass:
         )
         assert r.returncode == 0, r.stderr
         assert r.stdout.strip() == b"unknown"
-
 
     def _run_stream(self, tmp_path, prefix, march, results, **kw):
         # BENCH_BIN is set both before and after sourcing: the driver assigns it
@@ -721,8 +729,7 @@ class TestStreamFollowsTheNodeClass:
         Without the explicit || _die the run continued and exec'd a binary that
         was never produced."""
         prefix = self._prefix(tmp_path)
-        r = self._run_stream(tmp_path, prefix, "znver3", tmp_path / "results",
-                             compile_rc=1)
+        r = self._run_stream(tmp_path, prefix, "znver3", tmp_path / "results", compile_rc=1)
         assert r.returncode != 0, r.stdout
         assert b"RUN_OK" not in r.stdout
         assert b"STREAM compile failed" in r.stderr
@@ -736,9 +743,7 @@ class TestStreamFollowsTheNodeClass:
         assert r.returncode != 0
         assert b"install --tools stream" in r.stderr
 
-    def test_compiling_without_a_cached_source_never_reaches_the_compiler(
-        self, tmp_path
-    ):
+    def test_compiling_without_a_cached_source_never_reaches_the_compiler(self, tmp_path):
         """The pre-flight check on the cached source is what turns a missing file
         into an actionable message. Without it gcc is handed a nonexistent path
         and the operator gets a compiler error about the driver's internals."""
@@ -827,8 +832,9 @@ class TestStreamFollowsTheNodeClass:
         own instance of the set -e blind spot. Without its explicit check the run
         exec'd a stream.bin that was never written."""
         prefix = self._prefix(tmp_path)
-        r = self._run_stream(tmp_path, prefix, "ignored", tmp_path / "results",
-                             compile_rc=1, resolvable=False)
+        r = self._run_stream(
+            tmp_path, prefix, "ignored", tmp_path / "results", compile_rc=1, resolvable=False
+        )
         assert r.returncode != 0, r.stdout
         assert b"RUN_OK" not in r.stdout
         assert b"could not be built on this node" in r.stderr
@@ -840,8 +846,7 @@ class TestStreamFollowsTheNodeClass:
         prefix = self._prefix(tmp_path)
         (prefix / "stream-skylake-avx512").write_text("#!/bin/bash\necho STREAM_RAN\n")
         (prefix / "stream-skylake-avx512").chmod(0o755)
-        r = self._run_stream(tmp_path, prefix, "znver3", tmp_path / "results",
-                             with_gcc=False)
+        r = self._run_stream(tmp_path, prefix, "znver3", tmp_path / "results", with_gcc=False)
         assert r.returncode == 0, r.stderr + r.stdout
         assert b"RUN_OK" in r.stdout
         assert b"may under-report" in r.stderr
@@ -849,8 +854,7 @@ class TestStreamFollowsTheNodeClass:
 
     def test_a_node_with_neither_compiler_nor_binary_aborts(self, tmp_path):
         prefix = self._prefix(tmp_path)
-        r = self._run_stream(tmp_path, prefix, "znver3", tmp_path / "results",
-                             with_gcc=False)
+        r = self._run_stream(tmp_path, prefix, "znver3", tmp_path / "results", with_gcc=False)
         assert r.returncode != 0
         assert b"no STREAM binary" in r.stderr
 
@@ -874,7 +878,7 @@ class TestStreamFollowsTheNodeClass:
         BENCH_BIN={str(prefix)!r}
         HPC_BENCHMARK_LIB_ONLY=1 source {BENCHMARK!r}
         BENCH_BIN={str(prefix)!r}
-        cmd_run --tests stream,osu --results-dir {str(tmp_path / 'results')!r}
+        cmd_run --tests stream,osu --results-dir {str(tmp_path / "results")!r}
         """
         r = _stream_harness(tmp_path, "znver3", script)
         assert r.returncode != 0
@@ -899,8 +903,7 @@ class TestStreamFollowsTheNodeClass:
             "no source to compile on a node with no route to the internet"
         )
         assert (prefix / "stream-znver3").is_file(), (
-            "install did not produce a STREAM binary named for this node's "
-            "microarchitecture"
+            "install did not produce a STREAM binary named for this node's microarchitecture"
         )
 
     def test_run_actually_calls_the_per_march_helpers(self):
@@ -946,7 +949,8 @@ class TestGccsExitStatusDoesNotDecideTheMarch:
         """Without this the test above passes whether or not the stub models the
         bug, and the suite goes back to reporting green on the shipped defect."""
         r = _stream_harness(
-            tmp_path, "skylake-avx512",
+            tmp_path,
+            "skylake-avx512",
             """
             set -uo pipefail
             gcc -march=native -Q --help=target >/dev/null 2>&1
@@ -970,7 +974,11 @@ class TestGccsExitStatusDoesNotDecideTheMarch:
         every node class would quietly share one `stream-valid` binary. The parse
         must anchor on $1 being exactly `-march=`."""
         r = _stream_harness(
-            tmp_path, "irrelevant", self._SCRIPT, march_row=False, probe_rc=2,
+            tmp_path,
+            "irrelevant",
+            self._SCRIPT,
+            march_row=False,
+            probe_rc=2,
         )
         assert r.returncode == 0, r.stderr
         assert r.stdout.strip() == b"unknown", r.stdout
@@ -986,7 +994,11 @@ class TestGccsExitStatusDoesNotDecideTheMarch:
         old for -Q --help=target, or clang, prints no -march= row; the caller's
         `unknown` path is what keeps that off the shared bin/."""
         r = _stream_harness(
-            tmp_path, "irrelevant", self._SCRIPT, resolvable=False, probe_rc=2,
+            tmp_path,
+            "irrelevant",
+            self._SCRIPT,
+            resolvable=False,
+            probe_rc=2,
         )
         assert r.returncode == 0, r.stderr
         assert r.stdout.strip() == b"unknown"
@@ -999,9 +1011,10 @@ class TestGccsExitStatusDoesNotDecideTheMarch:
         with open(BENCHMARK) as fh:
             src = fh.read()
         start = src.index("_native_march()")
-        body = src[start:src.index("\n}\n", start)]
+        body = src[start : src.index("\n}\n", start)]
         gcc_cmd = [
-            ln.split("#")[0].rstrip() for ln in body.splitlines()
+            ln.split("#")[0].rstrip()
+            for ln in body.splitlines()
             if "gcc -march=native" in ln.split("#")[0]
         ]
         assert len(gcc_cmd) == 1, gcc_cmd
@@ -1037,7 +1050,7 @@ class TestBenchmarkBuildDiagnostics:
             and "command -v" not in line
         ]
         assert not offenders, (
-            "build steps must log through _build_step, not discard output: " f"{offenders}"
+            f"build steps must log through _build_step, not discard output: {offenders}"
         )
 
     def test_build_failure_prints_the_log_tail_and_path(self, tmp_path):
@@ -1082,7 +1095,8 @@ def _driver_sed_expr(needle):
     with open(BENCHMARK) as fh:
         lines = fh.read().splitlines()
     matches = [
-        l.strip() for l in lines
+        l.strip()
+        for l in lines
         if needle in l and l.strip().startswith("'s/") and not l.strip().startswith("#")
     ]
     assert len(matches) == 1, f"expected exactly one sed expression for {needle!r}: {matches}"
@@ -1101,9 +1115,9 @@ class TestHpcgConfigureTarget:
         with open(BENCHMARK) as fh:
             source = fh.read()
         assert "configure MPI_GCC_OMP" in source
-        assert "configure MPI_GCC " not in source and not source.count(
-            "configure MPI_GCC\n"
-        ), "MPI_GCC has no setup/Make.MPI_GCC in HPCG 3.1; configure exits 127"
+        assert "configure MPI_GCC " not in source and not source.count("configure MPI_GCC\n"), (
+            "MPI_GCC has no setup/Make.MPI_GCC in HPCG 3.1; configure exits 127"
+        )
 
     def test_a_missing_setup_file_is_reported_before_configure_runs(self, tmp_path):
         """Without this check the failure surfaces one step later, as a make
@@ -1173,9 +1187,7 @@ class TestHpcgOpenMpDefaultNone:
         )
 
 
-INTEGRATION_SCRIPT = os.path.join(
-    REPO_ROOT, "tests", "integration", "run_integration_test.sh"
-)
+INTEGRATION_SCRIPT = os.path.join(REPO_ROOT, "tests", "integration", "run_integration_test.sh")
 DOCS = [
     os.path.join(REPO_ROOT, "README.md"),
     os.path.join(REPO_ROOT, "tests", "integration", "README.md"),
@@ -1239,7 +1251,9 @@ class TestMonitoringWrapperProfileGuard:
         )
         assert r.returncode == 0, r.stderr
 
-    def test_sourcing_a_profile_with_an_unset_variable_does_not_abort(self, tmp_path, cluster_params):
+    def test_sourcing_a_profile_with_an_unset_variable_does_not_abort(
+        self, tmp_path, cluster_params
+    ):
         """A profile that references an unset variable on an export line is a
         fatal error under `set -u`, which the wrapper enables on line 2, so the
         monitoring install dies before it starts. Ubuntu's own /etc/profile is
@@ -1371,8 +1385,8 @@ def _run_wrapper(
         ("/etc/profile", f"{root}/profile"),
         ("/etc/parallelcluster/cfnconfig", f"{root}/cfnconfig"),
         ("/var/log/parallelcluster-monitoring-install.log", f"{root}/install.log"),
-        ('/home/${CLUSTER_USER}', root + '/home/${CLUSTER_USER}'),
-        ('/tmp/${TARBALL}', root + '/${TARBALL}'),
+        ("/home/${CLUSTER_USER}", root + "/home/${CLUSTER_USER}"),
+        ("/tmp/${TARBALL}", root + "/${TARBALL}"),
     ):
         assert original in wrapper, f"the wrapper no longer references {original}"
         wrapper = wrapper.replace(original, replacement)
@@ -1394,7 +1408,7 @@ def _run_wrapper(
         marker = '\tawk "$_compose_fetch"'
         assert marker in wrapper, "the compose patch is no longer an awk program"
         head, _, tail = wrapper.partition(marker)
-        end = tail.index("' \"$_al2023_installer\" > ") + len("' ")
+        end = tail.index('\' "$_al2023_installer" > ') + len("' ")
         wrapper = head + "\tcat " + tail[end:]
 
     with open(os.path.join(root, "profile"), "w"):
@@ -1415,9 +1429,7 @@ def _run_wrapper(
         os.makedirs(os.path.join(monitoring_home, "installer"))
         with open(os.path.join(monitoring_home, "installer", "install.sh"), "w") as fh:
             fh.write('#!/bin/bash\necho install.sh >> "$TRACE"\n')
-        _write_upstream_installer(
-            monitoring_home, upstream_body or _UPSTREAM_AL2023_INSTALLER
-        )
+        _write_upstream_installer(monitoring_home, upstream_body or _UPSTREAM_AL2023_INSTALLER)
 
     # rm and mkdir run for real so the tree's survival is observable, which is
     # the whole property under test -- but a failed path substitution above
@@ -1475,8 +1487,11 @@ def _run_wrapper(
     env = {**os.environ, **(extra_env or {})}
     if background:
         p = subprocess.Popen(
-            ["bash", script], cwd=root, env=env,
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            ["bash", script],
+            cwd=root,
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
         )
         return p, None, monitoring_home
     r = subprocess.run(["bash", script], capture_output=True, cwd=root, env=env)
@@ -1525,13 +1540,10 @@ class TestMonitoringWrapperOnlyTheHeadNodeWritesTheTree:
                 f"and fail OnNodeConfigured. trace: {trace}"
             )
         assert "install.sh" in trace, (
-            f"the compute node did not run the installer, so the exporters never "
-            f"start: {trace}"
+            f"the compute node did not run the installer, so the exporters never start: {trace}"
         )
 
-    def test_the_tree_the_compute_node_reads_survives_the_run(
-        self, cluster_params, tmp_path
-    ):
+    def test_the_tree_the_compute_node_reads_survives_the_run(self, cluster_params, tmp_path):
         """The trace assertion above pins the commands; this pins the outcome
         they exist to protect, so an extraction reintroduced by some other
         spelling is still caught."""
@@ -1539,13 +1551,9 @@ class TestMonitoringWrapperOnlyTheHeadNodeWritesTheTree:
         r, _, home = _run_wrapper(cluster_params, tmp_path, "ComputeFleet", tree=True)
         assert r.returncode == 0, r.stderr.decode()
         with open(os.path.join(home, "installer", "install.sh")) as fh:
-            assert fh.read() == stamp, (
-                "the compute node replaced the head node's installer"
-            )
+            assert fh.read() == stamp, "the compute node replaced the head node's installer"
 
-    def test_a_compute_node_fails_loudly_when_the_tree_is_absent(
-        self, cluster_params, tmp_path
-    ):
+    def test_a_compute_node_fails_loudly_when_the_tree_is_absent(self, cluster_params, tmp_path):
         """A compute node cannot create the tree, so if it is missing the head
         node's install did not complete. Exiting 0 there would leave the node up
         with no exporters and nothing in the log to explain it -- and `bash
@@ -1554,9 +1562,7 @@ class TestMonitoringWrapperOnlyTheHeadNodeWritesTheTree:
         r, trace, _ = _run_wrapper(cluster_params, tmp_path, "ComputeFleet", tree=False)
         assert r.returncode != 0, "a compute node with no monitoring tree exited 0"
         output = (r.stdout + r.stderr).decode()
-        assert "install.sh" in output, (
-            f"the failure does not name what is missing: {output!r}"
-        )
+        assert "install.sh" in output, f"the failure does not name what is missing: {output!r}"
         # Deleting the elif arm also exits non-zero -- bash on a missing script is
         # rc=127 -- so the diagnosis is the property, not the exit status.
         assert "the head node's monitoring install did not complete" in output, (
@@ -1575,9 +1581,7 @@ class TestMonitoringWrapperOnlyTheHeadNodeWritesTheTree:
             f"missing; the `exit 1` in the elif arm is gone: {output!r}"
         )
 
-    def test_a_login_node_does_not_write_the_shared_tree(
-        self, cluster_params, tmp_path
-    ):
+    def test_a_login_node_does_not_write_the_shared_tree(self, cluster_params, tmp_path):
         """The gate must name the one node type that may write, not exclude the
         one that may not. Spelling it `!= "ComputeFleet"` is equivalent only
         while those two values are the whole world -- ParallelCluster also has
@@ -1639,34 +1643,34 @@ class TestMonitoringWrapperSkipsLoginNodes:
     time to do it.
     """
 
-    def test_a_login_node_does_no_work_and_exits_zero(
-        self, cluster_params, tmp_path
-    ):
+    def test_a_login_node_does_no_work_and_exits_zero(self, cluster_params, tmp_path):
         """Whether or not the tree is present -- there is nothing here for a
         login node either way."""
         for tree in (False, True):
             r, trace, _ = _run_wrapper(
-                cluster_params, tmp_path, "LoginNode", tree=tree,
+                cluster_params,
+                tmp_path,
+                "LoginNode",
+                tree=tree,
             )
             assert r.returncode == 0, (
                 f"tree={tree}: a login node must not fail this wrapper; "
                 f"{(r.stdout + r.stderr).decode()[:300]}"
             )
             for forbidden in ("aws s3 cp", "rm ", "mkdir ", "tar ", "chown "):
-                assert forbidden not in trace, (
-                    f"tree={tree}: login node ran {forbidden!r}"
-                )
+                assert forbidden not in trace, f"tree={tree}: login node ran {forbidden!r}"
 
     def test_it_never_runs_the_installer(self, cluster_params, tmp_path):
         """The defect itself. The installer is what fails on a login node,
         so the assertion is on the execution trace, not on the exit status:
         a stubbed installer returns 0 and would hide this entirely."""
         r, trace, _ = _run_wrapper(
-            cluster_params, tmp_path, "LoginNode", tree=True,
+            cluster_params,
+            tmp_path,
+            "LoginNode",
+            tree=True,
         )
-        assert "install.sh" not in trace, (
-            f"the login node invoked the installer: {trace}"
-        )
+        assert "install.sh" not in trace, f"the login node invoked the installer: {trace}"
 
     def test_it_does_not_wait(self, cluster_params, tmp_path):
         """With nothing to install there is nothing to wait for. The old
@@ -1687,11 +1691,12 @@ class TestMonitoringWrapperSkipsLoginNodes:
         """Vacuity guard: 'skip the installer' must not become 'skip it
         everywhere'."""
         r, trace, _ = _run_wrapper(
-            cluster_params, tmp_path, "HeadNode", tree=True,
+            cluster_params,
+            tmp_path,
+            "HeadNode",
+            tree=True,
         )
-        assert "install.sh" in trace, (
-            f"the head node no longer runs the installer: {trace}"
-        )
+        assert "install.sh" in trace, f"the head node no longer runs the installer: {trace}"
 
 
 class TestTheDockerComposePluginIsStagedNotFetchedFromGitHub:
@@ -1714,9 +1719,7 @@ class TestTheDockerComposePluginIsStagedNotFetchedFromGitHub:
     check: a text assertion cannot tell which side of an `if` a line sits on."""
 
     def _plugin(self, tmp_path):
-        return os.path.join(
-            str(tmp_path), "libexec", "docker", "cli-plugins", "docker-compose"
-        )
+        return os.path.join(str(tmp_path), "libexec", "docker", "cli-plugins", "docker-compose")
 
     def _upstream(self, home):
         with open(os.path.join(home, "installer", "os", "alinux2023.sh")) as fh:
@@ -1725,9 +1728,7 @@ class TestTheDockerComposePluginIsStagedNotFetchedFromGitHub:
     def test_the_head_node_installs_the_plugin_from_s3(
         self, cluster_params_al2023_monitoring, tmp_path
     ):
-        r, trace, _ = _run_wrapper(
-            cluster_params_al2023_monitoring, tmp_path, "HeadNode"
-        )
+        r, trace, _ = _run_wrapper(cluster_params_al2023_monitoring, tmp_path, "HeadNode")
         assert r.returncode == 0, (
             f"the head node no longer completes.\nstdout: {r.stdout.decode()}\n"
             f"stderr: {r.stderr.decode()}"
@@ -1781,9 +1782,7 @@ class TestTheDockerComposePluginIsStagedNotFetchedFromGitHub:
         private subnet. Both continuation lines have to go, and the chmod below
         them must survive -- it is what makes the staged binary executable in
         upstream's own flow."""
-        r, _, home = _run_wrapper(
-            cluster_params_al2023_monitoring, tmp_path, "HeadNode"
-        )
+        r, _, home = _run_wrapper(cluster_params_al2023_monitoring, tmp_path, "HeadNode")
         assert r.returncode == 0, r.stderr.decode()
         patched = self._upstream(home)
         assert "github.com/docker/compose/releases" not in patched, (
@@ -1794,26 +1793,17 @@ class TestTheDockerComposePluginIsStagedNotFetchedFromGitHub:
             f"command and the node dies on it:\n{patched}"
         )
         assert "chmod +x /usr/libexec/docker/cli-plugins/docker-compose" in patched, (
-            f"the patch removed one line too many and took upstream's chmod with "
-            f"it:\n{patched}"
+            f"the patch removed one line too many and took upstream's chmod with it:\n{patched}"
         )
-        r2 = subprocess.run(
-            ["bash", "-n"], input=patched.encode(), capture_output=True
-        )
-        assert r2.returncode == 0, (
-            f"the patched installer is no longer valid bash: {r2.stderr!r}"
-        )
+        r2 = subprocess.run(["bash", "-n"], input=patched.encode(), capture_output=True)
+        assert r2.returncode == 0, f"the patched installer is no longer valid bash: {r2.stderr!r}"
 
-    def test_patching_twice_is_a_no_op(
-        self, cluster_params_al2023_monitoring, tmp_path
-    ):
+    def test_patching_twice_is_a_no_op(self, cluster_params_al2023_monitoring, tmp_path):
         """The head node's own postinstall can be re-run by hand, and a
         line-offset delete (`sed '/pat/,+1d'` and friends) eats two more lines on
         every pass. Deleting whole logical commands is what makes this idempotent,
         so the second pass is the property, not the guard around it."""
-        r, _, home = _run_wrapper(
-            cluster_params_al2023_monitoring, tmp_path, "HeadNode"
-        )
+        r, _, home = _run_wrapper(cluster_params_al2023_monitoring, tmp_path, "HeadNode")
         assert r.returncode == 0, r.stderr.decode()
         once = self._upstream(home)
 
@@ -1869,9 +1859,7 @@ class TestTheDockerComposePluginIsStagedNotFetchedFromGitHub:
         delete lets upstream overwrite the staged binary and fetch over the
         network from a node that may have none."""
         assert self._UPSTREAM_FETCH in _UPSTREAM_AL2023_INSTALLER
-        body = _UPSTREAM_AL2023_INSTALLER.replace(
-            self._UPSTREAM_FETCH, self._RESHAPES[shape]
-        )
+        body = _UPSTREAM_AL2023_INSTALLER.replace(self._UPSTREAM_FETCH, self._RESHAPES[shape])
 
         r, _, home = _run_wrapper(
             cluster_params_al2023_monitoring, tmp_path, "HeadNode", upstream_body=body
@@ -1882,15 +1870,11 @@ class TestTheDockerComposePluginIsStagedNotFetchedFromGitHub:
         )
         patched = self._upstream(home)
         for downloader in ("curl", "wget"):
-            assert downloader not in patched, (
-                f"a {shape} fetch survived the patch:\n{patched}"
-            )
+            assert downloader not in patched, f"a {shape} fetch survived the patch:\n{patched}"
         assert "chmod +x /usr/libexec/docker/cli-plugins/docker-compose" in patched, (
             f"the patch took upstream's chmod with it:\n{patched}"
         )
-        r2 = subprocess.run(
-            ["bash", "-n"], input=patched.encode(), capture_output=True
-        )
+        r2 = subprocess.run(["bash", "-n"], input=patched.encode(), capture_output=True)
         assert r2.returncode == 0, (
             f"the patched installer is not valid bash, which is a dead node: "
             f"{r2.stderr!r}\n{patched}"
@@ -1927,9 +1911,7 @@ class TestTheDockerComposePluginIsStagedNotFetchedFromGitHub:
         not render there: the S3 object does not exist, and `aws s3 cp` on a
         missing key is a failed node. stage_docker_compose is
         `enable_monitoring and 'alinux' in base_os` for exactly that reason."""
-        r, trace, _ = _run_wrapper(
-            cluster_params_monitoring_enabled, tmp_path, "HeadNode"
-        )
+        r, trace, _ = _run_wrapper(cluster_params_monitoring_enabled, tmp_path, "HeadNode")
         assert r.returncode == 0, r.stderr.decode()
         assert "cli-plugins" not in trace, (
             f"an Ubuntu cluster tried to install the compose plugin from S3: {trace}"
@@ -1953,9 +1935,7 @@ class TestTheDockerComposePluginIsStagedNotFetchedFromGitHub:
         )
 
 
-PERF_DOC_TEMPLATE = os.path.join(
-    REPO_ROOT, "hpc-benchmark", "README-PERFORMANCE.md.j2"
-)
+PERF_DOC_TEMPLATE = os.path.join(REPO_ROOT, "hpc-benchmark", "README-PERFORMANCE.md.j2")
 PERF_DOC_RENDERED = os.path.join(REPO_ROOT, "hpc-benchmark", "README-PERFORMANCE.md")
 
 
@@ -1984,9 +1964,7 @@ class TestPerformanceDocsMatchTheBenchmarkDriver:
             and not line.lstrip().startswith("#")
             and line not in probe
             and not line.lstrip().startswith("echo ")
-            and any(
-                tok in line for tok in ("gcc ", "CFLAGS", "CXXFLAGS", "cc ", "make ")
-            )
+            and any(tok in line for tok in ("gcc ", "CFLAGS", "CXXFLAGS", "cc ", "make "))
         ]
         assert len(build_lines) == 1, (
             f"expected exactly one -march=native compile line, found {build_lines}"
@@ -2048,9 +2026,7 @@ class TestPerformanceDocsMatchTheBenchmarkDriver:
         bash` and re-run install by hand. run now builds bin/osu-cuda itself, so
         those instructions produce a second tree for no benefit -- and nothing
         pinned that comment block, which is how it survived the change."""
-        with open(
-            os.path.join(REPO_ROOT, "hpc-benchmark", "job_hpc-benchmark.sh.j2")
-        ) as fh:
+        with open(os.path.join(REPO_ROOT, "hpc-benchmark", "job_hpc-benchmark.sh.j2")) as fh:
             text = fh.read()
         assert "srun" not in text, (
             "the job script still tells the operator to build OSU from an "
@@ -2091,9 +2067,7 @@ class TestPerformanceDocsMatchTheBenchmarkDriver:
         unconditionally, which was true of the template and wrong for a GPU-only
         cluster. Both are now conditional; if the template's partition logic
         changes, the table has to change with it."""
-        with open(
-            os.path.join(REPO_ROOT, "hpc-benchmark", "job_hpc-benchmark.sh.j2")
-        ) as fh:
+        with open(os.path.join(REPO_ROOT, "hpc-benchmark", "job_hpc-benchmark.sh.j2")) as fh:
             job_template = fh.read()
         assert "#SBATCH --partition={{" in job_template, (
             "the job script's partition is hardcoded again; a GPU-only cluster has "
@@ -2107,8 +2081,7 @@ class TestPerformanceDocsMatchTheBenchmarkDriver:
             with open(path) as fh:
                 text = fh.read()
             assert "| GPU queue only | `gpu` |" in text, (
-                f"{path} does not document that a GPU-only cluster targets the "
-                "gpu partition"
+                f"{path} does not document that a GPU-only cluster targets the gpu partition"
             )
             assert "sbatch --partition=gpu --ntasks-per-node=" in text, (
                 f"{path} does not document the GPU override for a mixed cluster"
@@ -2141,9 +2114,7 @@ class TestPerformanceDocsMatchTheBenchmarkDriver:
 
         argv = ast.unparse(
             ast.parse(
-                inspect.getsource(
-                    pcluster_core.stage_and_upload_hpc_benchmark_driver
-                ).lstrip()
+                inspect.getsource(pcluster_core.stage_and_upload_hpc_benchmark_driver).lstrip()
             )
         )
         assert "'--exclude', '*'" in argv and "'--include', 'hpc-benchmark.sh'" in argv, (
@@ -2180,7 +2151,8 @@ class TestCompileStreamFailuresReachTheCaller:
     @staticmethod
     def _assignments_from(body):
         return [
-            l.strip() for l in body.splitlines()
+            l.strip()
+            for l in body.splitlines()
             if "_compile_stream" in l and "=" in l.split("_compile_stream")[0]
         ]
 
@@ -2215,12 +2187,10 @@ class TestCompileStreamFailuresReachTheCaller:
         out = _run_bash(
             f"f() {{ echo partial; exit 3; }}\n"
             f"g() {{ {builtin} v=$(f); echo continued; }}\n"
-            "( set -euo pipefail; g ); echo \"rc=$?\"\n"
+            '( set -euo pipefail; g ); echo "rc=$?"\n'
         )
         assert "continued" in out, f"{builtin}: expected the caller to continue"
-        assert "rc=0" in out, (
-            f"{builtin} now propagates the failure under set -e: {out!r}"
-        )
+        assert "rc=0" in out, f"{builtin} now propagates the failure under set -e: {out!r}"
 
     @pytest.mark.parametrize(
         "form,body",
@@ -2235,7 +2205,7 @@ class TestCompileStreamFailuresReachTheCaller:
         out = _run_bash(
             "f() { echo partial; exit 3; }\n"
             f"g() {{ {body}; echo continued; }}\n"
-            "( set -euo pipefail; g ); echo \"rc=$?\"\n"
+            '( set -euo pipefail; g ); echo "rc=$?"\n'
         )
         assert "continued" not in out, f"{form}: the caller should not have continued"
         assert "rc=3" in out, f"{form} no longer propagates: {out!r}"
@@ -2246,15 +2216,23 @@ class TestCompileStreamFailuresReachTheCaller:
         to use it as a path. An `if [ -z "$v" ]` check would not catch this."""
         out = _run_bash(
             "f() { echo partial; exit 3; }\n"
-            "g() { local v=$(f); echo \"v=[$v]\"; }\n"
+            'g() { local v=$(f); echo "v=[$v]"; }\n'
             "( set -euo pipefail; g )\n"
         )
         assert "v=[partial]" in out, out
 
 
-def _cuda_harness(tmp_path, script, *, gpu=False, toolkit=False,
-                  header=True, runtime=True, cuda_home_env=None,
-                  nvcc=None):
+def _cuda_harness(
+    tmp_path,
+    script,
+    *,
+    gpu=False,
+    toolkit=False,
+    header=True,
+    runtime=True,
+    cuda_home_env=None,
+    nvcc=None,
+):
     """Drive the CUDA detection helpers with the GPU and the toolkit each faked.
 
     Both halves have to be independently controllable: a CPU head node fronting
@@ -2273,10 +2251,7 @@ def _cuda_harness(tmp_path, script, *, gpu=False, toolkit=False,
     stub.mkdir(parents=True, exist_ok=True)
     if gpu:
         smi = stub / "nvidia-smi"
-        smi.write_text(
-            "#!/bin/bash\n"
-            'echo "GPU 0: NVIDIA A10G (UUID: GPU-0000)"\n'
-        )
+        smi.write_text('#!/bin/bash\necho "GPU 0: NVIDIA A10G (UUID: GPU-0000)"\n')
         smi.chmod(0o755)
     for name in _STUB_PASSTHROUGH:
         real = shutil.which(name)
@@ -2365,8 +2340,7 @@ class TestOsuCudaFollowsTheBuildNode:
         """configure tests for the header AND both libraries, so either half
         missing is still a build abort. Asserted separately because a probe that
         checks only one of them passes any test that removes the whole tree."""
-        out = self._detect(tmp_path, gpu=True, toolkit=True,
-                           cuda_home_env="fake", **kw)
+        out = self._detect(tmp_path, gpu=True, toolkit=True, cuda_home_env="fake", **kw)
         assert "CUDA_HOME=[]" in out, (
             f"a toolkit tree with no {missing} was accepted; --enable-cuda=yes "
             f"would be passed to configure and the OSU build would abort"
@@ -2374,8 +2348,7 @@ class TestOsuCudaFollowsTheBuildNode:
 
     def test_a_cuda_home_pointing_nowhere_is_rejected(self, tmp_path):
         """A stale CUDA_HOME left in the environment must not be trusted."""
-        out = self._detect(tmp_path, gpu=True, toolkit=False,
-                           cuda_home_env="/nonexistent/cuda")
+        out = self._detect(tmp_path, gpu=True, toolkit=False, cuda_home_env="/nonexistent/cuda")
         assert "CUDA_HOME=[]" in out
 
     def _mode(self, tmp_path, **kw):
@@ -2397,8 +2370,7 @@ class TestOsuCudaFollowsTheBuildNode:
         Both locations are asserted: CUDA's packages leave nvcc at
         /usr/local/cuda/bin without putting it on a login shell's PATH, so a
         PATH-only probe reports no compiler on a fully equipped node."""
-        out = self._mode(tmp_path, gpu=True, toolkit=True,
-                         cuda_home_env="fake", nvcc=where)
+        out = self._mode(tmp_path, gpu=True, toolkit=True, cuda_home_env="fake", nvcc=where)
         assert "NVCC=[]" not in out, f"nvcc at {where} was not found: {out}"
         assert "MODE=[yes]" in out, out
 
@@ -2409,8 +2381,7 @@ class TestOsuCudaFollowsTheBuildNode:
         '-d cuda' reads, and every _ENABLE_CUDA_KERNEL_ block in osu_latency.c
         and osu_bw.c is additionally guarded on managed memory -- which run
         never requests. So =basic loses nothing this suite measures."""
-        out = self._mode(tmp_path, gpu=True, toolkit=True,
-                         cuda_home_env="fake", nvcc=None)
+        out = self._mode(tmp_path, gpu=True, toolkit=True, cuda_home_env="fake", nvcc=None)
         assert "NVCC=[]" in out, out
         assert "MODE=[basic]" in out, (
             "a toolkit with no nvcc was given --enable-cuda=yes; configure "
@@ -2464,9 +2435,7 @@ class TestOsuCudaFollowsTheBuildNode:
         # configure call ignores the result -- that is exactly the mutation where
         # both strings are still present and every invocation is CUDA-on. The
         # ./configure line itself must carry no literal --enable-cuda.
-        configure = [
-            line for line in body.splitlines() if "./configure" in line
-        ]
+        configure = [line for line in body.splitlines() if "./configure" in line]
         assert configure, "cmd_install no longer calls ./configure for OSU"
         for line in configure:
             assert "--enable-cuda" not in line, (
@@ -2475,8 +2444,7 @@ class TestOsuCudaFollowsTheBuildNode:
                 "node's install aborts in configure"
             )
         assert '"${osu_cuda_args[@]}"' in body, (
-            "the configure call no longer receives the CUDA args chosen by the "
-            "hardware check"
+            "the configure call no longer receives the CUDA args chosen by the hardware check"
         )
         assert "_host_has_gpu" in body, (
             "cmd_install does not consult the build node's hardware; if this became "
@@ -2484,9 +2452,7 @@ class TestOsuCudaFollowsTheBuildNode:
         )
         # Comments are allowed to name the flag -- explaining why it is the wrong
         # signal is the point. Code that reads it is not.
-        code = "\n".join(
-            line for line in body.splitlines() if not line.lstrip().startswith("#")
-        )
+        code = "\n".join(line for line in body.splitlines() if not line.lstrip().startswith("#"))
         assert "enable_gpu" not in code, (
             "cmd_install reads a cluster-level GPU flag. hpc-benchmark.sh is copied, "
             "not rendered, so it has no cluster vars -- and the head node's hardware "
@@ -2511,7 +2477,7 @@ class TestOsuCudaFollowsTheBuildNode:
         """bin/ is shared storage and survives rebuilds. A stale stamp would make
         run pass '-d cuda' to a binary that no longer has the option compiled in."""
         body = _function_body("cmd_install")
-        assert "rm -f \"$(_osu_cuda_stamp_path" in body, (
+        assert 'rm -f "$(_osu_cuda_stamp_path' in body, (
             "a non-CUDA OSU rebuild leaves the previous CUDA stamp in place"
         )
 
@@ -2523,7 +2489,8 @@ class TestOsuCudaFollowsTheBuildNode:
         # both '-d cuda' and the hang, and it sits ABOVE the guards -- matching it
         # would put the "use" before every "guard" and fail on correct code.
         body = "\n".join(
-            line for line in _function_body("cmd_run").splitlines()
+            line
+            for line in _function_body("cmd_run").splitlines()
             if not line.lstrip().startswith("#")
         )
         guards = {
@@ -2537,9 +2504,7 @@ class TestOsuCudaFollowsTheBuildNode:
         idx_use = body.index("-d cuda")
         for name, what in guards.items():
             assert name in body, f"cmd_run no longer checks {what} before -d cuda"
-            assert body.index(name) < idx_use, (
-                f"the -d cuda run is not behind the {name} guard"
-            )
+            assert body.index(name) < idx_use, f"the -d cuda run is not behind the {name} guard"
 
 
 def _fake_mpi_root(tmp_path, name, *, cuda=True, wrappers=True, launcher=True):
@@ -2562,8 +2527,7 @@ def _fake_mpi_root(tmp_path, name, *, cuda=True, wrappers=True, launcher=True):
     info = root / "bin" / "ompi_info"
     value = "true" if cuda else "false"
     info.write_text(
-        "#!/bin/bash\n"
-        f'echo "mca:mpi:base:param:mpi_built_with_cuda_support:value:{value}"\n'
+        f'#!/bin/bash\necho "mca:mpi:base:param:mpi_built_with_cuda_support:value:{value}"\n'
     )
     info.chmod(0o755)
     if launcher:
@@ -2579,16 +2543,16 @@ def _fake_mpi_root(tmp_path, name, *, cuda=True, wrappers=True, launcher=True):
         # see that. Real option parsing rather than `shift 2` -- that form
         # silently ate `-x LD_LIBRARY_PATH` and exec'd the flag as the program.
         mpirun.write_text(
-            '#!/bin/bash\n'
+            "#!/bin/bash\n"
             f'echo "LAUNCHED BY {name}"\n'
             'echo "LAUNCHER LD_LIBRARY_PATH=${LD_LIBRARY_PATH:-<unset>}"\n'
-            'while [[ $# -gt 0 ]]; do\n'
+            "while [[ $# -gt 0 ]]; do\n"
             '  case "$1" in\n'
-            '    -n|-np) shift 2 ;;\n'
+            "    -n|-np) shift 2 ;;\n"
             '    -x) echo "LAUNCHER FORWARDS $2"; shift 2 ;;\n'
-            '    *) break ;;\n'
-            '  esac\n'
-            'done\n'
+            "    *) break ;;\n"
+            "  esac\n"
+            "done\n"
             'exec "$@"\n'
         )
         mpirun.chmod(0o755)
@@ -2603,12 +2567,25 @@ def _fake_mpi_root(tmp_path, name, *, cuda=True, wrappers=True, launcher=True):
     return root
 
 
-def _osu_cuda_run_harness(tmp_path, *, gpu=True, installed_cuda=False,
-                          cached_src=True, src_payload=None,
-                          with_make=True, toolkit=True, prebuilt_tree=False,
-                          lock_held=False, build_rc=0, tests="osu", nvcc=None,
-                          cuda_mpi=True, cuda_mpi_wrappers=True,
-                          stamp_mpi="__match__", inherited_llp=None):
+def _osu_cuda_run_harness(
+    tmp_path,
+    *,
+    gpu=True,
+    installed_cuda=False,
+    cached_src=True,
+    src_payload=None,
+    with_make=True,
+    toolkit=True,
+    prebuilt_tree=False,
+    lock_held=False,
+    build_rc=0,
+    tests="osu",
+    nvcc=None,
+    cuda_mpi=True,
+    cuda_mpi_wrappers=True,
+    stamp_mpi="__match__",
+    inherited_llp=None,
+):
     """Run cmd_run's osu branch with the whole OSU toolchain faked.
 
     The point of interest is which pt2pt directory the -d cuda tests execute
@@ -2642,8 +2619,7 @@ def _osu_cuda_run_harness(tmp_path, *, gpu=True, installed_cuda=False,
     # stands in for the default on PATH. Both exist even when cuda_mpi=False, so
     # the no-CUDA-MPI case models an AMI whose only MPI cannot do -d cuda rather
     # than a node with no MPI.
-    cuda_mpi_root = _fake_mpi_root(tmp_path, "mpi-cuda", cuda=cuda_mpi,
-                                   wrappers=cuda_mpi_wrappers)
+    cuda_mpi_root = _fake_mpi_root(tmp_path, "mpi-cuda", cuda=cuda_mpi, wrappers=cuda_mpi_wrappers)
     stamp_root = str(cuda_mpi_root) if stamp_mpi == "__match__" else stamp_mpi
 
     def _stamp(text_root):
@@ -2687,19 +2663,17 @@ def _osu_cuda_run_harness(tmp_path, *, gpu=True, installed_cuda=False,
     # out-of-tree one, which is exactly the bug that shipped -- `make -C srcdir`
     # then found no Makefile and died on "No rule to make target 'install'".
     (inner / "configure").write_text(
-        '#!/bin/bash\n'
+        "#!/bin/bash\n"
         'echo "CONFIGURE ARGS=$*"\n'
         'for a in "$@"; do\n'
         '  case "$a" in CC=*|CXX=*) "${a#*=}" --version || exit 1 ;; esac\n'
-        'done\n'
+        "done\n"
         'echo "CONFIGURED IN $PWD" > Makefile\n'
-        'exit 0\n'
+        "exit 0\n"
     )
     (inner / "configure").chmod(0o755)
     good = tmp_path / "good.tar.gz"
-    subprocess.run(
-        ["tar", "-czf", str(good), "-C", str(tmp_path), inner.name], check=True
-    )
+    subprocess.run(["tar", "-czf", str(good), "-C", str(tmp_path), inner.name], check=True)
     expected_sha = hashlib.sha256(good.read_bytes()).hexdigest()
 
     src = prefix / "src" / f"osu-micro-benchmarks-{version}.tar.gz"
@@ -2724,20 +2698,20 @@ def _osu_cuda_run_harness(tmp_path, *, gpu=True, installed_cuda=False,
         m.write_text(
             "#!/bin/bash\n"
             f"rc={build_rc}\n"
-            'while [[ $# -gt 0 ]]; do\n'
+            "while [[ $# -gt 0 ]]; do\n"
             '  case "$1" in -C) cd "$2" || exit 1; shift 2 ;; *) shift ;; esac\n'
-            'done\n'
-            '[[ -f Makefile ]] || {\n'
-            '  echo "make: *** No rule to make target \'install\'.  Stop." >&2\n'
-            '  exit 2\n'
-            '}\n'
+            "done\n"
+            "[[ -f Makefile ]] || {\n"
+            "  echo \"make: *** No rule to make target 'install'.  Stop.\" >&2\n"
+            "  exit 2\n"
+            "}\n"
             '[[ "$rc" == 0 ]] || { echo "make: simulated failure" >&2; exit "$rc"; }\n'
-            f'd={str(cuda_tree)!r}/libexec/osu-micro-benchmarks/mpi/pt2pt\n'
+            f"d={str(cuda_tree)!r}/libexec/osu-micro-benchmarks/mpi/pt2pt\n"
             'mkdir -p "$d"\n'
-            'for n in osu_latency osu_bw; do\n'
+            "for n in osu_latency osu_bw; do\n"
             '  printf "#!/bin/bash\\necho \\"RAN %s FROM cuda-tree ARGS=\\$*\\"\\n" "$n" > "$d/$n"\n'
             '  chmod 755 "$d/$n"\n'
-            'done\n'
+            "done\n"
         )
         m.chmod(0o755)
     for name in _STUB_PASSTHROUGH + ("tar", "nproc", "rmdir", "tail", "ln"):
@@ -2763,10 +2737,10 @@ def _osu_cuda_run_harness(tmp_path, *, gpu=True, installed_cuda=False,
     # silently change which libmpi produced every headline number. Without this
     # line the host-to-host launches emit nothing to assert on.
     launcher.write_text(
-        '#!/bin/bash\n'
+        "#!/bin/bash\n"
         'echo "LAUNCHED BY path-default"\n'
         'echo "DEFAULT LAUNCHER LD_LIBRARY_PATH=${LD_LIBRARY_PATH:-<unset>}"\n'
-        'shift 2\n'
+        "shift 2\n"
         'exec "$@"\n'
     )
     launcher.chmod(0o755)
@@ -2810,8 +2784,7 @@ def _osu_cuda_run_harness(tmp_path, *, gpu=True, installed_cuda=False,
     cmd_run --tests {tests} --results-dir {str(results)!r}
     echo RUN_OK
     """
-    env = dict(os.environ, PATH=str(stub),
-               HPC_BENCHMARK_CUDA_MPI=str(cuda_mpi_root))
+    env = dict(os.environ, PATH=str(stub), HPC_BENCHMARK_CUDA_MPI=str(cuda_mpi_root))
     env.pop("CUDA_HOME", None)
     # Always decided here, never inherited: the developer's own LD_LIBRARY_PATH
     # would otherwise leak into every assertion about what the driver prepends.
@@ -2829,8 +2802,7 @@ def _osu_cuda_run_harness(tmp_path, *, gpu=True, installed_cuda=False,
     # config.log, config.status, libtool and a whole c/ tree.
     submitdir = tmp_path / "submitdir"
     submitdir.mkdir(parents=True, exist_ok=True)
-    r = subprocess.run([_BASH, "-c", script], capture_output=True, env=env,
-                       cwd=str(submitdir))
+    r = subprocess.run([_BASH, "-c", script], capture_output=True, env=env, cwd=str(submitdir))
     return r, prefix, results, submitdir
 
 
@@ -2864,12 +2836,11 @@ class TestRunBuildsCudaOsuOnTheNodeThatNeedsIt:
         assert "FROM cuda-tree ARGS=-d cuda D D" in out, (
             f"the device tests did not run from the CUDA tree: {out}"
         )
-        assert (results / next(p.name for p in results.iterdir())
-                / "osu" / "latency_cuda.txt").is_file()
+        assert (
+            results / next(p.name for p in results.iterdir()) / "osu" / "latency_cuda.txt"
+        ).is_file()
 
-    def test_the_build_happens_in_its_own_srcdir_not_the_submit_directory(
-        self, tmp_path
-    ):
+    def test_the_build_happens_in_its_own_srcdir_not_the_submit_directory(self, tmp_path):
         """configure was invoked by absolute path from wherever the job started,
         which autoconf treats as a VPATH build: Makefile, config.status,
         config.log, libtool and the whole c/ tree are written to the CWD, not the
@@ -2917,9 +2888,7 @@ class TestRunBuildsCudaOsuOnTheNodeThatNeedsIt:
         r, _, _, _ = _osu_cuda_run_harness(tmp_path, prebuilt_tree=True)
         out = r.stdout.decode()
         assert r.returncode == 0, r.stderr.decode() + out
-        assert "Building CUDA-enabled OSU" not in out, (
-            "an existing CUDA tree was rebuilt"
-        )
+        assert "Building CUDA-enabled OSU" not in out, "an existing CUDA tree was rebuilt"
         assert "FROM cuda-tree ARGS=-d cuda D D" in out, out
 
     def test_a_cuda_capable_install_is_used_directly(self, tmp_path):
@@ -2990,8 +2959,7 @@ class TestRunBuildsCudaOsuOnTheNodeThatNeedsIt:
         assert r.returncode == 0, r.stderr.decode()
         assert b"cached source is empty" in r.stderr, r.stderr
 
-    def test_the_harness_can_see_an_out_of_tree_build(self, tmp_path,
-                                                     monkeypatch):
+    def test_the_harness_can_see_an_out_of_tree_build(self, tmp_path, monkeypatch):
         """Vacuity guard for the two halves above. The stub configure writes its
         Makefile into $PWD the way config.status does, and the stub make requires
         one where it builds -- neither was true before, so the shipped bug passed.
@@ -3001,17 +2969,21 @@ class TestRunBuildsCudaOsuOnTheNodeThatNeedsIt:
         tell a `cd` that happened from one that was optimized into a comment.
         """
         source = open(BENCHMARK).read()
-        broken = source.replace(
-            'cd "$tmpdir" \\\n        && tar -xzf "$src" \\\n'
-            '        && cd "osu-micro-benchmarks-${OSU_VERSION}" \\',
-            'tar -xzf "$src" -C "$tmpdir" \\',
-        ).replace(
-            "            ./configure \\",
-            '            "$tmpdir/osu-micro-benchmarks-${OSU_VERSION}/configure" \\',
-        ).replace(
-            '            make -j"$(nproc)" install',
-            '            make -C "$tmpdir/osu-micro-benchmarks-${OSU_VERSION}" '
-            '-j"$(nproc)" install',
+        broken = (
+            source.replace(
+                'cd "$tmpdir" \\\n        && tar -xzf "$src" \\\n'
+                '        && cd "osu-micro-benchmarks-${OSU_VERSION}" \\',
+                'tar -xzf "$src" -C "$tmpdir" \\',
+            )
+            .replace(
+                "            ./configure \\",
+                '            "$tmpdir/osu-micro-benchmarks-${OSU_VERSION}/configure" \\',
+            )
+            .replace(
+                '            make -j"$(nproc)" install',
+                '            make -C "$tmpdir/osu-micro-benchmarks-${OSU_VERSION}" '
+                '-j"$(nproc)" install',
+            )
         )
         assert broken != source, "the out-of-tree mutation matched nothing"
         broken_path = tmp_path / "broken-hpc-benchmark.sh"
@@ -3021,8 +2993,7 @@ class TestRunBuildsCudaOsuOnTheNodeThatNeedsIt:
         r, prefix, _, submitdir = _osu_cuda_run_harness(tmp_path)
         assert r.returncode == 0, r.stderr.decode()
         assert b"No rule to make target" in r.stderr, (
-            "the harness did not reproduce the out-of-tree make failure: "
-            + r.stderr.decode()
+            "the harness did not reproduce the out-of-tree make failure: " + r.stderr.decode()
         )
         assert not (prefix / "osu-cuda" / ".cuda_enabled").exists(), (
             "a broken build was stamped complete"
@@ -3064,8 +3035,9 @@ class TestRunBuildsCudaOsuOnTheNodeThatNeedsIt:
         _fetch() {{ cp {str(tarball)!r} "$1"; }}
         cmd_install --prefix {str(prefix)!r} --tools osu
         """
-        r = subprocess.run([_BASH, "-c", script], capture_output=True,
-                           env=dict(os.environ, PATH=str(stub)))
+        r = subprocess.run(
+            [_BASH, "-c", script], capture_output=True, env=dict(os.environ, PATH=str(stub))
+        )
         assert r.returncode == 0, r.stderr.decode() + r.stdout.decode()
         cached = prefix / "src" / f"osu-micro-benchmarks-{version}.tar.gz"
         assert cached.is_file(), (
@@ -3081,21 +3053,19 @@ class TestRunBuildsCudaOsuOnTheNodeThatNeedsIt:
         body = _function_body("_build_osu_cuda")
         idx_make = body.index("CUDA OSU build failed")
         idx_stamp = body.index("_osu_cuda_stamp_path")
-        assert idx_make < idx_stamp, (
-            "the CUDA tree is stamped complete before make install has run"
-        )
+        assert idx_make < idx_stamp, "the CUDA tree is stamped complete before make install has run"
 
     def test_the_build_is_serialized_across_nodes(self):
         """bin/ is shared storage. Two GPU nodes running make install into one
         prefix interleave into a corrupt tree."""
         body = _function_body("_build_osu_cuda")
-        assert "mkdir \"$lock\"" in body, (
+        assert 'mkdir "$lock"' in body, (
             "the run-time build is not serialized; mkdir is the atomic primitive"
         )
         idx_lock = body.index('mkdir "$lock"')
         idx_make = body.index("CUDA OSU build failed")
         assert idx_lock < idx_make, "the build is not inside the lock"
-        assert "rmdir \"$lock\"" in body, "the lock is never released"
+        assert 'rmdir "$lock"' in body, "the lock is never released"
 
     def test_run_actually_calls_the_runtime_builder(self):
         """Every unit test above passes with the call site deleted, while a CPU-
@@ -3105,9 +3075,7 @@ class TestRunBuildsCudaOsuOnTheNodeThatNeedsIt:
             "cmd_run no longer builds a CUDA OSU tree, so a CPU head node's "
             "cluster is back to needing an interactive srun and a manual rebuild"
         )
-        assert "_osu_cuda_tree" in body, (
-            "cmd_run does not consult the run-time CUDA tree"
-        )
+        assert "_osu_cuda_tree" in body, "cmd_run does not consult the run-time CUDA tree"
 
 
 class TestDeviceTestsRunUnderAnMpiThatCanDoThem:
@@ -3126,8 +3094,7 @@ class TestDeviceTestsRunUnderAnMpiThatCanDoThem:
     on that OS-agnosticism, whose failure mode is a skip with a named reason.
     """
 
-    def _probe(self, tmp_path, *, roots=(), override=None, on_path=None,
-               launcher=True):
+    def _probe(self, tmp_path, *, roots=(), override=None, on_path=None, launcher=True):
         """Ask _cuda_aware_mpi_root what it finds, with PATH replaced wholesale.
 
         `roots` are extra fake MPI trees to create (name, cuda) pairs; `on_path`
@@ -3143,8 +3110,7 @@ class TestDeviceTestsRunUnderAnMpiThatCanDoThem:
                 (stub / name).symlink_to(real)
         made = {}
         for name, cuda in roots:
-            made[name] = _fake_mpi_root(tmp_path, name, cuda=cuda,
-                                        launcher=launcher)
+            made[name] = _fake_mpi_root(tmp_path, name, cuda=cuda, launcher=launcher)
         path = str(stub)
         if on_path is not None:
             path = f"{made[on_path]}/bin:{path}"
@@ -3156,11 +3122,8 @@ class TestDeviceTestsRunUnderAnMpiThatCanDoThem:
         env = dict(os.environ, PATH=path)
         env.pop("HPC_BENCHMARK_CUDA_MPI", None)
         if override is not None:
-            env["HPC_BENCHMARK_CUDA_MPI"] = str(
-                made.get(override, tmp_path / str(override))
-            )
-        r = subprocess.run([_BASH, "-c", script], capture_output=True, text=True,
-                           env=env)
+            env["HPC_BENCHMARK_CUDA_MPI"] = str(made.get(override, tmp_path / str(override)))
+        r = subprocess.run([_BASH, "-c", script], capture_output=True, text=True, env=env)
         assert r.returncode == 0, r.stderr + r.stdout
         m = re.search(r"^ROOT=\[(.*)\]$", r.stdout, re.M)
         assert m, r.stdout
@@ -3171,9 +3134,7 @@ class TestDeviceTestsRunUnderAnMpiThatCanDoThem:
         case: on an image whose default mpirun is already CUDA-aware, the probe
         accepts it and never consults a glob. Every base_os with a working
         default is therefore covered by the same code path."""
-        root, made = self._probe(
-            tmp_path, roots=[("mpi-default", True)], on_path="mpi-default"
-        )
+        root, made = self._probe(tmp_path, roots=[("mpi-default", True)], on_path="mpi-default")
         assert root == str(made["mpi-default"]), (
             f"a CUDA-aware default MPI was not accepted: {root!r}"
         )
@@ -3182,12 +3143,8 @@ class TestDeviceTestsRunUnderAnMpiThatCanDoThem:
         """The osiris case. 4.1.7 is on PATH, answers false, and must not be
         handed the device tests -- there is no CUDA-aware MPI in this fixture's
         glob range, so the correct answer is nothing at all."""
-        root, _ = self._probe(
-            tmp_path, roots=[("mpi-default", False)], on_path="mpi-default"
-        )
-        assert root == "", (
-            f"a non-CUDA-aware MPI was accepted for the device tests: {root!r}"
-        )
+        root, _ = self._probe(tmp_path, roots=[("mpi-default", False)], on_path="mpi-default")
+        assert root == "", f"a non-CUDA-aware MPI was accepted for the device tests: {root!r}"
 
     def test_the_operator_override_is_honored(self, tmp_path):
         root, made = self._probe(
@@ -3203,12 +3160,8 @@ class TestDeviceTestsRunUnderAnMpiThatCanDoThem:
     def test_an_override_that_cannot_do_cuda_is_still_rejected(self, tmp_path):
         """The override says where to look, not what the answer is. Trusting it
         blindly reintroduces the hang for anyone who points it at 4.1.7."""
-        root, _ = self._probe(
-            tmp_path, roots=[("mpi-default", False)], override="mpi-default"
-        )
-        assert root == "", (
-            f"the override bypassed the CUDA-support check: {root!r}"
-        )
+        root, _ = self._probe(tmp_path, roots=[("mpi-default", False)], override="mpi-default")
+        assert root == "", f"the override bypassed the CUDA-support check: {root!r}"
 
     def test_a_root_with_no_launcher_or_no_compiler_is_rejected(self, tmp_path):
         """ompi_info answering true is not enough: the root has to carry the
@@ -3222,9 +3175,7 @@ class TestDeviceTestsRunUnderAnMpiThatCanDoThem:
         for kw in ({"launcher": False}, {"wrappers": False}):
             root = _fake_mpi_root(tmp_path, f"mpi-{list(kw)[0]}", cuda=True, **kw)
             got, _ = self._probe(tmp_path, override=str(root))
-            assert got == "", (
-                f"a root missing {list(kw)[0]} was accepted as usable: {got!r}"
-            )
+            assert got == "", f"a root missing {list(kw)[0]} was accepted as usable: {got!r}"
 
     def test_an_override_naming_nothing_is_rejected_rather_than_echoed(self, tmp_path):
         """A typo'd path must skip the device tests, not become a launcher prefix
@@ -3242,9 +3193,7 @@ class TestDeviceTestsRunUnderAnMpiThatCanDoThem:
         assert "mpi_built_with_cuda_support:value:true" in body, (
             "the CUDA question is no longer asked of ompi_info itself"
         )
-        code = "\n".join(
-            line for line in body.splitlines() if not line.lstrip().startswith("#")
-        )
+        code = "\n".join(line for line in body.splitlines() if not line.lstrip().startswith("#"))
         for token in ("openmpi5", "5.0", "amzn", "alinux", "ubuntu", "rhel"):
             assert token not in code, (
                 f"_mpi_is_cuda_aware decides on {token!r}, which is a property of "
@@ -3259,10 +3208,13 @@ class TestDeviceTestsRunUnderAnMpiThatCanDoThem:
         # regex only strips double quotes, and this list is single-quoted so the
         # first element would carry a leading quote and match no prefix test.
         r = subprocess.run(
-            [_BASH, "-c",
-             f'HPC_BENCHMARK_LIB_ONLY=1 source {BENCHMARK!r}; '
-             'echo "$_CUDA_MPI_GLOBS"'],
-            capture_output=True, text=True,
+            [
+                _BASH,
+                "-c",
+                f'HPC_BENCHMARK_LIB_ONLY=1 source {BENCHMARK!r}; echo "$_CUDA_MPI_GLOBS"',
+            ],
+            capture_output=True,
+            text=True,
         )
         assert r.returncode == 0, r.stderr
         globs = r.stdout.split()
@@ -3282,10 +3234,7 @@ class TestDeviceTestsRunUnderAnMpiThatCanDoThem:
         r, _, _, _ = _osu_cuda_run_harness(tmp_path)
         out = r.stdout.decode()
         assert r.returncode == 0, r.stderr.decode() + out
-        d2d = [
-            line for line in out.splitlines()
-            if "ARGS=-d cuda" in line or "LAUNCHED BY" in line
-        ]
+        d2d = [line for line in out.splitlines() if "ARGS=-d cuda" in line or "LAUNCHED BY" in line]
         assert any("LAUNCHED BY mpi-cuda" in line for line in d2d), (
             f"the device tests were not launched by the CUDA-aware MPI: {d2d}"
         )
@@ -3317,9 +3266,7 @@ class TestDeviceTestsRunUnderAnMpiThatCanDoThem:
 
     def test_the_build_passes_the_wrappers_by_absolute_path(self):
         body = _function_body("_build_osu_cuda")
-        code = "\n".join(
-            line for line in body.splitlines() if not line.lstrip().startswith("#")
-        )
+        code = "\n".join(line for line in body.splitlines() if not line.lstrip().startswith("#"))
         assert 'mpicc="$mpi_root/bin/mpicc"' in code, (
             "the CUDA build no longer resolves mpicc under the chosen MPI root"
         )
@@ -3344,14 +3291,8 @@ class TestDeviceTestsRunUnderAnMpiThatCanDoThem:
         test_the_host_to_host_launch_is_left_alone observes at runtime."""
         with open(BENCHMARK) as fh:
             lines = fh.read().splitlines()
-        code = [
-            (n, l) for n, l in enumerate(lines, 1)
-            if not l.lstrip().startswith("#")
-        ]
-        exports = [
-            (n, l.strip()) for n, l in code
-            if re.search(r"\bexport\s+LD_LIBRARY_PATH", l)
-        ]
+        code = [(n, l) for n, l in enumerate(lines, 1) if not l.lstrip().startswith("#")]
+        exports = [(n, l.strip()) for n, l in code if re.search(r"\bexport\s+LD_LIBRARY_PATH", l)]
         assert not exports, (
             f"LD_LIBRARY_PATH is exported: {exports}. That outlives the command "
             "and silently relinks the host-to-host benchmarks too"
@@ -3390,9 +3331,7 @@ class TestDeviceTestsRunUnderAnMpiThatCanDoThem:
         a hypothetical. An unknown MPI must degrade to a rebuild; treating it as
         a match is the hang, and treating it as a skip loses the device numbers
         on every pre-existing install."""
-        r, _, _, _ = _osu_cuda_run_harness(
-            tmp_path, prebuilt_tree=True, stamp_mpi=None
-        )
+        r, _, _, _ = _osu_cuda_run_harness(tmp_path, prebuilt_tree=True, stamp_mpi=None)
         out = r.stdout.decode()
         assert r.returncode == 0, r.stderr.decode() + out
         assert "Building CUDA-enabled OSU" in out, (
@@ -3402,9 +3341,7 @@ class TestDeviceTestsRunUnderAnMpiThatCanDoThem:
             f"a legacy stamp skipped the device tests instead of rebuilding: {out}"
         )
 
-    def test_an_installed_tree_built_against_another_mpi_is_not_used_directly(
-        self, tmp_path
-    ):
+    def test_an_installed_tree_built_against_another_mpi_is_not_used_directly(self, tmp_path):
         """The GPU-head-node shortcut has to be MPI-aware too: bin/osu is built
         with the DEFAULT mpicc because it also serves the host-to-host tests, so
         on a ParallelCluster GPU AMI its stamp names 4.1.7 and the shortcut must
@@ -3427,15 +3364,11 @@ class TestDeviceTestsRunUnderAnMpiThatCanDoThem:
         r, _, _, _ = _osu_cuda_run_harness(tmp_path, cuda_mpi=False)
         out, err = r.stdout.decode(), r.stderr.decode()
         assert r.returncode == 0, err + out
-        assert "-d cuda" not in out, (
-            f"the device tests were launched with no CUDA-aware MPI: {out}"
-        )
+        assert "-d cuda" not in out, f"the device tests were launched with no CUDA-aware MPI: {out}"
         assert "no CUDA-aware MPI" in err, err
-        for hint in ("mpi_built_with_cuda_support", "HPC_BENCHMARK_CUDA_MPI",
-                     "openmpi5"):
+        for hint in ("mpi_built_with_cuda_support", "HPC_BENCHMARK_CUDA_MPI", "openmpi5"):
             assert hint in err, (
-                f"the skip note does not name {hint!r}, so an operator cannot act "
-                f"on it: {err}"
+                f"the skip note does not name {hint!r}, so an operator cannot act on it: {err}"
             )
         assert "RAN osu_latency FROM installed" in out, (
             "the host-to-host results were lost to a missing CUDA-aware MPI"
@@ -3480,13 +3413,9 @@ class TestDeviceTestsRunUnderAnMpiThatCanDoThem:
         (inner / "configure").write_text("#!/bin/bash\nexit 0\n")
         (inner / "configure").chmod(0o755)
         # The prefix has to appear, because the stamp is written into it.
-        (inner / "Makefile").write_text(
-            f"install:\n\t@mkdir -p {str(prefix / 'osu')}\n"
-        )
+        (inner / "Makefile").write_text(f"install:\n\t@mkdir -p {str(prefix / 'osu')}\n")
         tarball = tmp_path / "osu.tar.gz"
-        subprocess.run(
-            ["tar", "-czf", str(tarball), "-C", str(tmp_path), inner.name], check=True
-        )
+        subprocess.run(["tar", "-czf", str(tarball), "-C", str(tmp_path), inner.name], check=True)
         smi = stub / "nvidia-smi"
         smi.write_text('#!/bin/bash\necho "GPU 0: NVIDIA A10G (UUID: GPU-0)"\n')
         smi.chmod(0o755)
@@ -3503,8 +3432,7 @@ class TestDeviceTestsRunUnderAnMpiThatCanDoThem:
         """
         env = dict(os.environ, PATH=f"{mpi}/bin:{stub}", CUDA_HOME=str(cuda))
         env.pop("HPC_BENCHMARK_CUDA_MPI", None)
-        r = subprocess.run([_BASH, "-c", script], capture_output=True, text=True,
-                           env=env)
+        r = subprocess.run([_BASH, "-c", script], capture_output=True, text=True, env=env)
         assert r.returncode == 0, r.stderr + r.stdout
         return r, mpi, prefix
 
@@ -3517,9 +3445,7 @@ class TestDeviceTestsRunUnderAnMpiThatCanDoThem:
         message is not unconditional."""
         r, mpi, _ = self._install(tmp_path, default_cuda=False)
         out = r.stdout + r.stderr
-        assert str(mpi) in out, (
-            f"install never names the MPI it linked OSU against: {out}"
-        )
+        assert str(mpi) in out, f"install never names the MPI it linked OSU against: {out}"
         assert "NOT CUDA-aware" in out, (
             "install does not say that the tree it just built cannot do -d cuda, "
             f"which is the whole reason run builds a second one: {out}"
@@ -3612,18 +3538,23 @@ class TestTheCudaTreeLoadsItsOwnLibmpi:
     _OTHER_MPI = "/opt/amazon/openmpi/lib64"
 
     def _launch_lines(self, out):
-        return [ln for ln in out.splitlines()
-                if ln.startswith(("LAUNCHER LD_LIBRARY_PATH=", "LAUNCHER FORWARDS",
-                                  "LAUNCHED BY", "RAN "))]
+        return [
+            ln
+            for ln in out.splitlines()
+            if ln.startswith(
+                ("LAUNCHER LD_LIBRARY_PATH=", "LAUNCHER FORWARDS", "LAUNCHED BY", "RAN ")
+            )
+        ]
 
     def test_the_cuda_mpi_lib_dir_comes_first(self, tmp_path):
-        r, prefix, _, _ = _osu_cuda_run_harness(
-            tmp_path, inherited_llp=self._OTHER_MPI
-        )
+        r, prefix, _, _ = _osu_cuda_run_harness(tmp_path, inherited_llp=self._OTHER_MPI)
         assert r.returncode == 0, r.stderr.decode() + r.stdout.decode()
         out = r.stdout.decode()
-        seen = [ln.split("=", 1)[1] for ln in out.splitlines()
-                if ln.startswith("LAUNCHER LD_LIBRARY_PATH=")]
+        seen = [
+            ln.split("=", 1)[1]
+            for ln in out.splitlines()
+            if ln.startswith("LAUNCHER LD_LIBRARY_PATH=")
+        ]
         assert seen, f"the launcher never reported its LD_LIBRARY_PATH: {out}"
         cuda_lib = str(tmp_path / "mpi-cuda" / "lib64")
         for value in seen:
@@ -3636,27 +3567,25 @@ class TestTheCudaTreeLoadsItsOwnLibmpi:
         """Prepending, not replacing. The inherited value may carry CUDA or other
         libraries the binary also needs, so dropping it to fix the MPI trades one
         missing symbol for another."""
-        r, _, _, _ = _osu_cuda_run_harness(
-            tmp_path, inherited_llp=self._OTHER_MPI
-        )
+        r, _, _, _ = _osu_cuda_run_harness(tmp_path, inherited_llp=self._OTHER_MPI)
         assert r.returncode == 0, r.stderr.decode()
         out = r.stdout.decode()
-        seen = [ln.split("=", 1)[1] for ln in out.splitlines()
-                if ln.startswith("LAUNCHER LD_LIBRARY_PATH=")]
+        seen = [
+            ln.split("=", 1)[1]
+            for ln in out.splitlines()
+            if ln.startswith("LAUNCHER LD_LIBRARY_PATH=")
+        ]
         assert seen, out
         for value in seen:
             assert self._OTHER_MPI in value.split(":"), (
-                "the inherited LD_LIBRARY_PATH was discarded rather than "
-                f"prepended to: {value!r}"
+                f"the inherited LD_LIBRARY_PATH was discarded rather than prepended to: {value!r}"
             )
 
     def test_the_value_is_forwarded_to_the_ranks(self, tmp_path):
         """prterun ships its own environment. Without -x the launcher's own
         LD_LIBRARY_PATH never reaches the rank that dies, so the fix is inert --
         and inert in a way no assertion on the value alone can see."""
-        r, _, _, _ = _osu_cuda_run_harness(
-            tmp_path, inherited_llp=self._OTHER_MPI
-        )
+        r, _, _, _ = _osu_cuda_run_harness(tmp_path, inherited_llp=self._OTHER_MPI)
         assert r.returncode == 0, r.stderr.decode()
         out = r.stdout.decode()
         assert "LAUNCHER FORWARDS LD_LIBRARY_PATH" in out, (
@@ -3664,8 +3593,7 @@ class TestTheCudaTreeLoadsItsOwnLibmpi:
             f"the ranks inherit prterun's own environment instead: {out}"
         )
         assert out.count("LAUNCHER FORWARDS LD_LIBRARY_PATH") == 2, (
-            "both device tests must forward it, not just one: "
-            f"{self._launch_lines(out)}"
+            f"both device tests must forward it, not just one: {self._launch_lines(out)}"
         )
 
     def test_an_unset_inherited_value_produces_no_empty_entry(self, tmp_path):
@@ -3675,13 +3603,14 @@ class TestTheCudaTreeLoadsItsOwnLibmpi:
         r, _, _, _ = _osu_cuda_run_harness(tmp_path, inherited_llp=None)
         assert r.returncode == 0, r.stderr.decode()
         out = r.stdout.decode()
-        seen = [ln.split("=", 1)[1] for ln in out.splitlines()
-                if ln.startswith("LAUNCHER LD_LIBRARY_PATH=")]
+        seen = [
+            ln.split("=", 1)[1]
+            for ln in out.splitlines()
+            if ln.startswith("LAUNCHER LD_LIBRARY_PATH=")
+        ]
         assert seen, out
         for value in seen:
-            assert "" not in value.split(":"), (
-                f"LD_LIBRARY_PATH has an empty entry: {value!r}"
-            )
+            assert "" not in value.split(":"), f"LD_LIBRARY_PATH has an empty entry: {value!r}"
             assert not value.endswith(":"), value
 
     def test_only_directories_that_exist_are_named(self, tmp_path):
@@ -3692,8 +3621,11 @@ class TestTheCudaTreeLoadsItsOwnLibmpi:
         r, _, _, _ = _osu_cuda_run_harness(tmp_path, inherited_llp=None)
         assert r.returncode == 0, r.stderr.decode()
         out = r.stdout.decode()
-        seen = [ln.split("=", 1)[1] for ln in out.splitlines()
-                if ln.startswith("LAUNCHER LD_LIBRARY_PATH=")]
+        seen = [
+            ln.split("=", 1)[1]
+            for ln in out.splitlines()
+            if ln.startswith("LAUNCHER LD_LIBRARY_PATH=")
+        ]
         assert seen, out
         root = tmp_path / "mpi-cuda"
         for value in seen:
@@ -3707,9 +3639,7 @@ class TestTheCudaTreeLoadsItsOwnLibmpi:
         launch would silently change which libmpi those numbers were produced
         under -- the mirror image of the bug, and the reason this is scoped to the
         two d2d lines rather than exported once for the whole osu branch."""
-        r, _, _, _ = _osu_cuda_run_harness(
-            tmp_path, inherited_llp=self._OTHER_MPI
-        )
+        r, _, _, _ = _osu_cuda_run_harness(tmp_path, inherited_llp=self._OTHER_MPI)
         assert r.returncode == 0, r.stderr.decode()
         out = r.stdout.decode()
         cuda_lib = str(tmp_path / "mpi-cuda" / "lib64")
@@ -3718,19 +3648,19 @@ class TestTheCudaTreeLoadsItsOwnLibmpi:
         # CUDA-aware stub prints its report before exec'ing, so a positional split
         # on the first "FROM cuda-tree" line attributes that launch's own value to
         # the host-to-host side and the assertion can never hold.
-        seen = [ln.split("=", 1)[1] for ln in out.splitlines()
-                if ln.startswith("DEFAULT LAUNCHER LD_LIBRARY_PATH=")]
-        assert seen, (
-            f"the default launcher never reported its LD_LIBRARY_PATH: {out}"
-        )
+        seen = [
+            ln.split("=", 1)[1]
+            for ln in out.splitlines()
+            if ln.startswith("DEFAULT LAUNCHER LD_LIBRARY_PATH=")
+        ]
+        assert seen, f"the default launcher never reported its LD_LIBRARY_PATH: {out}"
         for value in seen:
             assert value.split(":")[0] != cuda_lib, (
                 "a host-to-host launch got the CUDA MPI's lib64 first, so "
                 f"those numbers came from a different libmpi: {value!r}"
             )
 
-    def test_the_harness_can_see_the_undefined_symbol_failure(self, tmp_path,
-                                                              monkeypatch):
+    def test_the_harness_can_see_the_undefined_symbol_failure(self, tmp_path, monkeypatch):
         """Vacuity guard. Every assertion above is on a string the stub prints, so
         a stub that printed them regardless of what the driver did would keep them
         all green. This drives the SHIPPED form -- the launcher chosen correctly,
@@ -3739,13 +3669,10 @@ class TestTheCudaTreeLoadsItsOwnLibmpi:
         broken = tmp_path / "broken-driver.sh"
         source = open(BENCHMARK).read()
         shipped = (
-            '                $cuda_mpi_launcher -n 2 "$osu_cuda_pt2pt/osu_latency"'
-            ' -d cuda D D \\\n'
+            '                $cuda_mpi_launcher -n 2 "$osu_cuda_pt2pt/osu_latency" -d cuda D D \\\n'
         )
-        fixed_start = source.index('                local cuda_llp')
-        fixed_end = source.index(
-            '                _info "Running OSU bandwidth, device-to-device'
-        )
+        fixed_start = source.index("                local cuda_llp")
+        fixed_end = source.index('                _info "Running OSU bandwidth, device-to-device')
         block = source[fixed_start:fixed_end]
         assert "-x LD_LIBRARY_PATH" in block, (
             "the fixed latency launch no longer looks the way this guard expects; "
@@ -3760,12 +3687,13 @@ class TestTheCudaTreeLoadsItsOwnLibmpi:
         broken.write_text(source[:fixed_start] + reverted + source[fixed_end:])
         broken.chmod(0o755)
         monkeypatch.setattr(f"{__name__}.BENCHMARK", str(broken))
-        r, _, _, _ = _osu_cuda_run_harness(
-            tmp_path, inherited_llp=self._OTHER_MPI
-        )
+        r, _, _, _ = _osu_cuda_run_harness(tmp_path, inherited_llp=self._OTHER_MPI)
         out = r.stdout.decode()
-        reports = [ln.split("=", 1)[1] for ln in out.splitlines()
-                   if ln.startswith("LAUNCHER LD_LIBRARY_PATH=")]
+        reports = [
+            ln.split("=", 1)[1]
+            for ln in out.splitlines()
+            if ln.startswith("LAUNCHER LD_LIBRARY_PATH=")
+        ]
         cuda_lib = str(tmp_path / "mpi-cuda" / "lib64")
         assert reports, out
         assert any(v.split(":")[0] != cuda_lib for v in reports), (
@@ -3803,10 +3731,7 @@ class TestTheKernelBuildCanFindNvcc:
         head node (the g6 osiris layout); _build_osu_cuda is the only thing that
         compiles the kernels on the common CPU-head layout."""
         body = _function_body(func)
-        lines = [
-            line for line in body.splitlines()
-            if not line.lstrip().startswith("#")
-        ]
+        lines = [line for line in body.splitlines() if not line.lstrip().startswith("#")]
         text = "\n".join(lines)
         assert "--enable-cuda=" in text, f"{func} no longer configures CUDA at all"
         assert "--with-cuda=" in text, (
@@ -3829,8 +3754,7 @@ class TestTheKernelBuildCanFindNvcc:
         logs = list((prefix / "build_logs").glob("osu-cuda.log"))
         assert logs, f"_build_osu_cuda wrote no build log under {prefix}"
         argv = [
-            line for line in logs[0].read_text().splitlines()
-            if line.startswith("CONFIGURE ARGS=")
+            line for line in logs[0].read_text().splitlines() if line.startswith("CONFIGURE ARGS=")
         ]
         assert argv, f"configure was never invoked: {logs[0].read_text()!r}"
         assert all("--with-cuda=" in line for line in argv), (
@@ -3912,21 +3836,20 @@ class TestTwoConcurrentRunsDoNotFightOverTheIorScratchFiles:
         (b / "ior").write_text(
             "#!/bin/bash\n"
             'o=""\n'
-            'while [[ $# -gt 0 ]]; do\n'
+            "while [[ $# -gt 0 ]]; do\n"
             '  case "$1" in -o) o="$2"; shift 2 ;; *) shift ;; esac\n'
-            'done\n'
+            "done\n"
             'echo "IOR OBJECT=$o"\n'
             'for r in 00000000 00000001; do : > "$o.$r"; done\n'
             'sleep "${HARNESS_IOR_SLEEP:-1}"\n'
-            'for r in 00000000 00000001; do\n'
+            "for r in 00000000 00000001; do\n"
             '  [[ -f "$o.$r" ]] || { echo "IOR STAT FAILED $o.$r" >&2; exit 1; }\n'
-            'done\n'
+            "done\n"
             'echo "IOR OK"\n'
         )
         (b / "ior").chmod(0o755)
         (prefix / ".build_arch").write_text(
-            subprocess.run(["uname", "-m"], capture_output=True,
-                           text=True).stdout
+            subprocess.run(["uname", "-m"], capture_output=True, text=True).stdout
         )
         return prefix
 
@@ -3954,10 +3877,10 @@ class TestTwoConcurrentRunsDoNotFightOverTheIorScratchFiles:
         echo RUN_OK
         """
         return subprocess.Popen(
-            [_BASH, "-c", script], stdout=subprocess.PIPE,
+            [_BASH, "-c", script],
+            stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            env=dict(os.environ, PATH=str(stub),
-                     HARNESS_IOR_SLEEP=str(sleep)),
+            env=dict(os.environ, PATH=str(stub), HARNESS_IOR_SLEEP=str(sleep)),
             cwd=str(tmp_path),
         )
 
@@ -3965,8 +3888,7 @@ class TestTwoConcurrentRunsDoNotFightOverTheIorScratchFiles:
         prefix = self._prefix(tmp_path)
         fs_path = tmp_path / "ior_scratch"
         procs = [
-            self._launch(tmp_path, prefix, fs_path,
-                         tmp_path / f"results-{tag}", tag, sleep)
+            self._launch(tmp_path, prefix, fs_path, tmp_path / f"results-{tag}", tag, sleep)
             for tag, sleep in (("a", 4), ("b", 1))
         ]
         return [(p.wait(), *p.communicate()) for p in procs]
@@ -4004,10 +3926,12 @@ class TestTwoConcurrentRunsDoNotFightOverTheIorScratchFiles:
         """Without this the three above pass against any implementation whose
         two runs simply do not overlap."""
         source = open(BENCHMARK).read()
-        broken = source.replace('-o "$fs_path/ior_testfile.$ts" \\',
-                                '-o "$fs_path/ior_testfile" \\')
-        broken = broken.replace('rm -f "$fs_path/ior_testfile.$ts"*',
-                                'rm -f "$fs_path/ior_testfile"*')
+        broken = source.replace(
+            '-o "$fs_path/ior_testfile.$ts" \\', '-o "$fs_path/ior_testfile" \\'
+        )
+        broken = broken.replace(
+            'rm -f "$fs_path/ior_testfile.$ts"*', 'rm -f "$fs_path/ior_testfile"*'
+        )
         assert broken != source, "the fixed-name mutation matched nothing"
         broken_path = tmp_path / "broken-hpc-benchmark.sh"
         broken_path.write_text(broken)
@@ -4060,8 +3984,17 @@ class TestMpiIgnoresInterfacesEveryNodeShares:
 
     @pytest.mark.parametrize(
         "iface",
-        ["docker0", "br-1a2b3c", "virbr0", "veth9f2ab", "cni0", "flannel.1",
-         "cali1234", "tunl0", "nerdctl0"],
+        [
+            "docker0",
+            "br-1a2b3c",
+            "virbr0",
+            "veth9f2ab",
+            "cni0",
+            "flannel.1",
+            "cali1234",
+            "tunl0",
+            "nerdctl0",
+        ],
     )
     def test_every_glob_in_the_list_actually_matches(self, tmp_path, iface):
         """_VIRTUAL_IFACE_GLOBS is only as good as its globs.  `br-*` needs the
@@ -4100,7 +4033,8 @@ class TestMpiIgnoresInterfacesEveryNodeShares:
     def test_an_operator_setting_survives(self, tmp_path):
         """Whoever set the variable has diagnosed something we have not."""
         values, _ = _run_isolation(
-            tmp_path, ["docker0", "eth0"],
+            tmp_path,
+            ["docker0", "eth0"],
             preset={"OMPI_MCA_btl_tcp_if_exclude": "lo,docker0,ib0"},
         )
         assert values["BTL"] == "lo,docker0,ib0", values
@@ -4111,24 +4045,19 @@ class TestMpiIgnoresInterfacesEveryNodeShares:
         test on the name overwrites it, which is exactly the operator override
         this is meant to honor."""
         values, _ = _run_isolation(
-            tmp_path, ["docker0", "eth0"],
+            tmp_path,
+            ["docker0", "eth0"],
             preset={"OMPI_MCA_oob_tcp_if_exclude": ""},
         )
-        assert values["OOB"] == "", (
-            f"an explicitly empty operator value was overwritten: {values}"
-        )
-        assert values["BTL"] == "lo,docker0", (
-            "presetting one channel must not suppress the other"
-        )
+        assert values["OOB"] == "", f"an explicitly empty operator value was overwritten: {values}"
+        assert values["BTL"] == "lo,docker0", "presetting one channel must not suppress the other"
 
     def test_a_missing_sysfs_is_not_an_error(self, tmp_path):
         """The driver runs under `set -euo pipefail`.  macOS has no
         /sys/class/net, and neither does a container; an unmatched glob leaves
         the loop iterating over the literal pattern, so the `-e` test on each
         entry is load-bearing."""
-        values, r = _run_isolation(
-            tmp_path, [], netdir=str(tmp_path / "definitely-absent")
-        )
+        values, r = _run_isolation(tmp_path, [], netdir=str(tmp_path / "definitely-absent"))
         assert r.returncode == 0, r.stderr
         assert values["BTL"] == "<unset>", values
 
@@ -4176,14 +4105,9 @@ class TestMpiIgnoresInterfacesEveryNodeShares:
         outright and would fail every run on such a cluster.  OMPI_MCA_* is
         ignored by any launcher that is not Open MPI."""
         with open(BENCHMARK) as fh:
-            lines = [
-                l for l in fh.read().splitlines()
-                if not l.strip().startswith("#")
-            ]
+            lines = [l for l in fh.read().splitlines() if not l.strip().startswith("#")]
         offenders = [l for l in lines if "--mca" in l]
-        assert not offenders, (
-            f"--mca is not portable to Intel MPI's mpiexec: {offenders}"
-        )
+        assert not offenders, f"--mca is not portable to Intel MPI's mpiexec: {offenders}"
 
     def test_the_harness_can_see_an_unisolated_driver(self, tmp_path):
         """Vacuity guard for the whole class: with the exports removed, the
@@ -4192,9 +4116,7 @@ class TestMpiIgnoresInterfacesEveryNodeShares:
             source = fh.read()
         neutered = tmp_path / "hpc-benchmark.sh"
         neutered.write_text(
-            source.replace(
-                'export OMPI_MCA_btl_tcp_if_exclude="lo,$excluded"', ":"
-            ).replace(
+            source.replace('export OMPI_MCA_btl_tcp_if_exclude="lo,$excluded"', ":").replace(
                 'export OMPI_MCA_oob_tcp_if_exclude="lo,$excluded"', ":"
             )
         )
@@ -4227,8 +4149,9 @@ def _render_template(name, cluster_params):
     return env.get_template(name).render(**cluster_params)
 
 
-def _run_access_script(tmp_path, name, cluster_params, *, aws_rc, aws_stdout,
-                       aws_stderr="", env_extra=None):
+def _run_access_script(
+    tmp_path, name, cluster_params, *, aws_rc, aws_stdout, aws_stderr="", env_extra=None
+):
     """Execute a rendered access script with a stub `aws` and stop before ssh.
 
     A missing instance and a failed API call are told apart only by the exit
@@ -4267,7 +4190,7 @@ def _run_access_script(tmp_path, name, cluster_params, *, aws_rc, aws_stdout,
     )
     # A resolved IP must not reach a real host, and grafana_tunnel additionally
     # forks pgrep for the tunnel PID.
-    (stub / "ssh").write_text("#!/bin/bash\necho SSH_REACHED \"$@\"\nexit 0\n")
+    (stub / "ssh").write_text('#!/bin/bash\necho SSH_REACHED "$@"\nexit 0\n')
     (stub / "pgrep").write_text("#!/bin/bash\necho 4242\n")
 
     # mktemp is stubbed rather than passed through so the capture file lands
@@ -4277,13 +4200,9 @@ def _run_access_script(tmp_path, name, cluster_params, *, aws_rc, aws_stdout,
     capture_dir = run_dir / "captures"
     capture_dir.mkdir()
     (stub / "mktemp").write_text(
-        "#!/bin/bash\n"
-        f"p={str(capture_dir)!r}/capture.$$\n"
-        ': > "$p"\n'
-        'echo "$p"\n'
+        f'#!/bin/bash\np={str(capture_dir)!r}/capture.$$\n: > "$p"\necho "$p"\n'
     )
-    for tool in ("bash", "sh", "sed", "rm", "dirname", "basename",
-                 "cat", "kill", "printf", "echo"):
+    for tool in ("bash", "sh", "sed", "rm", "dirname", "basename", "cat", "kill", "printf", "echo"):
         path = shutil.which(tool)
         if path:
             (stub / tool).symlink_to(path)
@@ -4300,7 +4219,10 @@ def _run_access_script(tmp_path, name, cluster_params, *, aws_rc, aws_stdout,
         env.update(env_extra)
     r = subprocess.run(
         [_BASH, str(script)],
-        capture_output=True, text=True, env=env, cwd=str(run_dir),
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=str(run_dir),
     )
     return r, capture_dir
 
@@ -4325,20 +4247,23 @@ class TestAFailedAwsCallIsNotReportedAsAStoppedCluster:
     @pytest.mark.parametrize("name", _ACCESS_SCRIPTS)
     def test_the_rendered_script_is_valid_bash(self, name, access_params):
         r = subprocess.run(
-            ["bash", "-n"], input=_render_template(name, access_params).encode(),
+            ["bash", "-n"],
+            input=_render_template(name, access_params).encode(),
             capture_output=True,
         )
         assert r.returncode == 0, r.stderr
 
     @pytest.mark.parametrize("name", _ACCESS_SCRIPTS)
-    def test_an_auth_failure_says_it_is_not_a_cluster_problem(
-        self, tmp_path, name, access_params
-    ):
+    def test_an_auth_failure_says_it_is_not_a_cluster_problem(self, tmp_path, name, access_params):
         r, _ = _run_access_script(
-            tmp_path, name, access_params, aws_rc=255, aws_stdout="",
+            tmp_path,
+            name,
+            access_params,
+            aws_rc=255,
+            aws_stdout="",
             aws_stderr="An error occurred (ExpiredToken) when calling the "
-                       "DescribeInstances operation: The security token "
-                       "included in the request is expired\n",
+            "DescribeInstances operation: The security token "
+            "included in the request is expired\n",
         )
         assert r.returncode != 0, r.stdout
         assert "NOT a cluster problem" in r.stderr, r.stderr
@@ -4347,26 +4272,28 @@ class TestAFailedAwsCallIsNotReportedAsAStoppedCluster:
         )
 
     @pytest.mark.parametrize("name", _ACCESS_SCRIPTS)
-    def test_the_real_aws_error_reaches_the_operator(
-        self, tmp_path, name, access_params
-    ):
+    def test_the_real_aws_error_reaches_the_operator(self, tmp_path, name, access_params):
         """2>/dev/null discarded the one line that names the actual cause."""
         r, _ = _run_access_script(
-            tmp_path, name, access_params, aws_rc=255, aws_stdout="",
+            tmp_path,
+            name,
+            access_params,
+            aws_rc=255,
+            aws_stdout="",
             aws_stderr="An error occurred (ExpiredToken): token is expired\n",
         )
-        assert "ExpiredToken" in r.stderr, (
-            f"aws's own message was swallowed: {r.stderr}"
-        )
+        assert "ExpiredToken" in r.stderr, f"aws's own message was swallowed: {r.stderr}"
 
     @pytest.mark.parametrize("name", _ACCESS_SCRIPTS)
-    def test_the_auth_message_names_the_profile_in_effect(
-        self, tmp_path, name, access_params
-    ):
+    def test_the_auth_message_names_the_profile_in_effect(self, tmp_path, name, access_params):
         """The usual cause is the wrong AWS_PROFILE, and the operator cannot see
         which one was used from the error alone."""
         r, _ = _run_access_script(
-            tmp_path, name, access_params, aws_rc=255, aws_stdout="",
+            tmp_path,
+            name,
+            access_params,
+            aws_rc=255,
+            aws_stdout="",
             aws_stderr="AccessDenied\n",
         )
         assert "stub-profile" in r.stderr, r.stderr
@@ -4378,9 +4305,7 @@ class TestAFailedAwsCallIsNotReportedAsAStoppedCluster:
     def test_a_stopped_cluster_still_says_so(self, tmp_path, name, access_params):
         """The other half: rc=0 with "None" is a genuinely absent head node, and
         it must not be reported as a credentials problem."""
-        r, _ = _run_access_script(
-            tmp_path, name, access_params, aws_rc=0, aws_stdout="None\n"
-        )
+        r, _ = _run_access_script(tmp_path, name, access_params, aws_rc=0, aws_stdout="None\n")
         assert r.returncode != 0, r.stdout
         assert "No running head node" in r.stderr, r.stderr
         assert "NOT a cluster problem" not in r.stderr, (
@@ -4391,19 +4316,19 @@ class TestAFailedAwsCallIsNotReportedAsAStoppedCluster:
         )
 
     @pytest.mark.parametrize("name", _ACCESS_SCRIPTS)
-    def test_the_two_diagnoses_are_distinguishable(
-        self, tmp_path, name, access_params
-    ):
+    def test_the_two_diagnoses_are_distinguishable(self, tmp_path, name, access_params):
         """Vacuity guard for the pair above: the whole point is that the two
         inputs produce different text, and a single generic message would satisfy
         every individually-worded assertion if it happened to mention both."""
         failed, _ = _run_access_script(
-            tmp_path, name, access_params, aws_rc=255, aws_stdout="",
+            tmp_path,
+            name,
+            access_params,
+            aws_rc=255,
+            aws_stdout="",
             aws_stderr="AccessDenied\n",
         )
-        absent, _ = _run_access_script(
-            tmp_path, name, access_params, aws_rc=0, aws_stdout="None\n"
-        )
+        absent, _ = _run_access_script(tmp_path, name, access_params, aws_rc=0, aws_stdout="None\n")
         assert failed.stderr != absent.stderr, (
             "a failed AWS call and a stopped cluster print the same thing"
         )
@@ -4413,9 +4338,7 @@ class TestAFailedAwsCallIsNotReportedAsAStoppedCluster:
         """PCluster head nodes in a private subnet have no public IP -- iris's
         head node answered "None" for PublicIpAddress and 10.0.1.20 for
         PrivateIpAddress -- so the fallback must survive the rc handling."""
-        r, _ = _run_access_script(
-            tmp_path, name, access_params, aws_rc=0, aws_stdout="10.0.1.20\n"
-        )
+        r, _ = _run_access_script(tmp_path, name, access_params, aws_rc=0, aws_stdout="10.0.1.20\n")
         assert r.returncode == 0, r.stderr + r.stdout
         assert "10.0.1.20" in r.stdout + r.stderr, r.stdout
 
@@ -4424,10 +4347,7 @@ class TestAFailedAwsCallIsNotReportedAsAStoppedCluster:
         """`2>/dev/null` on the call is the defect itself, and `|| true` erases
         the exit status the two branches are told apart by."""
         with open(os.path.join(TEMPLATE_DIR, name)) as fh:
-            lines = [
-                l for l in fh.read().splitlines()
-                if not l.strip().startswith("#")
-            ]
+            lines = [l for l in fh.read().splitlines() if not l.strip().startswith("#")]
         joined = "\n".join(lines)
         assert "describe-instances" in joined, f"{name} no longer queries EC2"
 
@@ -4462,7 +4382,11 @@ class TestAFailedAwsCallIsNotReportedAsAStoppedCluster:
         trap does still fire on exec -- but the failure paths take `exit 1`
         instead, so a trap that only covered one of the two would go unnoticed."""
         r, capture_dir = _run_access_script(
-            tmp_path, name, access_params, aws_rc=aws_rc, aws_stdout=aws_stdout,
+            tmp_path,
+            name,
+            access_params,
+            aws_rc=aws_rc,
+            aws_stdout=aws_stdout,
             aws_stderr="AccessDenied\n" if aws_rc else "",
         )
         assert (r.returncode == 0) == (aws_rc == 0), r.stderr + r.stdout
@@ -4490,8 +4414,11 @@ class TestAccessClusterLoginNodeSelection:
 
     def test_default_still_queries_head_node(self, tmp_path, access_params):
         r, _ = _run_access_script(
-            tmp_path, "access_cluster.j2", access_params,
-            aws_rc=0, aws_stdout="10.0.1.20\n",
+            tmp_path,
+            "access_cluster.j2",
+            access_params,
+            aws_rc=0,
+            aws_stdout="10.0.1.20\n",
         )
         assert r.returncode == 0, r.stderr + r.stdout
         args = (_argv_dir_for(tmp_path, "access_cluster.j2", 0) / "aws_args").read_text()
@@ -4500,8 +4427,11 @@ class TestAccessClusterLoginNodeSelection:
 
     def test_login_node_tag_filter_is_used_when_selected(self, tmp_path, access_params):
         r, _ = _run_access_script(
-            tmp_path, "access_cluster.j2", access_params,
-            aws_rc=0, aws_stdout="10.0.1.20\n",
+            tmp_path,
+            "access_cluster.j2",
+            access_params,
+            aws_rc=0,
+            aws_stdout="10.0.1.20\n",
             env_extra={"ACCESS_NODE_TYPE": "LoginNode"},
         )
         assert r.returncode == 0, r.stderr + r.stdout
@@ -4509,12 +4439,13 @@ class TestAccessClusterLoginNodeSelection:
         assert "Values=LoginNode" in args
         assert "Values=HeadNode" not in args
 
-    def test_login_node_diagnostics_name_the_login_node_when_absent(
-        self, tmp_path, access_params
-    ):
+    def test_login_node_diagnostics_name_the_login_node_when_absent(self, tmp_path, access_params):
         r, _ = _run_access_script(
-            tmp_path, "access_cluster.j2", access_params,
-            aws_rc=0, aws_stdout="None\n",
+            tmp_path,
+            "access_cluster.j2",
+            access_params,
+            aws_rc=0,
+            aws_stdout="None\n",
             env_extra={"ACCESS_NODE_TYPE": "LoginNode"},
         )
         assert r.returncode != 0, r.stdout
@@ -4525,8 +4456,12 @@ class TestAccessClusterLoginNodeSelection:
         self, tmp_path, access_params
     ):
         r, _ = _run_access_script(
-            tmp_path, "access_cluster.j2", access_params,
-            aws_rc=255, aws_stdout="", aws_stderr="AccessDenied\n",
+            tmp_path,
+            "access_cluster.j2",
+            access_params,
+            aws_rc=255,
+            aws_stdout="",
+            aws_stderr="AccessDenied\n",
             env_extra={"ACCESS_NODE_TYPE": "LoginNode"},
         )
         assert r.returncode != 0, r.stdout
@@ -4560,9 +4495,20 @@ def _run_osu_slots(tmp_path, tests, extra_args):
     env = dict(os.environ)
     env["PATH"] = f"{stub}:{env['PATH']}"
     r = subprocess.run(
-        [_BASH, str(tree / "hpc-benchmark.sh"), "run", "--tests", tests,
-         *extra_args, "--results-dir", str(tmp_path / "res")],
-        capture_output=True, text=True, env=env, cwd=str(tree),
+        [
+            _BASH,
+            str(tree / "hpc-benchmark.sh"),
+            "run",
+            "--tests",
+            tests,
+            *extra_args,
+            "--results-dir",
+            str(tmp_path / "res"),
+        ],
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=str(tree),
     )
     return r
 
@@ -4588,7 +4534,7 @@ class TestOsuRefusesAnAllocationItCannotRunIn:
         assert _SLOT_MESSAGE in r.stdout + r.stderr, r.stdout + r.stderr
 
     def test_the_diagnosis_names_the_slot_count_it_found(self, tmp_path):
-        """"needs at least 2" alone does not tell the operator what they asked
+        """ "needs at least 2" alone does not tell the operator what they asked
         for; the count is what makes it actionable."""
         r = _run_osu_slots(tmp_path, "osu", ["--nodes", "1", "--ppn", "1"])
         assert "has 1" in r.stdout + r.stderr, r.stdout + r.stderr
@@ -4623,8 +4569,7 @@ class TestOsuRefusesAnAllocationItCannotRunIn:
         r = _run_osu_slots(tmp_path, tests, ["--nodes", "1", "--ppn", "1"])
         out = r.stdout + r.stderr
         assert _SLOT_MESSAGE not in out, (
-            f"{tests!r} merely contains 'osu' and must not trip the slot "
-            "guard: " + out
+            f"{tests!r} merely contains 'osu' and must not trip the slot guard: " + out
         )
         assert "unknown test" in out, (
             f"{tests!r} should have been rejected as an unknown test: " + out
@@ -4637,8 +4582,7 @@ class TestOsuRefusesAnAllocationItCannotRunIn:
         them would be a worse regression than the bug being fixed."""
         r = _run_osu_slots(tmp_path, tests, ["--nodes", "1", "--ppn", "1"])
         assert _SLOT_MESSAGE not in r.stdout + r.stderr, (
-            f"--tests {tests} needs no 2 slots but was blocked: "
-            + r.stdout + r.stderr
+            f"--tests {tests} needs no 2 slots but was blocked: " + r.stdout + r.stderr
         )
 
     def test_two_slots_are_enough(self, tmp_path):
@@ -4687,18 +4631,20 @@ class TestEveryShellScriptIsUnderTheShellcheckGate:
         """Ask make itself, rather than reimplementing the filter-out."""
         r = subprocess.run(
             ["make", "-n", "shellcheck"],
-            cwd=REPO_ROOT, capture_output=True, text=True,
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
         )
         assert r.returncode == 0, r.stdout + r.stderr
-        line = next(
-            l for l in r.stdout.splitlines() if l.strip().startswith("shellcheck ")
-        )
+        line = next(l for l in r.stdout.splitlines() if l.strip().startswith("shellcheck "))
         return set(line.split()[1:])
 
     def _tracked_shell_files(self):
         r = subprocess.run(
             ["git", "ls-files", "*.sh"],
-            cwd=REPO_ROOT, capture_output=True, text=True,
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
         )
         assert r.returncode == 0, r.stderr
         return set(r.stdout.split())
@@ -4728,9 +4674,7 @@ class TestEveryShellScriptIsUnderTheShellcheckGate:
         merely fail.  Only a template belongs here, because only a template
         cannot be parsed at all."""
         text = self._makefile()
-        line = next(
-            l for l in text.splitlines() if l.startswith("SHELLCHECK_EXCLUDE")
-        )
+        line = next(l for l in text.splitlines() if l.startswith("SHELLCHECK_EXCLUDE"))
         excluded = line.split(":=", 1)[1].split()
         assert excluded == [self._EXCLUDED], (
             f"the shellcheck exclusion list is {excluded}; only the Jinja2 "
@@ -4752,11 +4696,12 @@ class TestEveryShellScriptIsUnderTheShellcheckGate:
         )
         r = subprocess.run(
             ["shellcheck", self._EXCLUDED],
-            cwd=REPO_ROOT, capture_output=True, text=True,
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
         )
         assert r.returncode != 0, (
-            f"{self._EXCLUDED} now passes shellcheck; remove it from "
-            "SHELLCHECK_EXCLUDE"
+            f"{self._EXCLUDED} now passes shellcheck; remove it from SHELLCHECK_EXCLUDE"
         )
         assert "SC1072" in r.stdout or "SC1073" in r.stdout, (
             "the exclusion is justified by shellcheck being unable to PARSE "
@@ -4769,7 +4714,9 @@ class TestEveryShellScriptIsUnderTheShellcheckGate:
         disabled, and CI runs exactly this."""
         r = subprocess.run(
             ["make", "shellcheck"],
-            cwd=REPO_ROOT, capture_output=True, text=True,
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
         )
         assert r.returncode == 0, r.stdout + r.stderr
 
@@ -4787,8 +4734,7 @@ class TestEveryShellScriptIsUnderTheShellcheckGate:
                 lines = fh.read().splitlines()
             # The first executable line: a file-level directive must precede it.
             first_code = next(
-                (i for i, l in enumerate(lines)
-                 if l.strip() and not l.lstrip().startswith("#")),
+                (i for i, l in enumerate(lines) if l.strip() and not l.lstrip().startswith("#")),
                 len(lines),
             )
             for i, line in enumerate(lines):
@@ -4800,8 +4746,7 @@ class TestEveryShellScriptIsUnderTheShellcheckGate:
                     "the gate: " + line.strip()
                 )
                 assert "#" in line.split("disable=", 1)[1], (
-                    f"{relpath}:{i + 1} disables a check without stating why: "
-                    + line.strip()
+                    f"{relpath}:{i + 1} disables a check without stating why: " + line.strip()
                 )
 
 
@@ -4823,9 +4768,7 @@ class TestSshOptionsSurviveWordSplitting:
         """Comment lines stripped.  The comment above SSH_OPTS quotes both broken
         forms verbatim to explain why they are wrong, so matching against the raw
         file finds the very strings the script no longer executes."""
-        return "\n".join(
-            l for l in self._text().splitlines() if not l.lstrip().startswith("#")
-        )
+        return "\n".join(l for l in self._text().splitlines() if not l.lstrip().startswith("#"))
 
     def test_ssh_opts_is_an_array(self):
         text = self._text()
@@ -4838,10 +4781,7 @@ class TestSshOptionsSurviveWordSplitting:
         """The mutation this exists to catch: `ssh "$SSH_OPTS"`."""
         text = self._code()
         bad = re.findall(r'ssh\s+"\$\{?SSH_OPTS\}?"', text)
-        assert not bad, (
-            f"{bad} passes every ssh option as one argument; use "
-            '"${SSH_OPTS[@]}"'
-        )
+        assert not bad, f'{bad} passes every ssh option as one argument; use "${{SSH_OPTS[@]}}"'
 
     def test_no_call_site_relies_on_an_unquoted_expansion(self):
         text = self._code()
@@ -4854,16 +4794,14 @@ class TestSshOptionsSurviveWordSplitting:
         calls = [c for c in calls if "SSH_OPTS" in c or c.startswith("$")]
         assert calls, "no ssh call sites found; this test has stopped covering anything"
         for c in calls:
-            assert c == '"${SSH_OPTS[@]}"', (
-                f"ssh is invoked with {c}, not the SSH_OPTS array"
-            )
+            assert c == '"${SSH_OPTS[@]}"', f"ssh is invoked with {c}, not the SSH_OPTS array"
 
     def test_the_key_path_is_quoted_inside_the_array(self):
         """The array is also what makes a space in the key path survivable --
         the string form could not quote one element without quoting all of them."""
         text = self._text()
-        block = text[text.index("SSH_OPTS=("):]
-        block = block[:block.index(")")]
+        block = text[text.index("SSH_OPTS=(") :]
+        block = block[: block.index(")")]
         assert '-i "${SSH_KEY}"' in block, (
             "the key path is unquoted inside the array; a path with a space "
             "would split into two arguments"
@@ -4874,8 +4812,8 @@ class TestSshOptionsSurviveWordSplitting:
         property of bash's expansion rules, not of the text.  Rebuild the real
         array from the script and count what a command would actually see."""
         text = self._text()
-        block = text[text.index("SSH_OPTS=("):]
-        block = block[:block.index(")") + 1]
+        block = text[text.index("SSH_OPTS=(") :]
+        block = block[: block.index(")") + 1]
         script = f'SSH_KEY="/path/with space/key.pem"\n{block}\nprintf "%s\\n" "${{SSH_OPTS[@]}}"\n'
         r = subprocess.run(["bash", "-c", script], capture_output=True, text=True)
         assert r.returncode == 0, r.stderr

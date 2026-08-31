@@ -39,21 +39,28 @@ class _Recorder:
     def __init__(self, tools_by_tier=None, result=None):
         self.calls = []
         self._tools = tools_by_tier or {}
-        self._result = result if result is not None else {"jsonrpc": "2.0", "id": 1, "result": {"ok": True}}
+        self._result = (
+            result if result is not None else {"jsonrpc": "2.0", "id": 1, "result": {"ok": True}}
+        )
 
     def __call__(self, tier, body):
         self.calls.append((tier, body))
         if body.get("method") == "tools/list":
             return {
-                "jsonrpc": "2.0", "id": body.get("id"),
+                "jsonrpc": "2.0",
+                "id": body.get("id"),
                 "result": {"tools": self._tools.get(tier, [])},
             }
         return self._result
 
 
 def _call(name, **args):
-    return {"jsonrpc": "2.0", "id": 7, "method": "tools/call",
-            "params": {"name": name, "arguments": args}}
+    return {
+        "jsonrpc": "2.0",
+        "id": 7,
+        "method": "tools/call",
+        "params": {"name": name, "arguments": args},
+    }
 
 
 class TestToolCallRouting:
@@ -66,7 +73,11 @@ class TestToolCallRouting:
     def test_the_handler_response_is_returned_unchanged(self):
         """The router is a forwarder; rewrapping a handler's response would
         be a place for the result shape to drift."""
-        canned = {"jsonrpc": "2.0", "id": 7, "result": {"content": [{"type": "text", "text": "hi"}]}}
+        canned = {
+            "jsonrpc": "2.0",
+            "id": 7,
+            "result": {"content": [{"type": "text", "text": "hi"}]},
+        }
         rec = _Recorder(result=canned)
         assert router.handle(_call("list_clusters"), invoke=rec) is canned
 
@@ -142,14 +153,16 @@ class TestProtocolMethodsAreTerminatedLocally:
 
     def test_notifications_produce_no_response(self):
         rec = _Recorder()
-        assert router.handle(
-            {"jsonrpc": "2.0", "method": "notifications/initialized"}, invoke=rec
-        ) is None
+        assert (
+            router.handle({"jsonrpc": "2.0", "method": "notifications/initialized"}, invoke=rec)
+            is None
+        )
         assert rec.calls == []
 
     def test_an_unknown_method_is_method_not_found(self):
-        resp = router.handle({"jsonrpc": "2.0", "id": 4, "method": "resources/read"},
-                             invoke=_Recorder())
+        resp = router.handle(
+            {"jsonrpc": "2.0", "id": 4, "method": "resources/read"}, invoke=_Recorder()
+        )
         assert resp["error"]["code"] == router._METHOD_NOT_FOUND
 
     def test_a_non_object_body_is_invalid_request(self):
@@ -162,8 +175,7 @@ class TestProtocolMethodsAreTerminatedLocally:
 
     def test_the_response_id_matches_the_request(self):
         for method in ("initialize", "ping"):
-            resp = router.handle({"jsonrpc": "2.0", "id": 99, "method": method},
-                                 invoke=_Recorder())
+            resp = router.handle({"jsonrpc": "2.0", "id": 99, "method": method}, invoke=_Recorder())
             assert resp["id"] == 99
 
 
@@ -172,7 +184,9 @@ class TestTierNamesAgreeEverywhere:
 
     def _router_policy_functions(self):
         raw = open(os.path.join(REPO_ROOT, "templates", "MCPRouterLambda.json_src")).read()
-        doc = json.loads(raw.replace("<AWS_REGION>", "us-east-2").replace("<AWS_ACCOUNT_ID>", "1" * 12))
+        doc = json.loads(
+            raw.replace("<AWS_REGION>", "us-east-2").replace("<AWS_ACCOUNT_ID>", "1" * 12)
+        )
         arns = []
         for stmt in doc["Statement"]:
             r = stmt["Resource"]
@@ -277,18 +291,21 @@ class TestAFailingHandlerLambdaDoesNotLeakItsStackTrace:
         return body
 
     def _unhandled(self):
-        return self._response({
-            "errorMessage": "Unable to import module 'mcp_server.handlers.read_only'",
-            "errorType": "Runtime.ImportModuleError",
-            "stackTrace": self._TRACE,
-        }, function_error="Unhandled")
+        return self._response(
+            {
+                "errorMessage": "Unable to import module 'mcp_server.handlers.read_only'",
+                "errorType": "Runtime.ImportModuleError",
+                "stackTrace": self._TRACE,
+            },
+            function_error="Unhandled",
+        )
 
     def test_the_stack_trace_never_reaches_the_client(self):
         out = router.unwrap_invocation(self._unhandled(), tier="read-only", request_id=7)
         blob = json.dumps(out)
         assert "/var/task/" not in blob
         assert "stackTrace" not in blob
-        assert "File \"" not in blob
+        assert 'File "' not in blob
 
     def test_it_becomes_a_wellformed_jsonrpc_error(self):
         """The other half: Lambda's error object has no `jsonrpc` or `id`,
@@ -313,8 +330,7 @@ class TestAFailingHandlerLambdaDoesNotLeakItsStackTrace:
         """`FunctionError` is "Handled" when the function caught and
         re-raised; still not a JSON-RPC response."""
         resp = self._response(
-            {"errorMessage": "boom", "errorType": "RuntimeError",
-             "stackTrace": self._TRACE},
+            {"errorMessage": "boom", "errorType": "RuntimeError", "stackTrace": self._TRACE},
             function_error="Handled",
         )
         out = router.unwrap_invocation(resp, tier="fleet-toggle", request_id=1)
@@ -324,9 +340,9 @@ class TestAFailingHandlerLambdaDoesNotLeakItsStackTrace:
         """Vacuity guard: the translation must not fire on the happy path,
         or every successful call becomes an error."""
         good = {"jsonrpc": "2.0", "id": 3, "result": {"tools": []}}
-        assert router.unwrap_invocation(
-            self._response(good), tier="read-only", request_id=3
-        ) == good
+        assert (
+            router.unwrap_invocation(self._response(good), tier="read-only", request_id=3) == good
+        )
 
     def test_an_unreadable_payload_is_reported_not_raised(self):
         """A truncated or non-JSON payload must not take the router down
@@ -335,7 +351,9 @@ class TestAFailingHandlerLambdaDoesNotLeakItsStackTrace:
         import io
 
         out = router.unwrap_invocation(
-            {"Payload": io.BytesIO(b"not json")}, tier="read-only", request_id=2,
+            {"Payload": io.BytesIO(b"not json")},
+            tier="read-only",
+            request_id=2,
         )
         assert out["error"]["code"] == router._INTERNAL_ERROR
 
@@ -348,7 +366,8 @@ class TestAFailingHandlerLambdaDoesNotLeakItsStackTrace:
         source = inspect.getsource(router.lambda_handler)
         assert "unwrap_invocation(" in source
         assert_absent_ignoring_formatting(
-            'json.loads(response["Payload"].read())', source,
+            'json.loads(response["Payload"].read())',
+            source,
             "the router must check FunctionError before parsing",
         )
 
@@ -385,11 +404,19 @@ class TestAnInvokeThatFailsOutrightIsNotLeaked:
 
     def test_a_missing_tier_is_a_json_rpc_error(self, monkeypatch):
         router = self._handler_with_failing_invoke(
-            monkeypatch, RuntimeError("Function not found: ...:pclustermaker-mcp-stack-mutation"),
+            monkeypatch,
+            RuntimeError("Function not found: ...:pclustermaker-mcp-stack-mutation"),
         )
-        event = {"body": json.dumps({
-            "jsonrpc": "2.0", "id": 7, "method": "tools/call",
-            "params": {"name": "delete_cluster", "arguments": {}}})}
+        event = {
+            "body": json.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 7,
+                    "method": "tools/call",
+                    "params": {"name": "delete_cluster", "arguments": {}},
+                }
+            )
+        }
         out = router.lambda_handler(event, None)
         body = json.loads(out["body"])
         assert out["statusCode"] == 200
@@ -400,11 +427,19 @@ class TestAnInvokeThatFailsOutrightIsNotLeaked:
         """The disclosure half. A traceback naming /var/task tells a caller
         the runtime layout; the tier name alone is what they can act on."""
         router = self._handler_with_failing_invoke(
-            monkeypatch, RuntimeError('File "/var/task/mcp_server/router.py", line 210'),
+            monkeypatch,
+            RuntimeError('File "/var/task/mcp_server/router.py", line 210'),
         )
-        event = {"body": json.dumps({
-            "jsonrpc": "2.0", "id": 8, "method": "tools/call",
-            "params": {"name": "delete_cluster", "arguments": {}}})}
+        event = {
+            "body": json.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 8,
+                    "method": "tools/call",
+                    "params": {"name": "delete_cluster", "arguments": {}},
+                }
+            )
+        }
         out = router.lambda_handler(event, None)
         assert "/var/task" not in out["body"], out["body"]
         assert "stack-mutation" in out["body"], "the tier has to be named"
@@ -413,11 +448,19 @@ class TestAnInvokeThatFailsOutrightIsNotLeaked:
         """Enough to diagnose (ResourceNotFound vs AccessDenied vs throttle)
         without echoing an arbitrary AWS string back to a caller."""
         router = self._handler_with_failing_invoke(
-            monkeypatch, PermissionError("arn:aws:iam::123456789012:role/secret-role denied"),
+            monkeypatch,
+            PermissionError("arn:aws:iam::123456789012:role/secret-role denied"),
         )
-        event = {"body": json.dumps({
-            "jsonrpc": "2.0", "id": 9, "method": "tools/call",
-            "params": {"name": "stop_fleet", "arguments": {}}})}
+        event = {
+            "body": json.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 9,
+                    "method": "tools/call",
+                    "params": {"name": "stop_fleet", "arguments": {}},
+                }
+            )
+        }
         out = router.lambda_handler(event, None)
         assert "PermissionError" in out["body"]
         assert "secret-role" not in out["body"]
@@ -428,10 +471,12 @@ class TestAnInvokeThatFailsOutrightIsNotLeaked:
 
         class _Client:
             def invoke(self, **kw):
-                return {"StatusCode": 200,
-                        "Payload": io.BytesIO(json.dumps(
-                            {"jsonrpc": "2.0", "id": 10, "result": {"ok": True}}
-                        ).encode())}
+                return {
+                    "StatusCode": 200,
+                    "Payload": io.BytesIO(
+                        json.dumps({"jsonrpc": "2.0", "id": 10, "result": {"ok": True}}).encode()
+                    ),
+                }
 
         class _Boto:
             @staticmethod
@@ -439,9 +484,16 @@ class TestAnInvokeThatFailsOutrightIsNotLeaked:
                 return _Client()
 
         monkeypatch.setitem(sys.modules, "boto3", _Boto)
-        event = {"body": json.dumps({
-            "jsonrpc": "2.0", "id": 10, "method": "tools/call",
-            "params": {"name": "list_clusters", "arguments": {}}})}
+        event = {
+            "body": json.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 10,
+                    "method": "tools/call",
+                    "params": {"name": "list_clusters", "arguments": {}},
+                }
+            )
+        }
         out = router.lambda_handler(event, None)
         assert json.loads(out["body"])["result"] == {"ok": True}
 
@@ -467,8 +519,11 @@ class TestToolsListFansOutConcurrently:
 
         def invoke(tier, body):
             time.sleep(delay)
-            return {"jsonrpc": "2.0", "id": body.get("id"),
-                    "result": {"tools": tools_by_tier.get(tier, [])}}
+            return {
+                "jsonrpc": "2.0",
+                "id": body.get("id"),
+                "result": {"tools": tools_by_tier.get(tier, [])},
+            }
 
         return invoke
 
@@ -484,8 +539,7 @@ class TestToolsListFansOutConcurrently:
         invoke = self._slow_invoke(delay, {})
 
         start = time.monotonic()
-        router.handle({"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
-                      invoke=invoke)
+        router.handle({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}, invoke=invoke)
         elapsed = time.monotonic() - start
 
         serial = delay * n
@@ -498,8 +552,7 @@ class TestToolsListFansOutConcurrently:
     def test_every_tier_is_still_invoked(self):
         """Concurrency must not become 'ask fewer tiers'."""
         rec = _Recorder()
-        router.handle({"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
-                      invoke=rec)
+        router.handle({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}, invoke=rec)
         assert sorted(t for t, _ in rec.calls) == sorted(router._FANOUT_TIERS)
 
     def test_duplicate_tools_still_resolve_in_tier_order(self):
@@ -511,8 +564,7 @@ class TestToolsListFansOutConcurrently:
         later = [{"name": "shared", "description": "from " + tiers[-1]}]
         rec = _Recorder(tools_by_tier={tiers[0]: dupe, tiers[-1]: later})
 
-        resp = router.handle({"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
-                             invoke=rec)
+        resp = router.handle({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}, invoke=rec)
         tools = resp["result"]["tools"]
         assert [t["name"] for t in tools] == ["shared"]
         assert tools[0]["description"] == "from " + tiers[0]
@@ -536,7 +588,6 @@ class TestToolsListFansOutConcurrently:
         # boto3 is the Lambda runtime's own SDK and is what `invoke` is
         # built from; the ban the docstring states is on the pcluster /
         # fastmcp dependency chain, which is what makes the package big.
-        assert mods <= {"json", "os", "sys", "concurrent", "boto3",
-                        "mcp_server"}, (
+        assert mods <= {"json", "os", "sys", "concurrent", "boto3", "mcp_server"}, (
             f"router imports something outside its allowed set: {mods}"
         )

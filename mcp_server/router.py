@@ -89,7 +89,8 @@ def unwrap_invocation(response, *, tier, request_id):
         payload = json.loads(response["Payload"].read())
     except (TypeError, ValueError, KeyError) as e:
         return _error(
-            request_id, _INTERNAL_ERROR,
+            request_id,
+            _INTERNAL_ERROR,
             f"handler {tier!r} returned an unreadable payload: {type(e).__name__}",
         )
 
@@ -103,7 +104,8 @@ def unwrap_invocation(response, *, tier, request_id):
     else:
         etype, message = "error", str(payload)
     return _error(
-        request_id, _INTERNAL_ERROR,
+        request_id,
+        _INTERNAL_ERROR,
         f"handler {tier!r} failed ({function_error}): {etype}: {message}",
     )
 
@@ -133,11 +135,14 @@ def handle(body, *, invoke):
         return None
 
     if method == "initialize":
-        return _result(request_id, {
-            "protocolVersion": _PROTOCOL_VERSION,
-            "capabilities": {"tools": {"listChanged": False}},
-            "serverInfo": _SERVER_INFO,
-        })
+        return _result(
+            request_id,
+            {
+                "protocolVersion": _PROTOCOL_VERSION,
+                "capabilities": {"tools": {"listChanged": False}},
+                "serverInfo": _SERVER_INFO,
+            },
+        )
 
     if method == "ping":
         return _result(request_id, {})
@@ -190,9 +195,9 @@ def handle(body, *, invoke):
         tier = route_for(name)
         if tier is None:
             return _error(
-                request_id, _INVALID_PARAMS,
-                f"unknown tool {name!r} -- this server routes: "
-                f"{', '.join(sorted(_TOOL_ROUTES))}",
+                request_id,
+                _INVALID_PARAMS,
+                f"unknown tool {name!r} -- this server routes: {', '.join(sorted(_TOOL_ROUTES))}",
             )
         return invoke(tier, body)
 
@@ -212,9 +217,7 @@ def lambda_handler(event, context):
     def _invoke(tier, payload):
         from mcp_server.tiers import function_name_for
 
-        request_id = (
-            (payload or {}).get("id") if isinstance(payload, dict) else None
-        )
+        request_id = (payload or {}).get("id") if isinstance(payload, dict) else None
         try:
             response = client.invoke(
                 FunctionName=function_name_for(tier),
@@ -234,7 +237,8 @@ def lambda_handler(event, context):
             # prevent (an internal path disclosed, and a body that is not a
             # JSON-RPC response), reached by the one door it does not watch.
             return _error(
-                request_id, _INTERNAL_ERROR,
+                request_id,
+                _INTERNAL_ERROR,
                 f"tier {tier!r} could not be invoked: {type(e).__name__}",
             )
         return unwrap_invocation(response, tier=tier, request_id=request_id)
