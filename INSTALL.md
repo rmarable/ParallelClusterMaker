@@ -239,7 +239,7 @@ claude.ai:
    address is a literal username rather than an alias.
 5. Approve the consent screen. Claude asks once per connector.
 
-The tool list should show **13** tools, or **17** once the container tier
+The tool list should show **15** tools, or **19** once the container tier
 is deployed. Asking Claude to list clusters is the quickest check — an
 **empty** answer is a successful one when no cluster exists.
 
