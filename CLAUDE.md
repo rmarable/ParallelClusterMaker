@@ -393,7 +393,7 @@ standing constraints for local development.
   **no tier granted any `elasticloadbalancing` action**, so every remote
   tier failed `describe-cluster` against any `--enable_loginnode`
   cluster. `TestEachTierCanActuallyDoItsJob` pins both directions for
-  both gaps. `MCPStackMutation.json_src` is now 5,935 bytes of the 6,144
+  both gaps. `MCPStackMutation.json_src` is now 5,979 bytes of the 6,144
   limit. Which grants, and why each stays narrow: `templates/CLAUDE.md`.
 - **Reuse is not convergence, and the difference is a naming asymmetry.**
   `_setup_iam`'s policies carry the cluster serial, so every build makes

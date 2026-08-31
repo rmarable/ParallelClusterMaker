@@ -10,18 +10,6 @@
             "Resource": "*"
         },
         {
-            "Sid": "MCPEC2FleetLifecycle",
-            "Action": [
-                "ec2:RunInstances",
-                "ec2:CreateFleet",
-                "ec2:TerminateInstances",
-                "ec2:CreateTags",
-                "ec2:DeleteTags"
-            ],
-            "Effect": "Allow",
-            "Resource": "*"
-        },
-        {
             "Sid": "MCPCloudFormationDescribeOnly",
             "Action": [
                 "cloudformation:DescribeStacks"

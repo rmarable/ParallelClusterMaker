@@ -138,11 +138,11 @@ def verify_claims(token, *, region, user_pool_id, jwks_client=None, jwt_module=N
     return claims
 
 
-def _client_exists(client_id, *, user_pool_id, cognito=None):
+def _client_exists(client_id, *, user_pool_id, region, cognito=None):
     if cognito is None:
         import boto3
 
-        cognito = boto3.client("cognito-idp")
+        cognito = boto3.client("cognito-idp", region_name=region)
     try:
         cognito.describe_user_pool_client(
             UserPoolId=user_pool_id,
@@ -170,7 +170,7 @@ def authorize(event, *, region, user_pool_id, cognito=None, jwks_client=None):
         jwks_client=jwks_client,
     )
     client_id = claims["client_id"]
-    if not _client_exists(client_id, user_pool_id=user_pool_id, cognito=cognito):
+    if not _client_exists(client_id, user_pool_id=user_pool_id, region=region, cognito=cognito):
         raise Unauthorized(
             f"client_id {client_id!r} does not exist in this user pool -- it was "
             f"never registered here, or it has been deleted to revoke access"

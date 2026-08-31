@@ -277,15 +277,11 @@
         {
             "Sid": "IAMClusterRoleLifecycle",
             "Action": [
-                "iam:CreateRole",
                 "iam:DeleteRole",
-                "iam:PutRolePolicy",
                 "iam:DeleteRolePolicy",
                 "iam:ListRolePolicies",
                 "iam:ListInstanceProfilesForRole",
                 "iam:TagRole",
-                "iam:PassRole",
-                "iam:AttachRolePolicy",
                 "iam:DetachRolePolicy",
                 "iam:ListAttachedRolePolicies"
             ],
@@ -295,7 +291,6 @@
         {
             "Sid": "IAMClusterPolicyLifecycle",
             "Action": [
-                "iam:CreatePolicy",
                 "iam:DeletePolicy",
                 "iam:GetPolicyVersion",
                 "iam:ListPolicyVersions",

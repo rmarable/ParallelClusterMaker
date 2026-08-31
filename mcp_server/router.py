@@ -210,9 +210,18 @@ def lambda_handler(event, context):
     Kept thin on purpose: everything decision-shaped lives in handle(), so
     it can be tested without an AWS SDK, an event fixture, or a network.
     """
+    import os
+
     import boto3
 
-    client = boto3.client("lambda")
+    # In-Lambda: AWS_REGION is this router's own region, and it invokes
+    # handler functions in that same region. Bound explicitly so the
+    # region-binding sweep holds across mcp_server too. os is stdlib -- the
+    # router's no-third-party-import rule is unaffected.
+    client = boto3.client(
+        "lambda",
+        region_name=os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION"),
+    )
 
     def _invoke(tier, payload):
         from mcp_server.tiers import function_name_for

@@ -58,7 +58,10 @@ class RegistrationError(Exception):
 def _client():
     import boto3
 
-    return boto3.client("cognito-idp")
+    # Runs only in-Lambda, where AWS_REGION is authoritatively this
+    # function's own region and the Cognito pool it manages is in it.
+    region = os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION")
+    return boto3.client("cognito-idp", region_name=region)
 
 
 def register(payload, *, user_pool_id, cognito=None):

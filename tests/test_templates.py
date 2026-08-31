@@ -6274,6 +6274,74 @@ class TestEachTierCanActuallyDoItsJob:
                 f"fleet-toggle grants {action}; it needs only to read the cluster config"
             )
 
+    def test_stack_mutation_keeps_every_action_teardown_needs(self):
+        """The delete/update tier deletes the cluster's IAM. Removing the
+        unused create-family (below) must not take a delete action with it --
+        a teardown that cannot delete a role or detach a policy leaves
+        orphaned, billable resources, which is the worst outcome this tier
+        has. These are the actions _delete_managed_policies/_delete_managed_iam
+        actually call."""
+        for action in (
+            "iam:DeleteRole",
+            "iam:DeleteRolePolicy",
+            "iam:DetachRolePolicy",
+            "iam:DeletePolicy",
+            "iam:ListPolicyVersions",
+            "iam:ListAttachedRolePolicies",
+        ):
+            assert self._grants("MCPStackMutation.json_src", action), (
+                f"stack-mutation cannot {action}; teardown needs it and would "
+                f"leave orphaned IAM behind"
+            )
+
+    def test_stack_mutation_cannot_create_or_escalate_iam(self):
+        """F3: the create-family -- CreateRole, PutRolePolicy, AttachRolePolicy,
+        PassRole, CreatePolicy -- is the privilege-escalation chain (create a
+        role, attach an admin policy, pass it to an instance). Every one of
+        these is called ONLY from the build path (_setup_iam,
+        _setup_fsx_hydration_iam, _ensure_cluster_boundary) or the deploy path
+        (_setup_mcp_infra), never from this tier's tools (delete_cluster,
+        finalize_cluster_teardown, add_queue, remove_queue). The build runs on
+        stack-mutation-node, not here. IamPassRole with its own condition is a
+        separate, retained statement."""
+        for action in (
+            "iam:CreateRole",
+            "iam:CreatePolicy",
+            "iam:AttachRolePolicy",
+        ):
+            assert not self._grants("MCPStackMutation.json_src", action), (
+                f"stack-mutation grants {action}; the create-family belongs to "
+                f"the build tier (stack-mutation-node), not the delete/update tier"
+            )
+        # PutRolePolicy is the inline-admin-policy half of the chain. The
+        # IAMClusterRoleLifecycle statement must no longer carry it; a
+        # conditioned pass-role (IamPassRole) is allowed to remain.
+        role_stmt = next(
+            st
+            for st in _load_policy("MCPStackMutation.json_src")["Statement"]
+            if st.get("Sid") == "IAMClusterRoleLifecycle"
+        )
+        acts = role_stmt["Action"]
+        acts = acts if isinstance(acts, list) else [acts]
+        assert "iam:PutRolePolicy" not in acts, acts
+        assert "iam:CreateRole" not in acts, acts
+
+    def test_fleet_toggle_cannot_launch_or_terminate_instances(self):
+        """F2: `update-compute-fleet` flips a DynamoDB item -- the actual
+        instance launch/termination is done later by clustermgtd/slurm_resume
+        on the head node under HeadNode-Compute, never by this Lambda. An
+        internet-facing tier holding `ec2:TerminateInstances` on `*` could
+        terminate every instance in the account for no functional gain."""
+        for action in (
+            "ec2:RunInstances",
+            "ec2:CreateFleet",
+            "ec2:TerminateInstances",
+        ):
+            assert not self._grants("MCPFleetToggleLambda.json_src", action), (
+                f"fleet-toggle grants {action}; the fleet is launched by the head "
+                f"node, not by this Lambda -- see HeadNode-Compute.json_src"
+            )
+
     # Every tier serving a tool that calls describe_cluster. A login-node
     # pool sits behind an NLB, and pcluster/aws/elb.py is reached during an
     # ordinary describe -- so this is not a login-node-only tier's problem.

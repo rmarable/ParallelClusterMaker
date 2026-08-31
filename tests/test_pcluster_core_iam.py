@@ -1350,9 +1350,15 @@ class TestEveryRegionalBotoClientIsBoundToTheTargetRegion:
     def _sources(self):
         import glob
 
+        # mcp_server/ builds clients too -- the router, the auth Lambdas, the
+        # deploy path, the record store. Omitting it left the rule "every
+        # regional client is bound" unenforced across the whole transport,
+        # where a client aimed at the wrong region fails as an opaque
+        # AccessDenied. In-Lambda clients bind to the function's own region.
         return sorted(
             glob.glob(os.path.join(REPO_ROOT, "src", "*.py"))
             + glob.glob(os.path.join(REPO_ROOT, "*.py"))
+            + glob.glob(os.path.join(REPO_ROOT, "mcp_server", "**", "*.py"), recursive=True)
         )
 
     def test_no_regional_client_is_left_unbound(self):
