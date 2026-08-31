@@ -1,20 +1,31 @@
 # Final live-verification runbook
 
-Three things are proven by test and static analysis but not yet on live AWS.
-This runbook closes all three in **one session, one cluster, one transport
-deploy**, across three phases:
+> **Status — VALIDATED 2026-08-31.** Run end to end on `osiris` (login-node
+> Graviton, us-east-1): all four checks closed, the claude.ai connector hop
+> included. The run earned its keep — it caught a real bug no render test
+> could: an accounting pool override larger than the head node's RAM aborted
+> MariaDB and silently disabled accounting, now fixed by a boot-time RAM
+> clamp (`postinstall.j2`, commit `dd9af91`). Afterward the cluster, the
+> transport, the claude.ai connector and even the retained CloudWatch log
+> group were all torn down — the account is clean, zero footprint. The
+> procedure below stays runnable for any future cluster or as a regression
+> check.
+
+Four things were proven by test and static analysis but, until this runbook
+was first run, not on live AWS. It closes all four in **one session, one
+cluster, one transport deploy**, across three phases:
 
 1. **Claude Code (local CLI)** — stand up the cluster and verify #1 and #2.
 2. **claude.ai (browser connector)** — deploy the remote transport and
    verify #3, plus general monitoring.
 3. **Claude Code (local CLI)** — tear the cluster and transport down.
 
-| # | What is unverified | Phase | Why not claude.ai |
+| # | What each check exercises (all closed in the run above) | Phase | Why not claude.ai |
 |---|---|---|---|
 | 1 | An **explicit accounting-DB size override** starts MariaDB cleanly on the target instance. | 1 | Confirming the size needs a MariaDB query on the head node (SSH). The browser has no shell. |
 | 2 | A **compute node's** stdout reaches CloudWatch and **survives scaledown**. | 1 | Needs `aws logs` on the compute instance's stream. The browser has only the MCP tool surface, and `diagnose_cluster` reads *head-node* logs. |
 | 3 | The **claude.ai browser connector hop** — real Cognito OAuth/PKCE through API Gateway. | 2 | This *is* the browser path; Claude Code's local stdio server bypasses it entirely. |
-| 4 | **A login-node cluster is describable from the remote tiers.** The pool sits behind an NLB, and no MCP tier granted `elasticloadbalancing` until the review fixed it — so `describe-cluster` (and every tool built on it) failed from the browser against any `--enable_loginnode` cluster. Fixed and pinned by test, never confirmed live. | 1 + 2 | The remote-tier ELB path only exists in the browser; Claude Code's local server never hit the gap. |
+| 4 | **A login-node cluster is describable from the remote tiers.** The pool sits behind an NLB, and no MCP tier granted `elasticloadbalancing` until the review fixed it — so `describe-cluster` (and every tool built on it) failed from the browser against any `--enable_loginnode` cluster. Fixed and pinned by test; confirmed live in this run. | 1 + 2 | The remote-tier ELB path only exists in the browser; Claude Code's local server never hit the gap. |
 
 **Why the split matters:** Claude Code and claude.ai are different
 transports. Claude Code (local stdio) has the full tool set and can SSH and
