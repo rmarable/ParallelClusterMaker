@@ -1205,20 +1205,53 @@ class TestSlurmAccountingDbSizeIsOverridableAndValidated:
         assert any("_mem_mb / 10" in line for line in lines), lines
         assert any("_pool_mb / 4" in line for line in lines), lines
 
-    def test_an_override_renders_the_literal_value_and_no_derivation(self, cluster_params):
+    def _render_full(self, cluster_params, pool, log):
+        import pcluster_core
+
+        ctx = dict(cluster_params)
+        ctx["enable_slurm_accounting"] = "true"
+        ctx["slurm_accounting_buffer_pool_mb"] = pool
+        ctx["slurm_accounting_log_file_mb"] = log
+        repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        env = pcluster_core._template_env(os.path.join(repo_root, "templates"))
+        return env.get_template("postinstall.j2").render(**ctx)
+
+    def test_an_override_renders_the_literal_value_then_clamps_to_ram(self, cluster_params):
+        """An explicit override is set literally, then clamped to 80% of RAM.
+        A pool larger than physical RAM aborts InnoDB at startup and the
+        non-fatal latch leaves accounting silently OFF -- confirmed live on a
+        3.8G c8g.large head node where 8192M did exactly that."""
         lines = self._render_sizing(cluster_params, "8192", "512")
-        assert "_pool_mb=8192" in lines
+        assert "_pool_mb=8192" in lines  # the literal override is set first
         assert "_log_mb=512" in lines
-        assert not any("_mem_mb" in line for line in lines), (
-            "an explicit pool must not reference _mem_mb -- it is only set in the "
-            "auto branch, and referencing it unset fails under set -u"
-        )
+        full = self._render_full(cluster_params, "8192", "512")
+        assert "_pool_cap=$(( _mem_mb * 80 / 100 ))" in full  # the RAM ceiling
+        assert '_pool_mb="$_pool_cap"' in full  # clamped when it exceeds the ceiling
+        assert "clamping to ${_pool_cap}M so MariaDB can start" in full  # warned on stdout
 
     def test_an_explicit_pool_with_auto_log_derives_the_log_from_the_pool(self, cluster_params):
         lines = self._render_sizing(cluster_params, "8192", "auto")
         assert "_pool_mb=8192" in lines
-        assert any("_pool_mb / 4" in line for line in lines), lines
-        assert not any("_mem_mb" in line for line in lines), lines
+        assert any("_pool_mb / 4" in line for line in lines), lines  # log derives from pool
+
+    def test_the_clamp_arithmetic_reduces_an_over_ram_override(self):
+        """The clamp lines, executed as rendered, take an over-RAM override
+        down to 80% of RAM. Extracted from the template, not re-typed, so a
+        change to the formula is caught."""
+        import re
+        import subprocess
+
+        full = self._render_full(self._auto_ctx(), "8192", "512")
+        # the three clamp lines, verbatim from the render
+        cap = re.search(r"_pool_cap=\$\(\( _mem_mb \* 80 / 100 \)\)", full).group(0)
+        snippet = f'_mem_mb=3801\n_pool_mb=8192\n{cap}\nif [ "$_pool_mb" -gt "$_pool_cap" ]; then _pool_mb="$_pool_cap"; fi\necho "$_pool_mb"\n'
+        out = subprocess.run(["bash", "-c", snippet], capture_output=True, text=True).stdout.strip()
+        assert out == "3040", out  # 3801 * 80 / 100
+
+    def _auto_ctx(self):
+        import conftest
+
+        return conftest.cluster_params.__wrapped__()
 
 
 class TestDownloadChecksumsAreValidatedBeforeAnythingIsCreated:

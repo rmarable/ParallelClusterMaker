@@ -759,13 +759,27 @@ then
 		# absolute value in MB, threaded from slurm_accounting_*_mb, for a
 		# large or long-retention database that outgrows the derived ceiling.
 		# The override is validated as a positive integer at build time.
-{% if slurm_accounting_buffer_pool_mb == 'auto' %}
 		_mem_mb="$(awk '/^MemTotal:/{print int($2/1024)}' /proc/meminfo)"
+{% if slurm_accounting_buffer_pool_mb == 'auto' %}
 		_pool_mb=$(( _mem_mb / 10 ))
 		if [ "$_pool_mb" -lt 128 ]; then _pool_mb=128; fi
 		if [ "$_pool_mb" -gt 4096 ]; then _pool_mb=4096; fi
 {% else %}
 		_pool_mb={{ slurm_accounting_buffer_pool_mb }}
+		# Clamp an explicit override to 80% of RAM. A buffer pool larger than
+		# physical RAM aborts InnoDB at startup ("Unknown/unsupported storage
+		# engine: InnoDB"), and the non-fatal latch then leaves accounting
+		# silently OFF -- confirmed on a c8g.large (3.8G) head node where an
+		# 8192M override did exactly that. RAM is unknown at build time, so
+		# this is the only place the ceiling can be enforced; the auto branch
+		# already caps this way. An override may raise the pool, never past
+		# what will start.
+		_pool_cap=$(( _mem_mb * 80 / 100 ))
+		if [ "$_pool_mb" -gt "$_pool_cap" ]
+		then
+			echo "WARNING: slurm_accounting_buffer_pool_mb=${_pool_mb} exceeds 80% of ${_mem_mb}M RAM; clamping to ${_pool_cap}M so MariaDB can start"
+			_pool_mb="$_pool_cap"
+		fi
 {% endif %}
 {% if slurm_accounting_log_file_mb == 'auto' %}
 		_log_mb=$(( _pool_mb / 4 ))
