@@ -301,24 +301,30 @@ back to zero.
 
 ---
 
-## Checklist
+## Checklist — closed 2026-08-31 on osiris
 
-- [ ] **#1** (Phase 1, Claude Code) `sacct` returns the job; the innodb sizes
-      are the 8192M/512M override, not the derived cap. (record exact bytes)
-- [ ] **#2** (Phase 1, Claude Code) the compute node's `Ready to finish
-      joining the cluster!` line is in its `cloud-init-output` stream — **and
-      still there after the node scaled down**.
-- [ ] **#3** (Phase 2, claude.ai) the browser connector lists 15 tools and
-      answers one read-only request through the Cognito OAuth flow.
-- [ ] **#4a** (Phase 1, Claude Code) `-L` reaches the login node, `$HOME` is
-      shared, `sinfo`/`sbatch` work there.
-- [ ] **#4b** (Phase 2, claude.ai) `check_cluster_health` / `diagnose_cluster`
-      on the login-node cluster return cleanly from the browser — no
-      `elasticloadbalancing`/load-balancer error.
-- [ ] (Phase 3, Claude Code) cluster and transport both torn down; no
-      `pclustermaker-mcp-*` left; `list_pcluster.py` shows no cluster.
+Boxes reflect that run. To re-run against a new cluster, copy them and clear.
 
-When all are ticked, update `CLAUDE-STATE.md`: close the compute-node
-capture-path and accounting-override items, drop "the claude.ai connector hop
-is unexercised," and record that a login-node cluster was operated and
-described end to end through the remote transport.
+- [x] **#1** (Phase 1, Claude Code) — 8192M > the 3.8G head node's RAM aborted
+      InnoDB (accounting silently OFF); the boot-time clamp reduced it to
+      3040M (`@@innodb_buffer_pool_size = 3187671040`), MariaDB started, and
+      `sacct` returned the job. Bug caught and fixed (`dd9af91`).
+- [x] **#2** (Phase 1, Claude Code) — `Ready to finish joining the cluster!`
+      found in a compute node's `cloud-init-output` stream that **outlived
+      the node** (`i-01677a…`, already terminated). Capture + scaledown
+      survival both confirmed.
+- [x] **#3** (Phase 2, claude.ai) — after a disconnect/re-add, the connector
+      listed 15 tools and executed List Queues / List Clusters / Diagnose
+      through the Cognito OAuth flow.
+- [x] **#4a** (Phase 1, Claude Code) — `-L` reached a distinct host
+      (`ip-172-31-29-138`), `/home` NFS-shared, `sinfo`/`sbatch` worked there.
+- [x] **#4b** (Phase 2, claude.ai) — `diagnose osiris` reached
+      `describe-cluster` + CloudWatch against the login-node cluster with no
+      `elasticloadbalancing` error (the review's ELB grant, confirmed live).
+- [x] (Phase 3, Claude Code) — cluster and transport both torn down, no
+      `pclustermaker-mcp-*` left, `list_pcluster.py` shows no cluster; the
+      connector and the retained CloudWatch log group were removed too.
+
+`CLAUDE-STATE.md` was updated accordingly (session 77): all three open live
+items closed, and the login-node cluster recorded as operated and described
+end to end through the remote transport.
