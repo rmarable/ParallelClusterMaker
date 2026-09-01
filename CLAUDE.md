@@ -611,9 +611,10 @@ three gates; see the `Makefile`.
 - Run the test suite after any change to Python, Jinja2 templates, or
   `conftest.py`.
 - The CLAUDE.md-family doc-hygiene tests live in three files under `tests/`
-  (citation sweep, line-citation sweep, preamble byte budget), gitignored
-  alongside `CLAUDE.local.md`/`CLAUDE-STATE.md` — they test properties of
-  files that aren't part of the public repo.
+  (citation sweep, line-citation sweep, preamble byte budget) and are
+  tracked. Some of what they check lives in gitignored files, so those
+  checks **skip** when the file is absent rather than failing — never
+  make one of them fail on a fresh clone to "prove" it runs.
 
 ## Behavior
 
