@@ -15,6 +15,9 @@ MCP rule touching them lives in the root `CLAUDE.md` even though it is
 pulled back on 2026-09-01: a prohibition that does not load when it binds is
 not a prohibition.
 
+Evidence behind these rules is in `mcp_server/CLAUDE.local.md`, which loads
+alongside this file.
+
 ## Constraints
 
 - The MCP server (`mcp_server/`) exposes `pcluster_core`'s `core_*`

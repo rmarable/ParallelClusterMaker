@@ -72,7 +72,13 @@ class TestEveryLineNumberTheNormativeDocsCiteStillPointsAtItsSubject:
         the manifest itself stays reviewable; the sweeps over those files are
         skipped, not failed, when they are absent."""
         if not cls._normative_docs():
-            pytest.skip("no CLAUDE.local.md present (fresh clone); nothing to sweep")
+            pytest.skip(
+                "no CLAUDE.local.md present (fresh clone); nothing to sweep. "
+                "_EXPECTED pins line numbers that only the dense docs cite, so "
+                "without them the manifest is orphaned -- it would fail on any "
+                "ordinary edit to a tracked source file while validating nothing, "
+                "and the fix would live in a file the contributor cannot open."
+            )
 
     @classmethod
     def _normative_docs(cls):
@@ -130,6 +136,7 @@ class TestEveryLineNumberTheNormativeDocsCiteStillPointsAtItsSubject:
         construction, so the manifest shrinks and still reads as full coverage.
         Two of these were introduced at once while renumbering after an edit --
         the substrings differ, which is what makes the collision invisible."""
+        self._require_dense_docs()
         source = open(__file__).read()
         body = source[source.index("_EXPECTED = {") :]
         body = body[: body.index("\n    }\n") + 1]
@@ -145,6 +152,7 @@ class TestEveryLineNumberTheNormativeDocsCiteStillPointsAtItsSubject:
         )
 
     def test_every_cited_line_holds_what_the_manifest_says(self):
+        self._require_dense_docs()
         for (relpath, line), expected in sorted(self._EXPECTED.items()):
             lines = open(os.path.join(REPO_ROOT, relpath)).read().splitlines()
             assert line <= len(lines), (
@@ -215,6 +223,7 @@ class TestEveryLineNumberTheNormativeDocsCiteStillPointsAtItsSubject:
         these drift, and a check that tolerates +/-1 tolerates the whole failure
         mode.  It also proves each pinned substring is unique to its line, since
         a substring the neighboring line shares cannot fail when shifted."""
+        self._require_dense_docs()
         for (relpath, line), expected in sorted(self._EXPECTED.items()):
             total = len(open(os.path.join(REPO_ROOT, relpath)).read().splitlines())
             shifted = [n for n in (line - 1, line + 1) if 1 <= n <= total]

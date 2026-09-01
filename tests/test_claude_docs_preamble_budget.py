@@ -85,10 +85,17 @@ class TestTheAlwaysLoadedPreambleStaysAffordable:
         17 doc tests passing and the budget reading better, with a 15KB
         constraint file orphaned.
 
-        The requirement is only that the scoped file's directory is named
-        somewhere in the always-loaded preamble.  Deliberately not a prose
-        pattern -- an assertion about how the pointer is phrased would rot as
-        the wording changes, and reachability is the property that matters."""
+        The requirement is that the scoped file is named BY PATH.  It matched
+        the bare directory (`os.path.dirname(p) + "/"`) until 2026-09-01, which
+        `templates/` satisfies 41 times over through ordinary references like
+        `templates/vars_file.j2` -- so every explicit pointer could be deleted
+        with this green, which is precisely the mutation it exists to catch.
+        Three independent reviewers defeated it that way on the same day.
+
+        A dense file may be named by its lean sibling instead: that is how a
+        reader actually reaches it, and it is how `templates/` and
+        `hpc-benchmark/` are arranged.  Deliberately not a prose pattern -- an
+        assertion about phrasing would rot as the wording changes."""
         preamble = "\n".join(
             io.open(os.path.join(REPO_ROOT, p), encoding="utf-8").read()
             for p in self._PREAMBLE
@@ -96,12 +103,45 @@ class TestTheAlwaysLoadedPreambleStaysAffordable:
         )
         scoped = [p for p in self._every_memory_file() if p not in self._PREAMBLE]
         assert scoped, "no scoped memory files found; the walk is broken"
-        unreachable = [p for p in scoped if os.path.dirname(p) + "/" not in preamble]
+        unreachable = []
+        for path in scoped:
+            if path in preamble:
+                continue
+            sibling = os.path.join(os.path.dirname(path), "CLAUDE.md")
+            sib_abs = os.path.join(REPO_ROOT, sibling)
+            if (
+                path.endswith("CLAUDE.local.md")
+                and sibling != path
+                and os.path.exists(sib_abs)
+                and path in io.open(sib_abs, encoding="utf-8").read()
+            ):
+                continue
+            unreachable.append(path)
         assert not unreachable, (
-            "these scoped memory files are named nowhere in the always-loaded "
-            f"preamble, so nothing directs a reader to them: {unreachable}.  "
-            "Add a pointer in CLAUDE.md naming the directory."
+            "these scoped memory files are named by no always-loaded file and "
+            f"by no lean sibling, so nothing directs a reader to them: "
+            f"{unreachable}.  Name the file by path in CLAUDE.md, or for a "
+            "dense file in its lean sibling."
         )
+
+    def test_the_reachability_guard_actually_discriminates(self, monkeypatch):
+        """Vacuity guard, absent when the check was written and the reason it
+        stayed broken.  The predecessor passed with every explicit pointer
+        deleted; drive the real assertion against an emptied preamble and
+        require it to raise."""
+        real_open = io.open
+        blanked = {os.path.join(REPO_ROOT, p) for p in self._PREAMBLE}
+
+        def fake_open(path, *a, **kw):
+            if str(path) in blanked:
+                import io as _io
+
+                return _io.StringIO("")
+            return real_open(path, *a, **kw)
+
+        monkeypatch.setattr(io, "open", fake_open)
+        with pytest.raises(AssertionError):
+            self.test_every_scoped_memory_file_is_reachable_from_the_preamble()
 
     # Headroom had drifted to 9 bytes against the old 150,000 ceiling --
     # several rounds of small, individually-justified additions each
@@ -576,7 +616,51 @@ class TestTheAlwaysLoadedPreambleStaysAffordable:
     # rather than eating margin that was authorized for something else. If it
     # is ever non-zero again it should be for a reason stated here, not
     # inherited.
+    # Slack authorizes a CEILING, not GROWTH. Without _SLACK_BASELINE it
+    # authorized both: set it non-zero, raise _CEILING to match, and 20KB of
+    # real preamble growth passes green -- measured 2026-09-01, and the knob
+    # was added the same morning with no guard on it at all. Pinning the total
+    # at the moment the slack was granted means an operator override can hold
+    # a ceiling above the derivation without also licensing everything the
+    # gap would otherwise admit. Meaningless while the slack is 0.
     _DELIBERATE_SLACK = 0
+    _SLACK_BASELINE = 0
+
+    def test_authorized_slack_licenses_a_ceiling_not_growth(self):
+        """An operator may raise _CEILING past what the derivation allows; that
+        is what _DELIBERATE_SLACK records.  What they may not do is let the
+        raise quietly fund growth, which is what happened before this existed:
+        slack 20,000 + a matching ceiling + 20,000B appended = green."""
+        if not self._DELIBERATE_SLACK:
+            return
+        self._require_full_preamble()
+        total = sum(self._sizes().values())
+        assert self._SLACK_BASELINE > 0, (
+            f"_DELIBERATE_SLACK is {self._DELIBERATE_SLACK:,}B but "
+            "_SLACK_BASELINE is unset, so the slack bounds nothing; record the "
+            "preamble total at the moment the slack was granted"
+        )
+        assert total <= self._SLACK_BASELINE, (
+            f"the preamble is {total:,}B against a {self._SLACK_BASELINE:,}B "
+            f"baseline recorded when {self._DELIBERATE_SLACK:,}B of slack was "
+            f"granted -- it has grown {total - self._SLACK_BASELINE:,}B since. "
+            "Slack authorizes a ceiling, not growth: ratchet the slack to 0 and "
+            "lower _CEILING, or re-grant it deliberately against today's total."
+        )
+
+    def test_the_slack_guard_actually_discriminates(self, monkeypatch):
+        """Vacuity guard.  Drive the real assertion with slack granted against
+        a stale baseline and require it to raise -- the exact laundering shape
+        (non-zero slack, matching ceiling, real growth) that passed before."""
+        self._require_full_preamble()
+        total = sum(self._sizes().values())
+        monkeypatch.setattr(type(self), "_DELIBERATE_SLACK", 20_000)
+        monkeypatch.setattr(type(self), "_SLACK_BASELINE", total - 20_000)
+        with pytest.raises(AssertionError):
+            self.test_authorized_slack_licenses_a_ceiling_not_growth()
+        monkeypatch.setattr(type(self), "_SLACK_BASELINE", 0)
+        with pytest.raises(AssertionError):
+            self.test_authorized_slack_licenses_a_ceiling_not_growth()
 
     @classmethod
     def _allowance(cls):
