@@ -169,8 +169,8 @@ standing constraints for local development.
   only** (a conditional one simulated without its context key reports
   `implicitDeny` + `MissingContextValues`, which is not a denial), and an
   unanswerable check warns rather than blocks, since
-  `iam:SimulatePrincipalPolicy` is itself ungranted. Details in
-  `templates/CLAUDE.md`.
+  `iam:SimulatePrincipalPolicy` is itself ungranted. Detail:
+  `preflight_deploy_permissions` (`mcp_server/deploy.py`).
 - **Adding policy versions breaks teardown unless teardown prunes them.**
   `DeletePolicy` refuses while any non-default version exists
   (`DeleteConflictException`), so the two halves must land together:

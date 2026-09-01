@@ -24,11 +24,8 @@ TODO
 __pycache__/
 
 # HPC transient state directories
-deprecated/
-tools/
 vars_files/
 active_clusters/
-cluster_data/
 
 # HPC performance benchmarking - generated files, logs, etc.
 hpc-benchmark/bin/

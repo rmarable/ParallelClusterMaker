@@ -103,9 +103,20 @@ class TestEveryTestNameTheDocsCiteStillExists:
         )
 
     def test_the_python_sources_cite_no_dangling_test_name_either(self):
-        """A stale citation in a comment misleads exactly as much, and one of the
-        three renames above was hiding in a comment in this file rather than in
-        any .md."""
+        """A stale citation in a comment or docstring misleads exactly as much,
+        and one of the three renames above was hiding in a comment in this file
+        rather than in any .md.
+
+        Docstrings, not just hash-comment lines.  This read only lines whose
+        lstrip() began with a hash, and this codebase is docstring-heavy: two
+        dangling names sat in docstrings for months, cited in the present tense
+        -- TestMonitoringWrapperLoginNodeBootRace as a forward reference to a
+        class deleted eleven lines below it, and the retired Ansible-side
+        ssh-secret guard -- both invisible to a check whose whole purpose is
+        stopping exactly that.  Docstrings are read with ast rather than by
+        guessing at quote characters, which cannot tell a docstring from any
+        other multi-line string.
+        """
         defined = self._defined_names()
         dangling = {}
         py_files = []
@@ -114,16 +125,49 @@ class TestEveryTestNameTheDocsCiteStillExists:
             for fname in files:
                 if fname.endswith(".py"):
                     py_files.append(os.path.relpath(os.path.join(root, fname), REPO_ROOT))
+        import ast
+
         for relpath in py_files:
-            for line in open(os.path.join(REPO_ROOT, relpath)):
-                stripped = line.lstrip()
-                if not stripped.startswith("#"):
-                    continue
-                for name in self._NAME.findall(stripped):
-                    if name not in defined:
-                        dangling.setdefault(name, set()).add(relpath)
-        assert not dangling, "a comment cites a test name that no longer exists: " + "; ".join(
-            f"{n} ({', '.join(sorted(f))})" for n, f in sorted(dangling.items())
+            # This module's own docstrings NAME dangling citations as worked
+            # examples -- that is what they are for -- so sweeping itself
+            # reports its own illustrations as defects.
+            if os.path.basename(relpath) == os.path.basename(__file__):
+                continue
+            source = open(os.path.join(REPO_ROOT, relpath)).read()
+            texts = [ln.lstrip() for ln in source.splitlines() if ln.lstrip().startswith("#")]
+            try:
+                tree = ast.parse(source)
+            except SyntaxError:
+                tree = None
+            if tree is not None:
+                doc_nodes = (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)
+                for node in ast.walk(tree):
+                    if isinstance(node, doc_nodes):
+                        doc = ast.get_docstring(node)
+                        if doc:
+                            texts.append(doc)
+            for text in texts:
+                for name in self._NAME.findall(text):
+                    if name in defined:
+                        continue
+                    # A filename is not a test-name citation.  `This was
+                    # tests/test_playbook_secrets.py` names a renamed FILE and
+                    # is correct prose; only a bare identifier is a citation.
+                    if re.search(re.escape(name) + r"\.py\b", text):
+                        continue
+                    # A wrapped identifier, in either direction.  A docstring
+                    # breaking `TestEveryNegativeSourceAssertion` before
+                    # `ProvesItsHaystack` yields a truncated prefix; joining
+                    # lines to repair that instead glues the name to the next
+                    # word (`...ceiling` + `bites`). Accepting a match that is
+                    # a prefix of a real name, or has one as its prefix, covers
+                    # both without rewriting the text.
+                    if any(d.startswith(name) or name.startswith(d) for d in defined):
+                        continue
+                    dangling.setdefault(name, set()).add(relpath)
+        assert not dangling, (
+            "a comment or docstring cites a test name that no longer exists: "
+            + "; ".join(f"{n} ({', '.join(sorted(f))})" for n, f in sorted(dangling.items()))
         )
 
     def test_the_sweep_can_see_a_dangling_citation(self, tmp_path, monkeypatch):
@@ -168,9 +212,22 @@ class TestEveryTestNameTheDocsCiteStillExists:
         # today plus the two top-level docs, it is not reading the repo.  Was 8
         # and stayed 8 when `mcp_server/` added two surfaces on 2026-09-01, so
         # both could be deleted outright with this green -- proven by mutation.
-        # The floor applies only with the local-only dense files present; a
-        # fresh clone legitimately has fewer surfaces.
-        floor = 10 if os.path.exists(os.path.join(REPO_ROOT, "CLAUDE.local.md")) else 5
+        # Counted PER KIND.  A single total is a bare count: deleting
+        # mcp_server/CLAUDE.local.md and adding newscope/CLAUDE.md nets to the
+        # same number and passes, so the floor said nothing about whether the
+        # constraint docs are still there.
+        dense_present = os.path.exists(os.path.join(REPO_ROOT, "CLAUDE.local.md"))
+        lean = {p for p in required if os.path.basename(p) == "CLAUDE.md"}
+        dense = {p for p in required if os.path.basename(p) == "CLAUDE.local.md"}
+        lean_floor, dense_floor = (4, 4) if dense_present else (4, 0)
+        assert len(lean) >= lean_floor and len(dense) >= dense_floor, (
+            f"derived {len(lean)} lean and {len(dense)} dense CLAUDE.md surfaces "
+            f"(floors {lean_floor}/{dense_floor}); a scoped pair has gone missing "
+            "from the scan"
+        )
+        # README.md always; CLAUDE-STATE.md only where it exists, which is
+        # what the required set above already does -- a clone has 5, not 6.
+        floor = lean_floor + dense_floor + 1 + (1 if dense_present else 0)
         assert len(required) >= floor, (
             f"derived only {len(required)} required doc surfaces ({sorted(required)}); "
             "the tracked-file scan is not seeing the constraint docs"

@@ -13,7 +13,8 @@ test:
 # is a separate decision, and a gate nobody can keep green stops being read.
 # Tracked Python plus every .py under mcp_server/, tests/ and src/, matching
 # tests/test_undefined_names.py's own file set: the doc-hygiene tests are
-# gitignored and mcp_server/ was untracked for a while, so a git-only sweep
+# gitignored (they are tracked as of dbdb8d6) and mcp_server/ was untracked
+# for a while, so a git-only sweep
 # skips exactly the newest code.
 lint:
 	@# Two gates, narrowest first. The undefined-name sweep predates ruff and

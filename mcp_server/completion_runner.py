@@ -118,9 +118,18 @@ def run_completion_attempt(
 
     if outcome.action == "retry":
         _log(payload, outcome)
-        # The delay is the gap between invocations, not a sleep inside one:
-        # Lambda bills wall-clock, so waiting in-process costs the same as
-        # working and buys nothing.
+        # This DOES wait inside the invocation, and that is a cost, not a
+        # design: Lambda bills wall-clock, so 60s of sleep bills the same as
+        # 60s of work and holds a concurrent execution the whole time -- up to
+        # 60 attempts, ~60 minutes, per teardown. The comment here used to
+        # claim the opposite ("the gap between invocations, not a sleep inside
+        # one"), directly above the line that sleeps.
+        #
+        # It stays because Lambda has no native delayed self-invoke: removing
+        # the sleep makes the retry loop spin through its whole attempt budget
+        # in seconds. Doing it properly means SQS DelaySeconds or an
+        # EventBridge schedule, which is a change to the teardown's shape and
+        # not a comment fix.
         (sleeper or time.sleep)(POLL_SECONDS)
         reinvoke(payload)
         return {"action": "retry", "attempt": payload.get("attempt")}

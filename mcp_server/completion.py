@@ -28,9 +28,12 @@ that re-invokes itself has no natural end and a stack wedged in
   * a terminal state check that treats an unreadable describe as "keep
     waiting" for a bounded number of tries but never as "it is gone".
 
-Nothing here waits inside an invocation. Each attempt is milliseconds of
-work and the delay is the gap between invocations, because sleeping in a
-Lambda is billed at the same rate as working in one.
+Nothing in THIS module waits: `decide` is a pure function, which is why it
+can be swept exhaustively.  The waiting happens in `completion_runner`, and
+it happens INSIDE the invocation -- 60s per retry, billed at the same rate
+as working.  Both this docstring and the runner's comment used to claim the
+delay was the gap between invocations; it is not, and Lambda has no native
+delayed self-invoke to make it so.  See the note at the sleep.
 """
 
 import time

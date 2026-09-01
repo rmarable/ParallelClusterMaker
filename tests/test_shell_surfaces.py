@@ -1587,8 +1587,8 @@ class TestMonitoringWrapperOnlyTheHeadNodeWritesTheTree:
         while those two values are the whole world -- ParallelCluster also has
         login nodes, and they NFS-mount /home from the head node exactly as
         compute nodes do, so one would reintroduce the race. LoginNode has its
-        own named branch (see TestMonitoringWrapperLoginNodeBootRace below for
-        the wait/retry it needs that ComputeFleet does not); this test's only
+        own named branch (see TestMonitoringWrapperSkipsLoginNodes below for what
+        that branch does instead); this test's only
         concern is that, tree already present, it never writes."""
         r, trace, _ = _run_wrapper(cluster_params, tmp_path, "LoginNode", tree=True)
         for forbidden in ("aws s3 cp", "rm ", "mkdir ", "tar ", "chown "):
@@ -1636,8 +1636,8 @@ class TestMonitoringWrapperSkipsLoginNodes:
     abandoned on Heartbeat Timeout across 45 minutes, the stack never
     leaving CREATE_IN_PROGRESS.
 
-    This class replaced TestMonitoringWrapperLoginNodeBootRace, which pinned
-    a bounded poll for MONITORING_HOME. That poll was a correct answer to
+    This class replaced a now-deleted one that pinned a bounded poll for
+    MONITORING_HOME. That poll was a correct answer to
     the wrong question: it made the login node wait for a tree it was then
     going to fail on anyway, and cost every login node up to 300s of boot
     time to do it.

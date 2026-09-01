@@ -70,8 +70,15 @@ class TestEveryLineNumberTheNormativeDocsCiteStillPointsAtItsSubject:
     def _require_dense_docs(cls):
         """The dense files are gitignored local-only.  This module is tracked so
         the manifest itself stays reviewable; the sweeps over those files are
-        skipped, not failed, when they are absent."""
-        if not cls._normative_docs():
+        skipped, not failed, when they are absent.
+
+        Keyed on the DENSE files, not on `_normative_docs()`.  That set grew to
+        include the tracked lean files on 2026-09-01 so a citation added to one
+        would be swept -- and since a lean file is always present, gating on it
+        made this skip unreachable and put the CI landmine straight back: four
+        failures in a fresh clone from one added comment.
+        """
+        if not cls._dense_docs():
             pytest.skip(
                 "no CLAUDE.local.md present (fresh clone); nothing to sweep. "
                 "_EXPECTED pins line numbers that only the dense docs cite, so "
@@ -81,12 +88,21 @@ class TestEveryLineNumberTheNormativeDocsCiteStillPointsAtItsSubject:
             )
 
     @classmethod
+    def _dense_docs(cls):
+        """Only the gitignored dense files -- what a fresh clone lacks."""
+        return tuple(d for d in cls._normative_docs() if d.endswith("CLAUDE.local.md"))
+
+    @classmethod
     def _normative_docs(cls):
         found = []
         for root, dirs, files in os.walk(REPO_ROOT):
             dirs[:] = [d for d in dirs if d not in cls._SKIP_DIRS]
             for name in files:
-                if name == "CLAUDE.local.md":
+                # Lean files too.  They carry no `file:line` citation today,
+                # and nothing enforced that -- one added to `CLAUDE.md` or a
+                # scoped lean file would rot forever, unswept, which is the
+                # exact failure this class exists to prevent.
+                if name in ("CLAUDE.local.md", "CLAUDE.md", "CLAUDE-STATE.md"):
                     found.append(os.path.relpath(os.path.join(root, name), REPO_ROOT))
         return tuple(sorted(found))
 

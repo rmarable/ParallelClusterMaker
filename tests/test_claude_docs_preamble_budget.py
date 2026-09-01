@@ -494,8 +494,16 @@ class TestTheAlwaysLoadedPreambleStaysAffordable:
     _SESSION_HEADING = re.compile(r"^#{2,4}\s+Session\s+\d+\b", re.M)
 
     # Indirection so the discrimination test can retarget the relapse detector at
-    # the archive itself; production value is the preamble.
-    _SCAN_FOR_SESSIONS = _PREAMBLE
+    # the archive itself.  Production value is EVERY memory file, not just the
+    # preamble: the six scoped files hold 147KB -- more than the preamble --
+    # and `### Session 99` could be appended to any of them freely, which is
+    # the same back door the archive-load guard closes for a different verb.
+    # Verified none carries a Session heading today, so widening costs nothing.
+    _SCAN_FOR_SESSIONS = None  # None => _every_memory_file(); see _sessions_scan()
+
+    @classmethod
+    def _sessions_scan(cls):
+        return cls._SCAN_FOR_SESSIONS or cls._every_memory_file()
 
     @classmethod
     def _sizes(cls):
@@ -541,7 +549,7 @@ class TestTheAlwaysLoadedPreambleStaysAffordable:
         Without that, neutering the assertion to `assert True` passed."""
         self._require_full_preamble()
         offenders = {}
-        for relpath in self._SCAN_FOR_SESSIONS:
+        for relpath in self._sessions_scan():
             text = open(os.path.join(REPO_ROOT, relpath)).read()
             found = self._SESSION_HEADING.findall(text)
             if found:
@@ -757,8 +765,16 @@ class TestTheAlwaysLoadedPreambleStaysAffordable:
         # bullets make up nearly all of `total`, so the same largest bullet is
         # a bigger fraction of a smaller whole -- a real composition shift, not
         # the allowance being gamed. 1/5 still catches a runaway allowance.
-        assert 0 < allowance <= total // 5, (
-            f"the derived allowance is {allowance:,}B against a {total:,}B "
+        # The anti-gaming bound applies to the DERIVED half.  _ALLOWANCE_FLOOR
+        # is a fixed 4,260, so once the preamble drops below ~21,300B the floor
+        # alone exceeds total//5 and this fires accusing the derivation of
+        # "being replaced by a constant" -- when the constant is the floor
+        # doing its job. Latent today (4,260 vs total//5), but it would land as
+        # a baffling failure at exactly the moment someone achieved a large
+        # reduction, which is when this file most needs to be trustworthy.
+        derived = 2 * self._largest_bullet_bytes()
+        assert 0 < derived <= total // 5, (
+            f"the derived allowance is {derived:,}B against a {total:,}B "
             f"preamble; two constraint bullets do not cost that much, so either "
             "the derivation is broken or it was replaced by a constant"
         )
@@ -971,10 +987,19 @@ class TestTheAlwaysLoadedPreambleStaysAffordable:
         # The indirection that lets this test retarget the detector is also a way
         # to disable it: pointing _SCAN_FOR_SESSIONS at some other file leaves the
         # pattern and the assertion intact while scanning nothing that matters.
-        assert type(self)._SCAN_FOR_SESSIONS == self._PREAMBLE, (
-            "the relapse detector is no longer scanning the preamble; "
-            "_SCAN_FOR_SESSIONS exists for this test to override per-call, not to "
-            "be repointed in production"
+        assert type(self)._SCAN_FOR_SESSIONS is None, (
+            "the relapse detector is pinned to a fixed list in production; "
+            "_SCAN_FOR_SESSIONS exists for this test to override per-call, not "
+            "to be repointed -- leave it None so the scan stays derived"
+        )
+        scanned = set(self._sessions_scan())
+        assert set(self._PREAMBLE) <= scanned, (
+            f"the relapse detector no longer covers the preamble: {scanned}"
+        )
+        assert len(scanned) > len(self._PREAMBLE), (
+            "the scan covers only the preamble; the scoped memory files hold "
+            "more bytes than it does and a session heading may not creep into "
+            "them either"
         )
         archive = os.path.join("docs", "sessions.md")
         assert os.path.exists(os.path.join(REPO_ROOT, archive)), (

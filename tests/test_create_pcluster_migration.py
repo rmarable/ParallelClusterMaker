@@ -559,8 +559,8 @@ class TestProvisionS3KeypairAndSecret:
         assert result == "sg-created0001"
 
     def test_resumed_build_still_writes_the_secret_unconditionally(self, tmp_path):
-        """The exact property TestTheSshSecretIsWrittenOnEveryRun pins on
-        the Ansible side: an already-existing keypair (changed=False) with
+        """The property the retired Ansible-side guard pinned, kept here after
+        the playbooks were deleted: an already-existing keypair (changed=False) with
         the local .pem already present must still reach the secret write."""
         s3 = _FakeS3()
         ec2 = _FakeEc2(keypair_already_exists=True)

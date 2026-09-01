@@ -294,3 +294,39 @@ class TestTheRunnerActsOnTheDecision:
         )
         assert out["action"] == "retry"
         assert not finals
+
+
+class TestTheRetryPathReallySleeps:
+    """Every other test here injects `sleeper=lambda s: None`, so none of them
+    can see that the retry path waits inside the invocation -- the repo's own
+    "when a test stubs the object under test, at least one test must drive the
+    real one" rule, unapplied to the one seam that costs money.
+
+    Driven with the real `time.sleep` and POLL_SECONDS patched to ~0, so the
+    call is real and the test is fast."""
+
+    def test_the_default_sleeper_is_real_time_sleep(self, monkeypatch):
+        import time
+
+        from mcp_server import completion_runner as cr
+
+        monkeypatch.setattr(cr, "POLL_SECONDS", 0.01)
+        slept = []
+        real_sleep = time.sleep
+
+        def spy(seconds):
+            slept.append(seconds)
+            return real_sleep(seconds)
+
+        monkeypatch.setattr(time, "sleep", spy)
+        cr.run_completion_attempt(
+            {"cluster_name": "c", "region": "us-east-1", "attempt": 0, "started_at": 0.0},
+            now=1.0,
+            describe=lambda *a, **k: "DELETE_IN_PROGRESS",
+            reinvoke=lambda payload: None,
+        )
+        assert slept == [0.01], (
+            "the retry path no longer sleeps in-process. If that is deliberate "
+            "-- SQS DelaySeconds or an EventBridge schedule -- update the notes "
+            "in completion.py and completion_runner.py, which describe the wait."
+        )

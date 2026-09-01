@@ -8699,8 +8699,7 @@ def _save_private_key_locally(ssh_keypair, private_key_pem):
 def _store_ssh_secret(secretsmanager, *, ssh_secret_name, cluster_name, ssh_keypair):
     """boto3 twin of "Store SSH private key in Secrets Manager". Must run
     unconditionally -- not gated on whether this run minted a new keypair
-    -- matching the fix TestTheSshSecretIsWrittenOnEveryRun
-    (tests/test_templates.py) pins on the Ansible side: gating this on
+    -- matching the fix the retired Ansible-side guard pinned: gating this on
     "changed" left a cluster whose first build failed after the keypair
     existed but before the secret was written with no secret at all, and
     no way back into the head node on retrieve_ssh_key.<cluster>.sh's
