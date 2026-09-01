@@ -1260,7 +1260,7 @@ class _CognitoWithDomain:
         self._pools = {pool_id: {"Name": pool_name, "Id": pool_id, "Domain": domain}}
         self.calls = []
 
-    def list_user_pools(self, MaxResults=60):
+    def list_user_pools(self, MaxResults=60, NextToken=None):
         return {"UserPools": [{"Name": p["Name"], "Id": pid} for pid, p in self._pools.items()]}
 
     def describe_user_pool(self, UserPoolId):
@@ -1355,12 +1355,86 @@ class _Apigw:
         self._apis = [{"name": n, "id": "id-%d" % i} for i, n in enumerate(names)]
         self.deleted = []
 
-    def get_rest_apis(self):
-        return {"items": list(self._apis)}
+    def get_rest_apis(self, position=None, limit=25):
+        # Modelled on botocore's apigateway GetRestApis: `position`/`limit`,
+        # default limit 25, output `items`/`position`.  The default is the
+        # whole point -- delete_gateway read only the first page until
+        # 2026-09-01 and lost the API in any account holding more than 25.
+        start = int(position or 0)
+        page = self._apis[start : start + limit]
+        out = {"items": list(page)}
+        if start + limit < len(self._apis):
+            out["position"] = str(start + limit)
+        return out
+
+    def get_paginator(self, name):
+        assert name == "get_rest_apis", name
+        outer = self
+
+        class _P:
+            def paginate(self, **kw):
+                position = None
+                while True:
+                    resp = outer.get_rest_apis(position=position, **kw)
+                    yield resp
+                    position = resp.get("position")
+                    if not position:
+                        return
+
+        return _P()
 
     def delete_rest_api(self, restApiId):
         self._apis = [a for a in self._apis if a["id"] != restApiId]
         self.deleted.append(restApiId)
+
+
+class TestTeardownSeesPastTheFirstPage:
+    """Both list calls in the teardown path were unpaginated until 2026-09-01.
+
+    `get_rest_apis` defaults to 25 items and `list_user_pools` caps at 60, so
+    in any account past those boundaries the MCP resource is simply not on the
+    first page.  For the gateway that means teardown reports "No MCP REST API
+    present" and the internet-facing endpoint survives; for the pool it means
+    teardown leaves it *and* the next deploy creates a second one, whose id is
+    rendered into every tier's authorizer policy.  The create side already
+    paginated; only the delete side did not.
+    """
+
+    def test_the_mcp_api_is_found_past_the_first_page_of_25(self):
+        from mcp_server.deploy import delete_gateway
+
+        names = ["unrelated-%d" % i for i in range(40)] + ["pclustermaker-mcp"]
+        apigw = _Apigw(names)
+        assert delete_gateway(apigw, suppress=False) == ["pclustermaker-mcp"]
+        assert all(a["name"] != "pclustermaker-mcp" for a in apigw._apis)
+        assert len(apigw._apis) == 40, "an unrelated API was deleted"
+
+    def test_a_pool_past_the_first_page_of_60_is_still_found(self):
+        from mcp_server.deploy import _all_user_pools
+
+        class _Paged:
+            def __init__(self, total, target_at):
+                self._pools = [{"Name": "other-%d" % i, "Id": "id-%d" % i} for i in range(total)]
+                self._pools[target_at] = {"Name": "pclustermaker-mcp-pool", "Id": "target"}
+                self.pages = 0
+
+            def list_user_pools(self, MaxResults=60, NextToken=None):
+                self.pages += 1
+                start = int(NextToken or 0)
+                page = self._pools[start : start + MaxResults]
+                out = {"UserPools": page}
+                if start + MaxResults < len(self._pools):
+                    out["NextToken"] = str(start + MaxResults)
+                return out
+
+        cog = _Paged(150, 120)
+        pools = _all_user_pools(cog)
+        assert cog.pages == 3, "NextToken was not followed"
+        assert len(pools) == 150
+        assert any(p["Name"] == "pclustermaker-mcp-pool" for p in pools), (
+            "the pool on page 3 was invisible, which is how a second pool gets "
+            "created and every existing token stops authorizing"
+        )
 
 
 class TestTheGatewayIsRemoved:

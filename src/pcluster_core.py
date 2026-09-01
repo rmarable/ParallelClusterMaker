@@ -9763,30 +9763,24 @@ def stage_and_upload_hpc_benchmark_driver(s3, *, ctx, region):
     bucket". The S3 sync is an ALLOWLIST on both ends (--exclude "*"
     --include "hpc-benchmark.sh"), matching CLAUDE.md's own documented
     incident (a blocklist once leaked internal docs and raw Jinja2
-    templates into the operator's working tree) -- kept as a real `aws s3
-    sync` subprocess call rather than hand-rolled in boto3, per the
-    migration plan's own recommendation (community.aws.s3_sync has no
-    boto3-native equivalent worth reimplementing)."""
+    templates into the operator's working tree).
+
+    **boto3, not `aws s3 sync`.** This was the last subprocess call on the
+    create path, and it is unreachable where the path actually runs: the
+    container tier's image carries no AWS CLI, which
+    `upload_directory_to_s3`'s docstring already said of the three calls it
+    replaced. It survived because it is gated on `enable_hpc_benchmarks`,
+    which defaults false -- the only reason a remote build with benchmarks
+    on had not hit it. The sync copied exactly one named file, so the
+    allowlist is now structural rather than a pair of CLI flags: one
+    `upload_file` of one path cannot leak a sibling.
+    """
     src = os.path.join(ctx["performance_rootdir"], "hpc-benchmark.sh")
     dest = os.path.join(ctx["performance_stage_dir"], "hpc-benchmark.sh")
+    os.makedirs(os.path.dirname(dest), exist_ok=True)
     shutil.copyfile(src, dest)
     os.chmod(dest, 0o755)
-    subprocess.run(
-        [
-            "aws",
-            "s3",
-            "sync",
-            f"{ctx['performance_rootdir']}/",
-            f"s3://{ctx['s3_bucketname']}/hpc-benchmark/",
-            "--exclude",
-            "*",
-            "--include",
-            "hpc-benchmark.sh",
-            "--region",
-            region,
-        ],
-        check=True,
-    )
+    s3.upload_file(src, ctx["s3_bucketname"], "hpc-benchmark/hpc-benchmark.sh")
     _create_hpc_results_bucket(s3, results_bucketname=ctx["results_bucketname"], region=region)
 
 

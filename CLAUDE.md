@@ -345,8 +345,12 @@ standing constraints for local development.
   **both** 412 and 409 as "someone else holds it" — a live 8-writer run
   proved the 409 path is reachable, and handling only 412 crashes a build
   under contention.
-- **`delete_cluster` initiates a teardown; `finalize_cluster_teardown`
-  finishes it.** `wait=False` returns on CloudFormation's acceptance and
+- **`delete_cluster` finishes its own teardown; `finalize_cluster_teardown`
+  is the manual recovery.** The server fires an async poller that runs the
+  cleanup once the stack is gone — read `auto_finalize_started`, and when it
+  is true do not poll and do not promise to come back (detail and the loop's
+  bounds: `mcp_server/CLAUDE.md`, `mcp_server/completion.py`). What follows
+  is why the manual half exists at all.** `wait=False` returns on CloudFormation's acceptance and
   skips *every* teardown step, leaving the IAM policies, the S3 bucket,
   the credentials, the SNS topic and the store record behind. A *second*
   `delete_cluster` does finish the job — an absent stack classifies as

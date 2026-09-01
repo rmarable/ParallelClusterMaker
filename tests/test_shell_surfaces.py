@@ -2117,9 +2117,14 @@ class TestPerformanceDocsMatchTheBenchmarkDriver:
                 inspect.getsource(pcluster_core.stage_and_upload_hpc_benchmark_driver).lstrip()
             )
         )
-        assert "'--exclude', '*'" in argv and "'--include', 'hpc-benchmark.sh'" in argv, (
-            "the driver upload is no longer an allowlist; if it went back to "
-            "syncing the tree, these docs have to say so again"
+        assert "'hpc-benchmark/hpc-benchmark.sh'" in argv, (
+            "the driver upload no longer names the one key it is documented to "
+            "write; if it went back to syncing the tree, these docs have to say "
+            "so again"
+        )
+        assert "'aws', 's3', 'sync'" not in argv, (
+            "the create path shelled out to the AWS CLI again -- absent from the "
+            "container tier's image, so unreachable where this path runs"
         )
         for path in (PERF_DOC_TEMPLATE, PERF_DOC_RENDERED):
             with open(path) as fh:

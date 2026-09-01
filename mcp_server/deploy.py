@@ -170,6 +170,14 @@ def deploy_tier(lam, tier, *, aws_account_id, code, environment=None):
     try:
         resp = _create_function_once_the_role_exists(lam, kwargs)
         print(f"  Created MCP function: {kwargs['FunctionName']}")
+        # create_function returns with State: Pending, and
+        # PutFunctionEventInvokeConfig against a Pending function answers
+        # ResourceConflictException -- which _pin_async_retries_to_zero
+        # swallows, so the deploy proceeded with AWS's default of TWO retries
+        # on Event invokes. That is the condition a retried build launches a
+        # second cluster under. The container tier has the longest Pending
+        # window and is the build tier, i.e. the one the pin exists for.
+        _wait_until_active(lam, kwargs["FunctionName"])
         _pin_async_retries_to_zero(lam, kwargs["FunctionName"])
         return resp["FunctionArn"]
     except Exception as e:
@@ -238,9 +246,10 @@ def _wait_until_updated(lam, function_name):
     """Block until a function's last update has settled.
 
     Lambda's own waiter, not a sleep: it polls LastUpdateStatus and knows
-    the terminal values. A create also has to settle before the function
-    can be invoked, but create_function is followed by no second call
-    here, so only the update path needs it.
+    the terminal values. A create has to settle too -- this docstring used
+    to say create_function "is followed by no second call here", which was
+    false in the same function: the retry pin is that second call. See
+    `_wait_until_active`.
     """
     try:
         lam.get_waiter("function_updated_v2").wait(FunctionName=function_name)
@@ -248,6 +257,23 @@ def _wait_until_updated(lam, function_name):
         # An account or botocore old enough to lack the waiter should not
         # fail the deploy outright -- the configuration call below will
         # surface any real problem with its own error.
+        pass
+
+
+def _wait_until_active(lam, function_name):
+    """Block until a newly created function leaves State: Pending.
+
+    Same shape as `_wait_until_updated`, different waiter: a create settles
+    on `State`, an update on `LastUpdateStatus`. Without this the retry pin
+    fires against a Pending function, gets ResourceConflictException, and is
+    swallowed -- leaving the function on AWS's default of two async retries.
+    """
+    try:
+        lam.get_waiter("function_active_v2").wait(FunctionName=function_name)
+    except Exception:
+        # Same tolerance as _wait_until_updated: an account or botocore
+        # without the waiter must not fail the deploy. The pin that follows
+        # reports its own failure.
         pass
 
 
@@ -669,6 +695,29 @@ GATEWAY_INTEGRATION_TIMEOUT_MS = 29_000
 _GATEWAY_NAME_PREFIX = "pclustermaker-mcp"
 
 
+def _all_user_pools(cog):
+    """Every user pool, paginated.
+
+    `list_user_pools` caps at 60 per page and returns a NextToken.  Unpaginated,
+    an account past that boundary reads as "the pool does not exist": teardown
+    leaves it behind, and a deploy creates a *second* pool whose id is rendered
+    into every tier's authorizer policy, locking out everyone holding a token
+    from the first.  The same reasoning is already written down for
+    `list_user_pool_clients`; it was never applied here.
+    """
+    pools = []
+    token = None
+    while True:
+        kwargs = {"MaxResults": 60}
+        if token:
+            kwargs["NextToken"] = token
+        resp = cog.list_user_pools(**kwargs)
+        pools.extend(resp.get("UserPools", []))
+        token = resp.get("NextToken")
+        if not token:
+            return pools
+
+
 def delete_gateway(apigw, *, suppress=True):
     """Delete the REST API setup_gateway creates.
 
@@ -677,7 +726,17 @@ def delete_gateway(apigw, *, suppress=True):
     because setup_gateway names the API rather than recording its id.
     """
     removed = []
-    for api in apigw.get_rest_apis().get("items", []):
+    # Paginated, like setup_gateway above.  get_rest_apis defaults to 25 items
+    # (botocore's apigateway model, GetRestApis.limit), so in an account with
+    # more REST APIs than that the MCP API is simply not on the first page,
+    # this prints "No MCP REST API present", and the internet-facing endpoint
+    # outlives the teardown -- the exact failure this function exists to stop.
+    apis = [
+        api
+        for page in apigw.get_paginator("get_rest_apis").paginate()
+        for api in page.get("items", [])
+    ]
+    for api in apis:
         if not api["name"].startswith(_GATEWAY_NAME_PREFIX):
             continue
         try:
@@ -703,7 +762,7 @@ def delete_cognito_pool(cog, *, pool_name_prefix, suppress=True):
     domain is read off `describe_user_pool`, which is authoritative.
     """
     removed = []
-    for pool in cog.list_user_pools(MaxResults=60)["UserPools"]:
+    for pool in _all_user_pools(cog):
         if not pool["Name"].startswith(pool_name_prefix):
             continue
         pid = pool["Id"]

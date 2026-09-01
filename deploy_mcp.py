@@ -27,6 +27,7 @@ sys.path.insert(0, _src_dir)
 sys.path.insert(0, _repo_root)
 
 from mcp_server.deploy import (  # noqa: E402
+    _all_user_pools,
     CONTAINER_RUNTIMES,
     FUNCTION_NAMES,
     IMAGE_PLATFORM,
@@ -369,7 +370,7 @@ def main():
                     print(f"  function   {fn}")
                 except Exception:
                     pass
-            for pool in cog.list_user_pools(MaxResults=60)["UserPools"]:
+            for pool in _all_user_pools(cog):
                 if pool["Name"].startswith(pool_prefix):
                     print(f"  user pool  {pool['Name']} ({pool['Id']})")
             try:
@@ -444,7 +445,7 @@ def main():
         cog = boto3.client("cognito-idp", region_name=args.region)
         want = _derive_mcp_user_pool_name(aws_account_id=account, region=args.region)
         pool_id = next(
-            (p["Id"] for p in cog.list_user_pools(MaxResults=60)["UserPools"] if p["Name"] == want),
+            (p["Id"] for p in _all_user_pools(cog) if p["Name"] == want),
             None,
         )
         if pool_id is None:
@@ -546,7 +547,7 @@ def main():
         cog = boto3.client("cognito-idp", region_name=args.region)
         want = _derive_mcp_user_pool_name(aws_account_id=account, region=args.region)
         pool_id = next(
-            (p["Id"] for p in cog.list_user_pools(MaxResults=60)["UserPools"] if p["Name"] == want),
+            (p["Id"] for p in _all_user_pools(cog) if p["Name"] == want),
             None,
         )
         if pool_id is None:
@@ -574,7 +575,7 @@ def main():
         cog = boto3.client("cognito-idp", region_name=args.region)
         want = _derive_mcp_user_pool_name(aws_account_id=account, region=args.region)
         pool_id = next(
-            (p["Id"] for p in cog.list_user_pools(MaxResults=60)["UserPools"] if p["Name"] == want),
+            (p["Id"] for p in _all_user_pools(cog) if p["Name"] == want),
             None,
         )
         if pool_id is None:

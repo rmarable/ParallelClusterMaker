@@ -177,3 +177,25 @@ class TestEveryTestNameTheDocsCiteStillExists:
         )
         missing = sorted(required - tracked)
         assert not missing, f"not being swept: {missing}"
+
+    def test_the_dangling_name_assertion_actually_discriminates(self, monkeypatch):
+        """`assert not dangling` could be neutered to `assert True` and stay
+        green: the existing vacuity guard checks the extractor, never the
+        assertion.  Drive the real method with a citation that cannot resolve.
+        """
+        monkeypatch.setattr(
+            type(self),
+            "_citations",
+            classmethod(lambda cls: {"TestThisNameWasNeverDefinedAnywhere": {"CLAUDE.md"}}),
+        )
+        with pytest.raises(AssertionError):
+            self.test_every_cited_test_name_resolves()
+
+    def test_the_coverage_assertion_actually_discriminates(self, monkeypatch):
+        """Same shape for the surface sweep: drop a required doc from the
+        scanned set and require the missing-surface assertion to raise."""
+        real = type(self)._tracked_markdown.__func__(type(self))
+        thinned = [p for p in real if os.path.basename(p) != "README.md"]
+        monkeypatch.setattr(type(self), "_tracked_markdown", classmethod(lambda cls: thinned))
+        with pytest.raises(AssertionError):
+            self.test_every_documentation_surface_is_swept()

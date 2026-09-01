@@ -26,6 +26,10 @@ COPY mcp_server/ ${LAMBDA_TASK_ROOT}/mcp_server/
 COPY src/pcluster_core.py src/pcluster_aux_data.py ${LAMBDA_TASK_ROOT}/src/
 COPY templates/ ${LAMBDA_TASK_ROOT}/templates/
 COPY scripts/ ${LAMBDA_TASK_ROOT}/scripts/
+# 192K, and stage_and_upload_hpc_benchmark_driver reads hpc-benchmark.sh
+# from it on the create path whenever --enable_hpc_benchmarks is set.
+# Without it that path raises FileNotFoundError before it ever reaches S3.
+COPY hpc-benchmark/ ${LAMBDA_TASK_ROOT}/hpc-benchmark/
 
 # pcluster_core lives under src/ and is imported as a top-level module.
 ENV PYTHONPATH="${LAMBDA_TASK_ROOT}:${LAMBDA_TASK_ROOT}/src"

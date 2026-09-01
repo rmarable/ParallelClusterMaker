@@ -12,9 +12,11 @@ which source the driver as a library.
 ## Constraints
 
 - **`hpc-benchmark.sh` returns early when `HPC_BENCHMARK_LIB_ONLY` is set**
-  so the test suite can source it as a library — but that guard sits well
-  below the top of the file, so `SCRIPT_DIR="$(cd "$(dirname -- "$0")" &&
-  pwd)"` and `set -euo pipefail` both run on `source`, before the guard.
+  so the test suite can source it as a library. `set -euo pipefail` sits
+  **below** that guard, deliberately — leaking `-e` into a sourcing shell
+  closed two SSH sessions while debugging `_native_march`, and the driver
+  says `Do not move this back up`. `SCRIPT_DIR="$(cd "$(dirname -- "$0")"
+  && pwd)"` does still run on `source`, above the guard.
   `dirname --` is required (an interactive shell's `$0` is `-bash`, which
   `dirname` without `--` parses as flags); do not add a `|| SCRIPT_DIR="$PWD"`
   fallback (the `cd` cannot fail, so it's unreachable dead code).
@@ -38,7 +40,9 @@ which source the driver as a library.
   the builder lacks CUDA. Requires both a real GPU (`_host_has_gpu`) and a
   CUDA toolkit (`_cuda_home`) before enabling; the choice is recorded in
   `bin/osu/.cuda_enabled` and cleared on a non-CUDA rebuild.
-- **Use `--enable-cuda=basic`, never `=yes`.** `=yes` additionally compiles
+- **`--enable-cuda` is derived, never fixed.** `_osu_cuda_mode` returns
+  `yes` when `_cuda_nvcc` finds a compiler and `basic` otherwise; do not
+  pin either. Do not "upgrade" the **fallback** to `=yes`: `=yes` compiles
   CUDA kernels and requires `nvcc`, which `configure` never checks for — a
   node with CUDA runtime libraries but no compiler configures cleanly and
   then fails at `make`. `=basic` is sufficient for everything this suite
@@ -46,7 +50,7 @@ which source the driver as a library.
 - **`OSU_VERSION` has a floor of 7.5.2** — 7.4 cannot compile against CUDA
   13 (removed 4-arg `cudaMemPrefetchAsync`) and hardcodes `NVCC = nvcc`
   with no `--with-cuda` substitution, so the kernel build silently resolves
-  the wrong (or missing) `nvcc`. Do not drop below 7.5 or hand-patch around
+  the wrong (or missing) `nvcc`. Do not drop below 7.5.2 or hand-patch around
   either issue — both are fixed upstream in 7.5.2.
 - **When `install` couldn't build CUDA, `run` builds a second OSU tree
   (`bin/osu-cuda`) on the GPU node at run time.** That build must never fail

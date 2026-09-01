@@ -5496,34 +5496,40 @@ class TestOnlyTheDriverIsStagedToS3:
     )
 
     @staticmethod
-    def _upload_argv():
-        """The `aws s3 sync` argv stage_and_upload_hpc_benchmark_driver runs.
+    def _uploaded_keys():
+        """Every S3 key stage_and_upload_hpc_benchmark_driver writes.
 
-        Read off the AST rather than as text: the arguments are a real Python
-        list, so `--exclude "*"` is two separate elements and a substring match
-        on the source would happily accept a blocklist written across them.
+        Read off the AST.  This used to parse an `aws s3 sync` argv and check
+        for `--exclude "*"` plus an `--include` allowlist; the subprocess is
+        gone (the container tier's image has no AWS CLI), and the allowlist is
+        structural now -- the function uploads named keys, so it cannot leak a
+        sibling by widening a flag.  The property under test is unchanged and
+        strictly stronger: exactly one key, and it is the driver.
         """
         import ast
         import inspect
 
         core = _pcluster_core()
         tree = ast.parse(inspect.getsource(core.stage_and_upload_hpc_benchmark_driver).lstrip())
+        keys = []
         for node in ast.walk(tree):
-            if not isinstance(node, ast.List):
-                continue
-            literals = [
-                e.value
-                for e in node.elts
-                if isinstance(e, ast.Constant) and isinstance(e.value, str)
-            ]
-            if literals[:3] == ["aws", "s3", "sync"]:
-                return literals
-        raise AssertionError("stage_and_upload_hpc_benchmark_driver no longer runs an aws s3 sync")
-
-    @classmethod
-    def _upload_includes(cls):
-        argv = cls._upload_argv()
-        return [argv[i + 1] for i, a in enumerate(argv) if a == "--include"]
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr in ("upload_file", "put_object", "upload_fileobj")
+            ):
+                for arg in node.args:
+                    if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
+                        keys.append(arg.value)
+                for kw in node.keywords:
+                    if kw.arg == "Key" and isinstance(kw.value, ast.Constant):
+                        keys.append(kw.value.value)
+        assert keys, (
+            "stage_and_upload_hpc_benchmark_driver no longer uploads any named "
+            "key -- if it went back to a directory sync, the allowlist is a "
+            "flag again and this guard must go back to reading argv"
+        )
+        return keys
 
     @staticmethod
     def _pull_command(rendered):
@@ -5539,21 +5545,23 @@ class TestOnlyTheDriverIsStagedToS3:
                 break
         return " ".join(" ".join(body).split())
 
-    def test_the_upload_is_an_allowlist(self):
-        argv = self._upload_argv()
-        excludes = [argv[i + 1] for i, a in enumerate(argv) if a == "--exclude"]
-        assert "*" in excludes, (
-            'the upload is not an allowlist -- without --exclude "*" every file '
-            "added to hpc-benchmark/ ships to the operator's home directory"
-        )
-        assert "hpc-benchmark.sh" in self._upload_includes(), (
-            "the upload excludes everything and includes nothing; self-repair is dead"
+    def test_the_upload_names_exactly_the_driver(self):
+        keys = self._uploaded_keys()
+        assert any(k.endswith("hpc-benchmark.sh") for k in keys), (
+            "the upload no longer writes the driver; head-node self-repair is dead"
         )
 
-    def test_the_upload_allowlists_nothing_but_the_driver(self):
-        assert self._upload_includes() == ["hpc-benchmark.sh"], (
-            "only the driver is needed for self-repair"
+    def test_the_upload_names_no_internal_file(self):
+        keys = self._uploaded_keys()
+        assert len(keys) == 1, (
+            f"the upload writes {len(keys)} keys ({keys}); one named key is what "
+            "makes the allowlist structural rather than a flag that can widen"
         )
+        for unwanted in self._NOT_FOR_THE_OPERATOR:
+            assert not any(unwanted in k for k in keys), (
+                f"{unwanted} is an internal file and must never reach the "
+                f"operator's home directory, but the upload names {keys}"
+            )
 
     def test_the_upload_is_still_gated_on_benchmarks(self):
         """An ungated upload creates the S3 prefix on every cluster, and the pull
@@ -5616,7 +5624,7 @@ class TestOnlyTheDriverIsStagedToS3:
         )
         pull = self._pull_command(rendered)
         for where, included in (
-            ("upload", self._upload_includes()),
+            ("upload", [k.rsplit("/", 1)[-1] for k in self._uploaded_keys()]),
             ("pull", re.findall(r'--include\s+"([^"]+)"', pull)),
         ):
             assert name not in included, f"{name} is allowlisted on the {where}"

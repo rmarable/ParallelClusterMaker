@@ -232,3 +232,24 @@ class TestEveryLineNumberTheNormativeDocsCiteStillPointsAtItsSubject:
                 monkeypatch.setattr(type(self), "_EXPECTED", {(relpath, wrong): expected})
                 with pytest.raises(AssertionError):
                     self.test_every_cited_line_holds_what_the_manifest_says()
+
+    def test_the_unpinned_assertion_actually_discriminates(self, monkeypatch):
+        """`assert not unpinned` was neuterable to `assert True` with the suite
+        green.  Feed the real method a citation the manifest does not pin."""
+        self._require_dense_docs()
+        monkeypatch.setattr(
+            type(self),
+            "_citations",
+            classmethod(lambda cls: [("src/pcluster_core.py", 1, "CLAUDE.local.md")]),
+        )
+        with pytest.raises(AssertionError):
+            self.test_every_checkable_citation_is_in_the_manifest()
+
+    def test_the_stale_manifest_assertion_actually_discriminates(self, monkeypatch):
+        """And the other direction: a manifest entry no doc cites."""
+        self._require_dense_docs()
+        stale = dict(type(self)._EXPECTED)
+        stale[("src/pcluster_core.py", 999_999)] = "nothing cites this"
+        monkeypatch.setattr(type(self), "_EXPECTED", stale)
+        with pytest.raises(AssertionError):
+            self.test_the_manifest_names_no_citation_the_docs_dropped()

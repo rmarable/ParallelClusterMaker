@@ -1804,12 +1804,19 @@ class TestStageAndUploadHpcBenchmarkDriver:
         s3.put_public_access_block = lambda **kw: None
         runner = _RecordingRun()
         monkeypatch.setattr(subprocess, "run", runner)
+        uploaded = []
+        s3.upload_file = lambda src, bucket, key: uploaded.append((src, bucket, key))
         stage_and_upload_hpc_benchmark_driver(s3, ctx=ctx, region="us-east-1")
         dest = os.path.join(ctx["performance_stage_dir"], "hpc-benchmark.sh")
         assert os.path.isfile(dest)
-        cmd = runner.calls[0]
-        assert cmd[:3] == ["aws", "s3", "sync"]
-        assert "--include" in cmd and "hpc-benchmark.sh" in cmd
+        assert runner.calls == [], (
+            "the create path shelled out again -- the container tier's image has "
+            "no AWS CLI, so a subprocess here is unreachable where it runs"
+        )
+        assert len(uploaded) == 1, uploaded
+        src, _bucket, key = uploaded[0]
+        assert src.endswith("hpc-benchmark.sh")
+        assert key == "hpc-benchmark/hpc-benchmark.sh"
         assert s3.created_buckets  # the results bucket
 
 

@@ -700,3 +700,107 @@ class TestTagGetResourcesReachesTheTiersThatNeedIt:
 
         b = len(json.dumps(self._doc(policy), separators=(",", ":")))
         assert b <= 6144, f"{policy} is {b} bytes, over IAM's 6,144 limit"
+
+
+class TestTheRetryPinIsMadeAgainstAFunctionThatCanAcceptIt:
+    """`MaximumRetryAttempts = 0` is only load-bearing if it is actually set.
+
+    Every existing guard here is an AST check -- the call site exists, the
+    constant is 0, the policy grants the action -- plus one pinning that the
+    pin can never fail a deploy. None of them asks whether the call can
+    SUCCEED when made. It could not: `create_function` returns `State:
+    Pending`, `PutFunctionEventInvokeConfig` answers ResourceConflictException
+    against a Pending function, and `_pin_async_retries_to_zero` swallows it.
+    The deploy then ran with AWS's default of two retries on Event invokes --
+    the condition under which a retried build launches a second cluster.
+    """
+
+    def _lam(self, *, pending_until_waited):
+        class _Waiter:
+            def __init__(self, outer):
+                self.outer = outer
+
+            def wait(self, FunctionName):
+                self.outer.waited.append(FunctionName)
+                self.outer.state = "Active"
+
+        class _Lam:
+            def __init__(self):
+                self.state = "Pending" if pending_until_waited else "Active"
+                self.waited = []
+                self.pinned = []
+                self.trace = []
+
+            def create_function(self, **kw):
+                self.trace.append("create")
+                return {"FunctionArn": "arn:aws:lambda:::function/f", "State": self.state}
+
+            def get_waiter(self, name):
+                self.trace.append("waiter:" + name)
+                return _Waiter(self)
+
+            def put_function_event_invoke_config(self, **kw):
+                self.trace.append("pin")
+                if self.state == "Pending":
+                    raise RuntimeError("ResourceConflictException: function is Pending")
+                self.pinned.append(kw)
+                return {}
+
+        return _Lam()
+
+    def test_the_create_path_waits_for_active_before_pinning(self):
+        from mcp_server import deploy
+
+        lam = self._lam(pending_until_waited=True)
+        deploy._wait_until_active(lam, "f")
+        deploy._pin_async_retries_to_zero(lam, "f")
+        assert lam.waited == ["f"], "the create path did not wait"
+        assert lam.pinned, (
+            "the retry pin was swallowed against a Pending function, so the "
+            "function keeps AWS's default of two async retries"
+        )
+        assert lam.pinned[0].get("MaximumRetryAttempts") == 0
+
+    def test_without_the_wait_the_pin_is_silently_lost(self):
+        """Discrimination guard: prove the failure this fix prevents is real,
+        so a revert cannot pass by leaving the wait out."""
+        from mcp_server import deploy
+
+        lam = self._lam(pending_until_waited=True)
+        deploy._pin_async_retries_to_zero(lam, "f")
+        assert lam.pinned == [], "the fake no longer reproduces the Pending refusal"
+        assert "pin" in lam.trace, "the pin was never attempted"
+
+    def test_the_wait_is_ordered_before_the_pin_on_the_create_path(self):
+        """Ordered by SOURCE POSITION, not `ast.walk` order.
+
+        The first version of this test compared first-occurrences from
+        `ast.walk`, which is breadth-first: it matched the *update* path's
+        `_pin_async_retries_to_zero` (earlier in the walk, later in the file)
+        against the create path's wait and failed on correct code. Sort by
+        lineno and look only at what follows the create call.
+        """
+        import ast
+        import inspect
+
+        from mcp_server import deploy
+
+        src = inspect.getsource(deploy.deploy_tier)
+        tree = ast.parse(src.lstrip())
+        calls = sorted(
+            (
+                (n.lineno, n.func.id)
+                for n in ast.walk(tree)
+                if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+            ),
+        )
+        names = [name for _, name in calls]
+        assert "_create_function_once_the_role_exists" in names, "create call gone"
+        after = names[names.index("_create_function_once_the_role_exists") + 1 :]
+        assert "_pin_async_retries_to_zero" in after, "the create path stopped pinning"
+        pin = after.index("_pin_async_retries_to_zero")
+        assert "_wait_until_active" in after[:pin], (
+            "the create path pins async retries without waiting for the function "
+            "to leave State: Pending, so PutFunctionEventInvokeConfig is refused "
+            "and swallowed and the function keeps AWS's two default retries"
+        )

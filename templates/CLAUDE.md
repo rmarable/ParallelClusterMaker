@@ -42,7 +42,7 @@ and deletes the six managed policies.
 - **`logs:DescribeLogGroups` requires `Resource: "*"`** in every policy that
   grants it — the API call carries no log-group ARN at the IAM level. Keep
   it in its own statement, separate from scoped stream-level actions.
-- **No policy an instance carries (the five managed ones or the inline
+- **No policy an instance carries (the six managed ones or the inline
   Lustre-hydration policy) may grant `logs:DeleteLogGroup`** — and neither
   may the MCP Lambda execution-role policies (`templates/MCP*.json_src`).
   Retained log groups are the only surviving record of a failed build, which
@@ -54,7 +54,7 @@ and deletes the six managed policies.
   instance-reachable nor the operator's own: Lambda execution roles for the
   MCP remote transport (Workstream 5). They are listed in
   `_MCP_LAMBDA_POLICY_FILES` (`tests/test_templates.py`), not
-  `_POLICY_FILES` — that one is pinned by equality to the five managed
+  `_POLICY_FILES` — that one is pinned by equality to the six managed
   cluster policies. `TestMcpLambdaPolicies` gives them the same structural
   guards (valid JSON, the 6,144-byte limit **measured minified**, unique
   Sids, no unsubstituted placeholders) plus a cross-check that every
@@ -197,9 +197,12 @@ and deletes the six managed policies.
   `/parallelcluster/*`; Cost Explorer/Pricing/STS read. See
   `templates/OperatorPolicy.json_src` and `generate_operator_policy.py`.
   `iam:CreatePolicyVersion`/`DeletePolicyVersion` are intentionally
-  **omitted** — the toolkit only ever calls `create_policy`/`delete_policy`,
-  and granting version-management would let the operator rewrite any
-  cluster's policy in place. Pinned by
+  **omitted** — granting version-management would let the operator rewrite
+  any cluster's policy in place. (The *toolkit* does call both, in
+  `_update_policy_document`, but under the MCP deploy credentials, not the
+  operator's; the conclusion holds, the old reason -- "only ever calls
+  create_policy/delete_policy" -- stopped being true when --update-policies
+  landed.) Pinned by
   `test_operator_policy_omits_policy_version_management`; the older guard
   covered `HeadNode-IAM` only. **`MCPDeployPolicy` does grant them and that
   is not a contradiction**: scoped to `pclustermaker-mcp-policy-*`, needed

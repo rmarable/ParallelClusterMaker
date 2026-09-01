@@ -51,15 +51,56 @@ class TestTheAlwaysLoadedPreambleStaysAffordable:
 
     _PREAMBLE = ("CLAUDE.md", "CLAUDE.local.md", "CLAUDE-STATE.md")
 
+    # Every gitignored memory doc.  A fresh clone has NONE of these; a
+    # developer machine has all of them.  The distinction is what lets an
+    # absent CLAUDE.local.md mean two different things.
+    _LOCAL_ONLY = (
+        "CLAUDE.local.md",
+        "CLAUDE-STATE.md",
+        "templates/CLAUDE.local.md",
+        "hpc-benchmark/CLAUDE.local.md",
+        "mcp_server/CLAUDE.local.md",
+        "docs/sessions.md",
+    )
+
     @classmethod
     def _require_full_preamble(cls):
-        """Two of the three preamble files are gitignored local-only files, so a
-        fresh clone (and CI) has only CLAUDE.md.  This module is tracked so the
-        checks that DO work on tracked files run there; the byte budget cannot,
-        and is skipped rather than failed."""
+        """Skip in a clone; FAIL if a preamble file was deleted.
+
+        The skip added on 2026-09-01 so this module could be tracked made the
+        absence of CLAUDE.local.md -- 53KB and 70 constraint bullets, the
+        densest normative file in the repo -- an expected condition: deleting
+        it produced 13 passed, 6 skipped, 0 failed, and the citation floor
+        even dropped 10 -> 5 *because* it was missing.  A blind spot for the
+        file that matters most.
+
+        A clone has none of the local-only docs; a working machine has them
+        all.  So "some present, one missing" is a deletion, not a clone, and
+        that is the case this refuses to skip."""
         absent = [f for f in cls._PREAMBLE if not os.path.exists(os.path.join(REPO_ROOT, f))]
-        if absent:
-            pytest.skip("local-only preamble files not present: %s" % ", ".join(absent))
+        if not absent:
+            return
+        present_local = [f for f in cls._LOCAL_ONLY if os.path.exists(os.path.join(REPO_ROOT, f))]
+        assert not present_local, (
+            f"{', '.join(absent)} is missing while {len(present_local)} other "
+            f"local-only docs are present ({', '.join(present_local)}) -- that "
+            "is a deleted file, not a fresh clone.  Restore it, or if it was "
+            "renamed update _PREAMBLE; do not let it skip."
+        )
+        pytest.skip("local-only preamble files not present: %s" % ", ".join(absent))
+
+    def test_a_deleted_preamble_file_is_not_mistaken_for_a_clone(self, monkeypatch):
+        """Discrimination guard for the branch above.  Simulate the deletion of
+        CLAUDE.local.md with the other local-only docs still present and require
+        a failure rather than a skip."""
+        real_exists = os.path.exists
+        gone = os.path.join(REPO_ROOT, "CLAUDE.local.md")
+
+        monkeypatch.setattr(
+            os.path, "exists", lambda p: False if str(p) == gone else real_exists(p)
+        )
+        with pytest.raises(AssertionError, match="deleted file, not a fresh clone"):
+            self._require_full_preamble()
 
     _SKIP_DIRS = {".git", ".venv", "__pycache__", "node_modules"}
 
@@ -351,6 +392,105 @@ class TestTheAlwaysLoadedPreambleStaysAffordable:
     # detector's own vacuity guard, and while each carried its own literal, a
     # mutation narrowing the detector's copy to `#{5,6}` left the guard matching
     # correctly and passed -- two copies of one pattern is the `pkg_dir` hazard.
+    # A scoped pair is not free -- it is the *rest* of what a session in that
+    # directory loads. Measured 2026-09-01: 147,733B sat outside every size
+    # check here, more than the 104,911B preamble the ceiling polices, and a
+    # session working in templates/ paid 189,722B (~47k tokens) against a
+    # budget that saw 104,911 of it.
+    #
+    # Budgeted PER DIRECTORY, on preamble + that pair, because that is what a
+    # session actually pays. One combined cap would let templates/ grow behind
+    # hpc-benchmark/ shrinking -- the "shuffling content between them" this
+    # class's own docstring rejects for the preamble pair, at a larger scale.
+    #
+    # Same ratchet discipline as _CEILING: after a real reduction, lower the
+    # entry in the same commit.
+    _SCOPED_SESSION_CEILINGS = {
+        "templates": 193_000,
+        "hpc-benchmark": 162_000,
+        "mcp_server": 117_500,
+    }
+
+    @classmethod
+    def _scoped_session_bytes(cls):
+        """{directory: preamble + that directory's memory pair}, for dirs whose
+        pair is fully present. A clone has only the lean halves, so a directory
+        missing its dense file is skipped rather than measured at half size."""
+        preamble = sum(
+            os.path.getsize(os.path.join(REPO_ROOT, f))
+            for f in cls._PREAMBLE
+            if os.path.exists(os.path.join(REPO_ROOT, f))
+        )
+        by_dir = {}
+        for rel in cls._every_memory_file():
+            if rel in cls._PREAMBLE:
+                continue
+            by_dir.setdefault(os.path.dirname(rel), []).append(rel)
+        return {
+            d: preamble + sum(os.path.getsize(os.path.join(REPO_ROOT, f)) for f in files)
+            for d, files in by_dir.items()
+            if len(files) == 2
+        }
+
+    def test_every_scoped_directory_has_a_session_budget(self):
+        """The directory set is DERIVED, so a new scoped pair cannot arrive
+        unbudgeted -- which is how 147KB accumulated outside the ceiling in the
+        first place. `mcp_server/` was created on 2026-09-01 and was never
+        priced by anything."""
+        self._require_full_preamble()
+        measured = set(self._scoped_session_bytes())
+        assert measured, "no complete scoped pairs found; the walk is broken"
+        unbudgeted = sorted(measured - set(self._SCOPED_SESSION_CEILINGS))
+        assert not unbudgeted, (
+            f"these scoped directories load with every session under them and "
+            f"nothing caps their size: {unbudgeted}.  Add an entry to "
+            "_SCOPED_SESSION_CEILINGS just above the measured total."
+        )
+
+    def test_no_scoped_session_exceeds_its_budget(self):
+        self._require_full_preamble()
+        over = {
+            d: (b, self._SCOPED_SESSION_CEILINGS[d])
+            for d, b in self._scoped_session_bytes().items()
+            if d in self._SCOPED_SESSION_CEILINGS and b > self._SCOPED_SESSION_CEILINGS[d]
+        }
+        assert not over, "; ".join(
+            f"a session in {d}/ loads {b:,}B against a {c:,}B budget ({b - c:,}B over)"
+            for d, (b, c) in sorted(over.items())
+        )
+
+    def test_each_scoped_budget_keeps_a_working_margin(self):
+        """Same floor as the preamble's, for the same reason: a budget reached
+        only at the moment of writing forces a condense pass in the same breath
+        as the rule that triggered it."""
+        self._require_full_preamble()
+        tight = {
+            d: self._SCOPED_SESSION_CEILINGS[d] - b
+            for d, b in self._scoped_session_bytes().items()
+            if d in self._SCOPED_SESSION_CEILINGS
+            and self._SCOPED_SESSION_CEILINGS[d] - b < self._WARNING_FLOOR
+        }
+        assert not tight, "; ".join(
+            f"{d}/ has {h:,}B of headroom, under the {self._WARNING_FLOOR:,}B working margin"
+            for d, h in sorted(tight.items())
+        )
+
+    def test_the_scoped_budget_actually_discriminates(self, monkeypatch):
+        """Vacuity guard: a directory over its cap must fail, and a newly
+        appeared directory must fail as unbudgeted."""
+        self._require_full_preamble()
+        real = self._scoped_session_bytes()
+        blown = {d: b + 10_000_000 for d, b in real.items()}
+        monkeypatch.setattr(type(self), "_scoped_session_bytes", classmethod(lambda cls: blown))
+        with pytest.raises(AssertionError):
+            self.test_no_scoped_session_exceeds_its_budget()
+
+        newcomer = dict(real)
+        newcomer["a_brand_new_scoped_dir"] = 1
+        monkeypatch.setattr(type(self), "_scoped_session_bytes", classmethod(lambda cls: newcomer))
+        with pytest.raises(AssertionError):
+            self.test_every_scoped_directory_has_a_session_budget()
+
     _SESSION_HEADING = re.compile(r"^#{2,4}\s+Session\s+\d+\b", re.M)
 
     # Indirection so the discrimination test can retarget the relapse detector at
@@ -424,13 +564,82 @@ class TestTheAlwaysLoadedPreambleStaysAffordable:
     # archive citation on the same 5KB line.  A pattern that cannot separate "load
     # this every time" from "we read this once, during verification" pressures
     # correct documentation into being reworded, so the pattern is what gives.
+    # Rebuilt 2026-09-01 as VERB + ALWAYS-NESS rather than a flat alternation
+    # of five literal phrasings.  The old form had the recall of whatever the
+    # repo happened to say: an adversarial pass planted six ordinary paraphrases
+    # -- "Load ... into context before doing anything else", "Consult ... in its
+    # entirety every time", "...should be reviewed at the beginning of each
+    # session", "Review all of ...", "Ingest the complete ...", "You MUST load
+    # ... unconditionally" -- and all six passed.  A guard against an
+    # instruction is worth what it catches when the instruction is worded by
+    # someone who was not thinking about the guard.
+    #
+    # Precision still matters more than reach here, for the reason below: the
+    # earlier `read ... in full` variant fired on "...were read in full"
+    # describing a node's own logs -- prose about evidence, not a directive.
+    # So the past-tense/report forms are excluded explicitly, and both
+    # directions are pinned by corpus in
+    # test_the_always_load_pattern_has_recall_and_precision.
     _ALWAYS_LOAD = re.compile(
-        r"at the start of every session|before taking any action|"
-        r"read (?:all|the whole|the entire)\b|"
-        r"always read\b|must (?:be )?read\b",
+        r"(?<!were )(?<!was )(?<!have )(?<!has )"
+        r"(?:read|load|consult|review|ingest|open)\w*\b"
+        # Not `[^.;]`: the archive filename contains a period, so a class
+        # excluding "." cannot span "docs/sessions.md" at all. Exclude a
+        # sentence boundary ("." followed by a space) instead.
+        r"(?:(?!\. )[^;]){0,80}?"
+        r"(?:at the start of every session|every session|each session|"
+        r"every time|beginning of each|before (?:doing anything|taking any "
+        r"action|starting|any other)|unconditionally|in its entirety)"
+        r"|(?:always|you must|must be)\s+"
+        r"(?:read|load|consult|review|ingest)\w*\b"
+        r"|(?:read|load|review|ingest)\w*\s+"
+        r"(?:all of|the complete|the whole|the entire)\b"
+        r"|at the start of every session|before taking any action",
         re.I,
     )
     _ARCHIVE_MENTION = re.compile(r"docs/sessions\.md")
+
+    # Both directions, as data.  A pattern is only as good as the sentences it
+    # was tested against, and the previous one was tested against exactly one.
+    _MUST_MATCH = (
+        "Read `docs/sessions.md` at the start of every session.",
+        "Load `docs/sessions.md` into context before doing anything else.",
+        "Consult `docs/sessions.md` in its entirety every time.",
+        "`docs/sessions.md` should be reviewed at the beginning of each session.",
+        "Review all of `docs/sessions.md` first.",
+        "Ingest the complete `docs/sessions.md` before starting.",
+        "You MUST load `docs/sessions.md` unconditionally.",
+        "Always read `docs/sessions.md`.",
+        "`docs/sessions.md` must be read before taking any action.",
+        "Read the entire `docs/sessions.md`.",
+    )
+    # Legitimate prose that must NOT fire: scoped pointers (the whole point of
+    # the split) and reports about what was read once, during an incident.
+    _MUST_NOT_MATCH = (
+        "Read `docs/sessions.md` when you need the evidence behind a rule.",
+        "Narrative: `docs/sessions.md` 64-77.",
+        "The node's own logs were read in full during verification.",
+        "Detail: `docs/sessions.md`.",
+        "See `docs/sessions.md` session 57 for the incident.",
+        "Verbatim originals of everything moved are in `docs/sessions.md`.",
+    )
+
+    def test_the_always_load_pattern_has_recall_and_precision(self):
+        """Corpus guard.  The predecessor was pinned against the single
+        phrasing this repo uses, so its recall was untested and, when measured,
+        1 in 7.  Recall without precision is worse than useless here: a pattern
+        that fires on "were read in full" pressures correct documentation into
+        being reworded around the guard."""
+        missed = [s for s in self._MUST_MATCH if not self._ALWAYS_LOAD.search(s)]
+        assert not missed, (
+            "these are unconditional always-load directives and the pattern does "
+            f"not see them: {missed}"
+        )
+        wrong = [s for s in self._MUST_NOT_MATCH if self._ALWAYS_LOAD.search(s)]
+        assert not wrong, (
+            "these are scoped pointers or reports about a past read, not "
+            f"directives, and the pattern fires on them: {wrong}"
+        )
 
     def test_the_archive_is_not_loaded_by_any_claude_md(self):
         """Moving 29k tokens out of the preamble buys nothing if a constraint file
@@ -780,3 +989,32 @@ class TestTheAlwaysLoadedPreambleStaysAffordable:
         monkeypatch.setattr(type(self), "_SCAN_FOR_SESSIONS", (archive,))
         with pytest.raises(AssertionError):
             self.test_the_dated_archive_is_not_in_the_preamble()
+
+    def test_the_archive_back_door_assertion_actually_discriminates(self, monkeypatch):
+        """`assert not offenders` was neuterable to `assert True` and stay
+        green: the existing vacuity guard exercises the regexes against
+        synthetic strings and never drives the production loop.  Plant an
+        unconditional always-load directive in one real memory file's content
+        and require the real method to raise."""
+        import builtins
+
+        # A file that actually exists: the production loop skips missing
+        # paths, and in a fresh clone the first entry is a gitignored one.
+        present = [
+            f for f in self._every_memory_file() if os.path.exists(os.path.join(REPO_ROOT, f))
+        ]
+        assert present, "no memory files on disk; the walk is broken"
+        target = os.path.join(REPO_ROOT, present[0])
+        planted = "You must read `docs/sessions.md` in full before doing anything.\n"
+        real_open = builtins.open
+
+        def fake_open(path, *a, **kw):
+            if str(path) == target:
+                import io as _io
+
+                return _io.StringIO(planted)
+            return real_open(path, *a, **kw)
+
+        monkeypatch.setattr(builtins, "open", fake_open)
+        with pytest.raises(AssertionError):
+            self.test_the_archive_is_not_loaded_by_any_claude_md()
