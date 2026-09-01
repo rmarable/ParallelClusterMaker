@@ -621,6 +621,22 @@ three gates; see the `Makefile`.
 - **Don't fabricate.** If a function, file, flag, or AWS behavior is not
   confirmed by reading the actual code or docs, say so — do not invent
   plausible-sounding details.
+- **Verify BEFORE writing an assertion, not after.** Every number, date,
+  count, filename, or "X is already covered by Y" claim written into a doc,
+  a commit message, or a report must be produced by a command that has
+  already run in this session. Running it afterward is not verification, it
+  is a coincidence that has not failed yet. Five of these shipped in one
+  day (2026-09-01): a date stamped on "re-verified in the credential-free
+  form" for a form that was never run; "everything moved verbatim", true of
+  one of two moves; a token saving true for half of sessions reported as
+  every session; "the rules themselves stay in `CLAUDE.md`" for a rule that
+  was not there; and a pointer naming `templates/CLAUDE.md` for guards that
+  live in `templates/CLAUDE.local.md`. Each was cheap to check and none was
+  checked. **A green suite and a falling metric are not evidence a change is
+  correct** — they are evidence that nothing being measured noticed, which
+  is not the same thing. When the observable effect is *which* file, path,
+  or endpoint something resolves to, assert on that directly; a size or a
+  pass count cannot see it.
 - **Don't guess silently.** If something is uncertain, say it is uncertain.
   A wrong confident answer is worse than an honest "I don't know."
 - **Ask before assuming.** If a request is ambiguous — scope unclear, two
