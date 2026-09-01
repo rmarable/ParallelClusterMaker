@@ -504,9 +504,12 @@ HeadNode)
 
 	# Deploy performance toolkit from S3 and install Python plotting dependencies.
 
-	# Allowlist mirrors stage_and_upload_hpc_benchmark_driver.  Only the driver is on
-	# S3; the personalized job script and README arrive by scp into
-	# ~/hpc-benchmark/<cluster>/<owner>/slurm and are not restorable from here.
+	# Allowlist mirrors stage_and_upload_hpc_benchmark_driver.  This pull is the
+	# self-repair copy only -- the driver, chmod'd below.  The personalized tree
+	# (job script, README, and a second copy of the driver) is pulled separately
+	# from the `performance/` prefix into
+	# ~/hpc-benchmark/<cluster>/<owner>/slurm, further down in the staging
+	# block; it used to arrive by scp, and this comment still said so.
 	aws s3 sync "s3://{{ s3_bucketname }}/hpc-benchmark/" "{{ ec2_user_home }}/hpc-benchmark/" \
 		--exclude "*" --include "hpc-benchmark.sh"
 	chmod +x "{{ ec2_user_home }}/hpc-benchmark/hpc-benchmark.sh"
@@ -684,6 +687,19 @@ then
 		aws s3 sync "s3://{{ s3_bucketname }}/performance/" \
 			"{{ headnode_performance_dir_dest }}/" \
 			|| echo "WARNING: could not pull the performance tree from S3"
+		# `aws s3 sync` does not carry file modes, and this block runs as
+		# root -- so without these two lines the tree the build summary tells
+		# the operator to use lands 644 root:root: `./hpc-benchmark.sh` is
+		# not executable, and `install` cannot write its bin/ and
+		# benchmark_results/ subdirectories. Confirmed on a live osiris
+		# build. The self-repair copy 170 lines above and the sbatch script
+		# three lines above both already chmod for the same reason; this one
+		# was the only pull that did not.
+		chmod +x "{{ headnode_performance_dir_dest }}/hpc-benchmark.sh" \
+			2>/dev/null || echo "WARNING: could not chmod the benchmark driver"
+		sudo chown -R "{{ ec2_user }}:{{ ec2_user }}" \
+			"{{ ec2_user_home }}/hpc-benchmark" \
+			|| echo "WARNING: could not chown the benchmark tree"
 {% endif %}
 		sudo mkdir -p /opt/parallelcluster/shared
 		sudo touch /opt/parallelcluster/shared/staging_tree_pulled

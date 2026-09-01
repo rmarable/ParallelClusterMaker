@@ -5657,14 +5657,38 @@ class TestOnlyTheDriverIsStagedToS3:
         chmods = [
             line.strip()
             for line in rendered.splitlines()
-            if line.strip().startswith("chmod +x") and "/hpc-benchmark/" in line
+            # "hpc-benchmark", not "/hpc-benchmark/": filtering on the
+            # directory made a chmod moved OUT of that path invisible to this
+            # guard, so the undelivered-path mutation passed vacuously.
+            if line.strip().startswith("chmod +x") and "hpc-benchmark" in line
         ]
-        assert len(chmods) == 1, f"expected one hpc-benchmark chmod, got {chmods}"
-        line = chmods[0]
-        assert line == f'chmod +x "{home}/hpc-benchmark/hpc-benchmark.sh"', (
-            "the chmod must name exactly the one file the sync delivers, with no "
-            f"|| true masking its failure: {line}"
-        )
+        # Every chmod target must be a path some sync actually delivers.  This
+        # asserted `len(chmods) == 1`, which encoded the count rather than the
+        # property in the docstring above -- and the count was wrong once a
+        # second delivered copy appeared: the `performance/` pull into
+        # ~/hpc-benchmark/<cluster>/<owner>/slurm landed 644 root:root on a
+        # live osiris build, because `aws s3 sync` carries no modes and only
+        # the self-repair pull chmod'd. A count cannot tell a missing chmod
+        # from an extra one.
+        assert chmods, "the benchmark driver is never made executable"
+        dests = [
+            line.strip().strip("\\").strip().strip('"')
+            for line in rendered.splitlines()
+            if "/hpc-benchmark/" in line and line.strip().startswith(f'"{home}')
+        ]
+        dests.append(f"{home}/hpc-benchmark/")
+        for line in chmods:
+            assert "|| true" not in line, (
+                f"|| true masks the chmod failing, which hides the driver never arriving: {line}"
+            )
+            target = line.split('"')[1]
+            assert target.endswith("/hpc-benchmark.sh"), (
+                f"chmod names something other than the driver: {line}"
+            )
+            assert any(target.startswith(d.rstrip("/")) for d in dests), (
+                f"chmod names {target}, which no sync in this template "
+                f"delivers -- destinations are {dests}"
+            )
 
 
 # A class asserting the Secrets Manager write happens on every run lived here.

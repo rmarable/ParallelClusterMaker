@@ -106,7 +106,23 @@ class TestEveryLineNumberTheNormativeDocsCiteStillPointsAtItsSubject:
                     found.append(os.path.relpath(os.path.join(root, name), REPO_ROOT))
         return tuple(sorted(found))
 
-    _SKIP_DIRS = {".git", ".venv", "__pycache__", "node_modules"}
+    # `active_clusters` and `src/vars_files` are per-build artifact trees, and
+    # a build COPIES source into them: after one live `osiris` run the repo
+    # held a second `hpc-benchmark/slurm/hpc-benchmark.sh`, the basename went
+    # ambiguous, and all four `hpc-benchmark.sh:1126,1130,1208,1214` citations
+    # stopped resolving. The suite then failed claiming the manifest "pins
+    # citations that no normative doc makes" -- blaming the docs for an
+    # artifact in the working tree. Both are gitignored, so this can only ever
+    # happen on an operator's machine, never in CI, which is exactly the shape
+    # of bug that survives.
+    _SKIP_DIRS = {
+        ".git",
+        ".venv",
+        "__pycache__",
+        "node_modules",
+        "active_clusters",
+        "vars_files",
+    }
 
     _CITE = re.compile(
         r"`([A-Za-z0-9_./-]+\.(?:sh|py|yml|j2|json_src))"
