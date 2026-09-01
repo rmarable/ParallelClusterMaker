@@ -131,7 +131,7 @@ class TestEveryLineNumberTheNormativeDocsCiteStillPointsAtItsSubject:
         Two of these were introduced at once while renumbering after an edit --
         the substrings differ, which is what makes the collision invisible."""
         source = open(__file__).read()
-        body = source[source.index("_EXPECTED = {"):]
+        body = source[source.index("_EXPECTED = {") :]
         body = body[: body.index("\n    }\n") + 1]
         keys = re.findall(r'\(\s*"([^"]+)"\s*,\s*(\d+)\s*\)\s*:', body)
         assert len(keys) >= len(self._EXPECTED), "the key extractor is not reading _EXPECTED"
@@ -179,9 +179,7 @@ class TestEveryLineNumberTheNormativeDocsCiteStillPointsAtItsSubject:
         self._require_dense_docs()
         cited = {(relpath, line) for relpath, line, _ in self._citations()}
         stale = sorted(set(self._EXPECTED) - cited)
-        assert not stale, (
-            f"_EXPECTED pins citations that no normative doc makes: {stale}"
-        )
+        assert not stale, f"_EXPECTED pins citations that no normative doc makes: {stale}"
 
     def test_the_sweep_can_see_a_drifted_citation(self):
         """Vacuity guard.  A regex that matches nothing, or a resolver that drops
@@ -195,9 +193,9 @@ class TestEveryLineNumberTheNormativeDocsCiteStillPointsAtItsSubject:
         # The exact drift that shipped: 898 was cited for the osu_latency line,
         # which has since moved twice (915, now 957). Assert a superseded number
         # really does miss -- any of them will do, and 898 is the original.
-        driver = open(
-            os.path.join(REPO_ROOT, "hpc-benchmark", "hpc-benchmark.sh")
-        ).read().splitlines()
+        driver = (
+            open(os.path.join(REPO_ROOT, "hpc-benchmark", "hpc-benchmark.sh")).read().splitlines()
+        )
         assert '-n 2 "$osu_pt2pt/osu_latency"' not in driver[898 - 1], (
             "line 898 still holds the osu_latency launch, so the drift this class "
             "exists for is not reproducible and the manifest proves nothing"
@@ -222,10 +220,6 @@ class TestEveryLineNumberTheNormativeDocsCiteStillPointsAtItsSubject:
             shifted = [n for n in (line - 1, line + 1) if 1 <= n <= total]
             assert shifted, f"{relpath}:{line} has no neighboring line to shift to"
             for wrong in shifted:
-                monkeypatch.setattr(
-                    type(self), "_EXPECTED", {(relpath, wrong): expected}
-                )
+                monkeypatch.setattr(type(self), "_EXPECTED", {(relpath, wrong): expected})
                 with pytest.raises(AssertionError):
                     self.test_every_cited_line_holds_what_the_manifest_says()
-
-

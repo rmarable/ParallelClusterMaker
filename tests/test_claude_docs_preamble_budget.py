@@ -57,8 +57,7 @@ class TestTheAlwaysLoadedPreambleStaysAffordable:
         fresh clone (and CI) has only CLAUDE.md.  This module is tracked so the
         checks that DO work on tracked files run there; the byte budget cannot,
         and is skipped rather than failed."""
-        absent = [f for f in cls._PREAMBLE
-                  if not os.path.exists(os.path.join(REPO_ROOT, f))]
+        absent = [f for f in cls._PREAMBLE if not os.path.exists(os.path.join(REPO_ROOT, f))]
         if absent:
             pytest.skip("local-only preamble files not present: %s" % ", ".join(absent))
 
@@ -418,7 +417,9 @@ class TestTheAlwaysLoadedPreambleStaysAffordable:
                 if not self._ARCHIVE_MENTION.search(line):
                     continue
                 for sentence in splitter.split(line):
-                    if self._ARCHIVE_MENTION.search(sentence) and self._ALWAYS_LOAD.search(sentence):
+                    if self._ARCHIVE_MENTION.search(sentence) and self._ALWAYS_LOAD.search(
+                        sentence
+                    ):
                         offenders.setdefault(relpath, []).append(n)
         assert not offenders, (
             "a constraint doc directs the reader to load `docs/sessions.md` "
@@ -437,7 +438,8 @@ class TestTheAlwaysLoadedPreambleStaysAffordable:
         pointer to be deleted."""
         claude_md = open(os.path.join(REPO_ROOT, "CLAUDE.md")).read()
         directive = [
-            line for line in claude_md.splitlines()
+            line
+            for line in claude_md.splitlines()
             if "CLAUDE-STATE.md" in line and self._ALWAYS_LOAD.search(line)
         ]
         assert directive, (
@@ -671,9 +673,7 @@ class TestTheAlwaysLoadedPreambleStaysAffordable:
             "docs/sessions.md is gone -- either the split was reverted or the "
             "archive moved; the preamble budget assumes the record lives there"
         )
-        found = self._SESSION_HEADING.findall(
-            open(os.path.join(REPO_ROOT, archive)).read()
-        )
+        found = self._SESSION_HEADING.findall(open(os.path.join(REPO_ROOT, archive)).read())
         assert len(found) >= 10, (
             f"_SESSION_HEADING found only {len(found)} session headings in the "
             "archive; it is not matching the form the record actually uses"

@@ -75,7 +75,8 @@ class TestEveryTestNameTheDocsCiteStillExists:
                 names.update(
                     re.findall(
                         r"^\s*(?:async\s+)?(?:def|class)\s+((?:test_|Test)[A-Za-z0-9_]+)",
-                        text, re.M,
+                        text,
+                        re.M,
                     )
                 )
         return names
@@ -93,9 +94,7 @@ class TestEveryTestNameTheDocsCiteStillExists:
     def test_every_cited_test_name_resolves(self):
         defined = self._defined_names()
         dangling = {
-            name: sorted(files)
-            for name, files in self._citations().items()
-            if name not in defined
+            name: sorted(files) for name, files in self._citations().items() if name not in defined
         }
         assert not dangling, (
             "the docs cite test names that no longer exist -- rename the citation "
@@ -123,9 +122,8 @@ class TestEveryTestNameTheDocsCiteStillExists:
                 for name in self._NAME.findall(stripped):
                     if name not in defined:
                         dangling.setdefault(name, set()).add(relpath)
-        assert not dangling, (
-            "a comment cites a test name that no longer exists: "
-            + "; ".join(f"{n} ({', '.join(sorted(f))})" for n, f in sorted(dangling.items()))
+        assert not dangling, "a comment cites a test name that no longer exists: " + "; ".join(
+            f"{n} ({', '.join(sorted(f))})" for n, f in sorted(dangling.items())
         )
 
     def test_the_sweep_can_see_a_dangling_citation(self, tmp_path, monkeypatch):
@@ -159,10 +157,7 @@ class TestEveryTestNameTheDocsCiteStillExists:
         was green.  Deriving it means the assertion is about coverage rather than
         about someone's memory."""
         tracked = set(self._tracked_markdown())
-        required = {
-            p for p in tracked
-            if os.path.basename(p) in ("CLAUDE.md", "CLAUDE.local.md")
-        }
+        required = {p for p in tracked if os.path.basename(p) in ("CLAUDE.md", "CLAUDE.local.md")}
         # CLAUDE-STATE.md is gitignored local-only; require it only where it
         # exists, so this module can be tracked and still pass a fresh clone.
         required |= {"README.md"}
@@ -182,5 +177,3 @@ class TestEveryTestNameTheDocsCiteStillExists:
         )
         missing = sorted(required - tracked)
         assert not missing, f"not being swept: {missing}"
-
-
