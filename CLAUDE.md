@@ -61,11 +61,147 @@ standing constraints for local development.
   created under the `pclustermaker-cluster-boundary` permissions boundary.
 - HPC benchmark constraints live in `hpc-benchmark/CLAUDE.md` — read before
   touching `hpc-benchmark/`.
-- Remote-transport constraints live in `mcp_server/CLAUDE.md` — the tier/IAM
-  split, the Gateway and Lambda ceilings, the authorizer, `deploy_mcp.py` and
-  artifact packaging. Read before touching `mcp_server/`, `deploy_mcp.py` or
-  `templates/MCP*.json_src`. The MCP rules that also bind `pcluster_core.py`,
-  the CLI or the node templates stayed here.
+- Remote-transport constraints that bind **only** files under `mcp_server/`
+  live in `mcp_server/CLAUDE.md` — the router, the authorizer, the Gateway and
+  Lambda ceilings, `completion.py`'s bounds, `packaging.py`'s tier sets, the
+  one-region rule. Every MCP rule that binds `src/pcluster_core.py`,
+  `deploy_mcp.py`, `generate_operator_policy.py`, `templates/` or `tests/` is
+  below, because a nested memory file does not load for those paths and a
+  prohibition that does not load when it binds is not a prohibition.
+- **No `aws s3 sync` subprocess on a path the container tier runs** — its
+  image has no AWS CLI. Use `upload_directory_to_s3`, and keep the `*.pem`
+  exclusion in the one shared `_S3_UPLOAD_NEVER`.
+- **A build failure the caller never sees must still be written down.**
+  The message was never the defect — every `CreateClusterResult` carries
+  one — but a 43.6s call against a 29s ceiling disconnects the caller
+  before the return value exists, and no failure path recorded anything,
+  so CloudWatch was the only trace and a plain AccessDenied cost two
+  rounds. Every **post-lock** failure publishes via
+  `_publish_build_failure`; pre-lock ones created nothing and return while
+  the caller is still connected. Three rules: the key is
+  `vars/<name>.build-failure.json`, since `MCPStateAccess*` grants only
+  `vars/*` and `configs/*` and a new prefix is AccessDenied when deployed;
+  it is **not** the cluster record, which would make `list_clusters` report
+  a cluster that does not exist; and it never raises, the caller being
+  already on an error path. `core_get_build_status` reads it back and keeps
+  **three** outcomes distinct — an unreachable store reports
+  `store_reachable: false`, never "no failure". Cleared on the next
+  successful build and by teardown.
+- **The build runs in an Event invocation; validation does not.** 43.6s
+  against a 29s ceiling, ~39s of it CDK synthesis, so nothing of ours
+  decomposes to fit — the tool validates (token, params, AZ via EC2),
+  fires at its own function, returns. Measured 36,572 → 177 ms, with the
+  build completing in a separate invocation 27.9s later (`joker`).
+  `build_started` is a returned fact, false locally where the build runs
+  inline. **`core_create_cluster` is deliberately not split** at the lock,
+  the correct seam: 1,851 lines is more risk than the outcome needs, so
+  pre-lock validation now fails where nobody waits and `build_runner`
+  records it, reading first since a post-lock failure has already named
+  its stage. **`MaximumRetryAttempts` must be 0** — AWS retries a failed
+  Event invoke twice and a retried build launches a second cluster; the
+  lock is the inner guard. **A tier must be granted invoke on *itself***:
+  the grant named `-stack-mutation` while the build tier is
+  `-stack-mutation-node`, so every remote build fell back to inline,
+  visible only as one log line since the fallback is silent. The
+  vars-file guard still asks whether the cluster is **already building**
+  before treating a leftover file as a dead run.
+- **Reuse is not convergence, and the difference is a naming asymmetry.**
+  `_setup_iam`'s policies carry the cluster serial, so every build makes
+  fresh ones and a stale document is unreachable; the MCP policy names are
+  fixed and long-lived, so the first-ever create won forever — a
+  `templates/MCP*.json_src` edit changed nothing in the account and printed
+  "Reusing existing MCP policy". `_setup_mcp_infra` compares the rendered
+  document against **AWS's own copy** (never a stored hash, tag or git ref —
+  a marker beside the truth is a second source that can be wrong about it);
+  `--update-policies` pushes it as a new default version, pruning
+  oldest-first under IAM's five-version ceiling, never the version in force.
+- **`deploy_mcp.py --teardown` removes the transport; nothing did before.**
+  `delete_mcp_functions` and `_delete_mcp_infra` were called by no entry
+  point, and the REST API and Cognito pool had no teardown code at all, so
+  the internet-facing endpoint outlived every teardown. Order is gateway,
+  functions, IAM, pool. **The Cognito domain must be deleted before the
+  pool**: `DeleteUserPool` fails while one exists, names no domain in the
+  error, and the domain string is not the pool name — read it off
+  `describe_user_pool`, never guess. Teardown deliberately leaves the
+  permissions boundary; `MCPDeployPolicy` denies deleting it. `--dry-run`
+  lists without removing.
+- **The deploy builds and pushes the container tier itself**
+  (`--tier stack-mutation-node`, no `--image-uri`), and `--teardown`
+  deletes the repository with **`force=True`** — one we created always
+  holds an image. Create and delete land together; creating without
+  deleting leaks one per account. Only `ecr:GetAuthorizationToken` may
+  keep `Resource: "*"` (it acts on the registry, not a repository); every
+  other ECR action is confined to `repository/pclustermaker-mcp-*`. The
+  registry URI is **read off `repositoryUri`**, never assembled — the
+  suffix differs in GovCloud and China. Password on **stdin**, never argv.
+  Finch's credential failure is named, never auto-applied. Detail:
+  `docs/sessions.md`, session 56.
+- **`--bootstrap` must be checked *before* the setup-flag short-circuit.**
+  An infrastructure flag alone deploys no tiers on purpose, but
+  `--bootstrap` normalizes to `--setup-infra --setup-gateway`, so checked
+  second it builds a gateway routing to functions that do not exist. It is
+  a *spelling* of those flags, never a second deploy path;
+  `normalize_bootstrap` is module-level for the reason `tiers_to_deploy`
+  is. It excludes `stack-mutation-node` (needs a runtime; six of seven are
+  zips). `--create-user` is the other half — nothing created a Cognito
+  user, so a deployed transport had nobody to sign in as. Both
+  `MessageAction="SUPPRESS"` and `Permanent=True` are load-bearing, and
+  the second *because* of the first (suppressing the invitation without a
+  permanent password leaves the account in `FORCE_CHANGE_PASSWORD`).
+  Detail: `docs/sessions.md`, session 56.
+- **MCP deployment is its own permission set, not the operator's.**
+  `OperatorPolicy` scopes its IAM to `pclustermaker-policy-*` and
+  `pclustermaker-role-*`, which match no MCP name, and the full MCP grant
+  set appended to it measures 6,358 bytes against the 6,144 limit — so
+  widening it does not merely read badly, it does not fit.
+  `MCPDeployPolicy.json_src` carries it — rendered by
+  `generate_operator_policy.py --mcp` as
+  `parallelcluster-mcp-deploy-pclustermaker`, a name kept outside
+  `_MCP_POLICY_NAME_PREFIX` because the deployer's own policy must survive
+  `--teardown`. Every MCP role is created
+  under the `MCPRoleBoundary.json_src` permissions boundary, with
+  `iam:CreateRole` granted **only** under a `StringEquals` condition on
+  `iam:PermissionsBoundary` — without it a deployer creates an unbounded
+  role and the ceiling never applies. **`deploy_mcp.py` cannot create or
+  attach that policy and must not try** — a deploy tool able to grant
+  itself permissions has no ceiling. It preflights instead, naming missing
+  actions before the first mutation: probes are **unconditional grants
+  only** (a conditional one simulated without its context key reports
+  `implicitDeny` + `MissingContextValues`, which is not a denial), and an
+  unanswerable check warns rather than blocks, since
+  `iam:SimulatePrincipalPolicy` is itself ungranted. Details in
+  `templates/CLAUDE.md`.
+- **Adding policy versions breaks teardown unless teardown prunes them.**
+  `DeletePolicy` refuses while any non-default version exists
+  (`DeleteConflictException`), so the two halves must land together:
+  `_delete_policy_with_versions` deletes non-default versions first. It
+  was unreachable until deploy could version a policy, and was reached the
+  same day — three MCP policies left undeletable in the account.
+- **No tool on the `read-only` tier may write anything.** `add_queue`/
+  `remove_queue` write `configs/<name>.yaml` and moved to `stack-mutation`,
+  where the rest of the config's lifecycle already lives (apply reads it,
+  teardown deletes it). A tier named read-only carrying `s3:PutObject`
+  misrepresents itself to whoever reads the policy next; mutating no
+  CloudFormation stack is not the same as being read-only. The cost is
+  accepted: a queue edit now carries that tier's blast radius.
+- **A read-only deployment and a least-privilege role break three
+  assumptions a checkout never tests.** `repo_root` is both the source root
+  and the state root, so `resolve_writable_repo_root` overlays a read-only
+  one under `/tmp` — detection is a write probe, never `os.access(W_OK)`.
+  `_create_locks_bucket` returns early on `head_bucket`; no handler tier
+  may be granted `s3:CreateBucket`. `MCPClusterBuild.json_src` carries the
+  build grants `MCPStackMutation` had no room for, on both tiers.
+- **A Lambda artifact must be pruned of bytecode.** `pip install --target`
+  of the read-only tier is 241 MB against the 250 MB unzipped limit;
+  removing `__pycache__`/`.pyc` takes it to 139 MB. `prune_for_lambda`
+  returns the total so a build checks before uploading. The 55 MB zip
+  exceeds the 50 MB direct-upload limit, so handler tiers go via S3.
+  `aws-parallelcluster` *declares* 17 `aws-cdk.*` packages — the lazy
+  import does not keep them out of the artifact.
+- **When a test stubs the object under test, at least one test must drive
+  the real one.** `handlers/base.py` called a FastMCP method that does not
+  exist; every stub defined the same wrong name, so the whole remote
+  `tools/call` path was broken and every test passed.
 - The build summary names every filesystem's mount point on two live
   surfaces: `make_pcluster.py`'s printed summary (`_storage_summary_lines`
   in `pcluster_core.py`) and `templates/sns_build_summary_report.j2`. A

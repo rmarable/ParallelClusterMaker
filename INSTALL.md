@@ -366,8 +366,11 @@ Do not skip the host half on the reasoning that the push happens in the VM,
 and do not skip the root half on the reasoning that you already wrote a
 config into the VM.
 
-Scrub all three afterward. The ECR token is short-lived, but it is still a
-credential at rest:
+Scrub all **four** afterward — the three above plus the macOS keychain,
+which `finch logout` clears and which editing `~/.finch/config.json` does
+not: emptying `auths` in the JSON leaves a keychain entry written by any
+earlier `finch login` that ran while `credsStore` was still set. The ECR
+token is short-lived, but it is still a credential at rest:
 
 ```sh
 export LIMA_HOME=/Applications/Finch/lima/data
@@ -391,6 +394,8 @@ $LIMACTL shell finch -- sh -c 'rm -f $HOME/.docker/config.json'
 $LIMACTL shell finch -- sudo sh -c 'rm -f /root/.docker/config.json'
 # and restore the host's keychain setting
 python3 -c "import json,os;p=os.path.expanduser('~/.finch/config.json');d=json.load(open(p));d['credsStore']='osxkeychain';d['auths']={};json.dump(d,open(p,'w'))"
+# fourth location: the keychain entry the JSON edit above cannot reach
+finch logout <acct>.dkr.ecr.<region>.amazonaws.com
 ```
 
 This is a Finch-specific workaround, confirmed on Finch; the other runtimes

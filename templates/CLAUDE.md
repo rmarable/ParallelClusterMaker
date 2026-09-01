@@ -61,7 +61,7 @@ and deletes the six managed policies.
   placeholder they use is actually substituted by `_render_policy`.
   `<MCP_USER_POOL_ID>` is theirs alone.
 - **A tier's policy has a floor as well as a ceiling — the detail behind
-  the rule in the root `CLAUDE.md`.** Every MCP IAM guard asked whether a
+  the rule in `mcp_server/CLAUDE.md`.** Every MCP IAM guard asked whether a
   tier could exceed its blast radius; none asked whether it could reach
   its own, and two could not. `fleet-toggle`: `update-compute-fleet`
   parses the cluster config from PCluster's per-cluster S3 bucket and
