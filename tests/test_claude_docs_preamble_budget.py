@@ -298,7 +298,14 @@ class TestTheAlwaysLoadedPreambleStaysAffordable:
     # anti-gaming bound are untouched and still mean what they say; the
     # loosening is visible, attributable, and can be ratcheted to zero on its
     # own without touching anything else.
-    _CEILING = 123_840
+    #
+    # 2026-09-01 (sixth pass): 123,840 -> 107,800 as _DELIBERATE_SLACK returns
+    # to 0. Band with zero slack is [107,074, 108,574]; 107,800 leaves 3,486B
+    # of headroom over a 104,314B preamble, above the 2,760B floor and inside
+    # the 4,260B allowance. The preamble is larger than it was at 93,600
+    # because thirteen misfiled rules came home in ac90728 -- that is content
+    # that has to be always-loaded, not slack.
+    _CEILING = 107_800
 
     # One pattern, one copy.  It is used by the relapse detector and by that
     # detector's own vacuity guard, and while each carried its own literal, a
@@ -561,7 +568,15 @@ class TestTheAlwaysLoadedPreambleStaysAffordable:
     # can be honored without silently breaking the anti-slack guard, and the
     # correct direction for it is down. Ratchet this to 0 before ratcheting
     # _CEILING, so the derivation resumes governing.
-    _DELIBERATE_SLACK = 20_640
+    # 2026-09-01, same day, ratcheted 20,640 -> 0. The raise was granted while
+    # the preamble was being restructured; the restructuring turned out to be
+    # partly wrong and was reversed, so the slack was underwriting a change
+    # that no longer exists. Giving it back is the ratchet working: the
+    # derivation governs again, and the next real reduction lowers _CEILING
+    # rather than eating margin that was authorized for something else. If it
+    # is ever non-zero again it should be for a reason stated here, not
+    # inherited.
+    _DELIBERATE_SLACK = 0
 
     @classmethod
     def _allowance(cls):
