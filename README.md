@@ -1,6 +1,6 @@
 # ParallelClusterMaker
 
-This CLI toolkit automates creation and destruction of [AWS ParallelCluster v3](https://github.com/aws/aws-parallelcluster) stacks.  It lets researchers and engineers stand up a working HPC cluster on AWS without deep infrastructure expertise.
+This CLI and MCP toolkit automates creation and destruction of [AWS ParallelCluster v3](https://github.com/aws/aws-parallelcluster) stacks, letting researchers and engineers stand up a working HPC cluster on AWS without deep infrastructure expertise.
 
 This codebase was co-written with [Claude Code](https://claude.ai/code) (Anthropic). AI-assisted contributions are accepted under a public policy ([AI_POLICY.md](AI_POLICY.md)): the tool or model must be disclosed, and a human remains responsible for every line submitted.
 
@@ -9,10 +9,10 @@ This codebase was co-written with [Claude Code](https://claude.ai/code) (Anthrop
 ## Use Cases
 
 - **Training ML models at scale** — multi-node distributed training on GPU queues (`g4dn`, `g4ad`, `g5`, `g5g`, `g6`, `p3`, `p3dn`, `p4d`, `p4de`, `p5`), with EFA and EFA-GDR for inter-node collective communication and FSx for Lustre for high-throughput data loading.
-- **Traditional HPC and scientific computing** — CFD, molecular dynamics, genomics, and other tightly-coupled MPI workloads, using EFA and dynamic placement groups for a low-latency interconnect.
+- **Traditional HPC and scientific computing** — CFD (Computational Fluid Dynamics), molecular modeling, genomics, and other tightly-coupled MPI workloads, using EFA and dynamic placement groups for a low-latency interconnect.
 - **Cluster and instance-type validation** — the built-in STREAM, OSU MPI, IOR, and HPCG benchmark suite measures memory bandwidth, MPI latency/bandwidth, filesystem I/O, and floating-point performance before committing a production workload to a given cluster shape.
 - **Cost-sensitive batch and embarrassingly parallel work** — parameter sweeps, Monte Carlo simulation, rendering — using spot capacity, the default, where jobs can tolerate interruption.
-- **On-demand research computing** — teams without dedicated infrastructure or a standing DevOps function can stand up a cluster for a research sprint and tear it down when finished, rather than carrying always-on cost.
+- **On-demand research computing** — teams without dedicated infrastructure or in-house DevOps capabilities can deploy a cluster for a research sprint and tear it down when finished, rather than carrying always-on cost.
 
 ---
 
